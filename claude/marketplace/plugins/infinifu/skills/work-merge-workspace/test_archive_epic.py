@@ -44,6 +44,11 @@ def init_workspace(root: Path) -> Path:
     write(root / "docs/notes/us001.md", frontmatter("story", "ready", "Story"))
     write(root / "docs/notes/im001.md", frontmatter("implementation", "proposed", "Implementation"))
     write(root / "docs/notes/ft001.md", frontmatter("feature", "proposed", "Feature"))
+    # Already-shipped artifacts, for the consumed-story and feature-refresh shapes.
+    write(root / "docs/notes/us002.md", frontmatter("shipped story", "done", "Story"))
+    write(root / "docs/notes/im002.md", frontmatter("shipped implementation", "accepted", "Implementation"))
+    write(root / "docs/notes/ft002.md", frontmatter("shipped feature", "accepted", "Feature"))
+    write(root / "docs/notes/ft003.md", frontmatter("stable feature", "stable", "Feature"))
     write(
         root / "bd",
         "#!/usr/bin/env bash\n"
@@ -203,6 +208,142 @@ class ArchiveEpicTests(unittest.TestCase):
         self.assertEqual(self.docs_snapshot(), before)
         self.assertFalse((self.root / "docs/notes/archive/spec/sp001.md").exists())
         self.assertFalse((self.root / "bd.log").exists(), "bd close must not run before a successful commit")
+
+    # ---- feature-refresh shape -------------------------------------------
+    # A spec that widens an ALREADY-ACCEPTED ft### instead of minting a new
+    # one. Nothing to flip: the feature was accepted before this spec and
+    # stays accepted after it. spec-retro rewrites its refreshed body.
+
+    def test_feature_refresh_finale_archives_without_flipping_the_feature(self) -> None:
+        self.write_spec(
+            "widen feature",
+            "## extends [[ft002]]\n\n## problem\n[[ft002]] gets a body refresh with a widened\n"
+            "## api_surface, not a new ft###. One capability, wider surface.",
+        )
+        self.commit_spec("feature-refresh spec")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        # The refreshed feature is asserted to exist and is NOT mutated.
+        self.assertEqual(status(self.root / "docs/notes/ft002.md"), "accepted")
+        # Everything else the finale owes still happens.
+        archived_spec = self.root / "docs/notes/archive/spec/sp001.md"
+        self.assertFalse((self.root / "docs/notes/spec/sp001.md").exists())
+        self.assertEqual(status(archived_spec), "done")
+        self.assertIn("Index: [[archive]]", archived_spec.read_text())
+        self.assertNotIn("sp001", (self.root / "docs/board.md").read_text())
+        self.assertIn("[[sp001|ship thing]]", (self.root / "docs/archive.md").read_text())
+        self.assertIn("close epic-1", (self.root / "bd.log").read_text())
+        # No unrelated lineage touched.
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "ready")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "proposed")
+        self.assertEqual(status(self.root / "docs/notes/ft001.md"), "proposed")
+
+    def test_feature_refresh_accepts_a_stable_feature_too(self) -> None:
+        self.write_spec("widen stable feature", "## extends [[ft003]]\n\n## problem\nWiden it.")
+        self.commit_spec("feature-refresh spec on a stable feature")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/ft003.md"), "stable")
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
+
+    def test_accepted_feature_cited_only_in_prose_still_fails_closed(self) -> None:
+        # THE TRAP. A feature-add spec whose ft### was never minted as
+        # `proposed` is textually indistinguishable from a refresh if you only
+        # look at citations. Treating "an accepted ft### is cited" as a refresh
+        # would archive it silently and leave a feature permanently
+        # un-accepted. Only an explicit `## extends` declaration classifies.
+        self.write_spec("forgot to mint", "## problem\nShip the capability described alongside [[ft002]].")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ambiguous", (result.stderr + result.stdout).lower())
+        self.assertEqual(self.docs_snapshot(), before)
+        self.assertEqual(status(self.root / "docs/notes/ft002.md"), "accepted")
+        self.assertFalse((self.root / "bd.log").exists())
+
+    def test_extends_declaring_a_proposed_feature_still_takes_the_feature_add_path(self) -> None:
+        # `## extends` on a not-yet-accepted ft### is the ordinary feature-add
+        # shape: the declaration names the deliverable, and it still flips.
+        self.write_spec("mint feature", "## extends [[ft001]]\n\n## problem\nShip it.")
+        self.commit_spec("feature-add spec declaring its deliverable")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/ft001.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
+
+    def test_extends_declaring_two_features_is_ambiguous(self) -> None:
+        self.write_spec("widen two", "## extends [[ft002]] [[ft003]]\n\n## problem\nWiden both.")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ambiguous", (result.stderr + result.stdout).lower())
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_extends_declaring_a_missing_feature_fails_before_mutation(self) -> None:
+        self.write_spec("widen ghost", "## extends [[ft099]]\n\n## problem\nWiden a feature that is not there.")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ft099", result.stderr + result.stdout)
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_prose_citation_of_an_accepted_feature_does_not_block_a_story_backed_finale(self) -> None:
+        # Regression guard for the new extractor: accepted ft### links outside
+        # `## extends` stay pure prose, exactly as adr0026 requires.
+        self.write_spec(
+            "ship story",
+            "## solves\n[[us001]]\n\n## implements\n[[im001]]\n\n"
+            "## problem\n[[ft002]] is a surveyed non-dependency.",
+        )
+        self.commit_spec("story spec citing an accepted feature")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/ft002.md"), "accepted")
+
+    # ---- pre-existing shapes, unchanged ----------------------------------
+
+    def test_story_backed_consumed_mode_flips_nothing_upstream(self) -> None:
+        self.write_spec("consume shipped story", "## solves\n[[us002]]\n\n## implements\n[[im002]]")
+        self.commit_spec("consuming spec")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/us002.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/im002.md"), "accepted")
+        self.assertIn("consumed", result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
+
+    def test_mixed_finale_flips_story_implementation_and_proposed_feature(self) -> None:
+        self.write_spec(
+            "ship story and feature",
+            "## solves\n[[us001]]\n\n## implements\n[[im001]]\n\n## problem\nAlso mints [[ft001]].",
+        )
+        self.commit_spec("mixed spec")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/ft001.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
 
 
 if __name__ == "__main__":

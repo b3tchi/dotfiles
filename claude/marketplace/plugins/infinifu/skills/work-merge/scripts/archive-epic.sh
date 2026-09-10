@@ -15,6 +15,12 @@
 # spec body. Mixed specs with both story-backed and proposed-feature lineage flip
 # all applicable artifacts. Ambiguous shapes fail before any file mutation.
 #
+# Feature-refresh specs widen an ft### that was ALREADY accepted by an earlier
+# spec. There is no status to flip — the feature was accepted before this spec
+# and stays accepted after it — so the finale does everything except the ft###
+# flip. The refreshed body is spec-retro's job. This shape is recognised ONLY
+# from an explicit `## extends [[ft###]]` declaration; see the extractor below.
+#
 # No push — spec-retro handles remote sync.
 
 set -euo pipefail
@@ -112,8 +118,60 @@ elif [ "${#PROPOSED_FTS[@]}" -gt 1 ]; then
   exit 1
 fi
 
-if [ "$HAS_STORY" -eq 0 ] && [ "$HAS_FEATURE" -eq 0 ]; then
-  echo "ERROR: ambiguous lifecycle shape for $SP: no complete story-backed lineage and no unique proposed ft### deliverable" >&2
+# A feature-refresh deliverable is DECLARED by the spec's `## extends` section
+# (the link may sit in the heading, `## extends [[ft014]]`, or in the section
+# body), never inferred from a citation — [[adr0026]] binds every tool that
+# classifies a lifecycle shape.
+#
+# The declaration is load-bearing, not ceremony. "An accepted ft### is cited"
+# cannot classify a refresh: a feature-add spec whose ft### was never minted as
+# `proposed` cites its accepted-looking feature exactly the same way, and
+# treating that as a refresh would archive it silently, leaving a feature
+# permanently un-accepted with nobody told. The two cases are indistinguishable
+# from citations alone, so the shape fails closed when the section is absent
+# and the pre-existing "no unique proposed ft###" error still fires.
+extract_extends_fts () {
+  local file="$1"
+  awk '
+    /^## extends([ \t]|$)/ { in_section = 1; print; next }
+    /^## / { in_section = 0 }
+    in_section { print }
+  ' "$file" | grep -oE '\[\[ft[0-9]+' | sed 's/^\[\[//' | awk '!seen[$0]++'
+}
+
+HAS_REFRESH=0
+REFRESH_FT=""
+REFRESH_FT_STATUS=""
+mapfile -t EXTENDS_FTS < <(extract_extends_fts "$SP_FILE")
+if [ "${#EXTENDS_FTS[@]}" -gt 1 ]; then
+  echo "ERROR: ambiguous lifecycle shape for $SP: '## extends' declares multiple ft### deliverables: ${EXTENDS_FTS[*]}" >&2
+  exit 1
+elif [ "${#EXTENDS_FTS[@]}" -eq 1 ]; then
+  EXT_FT="${EXTENDS_FTS[0]}"
+  EXT_FT_FILE="$AKM_ROOT/docs/notes/$EXT_FT.md"
+  [ -f "$EXT_FT_FILE" ] || {
+    echo "ERROR: $SP declares '## extends [[$EXT_FT]]' but $EXT_FT_FILE is missing" >&2
+    exit 1
+  }
+  REFRESH_FT_STATUS="$(status_of "$EXT_FT_FILE")"
+  case "$REFRESH_FT_STATUS" in
+    # Declaring a not-yet-accepted feature is the ordinary feature-add shape:
+    # the proposed-ft resolution above already owns it and flips it.
+    proposed) : ;;
+    # Already terminal before this spec existed → refresh. Nothing to flip.
+    accepted|stable)
+      HAS_REFRESH=1
+      REFRESH_FT="$EXT_FT"
+      ;;
+    *)
+      echo "ERROR: ambiguous lifecycle shape for $SP: '## extends [[$EXT_FT]]' has status ${REFRESH_FT_STATUS:-missing}; expected proposed (feature-add) or accepted/stable (feature-refresh)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if [ "$HAS_STORY" -eq 0 ] && [ "$HAS_FEATURE" -eq 0 ] && [ "$HAS_REFRESH" -eq 0 ]; then
+  echo "ERROR: ambiguous lifecycle shape for $SP: no complete story-backed lineage, no unique proposed ft### deliverable, and no '## extends [[ft###]]' declaration for a feature-refresh" >&2
   exit 1
 fi
 
@@ -247,11 +305,10 @@ story_summary () {
   fi
 }
 
-if [ "$HAS_STORY" -eq 1 ] && [ "$HAS_FEATURE" -eq 1 ]; then
-  echo "Archived: $SP → done ($SP_ARCHIVE), $(story_summary), $FT → accepted. Board → archive. Epic $EPIC closed."
-elif [ "$HAS_STORY" -eq 1 ]; then
-  echo "Archived: $SP → done ($SP_ARCHIVE), $(story_summary). Board → archive. Epic $EPIC closed."
-else
-  echo "Archived: $SP → done ($SP_ARCHIVE), $FT → accepted. Board → archive. Epic $EPIC closed."
-fi
+SUMMARY="Archived: $SP → done ($SP_ARCHIVE)"
+[ "$HAS_STORY" -eq 0 ] || SUMMARY="$SUMMARY, $(story_summary)"
+[ "$HAS_FEATURE" -eq 0 ] || SUMMARY="$SUMMARY, $FT → accepted"
+# Report the refresh truthfully: the finale did NOT touch this feature.
+[ "$HAS_REFRESH" -eq 0 ] || SUMMARY="$SUMMARY, $REFRESH_FT refreshed (already $REFRESH_FT_STATUS, not flipped)"
+echo "$SUMMARY. Board → archive. Epic $EPIC closed."
 echo "Next: run spec-retro for $SP to refresh AKM graph + push to remote."
