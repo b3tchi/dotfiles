@@ -792,9 +792,18 @@ def identity-log-dir [run: string, uid: string]: nothing -> any {
 # tree yet has no queues, which is the same answer an error would have to be
 # turned into at every call site.
 def project-queue-dir [base: string]: nothing -> string {
+    queue-dir-of (resolve-project-slug $base)
+}
+
+# The same directory, for a caller that already holds the slug and must NOT
+# re-derive it from a path. `worker-release` is that caller: `accept` deletes
+# the worktree an identity names, and slugging a path that no longer exists
+# answers with `resolve-project-slug`'s fallback bucket instead of the project
+# the worker was actually filed under.
+def queue-dir-of [slug: string]: nothing -> string {
     let root = ($env | get -o XDG_RUNTIME_DIR | default "")
     if ($root | is-empty) { return "" }
-    $root | path join $BUS_DIRNAME (resolve-project-slug $base) "bus" "queue"
+    $root | path join $BUS_DIRNAME $slug "bus" "queue"
 }
 
 # Where this project's claimed addresses live: one directory per uid.
@@ -882,7 +891,12 @@ export def claim-address [repo: string, uid: string]: nothing -> nothing {
 # `rm`) are cleaning up rather than asserting.
 export def release-address [repo: string, uid: string]: nothing -> nothing {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
-    let dir = (address-dir (resolve-project-slug $base) | path join $uid)
+    release-address-at (resolve-project-slug $base) $uid
+}
+
+# By slug, for the caller that already has one — see `queue-dir-of`.
+def release-address-at [slug: string, uid: string]: nothing -> nothing {
+    let dir = (address-dir $slug | path join $uid)
     if ($dir | path exists) { rm -rf $dir }
 }
 
@@ -3935,35 +3949,50 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
 # may still be waiting on it. Only a terminal worker is discardable.
 export def worker-release [--run: string, --uid: string]: nothing -> record {
     let dir = (worker-dir $run $uid)
-    if not ($dir | path exists) {
+    # Which project this address belongs to comes from the durable `.index`
+    # pointer, and NEVER from the identity's own `cwd`. `accept` deletes that
+    # worktree (`worktree-cleanup --path $identity.cwd --accepted`), so by the
+    # time the normal `accept` then `rm` sequence reaches here the path is
+    # gone; `resolve-project-slug` catches `main-worktree`'s failure and slugs
+    # the dead path verbatim, which lands in its documented fallback bucket —
+    # a slug holding none of this worker's records. Releasing there frees
+    # nothing, and the address plus its queue stay reserved forever, which is
+    # the exact failure the widened scope above exists to prevent. `.index`
+    # exists for precisely this lookup: `(run, uid)` is all a caller has.
+    let slug = (resolve-agent-slug $run $uid)
+    let placement = (if $slug == null { "" } else { agent-state-dir $slug $run $uid })
+    let claim = (if $slug == null { "" } else { address-dir $slug | path join $uid })
+
+    # Known by ANY of its records, not by the runtime tree alone. That tree is
+    # wiped at logout by design (sp029 T6), and a worker whose durable record
+    # outlived the wipe is exactly the one whose address most needs releasing —
+    # returning "no such worker" there made the documented recycle path a
+    # silent no-op after every logout.
+    let known = (
+        ($dir | path exists)
+        or (($placement | is-not-empty) and ($placement | path exists))
+        or (($claim | is-not-empty) and ($claim | path exists))
+    )
+    if not $known {
         return {run: $run, uid: $uid, removed: false, reason: "no such worker"}
     }
     let state = (bus-status $uid --run $run | get state)
     if $state not-in ["stopped" "accepted"] {
         error make {msg: $"refusing to release ($run)/($uid): it is ($state), and its envelopes may be the only record of what it did. Stop or accept it first"}
     }
-    # Read BEFORE anything is deleted: the identity's own `cwd` is what says
-    # which project this address belonged to, and it lives in the records
-    # below.
-    let identity = (bus-identity-of $uid --run $run)
-    let slug = (resolve-agent-slug $run $uid)
 
-    rm -rf $dir
+    if ($dir | path exists) { rm -rf $dir }
     # A run directory with nothing left in it is just clutter.
     let run_dir = (run-dir $run)
     if ($run_dir | path exists) and ((ls $run_dir | length) == 0) { rm -rf $run_dir }
 
-    if $identity != null {
-        let base = $identity.cwd
-        release-address $base $uid
-        let queues = (project-queue-dir $base)
+    if $slug != null {
+        release-address-at $slug $uid
+        let queues = (queue-dir-of $slug)
         if ($queues | is-not-empty) {
             let queue = ($queues | path join $uid)
             if ($queue | path exists) { rm -rf $queue }
         }
-    }
-    if $slug != null {
-        let placement = (agent-state-dir $slug $run $uid)
         if ($placement | path exists) { rm -rf $placement }
         # The run level is per-run bookkeeping, not a record of its own.
         let runs = (state-root | path join $slug "agents" $run)

@@ -861,6 +861,84 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/an-accepted-workers-address-is-released-once-its-worktree-is-gone" {
+        # The path that matters, and the one the first cut of this fix got
+        # wrong. `accept` DELETES the worktree an identity names
+        # (`worktree-cleanup --path $identity.cwd --accepted`), so by the time
+        # the normal accept-then-`rm` sequence runs — the only sequence
+        # plan-scrum-master uses — that path is gone. Re-slugging it lands in
+        # `resolve-project-slug`'s fallback bucket, which holds none of this
+        # worker's records, so release frees nothing and the address plus its
+        # queue stay reserved forever. The durable `.index` pointer is what
+        # keys the records, and it is what release must resolve from.
+        let root = (make-runtime "release-gone")
+        let repo = (make-repo "release-gone")
+        with-runtime $root {
+            let tree = (worker-placement --repo $repo --isolation "worktree" --subject "t1")
+            let uid = (mint-uid "impl" $repo)
+            bus-identity $uid --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "s", skill: "wk-build", window: $"($uid)@dotfiles"
+            }
+            # A queue of its own, planted the way a sender makes one — from
+            # inside the project, so it lands under the project's real slug.
+            let queue = (do {
+                cd $repo
+                ensure-bus-dirs
+                queue-append $uid (mint-msg-id)
+                project-dir | path join "queue" $uid
+            })
+            assert-true ($queue | path exists) "the fixture really planted a queue"
+
+            worker-stop $uid --run "r1"
+            # What `accept` does to the tree, without needing a live tmux
+            # server to get there.
+            ^git -C $repo worktree remove --force $tree.path
+            assert-true (not ($tree.path | path exists)) "the worktree is gone, exactly as after accept"
+
+            let released = (worker-release --run "r1" --uid $uid)
+            assert-true $released.removed "the address is freed"
+            assert-true (not ($queue | path exists)) "its queue goes with it"
+            assert-eq (mint-uid "impl" $repo) $uid "and the address is mintable again"
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/an-address-is-released-even-after-the-runtime-tree-is-wiped" {
+        # `$XDG_RUNTIME_DIR` is wiped at logout by design — that is why the
+        # placement record lives under `state-root` at all (sp029 T6). Deciding
+        # "is there such a worker" from the runtime tree alone made `rm` a
+        # silent no-op after every logout: it answered "no such worker" while
+        # the durable record, and so the address, was still there.
+        let root = (make-runtime "release-wiped")
+        let repo = (make-repo "release-wiped")
+        with-runtime $root {
+            let uid = (mint-uid "impl" $repo)
+            bus-identity $uid --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: $"($uid)@dotfiles"
+            }
+            worker-stop $uid --run "r1"
+            # The wipe itself: the runtime tree goes, the placement record does
+            # not.
+            rm -rf (bus-root)
+            assert-eq (mint-uid "impl" $repo) "impl-2" "the surviving record still holds the address"
+
+            let released = (worker-release --run "r1" --uid $uid)
+            assert-true $released.removed "rm reaches it anyway"
+            assert-eq $released.state "stopped" "on the verdict that survived the wipe"
+            assert-eq (mint-uid "impl" $repo) $uid "and the address is free again"
+
+            # A uid with no records anywhere is still not a worker.
+            let missing = (worker-release --run "r1" --uid "nobody")
+            assert-eq $missing.removed false "an unknown address is not released"
+            assert-eq $missing.reason "no such worker" "and says so plainly"
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
     (run-case "bus/an-occupied-address-is-refused-project-wide" {
         # The occupied-address guard used to check the SAME fresh, always-empty
         # run directory `mint-uid` searched, so it could not fire either. It
