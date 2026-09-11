@@ -31,6 +31,7 @@ import {
   createInitiatorTool,
   INITIATOR_TOOL_PARAMETERS,
   VERB_FLAGS,
+  VERB_FIXED_FLAGS,
   rosterFrame,
   collapsedStateLine,
   EMPTY_GRACE_MS,
@@ -740,6 +741,13 @@ describe("initiator tool", () => {
     // Direction 2 (the dotfiles-ztv4 shape): a schema property no verb renders
     // tells the agent to pass a flag the tool then throws away.
     expect([...declared].filter((f) => !rendered.has(f)).sort()).toEqual([]);
+
+    // Direction 3, introduced by the fixed-flag concept itself: a fixed flag
+    // sharing a name with a settable one would be pushed onto argv twice, once
+    // from each loop.
+    const fixed = new Set<string>();
+    for (const flags of Object.values(VERB_FIXED_FLAGS)) for (const f of flags ?? []) fixed.add(f);
+    expect([...fixed].filter((f) => rendered.has(f) || declared.has(f)).sort()).toEqual([]);
   });
 
   // dotfiles-f9kw: `timeline` is the one verb whose output the extension parses

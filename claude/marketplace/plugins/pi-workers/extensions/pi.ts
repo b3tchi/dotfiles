@@ -1294,7 +1294,7 @@ type _EveryDeclaredFlagIsRendered = AssertNoUnrenderedFlags<Exclude<FlagName, Re
  * Switches only. A fixed flag carrying a value would be a default, which is a
  * different thing and belongs in the CLI where the other defaults live.
  */
-const VERB_FIXED_FLAGS: Partial<Record<InitiatorVerb, readonly string[]>> = {
+export const VERB_FIXED_FLAGS: Partial<Record<InitiatorVerb, readonly string[]>> = {
   timeline: ["json"],
 };
 
