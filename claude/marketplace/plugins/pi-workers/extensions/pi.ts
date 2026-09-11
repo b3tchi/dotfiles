@@ -1206,15 +1206,38 @@ export const VERB_FLAGS: Record<string, readonly string[]> = {
   rm: ["uid"],
   status: [],
   inspect: [],
-  // `--json` because the CLI answers a person with columns by default; the
-  // extension needs the structure to summarise it.
-  timeline: ["json"],
+  timeline: [],
   workers: [],
   liveness: ["socket"],
   resume: ["feedback", "socket"],
   accept: ["repo", "socket"],
   stop: ["socket"],
   respawn: ["repo", "socket"],
+};
+
+/**
+ * Flags this extension passes for a verb whether or not anybody asked.
+ *
+ * dotfiles-f9kw: `timeline --json` used to live in VERB_FLAGS, which made it a
+ * flag the render loop looked for on the caller's args — and since no caller
+ * could set it (it was neither an InitiatorArgs field nor a schema property),
+ * it was dropped on every single call. The CLI therefore answered `timeline`
+ * with human columns, and `collapsedStateLine`'s whole "a list, not a record"
+ * branch, written to summarise a timeline, never ran.
+ *
+ * The reason it did not belong in VERB_FLAGS is that it is not a PARAMETER.
+ * Every VERB_FLAGS entry answers "what may a caller choose?"; `--json` answers
+ * "how does this extension talk to the CLI?". The extension parses timeline
+ * output, so it needs JSON always — an agent that could turn it off could only
+ * ever turn it off wrongly. Modelling it as a fixed flag keeps it out of the
+ * tool schema (nothing to reason about) and, more to the point, keeps it in
+ * exactly ONE place, so there is no second list for it to drift out of.
+ *
+ * Switches only. A fixed flag carrying a value would be a default, which is a
+ * different thing and belongs in the CLI where the other defaults live.
+ */
+const VERB_FIXED_FLAGS: Partial<Record<InitiatorVerb, readonly string[]>> = {
+  timeline: ["json"],
 };
 
 // ---------------------------------------------------------------------------
@@ -2511,6 +2534,10 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
         }
         argv.push(`--${flag}`, String(value));
       }
+
+      // Fixed flags last, and unconditionally: they are not read off `args`,
+      // so there is nothing for an absent value to suppress.
+      for (const flag of VERB_FIXED_FLAGS[args.verb] ?? []) argv.push(`--${flag}`);
 
       try {
         const out = await opts.exec("pi-worker", argv, { cwd: opts.cwd });

@@ -30,6 +30,7 @@ import {
   createResultTool,
   createInitiatorTool,
   INITIATOR_TOOL_PARAMETERS,
+  VERB_FLAGS,
   rosterFrame,
   collapsedStateLine,
   EMPTY_GRACE_MS,
@@ -717,6 +718,51 @@ describe("initiator tool", () => {
     const props = INITIATOR_TOOL_PARAMETERS.properties as Record<string, { description?: string }>;
     expect(props.commissioner).toBeDefined();
     expect(props.commissioner.description).toContain("spawn");
+  });
+
+  // dotfiles-b1xj: the regression guard, kept even though the types now make
+  // this a compile error too. A future refactor that loosens the types must
+  // still trip something, and a test survives a type that gets widened back to
+  // `Record<string, readonly string[]>` by someone in a hurry.
+  test("every flag a verb renders is a flag the schema declares, and vice versa", () => {
+    const declared = new Set(Object.keys(INITIATOR_TOOL_PARAMETERS.properties));
+    // `verb` is the selector, not a flag: it is rendered as argv[0], never as
+    // `--verb`, so it is a schema property with no VERB_FLAGS entry by design.
+    declared.delete("verb");
+
+    const rendered = new Set<string>();
+    for (const flags of Object.values(VERB_FLAGS)) for (const f of flags) rendered.add(f);
+
+    // Direction 1 (the dotfiles-f9kw shape): a flag the render loop reads that
+    // no schema property declares can never be set, so it is dropped silently
+    // on every call.
+    expect([...rendered].filter((f) => !declared.has(f)).sort()).toEqual([]);
+    // Direction 2 (the dotfiles-ztv4 shape): a schema property no verb renders
+    // tells the agent to pass a flag the tool then throws away.
+    expect([...declared].filter((f) => !rendered.has(f)).sort()).toEqual([]);
+  });
+
+  // dotfiles-f9kw: `timeline` is the one verb whose output the extension parses
+  // rather than shows — collapsedStateLine has a whole Array branch written for
+  // it ("a list, not a record"). That branch was unreachable, because the CLI
+  // answers a person with columns unless it is asked for JSON and nothing ever
+  // asked. `--json` is not a choice a caller makes; it is how this extension
+  // talks to the CLI, so it rides as a fixed flag rather than a parameter.
+  test("timeline always asks the CLI for JSON, because the extension parses it", async () => {
+    const { exec, calls } = fakeExec();
+    const tool = createInitiatorTool({ exec });
+
+    await tool.invoke({ verb: "timeline", uid: "w1" });
+
+    expect(calls[0].command).toBe("pi-worker");
+    expect(calls[0].args).toEqual(["timeline", "w1", "--json"]);
+  });
+
+  test("a fixed flag is not a model-settable parameter", () => {
+    // The whole point of the fixed-flag concept: an always-on flag must not
+    // show up in the schema, or an agent can reason about turning it off.
+    const props = INITIATOR_TOOL_PARAMETERS.properties as Record<string, unknown>;
+    expect(props.json).toBeUndefined();
   });
 
   test("a positional verb puts the uid where the CLI expects it", async () => {
