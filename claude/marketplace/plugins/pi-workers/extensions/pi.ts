@@ -1195,7 +1195,7 @@ export interface InitiatorTool {
  * caller's own project now, never named by the caller. `send`/`wait` carry
  * `as`/`to` instead of the retired ticket/instructions work-payload shape.
  */
-const VERB_FLAGS: Record<string, readonly string[]> = {
+export const VERB_FLAGS: Record<string, readonly string[]> = {
   ps: ["socket"],
   // dotfiles-uwz6: `commissioner` rides here so an orchestrator can name its
   // OWN address at spawn. Absent means absent — the CLI then defaults to the
