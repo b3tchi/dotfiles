@@ -1173,6 +1173,9 @@ export interface InitiatorArgs {
   repo?: string;
   session?: string;
   skill?: string;
+  // dotfiles-ztv4: declared in INITIATOR_TOOL_PARAMETERS as REQUIRED, so it
+  // has to survive as far as argv — `main spawn` refuses without it.
+  isolation?: "worktree" | "main";
   task?: string;
   commissioner?: string;
   feedback?: string;
@@ -1197,7 +1200,7 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   // dotfiles-uwz6: `commissioner` rides here so an orchestrator can name its
   // OWN address at spawn. Absent means absent — the CLI then defaults to the
   // run it mints, which is the behavior every existing caller already has.
-  spawn: ["uid", "role", "subject", "project", "repo", "session", "skill", "task", "commissioner", "socket"],
+  spawn: ["uid", "role", "subject", "project", "repo", "session", "skill", "isolation", "task", "commissioner", "socket"],
   send: ["as", "to", "content"],
   wait: ["as", "block", "timeout"],
   rm: ["uid"],
