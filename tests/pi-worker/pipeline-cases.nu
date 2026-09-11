@@ -931,17 +931,96 @@ let cases = [
     })
 
     (run-case "pipeline/spawn-refuses-a-commissioner-that-is-not-an-address" {
-        # The commissioner becomes a queue directory name and is written into
-        # durable state, so prose or a path segment here has to be refused at
-        # the flag rather than discovered as a stray directory later.
+        # The commissioner becomes a queue file name (`queue/<address>`, see
+        # `queue-path`) and is written into durable state, so prose, a path
+        # segment, or a name too long to BE a file name has to be refused at
+        # the flag rather than discovered later. Too-long is in here for the
+        # same reason as the rest (dotfiles-sjm5): it was accepted at spawn and
+        # only failed at `bus-result`, where the worker's own `result` exits
+        # nonzero and the commissioner is simply never told — the exact
+        # silence dotfiles-uwz6 was filed to end.
+        #
+        # Two things this case is deliberate about, both earned (dotfiles-r9ge).
+        #
+        # It asserts the REASON, not the bare fact of a throw. `try { spawn;
+        # false } catch { true }` passes for ANY error, and spawning onto an
+        # occupied address throws one that has nothing to do with the
+        # commissioner — so that shape cannot tell a working guard from a
+        # missing one.
+        #
+        # And every value gets its OWN uid. Looping bad values over one uid
+        # makes every value after the first hit `claim-address` on an address
+        # the previous iteration just occupied; it is refused, the old
+        # assertion read that as coverage, and with the guard deleted only the
+        # first value would have failed.
         with-pipeline "spawn-commissioner-refusal" {|t, repo|
-            for bad in ["not an address" "../escape" "a/b" ".."] {
-                let failed = (try {
-                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --commissioner $bad --socket $t.socket
-                    false
-                } catch { true })
-                assert-true $failed $"spawn must refuse --commissioner '($bad)': it is an address, and an address is a queue name"
+            let over = (0..<($MAX_ADDRESS_CHARS + 1) | each {|| "a" } | str join "")
+            let past_name_max = (0..<256 | each {|| "a" } | str join "")
+            let bad = [
+                "." ".." "../escape" "....//....//etc" "a/b" "/etc/passwd"
+                "not an address" "ok\nevil" "evil\n" "\n" "a\tb"
+                "日本語" "café" "%2e%2e" "$(whoami)" "a;rm -rf /" "~" "*"
+                "a b" "a\u{0}b" $over $past_name_max
+            ]
+            for pair in ($bad | enumerate) {
+                assert-rejects {
+                    worker-spawn --run "run-1" --uid $"impl-($pair.index)" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session $"sid-($pair.index)" --skill "wk-build" --isolation "worktree" --commissioner $pair.item --socket $t.socket
+                } "--commissioner" $"spawn must refuse --commissioner ($pair.item | to json) AS A COMMISSIONER: it is an address, and an address is a queue name"
             }
+
+            # The bound has to refuse the shapes above WITHOUT refusing a legal
+            # address, or it is just a different bug. An address of exactly
+            # MAX_ADDRESS_CHARS is the last accepted one, and it is accepted
+            # all the way through to the durable record.
+            let at_limit = (0..<$MAX_ADDRESS_CHARS | each {|| "a" } | str join "")
+            worker-spawn --run "run-1" --uid "impl-ok" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-ok" --skill "wk-build" --isolation "worktree" --commissioner $at_limit --socket $t.socket
+            assert-eq ((bus-identity-of "impl-ok" --run "run-1") | get -o commissioner) $at_limit "an address of exactly MAX_ADDRESS_CHARS is legal and is recorded verbatim"
+        }
+    })
+
+    (run-case "pipeline/a-spawn-whose-window-never-opens-still-leaves-the-ticket-and-the-commissioner" {
+        # dotfiles-hf09. `worker-place` writes the identity TWICE: once before
+        # `open-worker-window`, and again after, to add `window_id`. The first
+        # write is the whole point of writing it twice — it is "what leaves a
+        # resume handle behind when the window never gets created at all",
+        # which is the recovery case dotfiles-v13r argued the ticket from.
+        #
+        # Every other case in this suite reads the FINAL identity, so the first
+        # write was invisible to the whole suite: deleting `task: $task` from it
+        # alone left both suites green. This case reads the record the crash
+        # path actually leaves, so a field dropped from the pre-window write is
+        # a failure rather than a silence.
+        #
+        # The window is made to fail through a `tmux` shim that passes
+        # everything through to the real binary EXCEPT `new-window`. Nothing
+        # earlier in `worker-place` can be used instead: an unreachable socket
+        # and an unknown project are both refused before the first identity
+        # write, deliberately, so they never reach the code under test.
+        with-pipeline "identity-before-window" {|t, repo|
+            let real_tmux = (which tmux | get path.0)
+            let shim = ([(fixture-base) $"piw-t5-noweenwin-(random chars --length 6)"] | path join)
+            mkdir $shim
+            $"#!/bin/bash\nfor a in \"$@\"; do\n  if [ \"$a\" = new-window ]; then echo 'test shim: new-window refused' >&2; exit 1; fi\ndone\nexec ($real_tmux) \"$@\"\n" | save -f ($shim | path join "tmux")
+            chmod +x ($shim | path join "tmux")
+
+            let outcome = (with-env {PATH: ([$shim] ++ $env.PATH)} {
+                try {
+                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "dotfiles-hf09" --session "sid-1" --skill "wk-build" --isolation "worktree" --commissioner "orchestrator-1" --socket $t.socket
+                    {threw: false, msg: ""}
+                } catch {|e| {threw: true, msg: $e.msg}}
+            })
+            rm -rf $shim
+            assert-true $outcome.threw "the shim must actually break window creation, or this case proves nothing"
+            assert-true ($outcome.msg | str contains "could not create window") $"and break it AT open-worker-window, got: ($outcome.msg)"
+
+            # What a recovery reads: the pre-window record, and it is the only
+            # one there — `window_id` is absent because it never existed.
+            let left = (bus-identity-of "impl-a" --run "run-1")
+            assert-eq ($left | get -o window_id | default "") "" "the identity left behind is the PRE-window write, not the second one"
+            assert-eq ($left | get -o task) "dotfiles-hf09" "a worker whose window never came up still names the ticket it was spawned for"
+            assert-eq ($left | get -o commissioner) "orchestrator-1" "and still names who is to be told about it"
+            assert-eq $left.session "sid-1" "alongside the resume handle that write exists for"
+            assert-eq $left.branch "wk-dotfiles-hf09.0" "and the branch its worktree was allocated on"
         }
     })
 

@@ -91,6 +91,25 @@ export const OBSERVATIONAL_VERDICTS = ["unknown" "gone"]
 # that `impl-<subject>@<project>` still reads in a window list.
 export const MAX_SUBJECT_CHARS = 40
 
+# An ADDRESS is worn as a file name, not merely read: the queue `bus-send`
+# appends to is `queue/<address>` and nothing else (`queue-path`), and a
+# claimed address is also a directory of its own under the project
+# (`claim-address`, `worker-dir`). The hard boundary is therefore the
+# filesystem's NAME_MAX, measured at 255 bytes here — 255 creates, 256 fails
+# ENAMETOOLONG.
+#
+# The cap is set well below that boundary rather than at it. Every address
+# this system mints is `<role>-<n>` or `r<n>` (`mint-uid`, `next-run-id`), so
+# 64 is already far more than anything real ever needs, and the ~190 bytes of
+# headroom mean a future name that composes an address with a suffix — the
+# `<name>.marker` and `<sequence>.json` shapes already used beside it — cannot
+# reach NAME_MAX either. A cap AT 255 would have to be revisited the first
+# time anything is appended to an address.
+#
+# Characters, not bytes, and the two are the same count on purpose: the guard
+# beside this one admits only `[A-Za-z0-9._-]`, all single-byte.
+export const MAX_ADDRESS_CHARS = 64
+
 # Statuses a worker may report in a result envelope. `accepted` is the
 # initiator's verdict on the work and `stopped` is an external act, so neither
 # is something a worker can claim about itself.
@@ -3278,6 +3297,22 @@ export def worker-spawn [
         # refused outright rather than left to resolve as path segments.
         if not ($commissioner =~ '^[A-Za-z0-9._-]+$') or ($commissioner in [".", ".."]) {
             error make {msg: $"spawn's --commissioner is an address, not prose: '($commissioner)' must match [A-Za-z0-9._-]+. It names who is told when this worker reports — a peer's uid, or your own claimed address. Omit it and the run this spawn mints is used, which is what `wait --as <run>` reads"}
+        }
+        # Length, for the same reason as the character set and in the same
+        # breath: the address has to BE a file name (`queue/<address>`), and
+        # one that cannot be is a caller error detectable here, at spawn.
+        #
+        # Unbounded, it was not. A 301-character commissioner was accepted and
+        # recorded verbatim; the failure surfaced at `bus-result`, where the
+        # outbox envelope is written FIRST and succeeds — so `status`, `accept`
+        # and `derive-state` all still see the result — and only the additive
+        # peer-bus delivery throws `I/O error` (ENAMETOOLONG from
+        # `queue-append`). Net effect: the worker's own `result` exits nonzero
+        # while the named commissioner is never told, which is precisely the
+        # silence dotfiles-uwz6 exists to end. Nothing is left half-written and
+        # a retry fails identically, so the only fix is to refuse it up front.
+        if ($commissioner | str length) > $MAX_ADDRESS_CHARS {
+            error make {msg: $"spawn's --commissioner is an address, and an address is a file name: '($commissioner | str substring 0..31)…' is ($commissioner | str length) characters, over the ($MAX_ADDRESS_CHARS)-character cap. An address is a peer's uid or a run — `impl-2`, `r7` — not a description of one"}
         }
     }
 
