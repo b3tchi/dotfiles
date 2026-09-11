@@ -1228,7 +1228,10 @@ export interface InitiatorTool {
 }
 
 /**
- * Flags each verb accepts, in the order the CLI documents them.
+ * The flags each verb accepts FROM A CALLER, in the order the CLI documents
+ * them. Constrained to FLAG_SCHEMAS keys, so a name here that nothing declares
+ * does not compile. Flags this extension passes on its own account are not here
+ * — see VERB_FIXED_FLAGS below.
  *
  * sp029 T9: `run` is gone from every entry — a uid is looked up in the
  * caller's own project now, never named by the caller. `send`/`wait` carry
