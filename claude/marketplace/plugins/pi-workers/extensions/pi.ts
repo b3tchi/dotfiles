@@ -1161,28 +1161,67 @@ const UID_IS_POSITIONAL: readonly string[] = [
   "respawn",
 ];
 
-export interface InitiatorArgs {
-  verb: InitiatorVerb;
-  uid?: string;
-  as?: string;
-  to?: string;
-  content?: string;
-  role?: string;
-  subject?: string;
-  project?: string;
-  repo?: string;
-  session?: string;
-  skill?: string;
-  // dotfiles-ztv4: declared in INITIATOR_TOOL_PARAMETERS as REQUIRED, so it
-  // has to survive as far as argv — `main spawn` refuses without it.
-  isolation?: "worktree" | "main";
-  task?: string;
-  commissioner?: string;
-  feedback?: string;
-  block?: boolean;
-  timeout?: number;
-  socket?: string;
-}
+/**
+ * dotfiles-b1xj: THE source of truth for the tool's flags. One entry per flag,
+ * carrying the JSON-schema fragment the agent reads.
+ *
+ * There used to be three hand-synced lists — InitiatorArgs, VERB_FLAGS and
+ * INITIATOR_TOOL_PARAMETERS.properties — with a `Record<string, unknown>` cast
+ * between the last two, which erased the relationship and left the compiler
+ * unable to object to drift in either direction. Two flags escaped through it
+ * (dotfiles-ztv4's `isolation`, dotfiles-f9kw's `json`). Now InitiatorArgs is
+ * derived from these keys, VERB_FLAGS is constrained to these keys, and the
+ * schema is built by spreading this object, so the three cannot disagree
+ * without failing to compile.
+ *
+ * `verb` is not here: it selects the operation and is rendered as argv[0], not
+ * as `--verb`, so it is a schema property with no flag entry by design.
+ */
+const FLAG_SCHEMAS = {
+  uid: { type: "string", description: "the worker's id in this project. On spawn, omit it and one is minted from the role. Every other verb below looks it up wherever this project last recorded it — there is no run id to pass" },
+  as: { type: "string", description: "send/wait: who you are acting as. Omit it inside a worker window (PI_WORKER_UID is already set); an orchestrating session names its own claimed address" },
+  to: { type: "string", description: "send: one or more recipient addresses, comma-separated" },
+  content: { type: "string", description: "send: the message body. The bus interprets none of it — it is delivered opaque" },
+  role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
+  subject: { type: "string", description: "spawn: a short NAME for the work — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Prose is slugified and capped rather than refused, so passing a whole instruction here gets you a window called 'impl-create-timestamp-named-text-file@…' and the instruction goes nowhere: what the worker should DO travels in `send --content`" },
+  project: { type: "string", description: "spawn: omit this. The tmux session group is derived from the session you are in, which is where the operator is looking. Pass it only when running outside tmux" },
+  repo: { type: "string", description: "spawn/accept/respawn: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository" },
+  session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
+  skill: { type: "string", description: "spawn: a label for what this worker does, e.g. wk-build or doc-plan. Travels as identity, not a lookup key — it does not decide isolation or payload shape" },
+  isolation: {
+    type: "string",
+    enum: ["worktree", "main"],
+    description:
+      "spawn: REQUIRED, no default. 'worktree' gives the worker its own throwaway worktree and branch; 'main' runs it in the repo's main worktree, shared with the operator. Nothing lands in the shared tree without this being typed",
+  },
+  task: { type: "string", description: "spawn: a ticket ID and nothing else. It names the worker's git branch AND is recorded on the worker's identity, so `inspect`/`ps`/`workers` can say which ticket a worker serves after a crash. Short, no spaces. To give a worker prose, use `send` with content — never this" },
+  commissioner: { type: "string", description: "spawn: the address to notify when this worker reports — normally your OWN claimed address. Omit it and the run this spawn mints is used, which is why the convention without it is to read `run` out of the spawn result and `wait --as <run>`. Pass it and you can simply `wait --as <your address>` instead of polling `ps`" },
+  feedback: { type: "string", description: "resume: why the work is being sent back" },
+  block: { type: "boolean", description: "wait: block until mail arrives instead of peeking. This is how you learn a worker finished" },
+  timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },
+  socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },
+} as const;
+
+/** Every flag name the tool knows. */
+type FlagName = keyof typeof FLAG_SCHEMAS;
+
+/**
+ * The TypeScript type a flag's schema fragment describes, so InitiatorArgs is
+ * not a second hand-written statement of what the schema already says.
+ */
+type FlagValue<S> = S extends { readonly enum: readonly (infer E)[] }
+  ? E
+  : S extends { readonly type: "string" }
+    ? string
+    : S extends { readonly type: "boolean" }
+      ? boolean
+      : S extends { readonly type: "number" }
+        ? number
+        : never;
+
+export type InitiatorArgs = { verb: InitiatorVerb } & {
+  [K in FlagName]?: FlagValue<(typeof FLAG_SCHEMAS)[K]>;
+};
 
 export interface InitiatorTool {
   invoke(args: InitiatorArgs): Promise<ReportOutcome>;
@@ -1195,7 +1234,7 @@ export interface InitiatorTool {
  * caller's own project now, never named by the caller. `send`/`wait` carry
  * `as`/`to` instead of the retired ticket/instructions work-payload shape.
  */
-export const VERB_FLAGS: Record<string, readonly string[]> = {
+export const VERB_FLAGS = {
   ps: ["socket"],
   // dotfiles-uwz6: `commissioner` rides here so an orchestrator can name its
   // OWN address at spawn. Absent means absent — the CLI then defaults to the
@@ -1213,7 +1252,23 @@ export const VERB_FLAGS: Record<string, readonly string[]> = {
   accept: ["repo", "socket"],
   stop: ["socket"],
   respawn: ["repo", "socket"],
-};
+  // `as const satisfies` rather than an annotation: the annotation would widen
+  // the arrays to `readonly FlagName[]` and lose the literals the reachability
+  // check below needs. A flag name that is not a FLAG_SCHEMAS key fails here,
+  // and so does a verb with no entry at all.
+} as const satisfies Record<InitiatorVerb, readonly FlagName[]>;
+
+/** Every flag at least one verb renders. */
+type RenderedFlag = (typeof VERB_FLAGS)[InitiatorVerb][number];
+
+/**
+ * The other direction of drift, made structural: a flag declared in
+ * FLAG_SCHEMAS that no verb renders is a flag the agent is told to pass and the
+ * tool silently throws away — exactly dotfiles-ztv4. This alias is `never` when
+ * the two agree and a compile error the moment they do not.
+ */
+type AssertNoUnrenderedFlags<T extends never> = T;
+type _EveryDeclaredFlagIsRendered = AssertNoUnrenderedFlags<Exclude<FlagName, RenderedFlag>>;
 
 /**
  * Flags this extension passes for a verb whether or not anybody asked.
@@ -2520,7 +2575,9 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
       if (UID_IS_POSITIONAL.includes(args.verb) && args.uid) argv.push(args.uid);
 
       for (const flag of VERB_FLAGS[args.verb] ?? []) {
-        const value = (args as unknown as Record<string, unknown>)[flag];
+        // No cast: `flag` is a FlagName and InitiatorArgs is keyed by FlagName,
+        // so the compiler checks this lookup rather than erasing it.
+        const value = args[flag];
         // Absent stays ABSENT. An empty flag is not the same as no flag: the
         // CLI reads an empty --task as "this stage has a ticket id" and then
         // fails on a shape the caller never asked for.
@@ -2572,32 +2629,14 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
 // by itself. `send` carries `as`/`to`/`content` in place of the retired
 // ticket/instructions work-payload shape (that gate moved to the consumer's
 // own instructions per sp029 T8/T10).
+//
+// dotfiles-b1xj: the properties are SPREAD from FLAG_SCHEMAS rather than
+// restated here. Declaring a flag is now one edit in one place.
 export const INITIATOR_TOOL_PARAMETERS = {
   type: "object",
   properties: {
     verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
-    uid: { type: "string", description: "the worker's id in this project. On spawn, omit it and one is minted from the role. Every other verb below looks it up wherever this project last recorded it — there is no run id to pass" },
-    as: { type: "string", description: "send/wait: who you are acting as. Omit it inside a worker window (PI_WORKER_UID is already set); an orchestrating session names its own claimed address" },
-    to: { type: "string", description: "send: one or more recipient addresses, comma-separated" },
-    content: { type: "string", description: "send: the message body. The bus interprets none of it — it is delivered opaque" },
-    role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
-    subject: { type: "string", description: "spawn: a short NAME for the work — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Prose is slugified and capped rather than refused, so passing a whole instruction here gets you a window called 'impl-create-timestamp-named-text-file@…' and the instruction goes nowhere: what the worker should DO travels in `send --content`" },
-    project: { type: "string", description: "spawn: omit this. The tmux session group is derived from the session you are in, which is where the operator is looking. Pass it only when running outside tmux" },
-    repo: { type: "string", description: "spawn/accept/respawn: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository" },
-    session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
-    skill: { type: "string", description: "spawn: a label for what this worker does, e.g. wk-build or doc-plan. Travels as identity, not a lookup key — it does not decide isolation or payload shape" },
-    isolation: {
-      type: "string",
-      enum: ["worktree", "main"],
-      description:
-        "spawn: REQUIRED, no default. 'worktree' gives the worker its own throwaway worktree and branch; 'main' runs it in the repo's main worktree, shared with the operator. Nothing lands in the shared tree without this being typed",
-    },
-    task: { type: "string", description: "spawn: a ticket ID and nothing else. It names the worker's git branch AND is recorded on the worker's identity, so `inspect`/`ps`/`workers` can say which ticket a worker serves after a crash. Short, no spaces. To give a worker prose, use `send` with content — never this" },
-    commissioner: { type: "string", description: "spawn: the address to notify when this worker reports — normally your OWN claimed address. Omit it and the run this spawn mints is used, which is why the convention without it is to read `run` out of the spawn result and `wait --as <run>`. Pass it and you can simply `wait --as <your address>` instead of polling `ps`" },
-    feedback: { type: "string", description: "resume: why the work is being sent back" },
-    block: { type: "boolean", description: "wait: block until mail arrives instead of peeking. This is how you learn a worker finished" },
-    timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },
-    socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },
+    ...FLAG_SCHEMAS,
   },
   required: ["verb"],
   additionalProperties: false,
