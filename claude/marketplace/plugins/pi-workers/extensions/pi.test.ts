@@ -811,6 +811,29 @@ describe("initiator tool", () => {
     expect(argv).toContain("--role impl");
   });
 
+  test("spawn forwards --isolation, which the CLI refuses to default", async () => {
+    // dotfiles-ztv4: the tool declared `isolation` as REQUIRED in its schema
+    // but left it out of VERB_FLAGS.spawn, so it was never rendered into argv
+    // and `main spawn` refused every extension-driven spawn — the agent was
+    // told to pass a flag the tool then dropped.
+    const calls: string[][] = [];
+    const tool = createInitiatorTool({
+      exec: async (_cmd, argv) => {
+        calls.push(argv);
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    });
+    await tool.invoke({
+      verb: "spawn",
+      role: "impl",
+      subject: "timestamp",
+      skill: "probe",
+      isolation: "worktree",
+    });
+    expect(calls[0]).toContain("--isolation");
+    expect(calls[0][calls[0].indexOf("--isolation") + 1]).toBe("worktree");
+  });
+
   test("a multi-line result summary collapses to one line in the transcript", async () => {
     // Observed live. A worker reported
     //
