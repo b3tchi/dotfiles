@@ -1,0 +1,55 @@
+# agent-monitor — build + link the ft016 renderer (sp030 Task 10).
+#
+# adr0030 admits Go for this one interactive TUI on its own merits — raw
+# mode, alternate screen, SIGWINCH, two concurrent samplers — NOT via
+# adr0003's daemon gate, and it carries adr0003's `nushell/actions/` wrapper
+# mandate OUT for this binary explicitly: agent-monitor IS the interface, a
+# human runs it directly and reads raw keystrokes from it for the whole
+# session, so a nushell front-end would only forward argv and add a shell
+# start-up to an interactive launch. NO nushell wrapper is created here,
+# deliberately, per that carve-out — the binary links straight to
+# ~/.local/bin/agent-monitor below.
+#
+# Build to a TEMP file in the SAME directory, then rename over the final
+# path -- never build IN PLACE, matching hotkeyd/dot.yaml (and
+# akm-graph/dot.yaml + preview/dot.yaml's simpler build-straight-to-bin
+# variant, not used here because the binary also has to sit in the repo for
+# the `links:` entry below to point at). A `go build` that dies
+# mid-`rotz install` (disk full, SIGINT, a bad module cache mid-download)
+# must not leave a half-written `agent-monitor` binary sitting where the
+# ~/.local/bin link resolves to; a killed temp file is harmless, while a
+# killed `mv` within one filesystem cannot land a partial file at all.
+linux:
+  links:
+    agent-monitor: ~/.local/bin/agent-monitor
+
+  installs:
+    cmd: |
+      if command -v go >/dev/null 2>&1; then
+        # Resolve the source dir via akm-root so a non-standard clone path
+        # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles, matching
+        # hotkeyd/dot.yaml + akm-graph/dot.yaml + preview/dot.yaml.
+        SRC="$HOME/.dotfiles/agent-monitor"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/agent-monitor" ]; then
+            SRC="$ROOT/agent-monitor"
+          fi
+        fi
+        TMP="$(mktemp "$SRC/.agent-monitor.build.XXXXXX")"
+        if CGO_ENABLED=0 go build -C "$SRC" -o "$TMP" ./cmd/agent-monitor; then
+          mv -f "$TMP" "$SRC/agent-monitor"
+          echo "agent-monitor: built $SRC/agent-monitor from ./cmd/agent-monitor"
+        else
+          rm -f "$TMP"
+          echo "agent-monitor: go build FAILED -- $SRC/agent-monitor left \
+      unchanged. Re-run 'rotz install agent-monitor' once the build error is \
+      fixed; the ~/.local/bin/agent-monitor link (rotz link) simply points at \
+      whatever last built successfully, or nothing yet if this is the first \
+      build." >&2
+        fi
+      else
+        echo "agent-monitor: no Go toolchain on PATH -- skipping the build \
+      (install go, then re-run 'rotz install agent-monitor'). The \
+      ~/.local/bin/agent-monitor link has nothing to point at until then." >&2
+      fi

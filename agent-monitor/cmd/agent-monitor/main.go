@@ -4,11 +4,16 @@
 // straight to ~/.local/bin.
 //
 // sp030 T8 wired the roster pane scaffold: a slow, gated sample on a ticker,
-// a forced refresh on `r`, and a plain render loop. sp030 T9 (this file)
-// adds the second pane — messages, sampled on their own fast, ungated
-// ticker — and `--once`, a non-interactive single-frame mode that composes
-// in a pipe (no raw mode, no alternate screen). Real key-table extraction
-// and full loop-guard packaging are T10's job.
+// a forced refresh on `r`, and a plain render loop. sp030 T9 added the
+// second pane — messages, sampled on their own fast, ungated ticker — and
+// `--once`, a non-interactive single-frame mode that composes in a pipe (no
+// raw mode, no alternate screen). sp030 T10 (this file) extracts the
+// PROVISIONAL inline key handling those left behind into internal/tui:
+// focus, filter and scroll now live in a tui.Model driven by a tui.Decoder,
+// and terminal restore is wired through a tui.Restorer so it fires exactly
+// once regardless of which of several goroutines gets there first — see
+// enterInteractiveMode's and runInteractive's comments for why that matters
+// specifically for a panic in a background sampler's render callback.
 package main
 
 import (
@@ -24,6 +29,7 @@ import (
 
 	"agent-monitor/internal/render"
 	"agent-monitor/internal/source"
+	"agent-monitor/internal/tui"
 
 	"golang.org/x/term"
 )
@@ -89,14 +95,17 @@ func runOnce(w io.Writer) error {
 	msgMonitor := source.NewMessagesMonitor(source.NewMessagesSampler())
 	msgMonitor.Tick(ctx)
 
-	for _, line := range buildFrame(censusMonitor, msgMonitor, time.Now(), terminalWidth()) {
+	// --once has no key input, so nothing ever filters or scrolls a frame
+	// it renders — a fresh, untouched Model is exactly "no filter, no
+	// scroll", the same state an interactive session starts in too.
+	for _, line := range buildFrame(tui.NewModel(), censusMonitor, msgMonitor, time.Now(), terminalWidth()) {
 		fmt.Fprintln(w, line)
 	}
 	return nil
 }
 
-// runInteractive is the T8 scaffold's original loop, now driving two
-// samplers (roster + messages) and drawing their combined frame.
+// runInteractive drives two samplers (roster + messages), a tui.Model for
+// key-driven state, and draws their combined, filtered, scrolled frame.
 func runInteractive() {
 	// adr0014 guard 1, fail fast on unrecoverable setup: checked once, here,
 	// before any loop starts. A missing dependency is not something a retry
@@ -113,6 +122,7 @@ func runInteractive() {
 
 	censusMonitor := source.NewMonitor(source.NewSampler(stampPath()))
 	msgMonitor := source.NewMessagesMonitor(source.NewMessagesSampler())
+	model := tui.NewModel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -124,7 +134,20 @@ func runInteractive() {
 	msgMonitor.Tick(ctx)
 
 	restoreTerminal := enterInteractiveMode()
-	defer restoreTerminal()
+
+	// restorer makes "restore the terminal exactly once" true regardless of
+	// WHICH exit path gets there first: this defer covers a normal quit
+	// (`q`), a signal, or a panic on THIS (the main) goroutine. It does not
+	// by itself cover a panic in a render path running on a background
+	// sampler goroutine — draw, invoked from source.RunLoop's and
+	// source.RunMessagesLoop's onTick below, runs on ITS OWN goroutine, and
+	// Go never runs one goroutine's deferred calls to save another's panic.
+	// Those two goroutines get their own restorer.Guard below instead, and
+	// sync.Once (inside tui.Restorer) is what makes exactly one of these
+	// several defers actually do the restoring, whichever fires first. See
+	// tui.Restorer's doc comment for the full reasoning.
+	restorer := tui.NewRestorer(restoreTerminal)
+	defer restorer.Restore()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -133,25 +156,30 @@ func runInteractive() {
 	go readKeys(keys)
 
 	draw := func() {
-		lines := buildFrame(censusMonitor, msgMonitor, time.Now(), terminalWidth())
+		lines := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth())
 		writeFrame(lines)
 	}
 	draw()
 
-	go source.RunLoop(ctx, censusMonitor, pollInterval, piBoundInterval, func(changed bool) {
-		if changed {
-			draw()
-		}
+	go restorer.Guard(func() {
+		source.RunLoop(ctx, censusMonitor, pollInterval, piBoundInterval, func(changed bool) {
+			if changed {
+				draw()
+			}
+		})
 	})
-	go source.RunMessagesLoop(ctx, msgMonitor, messagesInterval, func(changed bool) {
-		if changed {
-			draw()
-		}
+	go restorer.Guard(func() {
+		source.RunMessagesLoop(ctx, msgMonitor, messagesInterval, func(changed bool) {
+			if changed {
+				draw()
+			}
+		})
 	})
 
+	dec := &tui.Decoder{}
 	for {
 		select {
-		case <-sigCh:
+		case <-sigCh: // SIGINT/SIGTERM take the same restore path as `q`: return
 			return
 		case <-ctx.Done():
 			return
@@ -159,14 +187,19 @@ func runInteractive() {
 			if !ok {
 				return
 			}
-			switch b {
-			case 'q', 'Q', 0x03: // 0x03 = Ctrl-C, in case raw mode swallowed SIGINT
+			key, ready := dec.Feed(b)
+			if !ready {
+				continue // mid-escape-sequence; wait for the rest
+			}
+			outcome := model.HandleKey(key)
+			if outcome.Quit {
 				return
-			case 'r', 'R':
+			}
+			if outcome.ForceRefresh {
 				censusMonitor.Refresh(ctx)
 				msgMonitor.Tick(ctx)
-				draw()
 			}
+			draw()
 		}
 	}
 }
@@ -174,19 +207,48 @@ func runInteractive() {
 // buildFrame stacks the roster pane over the message pane, separated by one
 // blank line, into a single list of terminal lines. Neither pane's Render
 // function talks to the other; this is the only place that joins them, and
-// it joins rendered TEXT, not data — the two samples never touch.
-func buildFrame(censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width int) []string {
+// it joins rendered TEXT, not data — the two samples never touch. model's
+// committed filter and each pane's scroll offset are applied here, to a
+// COPY of the last good sample — Monitor.Last() itself is never mutated, so
+// a later change to the filter or scroll can still see every row the
+// sampler ever captured.
+func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width int) []string {
 	var lines []string
-	lines = append(lines, render.Render(censusMonitor.Last(), censusMonitor.Stale(), now, width)...)
+	lines = append(lines, render.Render(filteredCensusSample(model, censusMonitor.Last()), censusMonitor.Stale(), now, width)...)
 	lines = append(lines, "")
-	lines = append(lines, render.RenderLog(msgMonitor.Last(), msgMonitor.Stale(), now, width)...)
+	lines = append(lines, render.RenderLog(filteredMessageSample(model, msgMonitor.Last()), msgMonitor.Stale(), now, width)...)
 	return lines
 }
 
+// filteredCensusSample applies model's committed filter and the roster
+// pane's own scroll offset (dropping that many rows from the top — a
+// scrolled-past row is simply not in the slice render.Render receives) to
+// sample, without mutating it. It calls SetRosterLen so the NEXT keystroke's
+// scroll bound reflects the CURRENT (post-filter) row count — a filter that
+// just shrank the roster must not leave scroll pointing past its new end.
+func filteredCensusSample(model *tui.Model, sample *source.Sample) *source.Sample {
+	if sample == nil {
+		return nil
+	}
+	rows := model.FilterRoster(sample.Rows)
+	model.SetRosterLen(len(rows))
+	return &source.Sample{Rows: rows[model.RosterScroll:], At: sample.At}
+}
+
+// filteredMessageSample is filteredCensusSample's twin for the message pane.
+func filteredMessageSample(model *tui.Model, sample *source.MessageSample) *source.MessageSample {
+	if sample == nil {
+		return nil
+	}
+	msgs := model.FilterMessages(sample.Messages)
+	model.SetMessagesLen(len(msgs))
+	return &source.MessageSample{Messages: msgs[model.MessagesScroll:], At: sample.At}
+}
+
 // readKeys feeds raw stdin bytes to ch, closing it on EOF/error (stdin
-// closed, e.g. under a non-interactive harness). Full key-table handling
-// (tab/filter/scroll) is internal/tui's job in a later task; this scaffold
-// only needs to tell `q` and `r` apart from everything else.
+// closed, e.g. under a non-interactive harness). Byte-at-a-time is
+// deliberate: tui.Decoder is what assembles multi-byte sequences (arrow
+// keys) back into whole Key events, so this loop stays a dumb byte pump.
 func readKeys(ch chan<- byte) {
 	defer close(ch)
 	buf := make([]byte, 1)
