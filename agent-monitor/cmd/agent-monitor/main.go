@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -98,7 +99,7 @@ func runOnce(w io.Writer) error {
 	// --once has no key input, so nothing ever filters or scrolls a frame
 	// it renders — a fresh, untouched Model is exactly "no filter, no
 	// scroll", the same state an interactive session starts in too.
-	for _, line := range buildFrame(tui.NewModel(), censusMonitor, msgMonitor, time.Now(), terminalWidth()) {
+	for _, line := range buildFrame(tui.NewModel(), censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0) {
 		fmt.Fprintln(w, line)
 	}
 	return nil
@@ -156,7 +157,7 @@ func runInteractive() {
 	go readKeys(keys)
 
 	draw := func() {
-		lines := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth())
+		lines := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), terminalHeight())
 		writeFrame(lines)
 	}
 	draw()
@@ -212,12 +213,60 @@ func runInteractive() {
 // COPY of the last good sample — Monitor.Last() itself is never mutated, so
 // a later change to the filter or scroll can still see every row the
 // sampler ever captured.
-func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width int) []string {
+// height is the terminal's row count, or 0 for "do not clamp" — which is what
+// --once passes, because a pipe has no height and a consumer asked for the
+// whole frame.
+func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int) []string {
+	roster := render.Render(filteredCensusSample(model, censusMonitor.Last()), censusMonitor.Stale(), now, width)
+	log := render.RenderLog(filteredMessageSample(model, msgMonitor.Last()), msgMonitor.Stale(), now, width)
+	if height > 0 {
+		roster, log = fitPanes(roster, log, height)
+	}
+
 	var lines []string
-	lines = append(lines, render.Render(filteredCensusSample(model, censusMonitor.Last()), censusMonitor.Stale(), now, width)...)
+	lines = append(lines, roster...)
 	lines = append(lines, "")
-	lines = append(lines, render.RenderLog(filteredMessageSample(model, msgMonitor.Last()), msgMonitor.Stale(), now, width)...)
+	lines = append(lines, log...)
 	return lines
+}
+
+// fitPanes trims two stacked panes so the whole frame fits in height rows.
+//
+// dotfiles-9x2m: without this the frame is however many lines the data
+// happens to produce, writeFrame prints all of them, and a frame taller than
+// the terminal makes the TERMINAL scroll — carrying the roster off the top
+// where no amount of in-pane scrolling can bring it back. The pane scroll
+// offsets were being applied correctly and were simply invisible.
+//
+// Each pane gets half the rows, minus the blank separator; whatever a short
+// pane does not use goes to the other, so a machine with three agents and a
+// busy bus still fills the screen with messages rather than padding. Trimming
+// takes from the BOTTOM, which keeps each pane's header line — a pane whose
+// header scrolled away is unreadable, and the header is what carries the
+// staleness indicator.
+func fitPanes(roster, log []string, height int) ([]string, []string) {
+	avail := height - 1 // the blank line between the panes
+	if avail < 2 {
+		// Degenerate terminal: one row each is the most that is still two
+		// panes. Below that there is nothing useful to show.
+		return clamp(roster, 1), clamp(log, 1)
+	}
+
+	rosterBudget := avail / 2
+	logBudget := avail - rosterBudget
+	if len(roster) < rosterBudget {
+		logBudget += rosterBudget - len(roster)
+	} else if len(log) < logBudget {
+		rosterBudget += logBudget - len(log)
+	}
+	return clamp(roster, rosterBudget), clamp(log, logBudget)
+}
+
+func clamp(lines []string, n int) []string {
+	if n < 0 || len(lines) <= n {
+		return lines
+	}
+	return lines[:n]
 }
 
 // filteredCensusSample applies model's committed filter and the roster
@@ -290,6 +339,15 @@ func enterInteractiveMode() (restore func()) {
 	}
 }
 
+// terminalHeight reports the row count, or 0 when stdout is not a terminal —
+// 0 meaning "do not clamp", the same contract buildFrame's height takes.
+func terminalHeight() int {
+	if _, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && h > 0 {
+		return h
+	}
+	return 0
+}
+
 func terminalWidth() int {
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		return w
@@ -302,10 +360,27 @@ func stampPath() string {
 }
 
 func writeFrame(lines []string) {
+	io.WriteString(os.Stdout, frameBytes(lines))
+}
+
+// frameBytes is the exact text writeFrame puts on the terminal, split out so a
+// test can assert on it without a pty.
+//
+// CRLF, not LF (dotfiles-r9ty). The interactive path runs in RAW mode, which
+// disables the ONLCR output mapping that normally turns a bare \n into \r\n.
+// Without that mapping \n moves down one row and KEEPS THE COLUMN, so every
+// line starts where the previous one ended and the frame staircases off the
+// right edge, wrapping rows into each other. `--once` never enters raw mode,
+// so the tty still maps LF for it — which is why one-shot output looked
+// perfect, every unit test passed, and only running the real TUI showed it.
+func frameBytes(lines []string) string {
 	// Home cursor and clear below, rather than a full clear-and-redraw --
 	// cheaper and avoids a visible flash on every tick.
-	fmt.Print("\x1b[H\x1b[J")
+	var b strings.Builder
+	b.WriteString("\x1b[H\x1b[J")
 	for _, l := range lines {
-		fmt.Println(l)
+		b.WriteString(l)
+		b.WriteString("\r\n")
 	}
+	return b.String()
 }
