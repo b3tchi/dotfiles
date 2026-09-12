@@ -1,0 +1,50 @@
+[
+  {
+    "at": "2026-09-10T01:13:30.982904Z",
+    "id": "01M24E11K5M3AYPRFHRVH70394",
+    "from": "probe",
+    "to": [
+      "smoke-1"
+    ],
+    "kind": "inbox",
+    "content": "ping-verify"
+  },
+  {
+    "at": "2026-09-10T01:16:21.281955Z",
+    "id": "01M24E67X055CVGG48A3ZDXT2E",
+    "from": "r2",
+    "to": [
+      "brainstorm-1"
+    ],
+    "kind": "inbox",
+    "content": "Say the single word: delivered"
+  },
+  {
+    "at": "2026-09-10T01:17:44.326971Z",
+    "id": "01M24E8S055W265NP8E524X38D",
+    "from": "smoke-1",
+    "to": [
+      "r2"
+    ],
+    "kind": "inbox",
+    "content": {
+      "status": "complete",
+      "summary": "delivered",
+      "window": "smoke-sample-task@dotfiles",
+      "session": "00000000-0000-4000-8000-000000000001",
+      "resume": "pi --session 00000000-0000-4000-8000-000000000001",
+      "validation": "User requested single-word response only; no repository changes were made."
+    }
+  },
+  {
+    "at": "2026-09-10T01:18:02.100000Z",
+    "id": "01M24E8S055W265NP8E524X39Z",
+    "from": "smoke-operator",
+    "to": [
+      "peer-1",
+      "peer-2"
+    ],
+    "kind": "inbox",
+    "content": "fan-out to two peers"
+  }
+]
