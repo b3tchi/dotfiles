@@ -1864,6 +1864,191 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         rm -rf $root; rm -rf $repo
     })
 
+    # ------------------------------------------------------- presence (sp030 T3)
+    #
+    # Presence lives under `$XDG_STATE_HOME` (`state-root`), which `run-case`
+    # already sandboxes per case — unlike the bus tree above, none of these
+    # need `make-runtime`/`with-runtime` at all.
+
+    (run-case "presence/write-then-read-round-trips-and-is-0600" {
+        let repo = (make-repo "presence-roundtrip")
+        claim-address $repo "impl-1"
+        presence-write "impl-1" "streaming" --repo $repo
+        let got = (presence-read "impl-1" --repo $repo)
+        assert-eq $got.state "streaming" "the written state comes back"
+        assert-true (($got.at | into datetime) > ((date now) - 1min)) "and a fresh timestamp"
+        assert-eq (mode-of (presence-file "impl-1" --repo $repo)) "rw-------" "the presence file is private to its owner"
+        rm -rf $repo
+    })
+
+    (run-case "presence/a-later-write-overwrites-the-earlier-one" {
+        let repo = (make-repo "presence-overwrite")
+        claim-address $repo "impl-1"
+        presence-write "impl-1" "running" --repo $repo
+        presence-write "impl-1" "compacting" --repo $repo
+        assert-eq ((presence-read "impl-1" --repo $repo) | get state) "compacting" "the latest transition wins"
+        rm -rf $repo
+    })
+
+    (run-case "presence/an-unspawned-uid-reads-null-and-never-raises" {
+        let repo = (make-repo "presence-absent")
+        assert-eq (presence-read "nobody" --repo $repo) null "no address, no file, no error"
+        rm -rf $repo
+    })
+
+    (run-case "presence/a-truncated-file-reads-as-unknown-not-a-raise" {
+        let repo = (make-repo "presence-truncated")
+        claim-address $repo "impl-1"
+        presence-write "impl-1" "running" --repo $repo
+        let path = (presence-file "impl-1" --repo $repo)
+        # Cut the well-formed JSON object off mid-value: still bytes on disk,
+        # never parseable.
+        (open --raw $path) | str substring 0..8 | save -f $path
+        assert-eq (presence-read "impl-1" --repo $repo) "unknown" "corrupt data is unknown, not absence and not a raise"
+        rm -rf $repo
+    })
+
+    (run-case "presence/write-refuses-a-uid-with-no-claimed-address" {
+        # The address directory a presence file would live under is the SAME
+        # one `claim-address` mints and `release-address` deletes. A refusal
+        # here must never conjure that directory back — that would let a
+        # released or never-spawned uid look claimed again.
+        let repo = (make-repo "presence-unclaimed")
+        assert-rejects { presence-write "ghost" "running" --repo $repo } "no claimed address" ""
+        let dir = ((presence-file "ghost" --repo $repo) | path dirname)
+        assert-true (not ($dir | path exists)) "refusing to write must not resurrect the address directory"
+        rm -rf $repo
+    })
+
+    (run-case "presence/a-released-uid-loses-its-presence-and-cannot-be-written-again" {
+        let repo = (make-repo "presence-released")
+        claim-address $repo "impl-1"
+        presence-write "impl-1" "running" --repo $repo
+        assert-true ((presence-read "impl-1" --repo $repo) != null) "sanity: presence exists before release"
+
+        release-address $repo "impl-1"
+        assert-eq (presence-read "impl-1" --repo $repo) null "the address claim and its presence go together"
+        assert-rejects { presence-write "impl-1" "running" --repo $repo } "no claimed address" "a released uid stays released"
+        rm -rf $repo
+    })
+
+    (run-case "presence/main-workers-carries-the-presence-column" {
+        # `main workers` is `run-workers` flattened across every run — the
+        # verb sp030 T3's success criteria actually name.
+        let repo = (make-repo "presence-workers-col")
+        let root = (make-runtime "presence-workers-col")
+        with-runtime $root {
+            # Claim BEFORE recording identity, exactly as a real spawn does:
+            # `bus-identity` writes into the durable placement record, and
+            # once a uid is there `claim-address` refuses it as already taken
+            # — same guard `main spawn`'s own ordering relies on.
+            claim-address $repo "impl-1"
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            bus-identity "impl-2" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s2", skill: "wk-build", window: "impl-2@dotfiles"
+            }
+            presence-write "impl-1" "streaming" --repo $repo
+            # impl-2 never claims an address and never publishes: the ordinary
+            # shape for a worker whose extension never loaded.
+
+            let rows = (run-workers "r1" --repo $repo)
+            assert-eq ((($rows | where uid == "impl-1") | first).presence) "streaming" "a worker with a fresh reading reports its state"
+            assert-eq ((($rows | where uid == "impl-2") | first).presence) "" "a worker that never published carries an empty column, not a guess"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "presence/a-stale-reading-in-workers-renders-unknown-never-a-branch-on-it" {
+        let repo = (make-repo "presence-workers-stale")
+        let root = (make-runtime "presence-workers-stale")
+        with-runtime $root {
+            claim-address $repo "impl-1"
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            let path = (presence-file "impl-1" --repo $repo)
+            {state: "running", at: ((date now) - 10min | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ")} | to json | save -f $path
+            chmod 600 $path
+
+            let row = (run-workers "r1" --repo $repo | where uid == "impl-1" | first)
+            assert-eq $row.presence "unknown" "past the freshness bound the column says unknown"
+            # adr0017: `unknown` is data. It must still SHOW UP as a normal
+            # worker row rather than the row vanishing or the state field
+            # being coerced into something a caller could act on.
+            assert-eq $row.uid "impl-1" "the worker is still listed"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "presence/a-negative-age-in-workers-renders-unknown-not-fresh-forever" {
+        # A clock moved backwards must never read as "very fresh" — the same
+        # `unknown` a genuinely stale reading gets, chosen deliberately over
+        # inventing a third state nothing else here has to handle.
+        let repo = (make-repo "presence-workers-negative-age")
+        let root = (make-runtime "presence-workers-negative-age")
+        with-runtime $root {
+            claim-address $repo "impl-1"
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            let path = (presence-file "impl-1" --repo $repo)
+            {state: "running", at: ((date now) + 10min | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ")} | to json | save -f $path
+            chmod 600 $path
+
+            let row = (run-workers "r1" --repo $repo | where uid == "impl-1" | first)
+            assert-eq $row.presence "unknown" "a timestamp in the future reads unknown, not a fresh reported state"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "presence/concurrent-writes-from-one-worker-never-yield-a-torn-read" {
+        # Two transitions in the same millisecond: the guarantee is that a
+        # reader sees one WHOLE record — the newer one or the older one —
+        # never a half-written mix of both. A large state string makes a
+        # torn read (a truncated `from json` mid-object) detectable rather
+        # than accidentally still-valid-looking.
+        let repo = (make-repo "presence-concurrent")
+        claim-address $repo "impl-1"
+        let big = ("" | fill -c "z" -w 6000)
+
+        let script = ([(fixture-base) $"presence-writer-(random chars --length 6).nu"] | path join)
+        let body = ('use ' + (worker-script $env.FILE_PWD) + ' *
+def main [repo: string, big: string] {
+    for i in 1..150 {
+        presence-write "impl-1" $"S-($i)-($big)" --repo $repo
+    }
+}')
+        $body | save -f $script
+        job spawn { ^nu $script $repo $big | ignore }
+
+        mut checked = 0
+        mut clean = 0
+        for i in 1..150 {
+            let r = (presence-read "impl-1" --repo $repo)
+            $checked = $checked + 1
+            if $r == null {
+                # the writer had not made its first move yet — fine, not torn
+                $clean = $clean + 1
+            } else if ($r | describe) == "string" {
+                # "unknown": a parse failure. This is exactly what a torn
+                # read would produce, so it is NOT counted as clean.
+                $clean = $clean
+            } else if ($r.state | str starts-with "S-") and ($r.state | str ends-with $big) {
+                $clean = $clean + 1
+            }
+        }
+        assert-eq $clean $checked $"($checked - $clean) of ($checked) concurrent reads saw a torn or corrupt record"
+        sleep 400ms
+        rm -f $script
+        rm -rf $repo
+    })
+
 ]
 
 $cases | to json
