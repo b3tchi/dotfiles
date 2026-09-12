@@ -20,12 +20,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp030|agent-monitor]]
-
 
 ## ready
 
-
-
+- [[sp030|agent-monitor]]
 
 - [[sp012|live-region-xshape-overlay]]
