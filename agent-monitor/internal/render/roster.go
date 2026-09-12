@@ -160,7 +160,15 @@ func spaces(n int) string {
 // only honest "age" this renderer has: agent-census's payload carries no
 // per-row timestamp (nothing upstream promises one — see census.go's Sample
 // doc), so every row in one frame shares its sample's own capture age
-// rather than a fabricated per-agent value.
+// rather than a fabricated per-agent value. This age is a truthful bound
+// for pi rows as well as claude's, DESPITE the --if-changed gate being
+// blind to pi state (dotfiles-eee4): source.Sample's doc comment and
+// source.RunLoop's bound clock are what make that true — every sample this
+// renderer ever sees was produced by an agent-census invocation that
+// re-probed pi unconditionally, at most RunLoop's bound-clock interval ago
+// (cmd/agent-monitor/main.go's piBoundInterval). A single sample-level age
+// is therefore not an approximation for pi; it is exact, the same way it is
+// for claude.
 func ageString(now, at time.Time) string {
 	d := now.Sub(at)
 	if d < 0 {

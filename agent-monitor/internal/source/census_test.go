@@ -219,6 +219,39 @@ func assertNotContains(t *testing.T, argv []string, unwanted string) {
 	}
 }
 
+// TestPoll_GatedSuccessCarriesFreshPiRows pins the reasoning in Sample's doc
+// comment: when a GATED poll's exec actually runs (the gate opened, e.g.
+// because a claude account file moved) and returns real output, the pi rows
+// in that output are exactly as fresh as the claude rows -- agent-census's
+// probe-all re-probes pi unconditionally on every real invocation, gated or
+// not (dotfiles-eee4 is about whether an invocation happens at all, not
+// about pi lagging behind claude within one that did). If this ever stopped
+// being true (agent-census started caching pi separately, say), this test
+// would catch it: a gated Poll that came back with claude-only rows would
+// fail it immediately.
+func TestPoll_GatedSuccessCarriesFreshPiRows(t *testing.T) {
+	stub := &stubExec{out: []byte(mixedPayload)} // the gate opened; real output
+	s := &Sampler{Exec: stub.run, StampPath: "/tmp/stamp"}
+
+	sample, err := s.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if sample == nil {
+		t.Fatal("Poll returned nil (unchanged) for non-empty output")
+	}
+	var pi int
+	for _, r := range sample.Rows {
+		if r.Runtime == "pi" {
+			pi++
+		}
+	}
+	if pi == 0 {
+		t.Fatal("a gated poll's sample carries no pi rows -- Sample.At would then " +
+			"NOT be a truthful staleness bound for pi, contradicting Sample's doc")
+	}
+}
+
 // gatedExec simulates agent-census's real behaviour under a gate that never
 // opens for pi: any call carrying --if-changed (the gated poll) returns
 // empty output forever, as if no claude account file ever moves; any call

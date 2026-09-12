@@ -98,6 +98,17 @@ func ParseRows(data []byte) ([]Row, error) {
 // caller's clock, never invented — the source payload carries no per-row
 // timestamp (nothing upstream promises one), so a sample's own capture time
 // is the only honest freshness signal available.
+//
+// At is a truthful staleness bound for pi rows too, not only claude's,
+// despite the --if-changed gate being blind to pi (dotfiles-eee4): every
+// actual agent-census invocation — whether the gate let a Poll through, or
+// RunLoop's bound clock forced one — re-probes pi unconditionally
+// (nushell/actions/agent-census's probe-all calls probe-pi-workers with no
+// --fast/--if-changed conditional at all). So a Sample never carries a pi
+// reading older than At; what dotfiles-eee4 actually threatens is CADENCE
+// (an execution might not happen often enough), which RunLoop's bound clock
+// bounds, not the freshness label on data that WAS returned. See
+// TestPoll_GatedSuccessCarriesFreshPiRows for the pinned proof.
 type Sample struct {
 	Rows []Row
 	At   time.Time
