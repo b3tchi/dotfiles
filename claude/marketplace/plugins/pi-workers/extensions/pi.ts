@@ -1140,6 +1140,7 @@ export const INITIATOR_VERBS = [
   "inspect",
   "timeline",
   "workers",
+  "messages",
   "liveness",
   "resume",
   "accept",
@@ -1250,6 +1251,7 @@ export const VERB_FLAGS = {
   inspect: [],
   timeline: [],
   workers: [],
+  messages: [],
   liveness: ["socket"],
   resume: ["feedback", "socket"],
   accept: ["repo", "socket"],
@@ -1296,6 +1298,7 @@ type _EveryDeclaredFlagIsRendered = AssertNoUnrenderedFlags<Exclude<FlagName, Re
  */
 export const VERB_FIXED_FLAGS: Partial<Record<InitiatorVerb, readonly string[]>> = {
   timeline: ["json"],
+  messages: ["json"],
 };
 
 // ---------------------------------------------------------------------------
