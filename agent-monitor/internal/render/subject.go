@@ -79,17 +79,21 @@ func firstLine(s string) string {
 	return s
 }
 
-// neutralize strips C0/C1 control characters — including the ESC byte that
-// introduces every ANSI escape sequence — before the subject ever reaches a
-// terminal. Dropping ESC alone is sufficient to make a CSI sequence inert
-// (a terminal only interprets "\x1b[31m" as a colour change because of the
-// leading ESC; without it, "[31m" is just three harmless printable
-// characters), so this does not need a full ANSI parser to be safe.
+// neutralize strips C0 and C1 control characters — including the ESC byte
+// that introduces every 7-bit ANSI escape sequence, and the C1 range
+// (U+0080-U+009F) that carries the same control functions in their 8-bit
+// single-byte form (U+009D, for instance, is the 8-bit OSC introducer,
+// honoured by some terminal emulators exactly like the 7-bit ESC ] form) —
+// before the subject ever reaches a terminal. Dropping ESC alone defuses
+// every 7-bit CSI/OSC sequence (a terminal only interprets "\x1b[31m" as a
+// colour change because of the leading ESC; without it, "[31m" is just
+// three harmless printable characters); dropping C1 too closes the 8-bit
+// form of the same hole. Neither requires a full ANSI parser to be safe.
 func neutralize(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			continue
 		}
 		b.WriteRune(r)

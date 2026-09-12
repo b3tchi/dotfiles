@@ -106,6 +106,21 @@ func TestDeriveSubject_ControlCharacters_Neutralised(t *testing.T) {
 	}
 }
 
+// C1 control codes (U+0080-U+009F) are the 8-bit single-byte forms of the
+// same control functions C0/ESC sequences introduce in 7-bit form -- U+009D
+// is the 8-bit OSC (Operating System Command) introducer, honoured by some
+// terminal emulators exactly like the 7-bit ESC ] form. Neutralising ESC
+// alone defuses the 7-bit form; this asserts the 8-bit form is stripped too.
+func TestDeriveSubject_C1ControlCode_Neutralised(t *testing.T) {
+	content := []byte(`"a\u009db"`)
+	got := DeriveSubject("inbox", content, 80)
+	for _, r := range got {
+		if r >= 0x80 && r <= 0x9f {
+			t.Fatalf("got %q, contains raw C1 control rune %U", got, r)
+		}
+	}
+}
+
 // Wide (CJK) characters: truncation must count display cells, not bytes or
 // runes, and must never split a wide character across the cut.
 func TestDeriveSubject_CJK_TruncatesOnCellBoundary(t *testing.T) {
