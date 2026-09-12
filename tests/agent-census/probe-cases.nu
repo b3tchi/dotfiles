@@ -431,6 +431,49 @@ echo "99003  scratch_3"'
         "projects:\n  alpha:\n    path: /tmp/alpha\n" | save -f $f
         assert-eq (probe-registry $f) {alpha: {path: "/tmp/alpha"}}
     })
+
+    # ---- pi runtime probe (sp030 T6) --------------------------------------
+
+    (run-case "probe/pi: a stub pi-worker on a bare PATH is passed through unchanged" {
+        let s = (make-probe-sandbox "piok")
+        let fixture = (load-json $env.FILE_PWD "pi-workers.json")
+        $fixture | to json | save -f ($s | path join "fixture.json")
+        # Plain string concatenation, not `$'...'` interpolation: nu treats
+        # `(...)` inside an interpolated string as ITS OWN subexpression, and
+        # bash's `$(<file)` read idiom right after `($s)` makes nu's paren
+        # matching swallow the two together and try to run the result as an
+        # external command. Concatenation sidesteps that entirely.
+        let body = ('if [ "$1" = "workers" ]; then printf "%s" "$(<' + $s + '/fixture.json)"; fi')
+        write-stub $s "pi-worker" $body
+        let rows = (with-stub-path $s { probe-pi-workers })
+        assert-eq ($rows | length) ($fixture | length) "every fixture row must survive the probe"
+        assert-eq ($rows | get uid | sort) ($fixture | get uid | sort) "rows pass through unchanged, not reshaped"
+    })
+
+    (run-case "probe/pi: missing binary degrades to empty, not a raise" {
+        let s = (make-probe-sandbox "pimissing")
+        assert-eq (with-stub-path $s { probe-pi-workers }) []
+    })
+
+    (run-case "probe/pi: an erroring pi-worker degrades to empty, exit 0 overall" {
+        # 'pi-worker present but erroring (no project)' from the task's edge
+        # cases: a non-zero exit must not abort the census.
+        let s = (make-probe-sandbox "pierror")
+        write-stub $s "pi-worker" 'echo "not inside a git repository" >&2; exit 1'
+        assert-eq (with-stub-path $s { probe-pi-workers }) []
+    })
+
+    (run-case "probe/pi: non-JSON output yields no rows instead of crashing" {
+        let s = (make-probe-sandbox "pinotjson")
+        write-stub $s "pi-worker" 'echo "some prose, not json"'
+        assert-eq (with-stub-path $s { probe-pi-workers }) []
+    })
+
+    (run-case "probe/pi: an empty JSON array is an empty list, not an error" {
+        let s = (make-probe-sandbox "piempty")
+        write-stub $s "pi-worker" 'echo "[]"'
+        assert-eq (with-stub-path $s { probe-pi-workers }) []
+    })
 ]
 
 $results | to json

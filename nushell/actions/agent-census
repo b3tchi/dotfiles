@@ -290,8 +290,187 @@ export def detail-rows [
             cwd:     ($a | get -o cwd | default "")
             pid:     ($a | get -o pid)
             how:     $r.how
+            # sp030 T6: every detail row now carries which runtime produced
+            # it, so a consumer never has to guess from column shape alone.
+            # uid/role/branch are pi-only concepts (claude has session name /
+            # pid instead) -- present here too, empty, so the two kinds of
+            # row concatenate into one uniform nushell table.
+            runtime: "claude"
+            uid:     ""
+            role:    ""
+            branch:  ""
         }
     }
+}
+
+# ================================================== PI RUNTIME (sp030 T6)
+#
+# Widens the census past claude, per ft012's `## extends` and adr0024. Two
+# axes again, and the split is the same one adr0024 already drew for claude:
+#
+#   state (job axis)    the bus's persisted worker state -- WORKER_STATES in
+#                        pi-worker.nu, durable, survives the process.
+#   presence (status axis) the worker's own published self-report of what it
+#                        is doing right now (sp030 T3) -- informational only.
+#
+# Unlike claude, the bucket for a pi row is decided by the job axis ALONE,
+# with no fallback to presence: `pi-worker workers` always returns a `state`
+# (bus-status defaults it to "unknown" rather than omitting it), so there is
+# no "job axis absent" case the way an interactive claude session has none.
+# presence is exposed as the `status` column for visibility, never consulted
+# for bucketing (see the edge case: a missing presence file still buckets
+# from the job axis alone).
+
+# WORKER_STATES (pi-worker.nu) enumerates exactly nine persisted states.
+# Every one gets an explicit bucket here -- "unrecognised" is reserved for a
+# value OUTSIDE this set (the "unknown" bus-status sentinel for an
+# identity-less worker, or a state a future pi-worker build invents), which
+# falls to `other` rather than vanishing (adr0017).
+#
+#   created         minted, nothing run yet -- alive, at rest: idle.
+#   running         actively executing: working.
+#   waiting_human, blocked, protocol_error   alive, needs attention: blocked.
+#   failed          alive-but-stalled, same shape as claude's own `failed`
+#                   (this file's BUCKETS above already buckets it `blocked`);
+#                   mirrored here for the same reason: an operator still has
+#                   to come back to it, exactly like waiting_human/blocked.
+#   complete, accepted, stopped   the job is over: done.
+const PI_STATE_BUCKETS = {
+    created: "idle"
+    running: "working"
+    waiting_human: "blocked"
+    blocked: "blocked"
+    protocol_error: "blocked"
+    failed: "blocked"
+    complete: "done"
+    accepted: "done"
+    stopped: "done"
+}
+
+export def pi-bucket-state [state: string]: nothing -> string {
+    $PI_STATE_BUCKETS | get -o $state | default "other"
+}
+
+# `window` on a `pi-worker workers` row is `<role>-<subject>@<project>`,
+# minted by `worker-window-name` in pi-worker.nu and returned verbatim in the
+# JSON. Parsing it is reading what the bus already carries -- not re-deriving
+# a project from a cwd, which is exactly what the success criterion asks for.
+# Empty (or malformed: no "@") for a worker with no identity written yet,
+# which is the ordinary case for a freshly-claimed address -- {role: "",
+# project: "", subject: ""} rather than a raise.
+export def parse-pi-window [window: string]: nothing -> record {
+    if ($window | is-empty) {
+        return {role: "", project: "", subject: ""}
+    }
+    let parts = ($window | split row "@")
+    if ($parts | length) < 2 {
+        return {role: "", project: "", subject: ""}
+    }
+    let project = ($parts | last)
+    let head = ($parts | drop 1 | str join "@")
+    let hparts = ($head | split row "-")
+    let role = ($hparts | first)
+    let subject = ($hparts | skip 1 | str join "-")
+    {role: $role, project: $project, subject: $subject}
+}
+
+# One `pi-worker workers` row, normalised to the same detail-row shape
+# `detail-rows` emits, so the two kinds concatenate into one table.
+#
+# branch is NOT populated: `pi-worker workers` does not expose a worker's git
+# branch (sp030 T3 added presence only, and this action's contract is to read
+# that one verb and nothing else -- no bus path). Reading it would mean
+# opening the worker's identity file directly, which is exactly the
+# unsupported read this task's success criteria forbid. Empty is the honest
+# answer, not a guess (adr0017): see the deviation note in this task's bd
+# evidence for the follow-up this leaves open.
+export def pi-detail-row [w: record]: nothing -> record {
+    let parsed = (parse-pi-window ($w | get -o window | default ""))
+    let project = if ($parsed.project | is-empty) { "unknown" } else { $parsed.project }
+    let state = ($w | get -o state | default "")
+    {
+        project: $project
+        account: ""
+        kind:    ""
+        state:   $state                                  # job axis
+        status:  ($w | get -o presence | default "")      # process axis
+        bucket:  (pi-bucket-state $state)
+        name:    ($w | get -o uid | default "")
+        cwd:     ""
+        pid:     null
+        how:     (if ($parsed.project | is-empty) { "unmatched" } else { "window" })
+        runtime: "pi"
+        uid:     ($w | get -o uid | default "")
+        role:    $parsed.role
+        branch:  ""
+    }
+}
+
+export def pi-detail-rows [workers: list]: nothing -> table {
+    $workers | each {|w| pi-detail-row $w }
+}
+
+# Per-project bucket counts contributed by pi workers alone -- no `path`, no
+# `accounts`, no `cwds`: pi has none of those concepts, and `merge-runtime-
+# counts` is what folds this into (or alongside) claude's own per-project
+# rows, which do carry them.
+export def pi-count-rows [workers: list]: nothing -> table {
+    if ($workers | is-empty) { return [] }
+    let attributed = ($workers | each {|w|
+        let parsed = (parse-pi-window ($w | get -o window | default ""))
+        let project = if ($parsed.project | is-empty) { "unknown" } else { $parsed.project }
+        {project: $project, bucket: (pi-bucket-state ($w | get -o state | default ""))}
+    })
+    $attributed | group-by project | items {|project, rows| {
+        project: $project
+        idle:    ($rows | where bucket == "idle"    | length)
+        working: ($rows | where bucket == "working" | length)
+        blocked: ($rows | where bucket == "blocked" | length)
+        done:    ($rows | where bucket == "done"    | length)
+        other:   ($rows | where bucket == "other"   | length)
+        total:   ($rows | length)
+    }}
+}
+
+# Add pi's per-project counts on top of claude's own rows (`shape-rows`), so
+# a project running both runtimes reports ONE row with combined totals.
+#
+# `path`, `accounts` and `cwds` stay whatever claude's row already carries --
+# a project pi alone touches gets `path: null`, `accounts: {personal: 0, work:
+# 0}` and `cwds: []`, since pi has no registry path, no claude account split,
+# and (per the edge case) never contributes to the `unknown` row's `cwds`.
+#
+# Returns claude_rows UNCHANGED, by identity, when there are no pi rows to
+# add -- the regression guard a claude-only machine's output depends on.
+export def merge-runtime-counts [claude_rows: table, pi_rows: table]: nothing -> table {
+    if ($pi_rows | is-empty) { return $claude_rows }
+    let claude_projects = ($claude_rows | get -o project | default [])
+    let merged = ($claude_rows | each {|c|
+        let hit = ($pi_rows | where project == $c.project)
+        if ($hit | is-empty) { $c } else {
+            let p = ($hit | first)
+            $c
+            | update idle    ($c.idle + $p.idle)
+            | update working ($c.working + $p.working)
+            | update blocked ($c.blocked + $p.blocked)
+            | update done    ($c.done + $p.done)
+            | update other   ($c.other + $p.other)
+            | update total   ($c.total + $p.total)
+        }
+    })
+    let pi_only = ($pi_rows | where {|p| $p.project not-in $claude_projects} | each {|p| {
+        project: $p.project
+        path: null
+        idle: $p.idle
+        working: $p.working
+        blocked: $p.blocked
+        done: $p.done
+        other: $p.other
+        total: $p.total
+        accounts: {personal: 0, work: 0}
+        cwds: []
+    }})
+    $merged ++ $pi_only
 }
 
 # ============================================================ PROBE LAYER
@@ -597,6 +776,29 @@ export def probe-ps []: nothing -> table {
     } catch { [] }
 }
 
+# --------------------------------------------------------- pi runtime probe
+#
+# sp030 T6: a second probe, shelling out to `pi-worker workers` and NOTHING
+# else -- no bus path is read from this action, the same supported-surface
+# discipline adr0025 holds the claude probe to. Degrades exactly like
+# probe-agents: a missing binary, a non-zero exit, or output that is not JSON
+# all yield zero pi rows, never an abort. A box that has never run a pi
+# worker is the ordinary case, not a failure -- the same degradation tmux
+# already gets from probe-panes.
+export def probe-pi-workers []: nothing -> list {
+    let r = (try {
+        do --ignore-errors { ^pi-worker workers } | complete
+    } catch { {exit_code: 1, stdout: "", stderr: ""} })
+    if ($r | get -o exit_code | default 1) != 0 { return [] }
+    let parsed = (try { $r.stdout | from json } catch { null })
+    let shape = ($parsed | describe)
+    if ($shape | str starts-with "list") or ($shape | str starts-with "table") {
+        $parsed
+    } else {
+        []
+    }
+}
+
 # The ft001 registry. Absent file, unreadable yaml, or a document with no
 # `projects` key all yield {} — every agent then lands in `unknown` with its
 # cwd shown, which is the honest answer rather than a fabricated attribution.
@@ -701,10 +903,11 @@ export def gate-decide [token: string, stamp: any, now: int]: nothing -> bool {
 export def probe-all [--fast]: nothing -> record {
     let accounts = (discover-accounts)
     {
-        agents:   (collect-agents $accounts --fast=$fast)
-        panes:    (probe-panes)
-        ps:       (probe-ps)
-        registry: (probe-registry)
+        agents:     (collect-agents $accounts --fast=$fast)
+        panes:      (probe-panes)
+        ps:         (probe-ps)
+        registry:   (probe-registry)
+        pi_workers: (probe-pi-workers)
     }
 }
 
@@ -712,7 +915,9 @@ export def probe-all [--fast]: nothing -> record {
 export def census [--all, --fast]: nothing -> table {
     let p = (probe-all --fast=$fast)
     let agents = if $all { $p.agents } else { live-agents $p.agents }
-    shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
+    let claude_rows = (shape-rows $agents $p.panes $p.ps $p.registry)
+    let pi_rows = (pi-count-rows $p.pi_workers)
+    merge-runtime-counts $claude_rows $pi_rows | sort-by project
 }
 
 # ============================================================== CLI SURFACE
@@ -760,10 +965,19 @@ def main [
 
     let p = (probe-all --fast=$fast)
     let agents = if $all { $p.agents } else { live-agents $p.agents }
+    # pi rows are unconditional: `pi-worker workers` has no --all-shaped
+    # historical/live split of its own, so --all/--fast only ever govern the
+    # claude side. `--if-changed`'s gate is claude-state-file scoped too (see
+    # its own comment); a pi worker's own state changing does not reopen it,
+    # which is a known limitation and not this task's contract to close.
     let rows = if $detail {
-        detail-rows $agents $p.panes $p.ps $p.registry | sort-by project account
+        let claude_detail = (detail-rows $agents $p.panes $p.ps $p.registry)
+        let pi_detail = (pi-detail-rows $p.pi_workers)
+        ($claude_detail ++ $pi_detail) | sort-by project account
     } else {
-        shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
+        let claude_rows = (shape-rows $agents $p.panes $p.ps $p.registry)
+        let pi_rows = (pi-count-rows $p.pi_workers)
+        merge-runtime-counts $claude_rows $pi_rows | sort-by project
     }
     let out = if $project != null { $rows | where project == $project } else { $rows }
     if $json {

@@ -414,6 +414,171 @@ let results = [
         let rows = (shape-rows [{cwd: "/tmp/ünï code/deep", kind: "background", state: "done", account: "personal"}] {} [] $reg)
         assert-eq ($rows | first | get project) "proj ünïcode"
     })
+
+    # ---- pi runtime (sp030 T6) --------------------------------------------
+
+    (run-case "pi/pi-bucket-state maps every one of the nine persisted states" {
+        # WORKER_STATES in pi-worker.nu, in full -- each gets its own real
+        # bucket, not a fallthrough to `other`.
+        assert-eq (pi-bucket-state "created")        "idle"
+        assert-eq (pi-bucket-state "running")        "working"
+        assert-eq (pi-bucket-state "waiting_human")  "blocked"
+        assert-eq (pi-bucket-state "blocked")        "blocked"
+        assert-eq (pi-bucket-state "protocol_error") "blocked"
+        assert-eq (pi-bucket-state "failed")         "blocked"
+        assert-eq (pi-bucket-state "complete")       "done"
+        assert-eq (pi-bucket-state "accepted")       "done"
+        assert-eq (pi-bucket-state "stopped")        "done"
+    })
+
+    (run-case "pi/pi-bucket-state routes an invented state to other, not idle" {
+        # The mutation this catches: a `default "idle"` swallowing anything
+        # new upstream ships, same as the claude-side guard above.
+        assert-eq (pi-bucket-state "hibernating") "other"
+        # The bus's own "no identity recorded" sentinel is not a WORKER_STATE
+        # either, and must surface the same way rather than being mistaken
+        # for a real job state.
+        assert-eq (pi-bucket-state "unknown") "other"
+    })
+
+    (run-case "pi/parse-pi-window reads role, subject and project off the CLI's own format" {
+        let p = (parse-pi-window "probe-audit-sample-task@dotfiles")
+        assert-eq $p.role "probe"
+        assert-eq $p.project "dotfiles"
+        assert-eq $p.subject "audit-sample-task"
+    })
+
+    (run-case "pi/parse-pi-window degrades an identity-less worker to all-empty" {
+        # main workers reports window: "" for a uid with no identity written
+        # yet -- the ordinary shape for a freshly-claimed address.
+        assert-eq (parse-pi-window "") {role: "", project: "", subject: ""}
+    })
+
+    (run-case "pi/parse-pi-window degrades a malformed window without raising" {
+        assert-eq (parse-pi-window "no-at-sign-here") {role: "", project: "", subject: ""}
+    })
+
+    (run-case "pi/pi-detail-row carries uid, role and runtime for a pi agent" {
+        let w = {
+            run: "r9", uid: "impl-7", state: "running", unacked: 0, task: "",
+            window: "impl-fix-the-thing@myproj", resume: "pi --session x", presence: "streaming",
+        }
+        let row = (pi-detail-row $w)
+        assert-eq $row.runtime "pi"
+        assert-eq $row.uid "impl-7"
+        assert-eq $row.role "impl"
+        assert-eq $row.project "myproj"
+        assert-eq $row.state "running"
+        assert-eq $row.status "streaming" "presence is exposed as the status column"
+        assert-eq $row.bucket "working"
+        # branch is not obtainable from `pi-worker workers` alone -- see the
+        # comment on pi-detail-row. Empty, not fabricated.
+        assert-eq $row.branch ""
+    })
+
+    (run-case "pi/pi-detail-row: a missing presence file buckets from the job axis alone" {
+        # Edge case from the task design: status empty, bucket unaffected.
+        let w = {run: "r9", uid: "w1", state: "blocked", unacked: 0, task: "", window: "impl-w1@proj", resume: "", presence: ""}
+        let row = (pi-detail-row $w)
+        assert-eq $row.status ""
+        assert-eq $row.bucket "blocked"
+    })
+
+    (run-case "pi/pi-detail-row: an identity-less worker lands in unknown, how=unmatched" {
+        let w = {run: "r1", uid: "impl-1", state: "unknown", unacked: 0, task: "", window: "", resume: "", presence: ""}
+        let row = (pi-detail-row $w)
+        assert-eq $row.project "unknown"
+        assert-eq $row.how "unmatched"
+        assert-eq $row.bucket "other"
+    })
+
+    (run-case "pi/detail-rows (claude) now carries the same runtime/uid/role/branch columns, empty" {
+        let rows = (detail-rows $agents $panes $ps $registry)
+        let r = ($rows | first)
+        assert-eq $r.runtime "claude"
+        assert-eq $r.uid ""
+        assert-eq $r.role ""
+        assert-eq $r.branch ""
+    })
+
+    (run-case "pi/pi-count-rows folds pi agents into per-project bucket counts" {
+        let workers = [
+            {run: "r1", uid: "a", state: "running",       window: "impl-a@alpha", presence: ""}
+            {run: "r1", uid: "b", state: "waiting_human", window: "impl-b@alpha", presence: ""}
+            {run: "r1", uid: "c", state: "complete",      window: "impl-c@beta",  presence: ""}
+        ]
+        let rows = (pi-count-rows $workers)
+        let alpha = ($rows | where project == "alpha" | first)
+        assert-eq $alpha.working 1
+        assert-eq $alpha.blocked 1
+        assert-eq $alpha.total 2
+        let beta = ($rows | where project == "beta" | first)
+        assert-eq $beta.done 1
+        assert-eq $beta.total 1
+    })
+
+    (run-case "pi/merge-runtime-counts adds pi counts onto a matching claude project" {
+        let claude_rows = [
+            {project: "alpha", path: "/x/alpha", idle: 1, working: 0, blocked: 0, done: 0, other: 0, total: 1,
+             accounts: {personal: 1, work: 0}, cwds: []}
+        ]
+        let pi_rows = [{project: "alpha", idle: 0, working: 1, blocked: 0, done: 0, other: 0, total: 1}]
+        let merged = (merge-runtime-counts $claude_rows $pi_rows)
+        assert-eq ($merged | length) 1 "one project row, combined -- not two"
+        let a = ($merged | first)
+        assert-eq $a.idle 1
+        assert-eq $a.working 1
+        assert-eq $a.total 2 "counts from both runtimes add"
+        assert-eq $a.path "/x/alpha" "claude's registry path survives the merge"
+    })
+
+    (run-case "pi/merge-runtime-counts adds a new row for a pi-only project" {
+        let claude_rows = [
+            {project: "alpha", path: "/x/alpha", idle: 0, working: 1, blocked: 0, done: 0, other: 0, total: 1,
+             accounts: {personal: 1, work: 0}, cwds: []}
+        ]
+        let pi_rows = [{project: "gamma", idle: 0, working: 0, blocked: 1, done: 0, other: 0, total: 1}]
+        let merged = (merge-runtime-counts $claude_rows $pi_rows)
+        assert-eq ($merged | length) 2
+        let g = ($merged | where project == "gamma" | first)
+        assert-eq $g.blocked 1
+        assert-eq $g.path null "pi has no registry path of its own"
+        assert-eq $g.cwds [] "pi never contributes a cwd"
+        assert-eq $g.accounts {personal: 0, work: 0}
+    })
+
+    (run-case "pi/merge-runtime-counts returns claude_rows UNCHANGED when there are no pi rows" {
+        # The regression guard a claude-only machine depends on: identity, not
+        # merely equality, so a claude-only census is byte-for-byte the same
+        # census this action always produced.
+        let claude_rows = (shape-rows $agents $panes $ps $registry)
+        assert-eq (merge-runtime-counts $claude_rows []) $claude_rows
+    })
+
+    (run-case "pi/a mixed-runtime project sums both runtimes' counts" {
+        let reg = {"mixedproj": {path: "/x/mixedproj"}}
+        let claude_rows = (shape-rows [{cwd: "/x/mixedproj", kind: "background", state: "working", status: "busy", account: "personal"}] {} [] $reg)
+        let pi_rows = (pi-count-rows [{run: "r1", uid: "w1", state: "blocked", window: "impl-w1@mixedproj", presence: ""}])
+        let merged = (merge-runtime-counts $claude_rows $pi_rows)
+        assert-eq ($merged | length) 1
+        let m = ($merged | first)
+        assert-eq $m.working 1 "claude's agent"
+        assert-eq $m.blocked 1 "pi's agent"
+        assert-eq $m.total 2 "both runtimes counted in one row"
+    })
+
+    (run-case "pi/fixture: the captured pi-worker workers payload carries the documented fields" {
+        let workers = (load-json $env.FILE_PWD "pi-workers.json")
+        assert-true (($workers | length) > 0) "fixture must not be empty"
+        for f in [run uid state unacked task window resume presence] {
+            assert-true ($f in ($workers | first | columns)) $"fixture row is missing ($f)"
+        }
+        # Deliberately includes at least one identity-less worker (empty
+        # window) and at least one with a parsable window, matching the two
+        # shapes pi-detail-row must handle.
+        assert-true (($workers | where window == "" | length) > 0) "need at least one identity-less worker"
+        assert-true (($workers | where window != "" | length) > 0) "need at least one worker with a window"
+    })
 ]
 
 $results | to json
