@@ -277,7 +277,9 @@ func (m *Monitor) Refresh(ctx context.Context) bool {
 // onTick(changed) fires after every fast or bound tick, whichever produced
 // it, so a caller tracking frame age can redraw on either clock.
 //
-// It carries adr0014's three guards, named:
+// This is loop.go's RunDualTicked (sp030 T10 consolidated the guard
+// implementation there; this function is now just the two clocks named).
+// adr0014's three guards still apply, exactly as before:
 //
 //   - guard 1, fail fast on unrecoverable setup: checked by Available()
 //     before RunLoop is ever called (see cmd/agent-monitor/main.go) — a
@@ -292,24 +294,5 @@ func (m *Monitor) Refresh(ctx context.Context) bool {
 //     Refresh is retried only on ITS OWN ticker's next firing, never inline
 //     and never immediately — the same shape adr0014 requires of a respawn.
 func RunLoop(ctx context.Context, m *Monitor, fast, bound time.Duration, onTick func(changed bool)) {
-	fastTicker := time.NewTicker(fast) // guard 2: sleep floor for the gated poll
-	defer fastTicker.Stop()
-	boundTicker := time.NewTicker(bound) // guard 2: sleep floor for the forced, pi-bounding refresh
-	defer boundTicker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-fastTicker.C:
-			changed := m.Tick(ctx) // guard 3: bounded retry, next fast tick only
-			if onTick != nil {
-				onTick(changed)
-			}
-		case <-boundTicker.C:
-			changed := m.Refresh(ctx) // guard 3: bounded retry, next bound tick only
-			if onTick != nil {
-				onTick(changed)
-			}
-		}
-	}
+	_ = RunDualTicked(ctx, nil, fast, m.Tick, bound, m.Refresh, onTick)
 }

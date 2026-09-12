@@ -31,6 +31,7 @@ akm-graph/akmgraph
 preview/preview
 preview/preview-d
 d2/d2router
+agent-monitor/agent-monitor
 
 # Agent task worktrees (dotfiles-3c7). `work-do` checks each bd task out into
 # .worktrees/bd-<id>.<N>/, and the Claude Code harness makes its own under

@@ -143,8 +143,9 @@ func (m *MessagesMonitor) Tick(ctx context.Context) bool {
 // messages verb has no gate to bound a second, slower clock against — see
 // Poll's doc comment.
 //
-// It carries adr0014's three guards, named exactly as census.go's RunLoop
-// does:
+// This is loop.go's RunSingleTicked (sp030 T10 consolidated the guard
+// implementation there, shared with census.go's RunLoop). adr0014's three
+// guards still apply, exactly as before:
 //
 //   - guard 1, fail fast on unrecoverable setup: MessagesAvailable() is
 //     checked once, before this loop is ever started (cmd/agent-monitor/main.go),
@@ -155,17 +156,5 @@ func (m *MessagesMonitor) Tick(ctx context.Context) bool {
 //   - guard 3, retry bounded by a timer outside the loop: a failed Tick is
 //     retried only on the ticker's own next firing, never inline.
 func RunMessagesLoop(ctx context.Context, m *MessagesMonitor, interval time.Duration, onTick func(changed bool)) {
-	ticker := time.NewTicker(interval) // guard 2: sleep floor
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			changed := m.Tick(ctx) // guard 3: bounded retry, next tick only
-			if onTick != nil {
-				onTick(changed)
-			}
-		}
-	}
+	_ = RunSingleTicked(ctx, nil, interval, m.Tick, onTick)
 }
