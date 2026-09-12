@@ -61,6 +61,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0025|census reads supported surface only]]
 - [[adr0028|tmux hosts and displays agent workers; it never carries their messages]]
 - [[adr0029|agent-census --fast reads accounts' internal state files, opt-in and parity-guarded]]
+- [[adr0030|Go for agent-monitor, an interactive terminal UI]]
 
 ### [[cat002|display-platform]]
 
