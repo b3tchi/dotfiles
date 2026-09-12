@@ -27,6 +27,8 @@ import {
   settledWithoutResult,
   unreadAfter,
   createAgentStateTracker,
+  createPresencePublisher,
+  type ExecFn,
   createResultTool,
   createInitiatorTool,
   INITIATOR_TOOL_PARAMETERS,
@@ -428,6 +430,317 @@ describe("agent state tracker", () => {
       },
     };
     expect(() => createAgentStateTracker(source).current()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Presence publisher (sp030 T4).
+//
+// The bridge derives its own state (above) and kept it in extension memory
+// only — written nowhere a consumer could see it (dotfiles-zxzj). These cases
+// pin the publishing half: the same `nu -c` idiom `queue-mark-read` already
+// uses, one call per transition, a repeat state writing nothing, a burst
+// collapsing to a SINGLE follow-up call rather than one process per
+// transition, and a failing or throwing exec never reaching the host's event
+// dispatch.
+//
+// Design note (measured, see createPresencePublisher's own comment): the
+// publish is genuinely fire-and-forget — the event handler that triggers it
+// never awaits the exec call — so the ~75-155ms `nu -c` cost is background
+// CPU, not something a turn waits on. A fixed-delay debounce would only have
+// hidden a cost nothing perceives, so there is no `debounceMs` here. What
+// bursts still need is single-flight: at most one `nu -c presence-write` runs
+// at a time, so two overlapping writes can never finish out of order and
+// leave a STALE state on disk. The very first transition after a quiet spell
+// publishes immediately, with no artificial wait at all.
+
+describe("presence publisher", () => {
+  type Call = { command: string; args: string[] };
+  type ExecResult = { stdout: string; stderr: string; code: number; killed: boolean };
+
+  function stubExec(impl?: (command: string, args: string[]) => Promise<ExecResult>) {
+    const calls: Call[] = [];
+    const exec = async (command: string, args: string[]): Promise<ExecResult> => {
+      calls.push({ command, args });
+      if (impl) return impl(command, args);
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    return { exec, calls };
+  }
+
+  function fakeSource() {
+    const handlers = new Map<string, (e: unknown) => unknown>();
+    return {
+      fire: (event: string, payload: unknown = {}) => {
+        const h = handlers.get(event);
+        if (!h) throw new Error(`nothing subscribed to '${event}'`);
+        h(payload);
+      },
+      source: {
+        on: (event: string, handler: (e: unknown) => unknown) => {
+          handlers.set(event, handler);
+        },
+      },
+    };
+  }
+
+  function withSilencedConsoleError(body: () => Promise<void> | void, logged: string[]) {
+    const original = console.error;
+    console.error = (msg?: unknown) => {
+      logged.push(String(msg));
+    };
+    return Promise.resolve(body()).finally(() => {
+      console.error = original;
+    });
+  }
+
+  // A stub exec resolves after a couple of microtask hops (its own `await`,
+  // then `sendOnce`'s, then `.finally(runNext)`'s), never a real timer — a
+  // short macrotask tick flushes all of them, so tests wait on that rather
+  // than on a duration this design does not have.
+  const settle = () => new Promise((r) => setTimeout(r, 5));
+
+  test("the first transition after a quiet spell publishes IMMEDIATELY — no artificial wait", () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    fire("agent_start"); // -> streaming
+
+    // Asserted with NO await at all: if this were still a delay-based
+    // debounce, calls would be empty here until the timer fired.
+    expect(calls.map((c) => [c.command, c.args])).toEqual([
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"]],
+    ]);
+  });
+
+  test("a `repo` option appends --repo, skipping presence-write's own git rev-parse fork; omitting it matches presence-write's cwd-derived default", () => {
+    const { exec: withRepoExec, calls: withRepoCalls } = stubExec();
+    const { source: s1, fire: f1 } = fakeSource();
+    createAgentStateTracker(s1, {
+      uid: "impl-a",
+      exec: withRepoExec,
+      modulePath: "/mod/pi-worker.nu",
+      repo: "/home/jan/.dotfiles/.worktrees/wk-t1.0",
+    });
+    f1("agent_start");
+    expect(withRepoCalls.map((c) => c.args)).toEqual([
+      [
+        "-c",
+        "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming' --repo '/home/jan/.dotfiles/.worktrees/wk-t1.0'",
+      ],
+    ]);
+
+    const { exec: noRepoExec, calls: noRepoCalls } = stubExec();
+    const { source: s2, fire: f2 } = fakeSource();
+    createAgentStateTracker(s2, { uid: "impl-a", exec: noRepoExec, modulePath: "/mod/pi-worker.nu" });
+    f2("agent_start");
+    expect(noRepoCalls.map((c) => c.args)).toEqual([
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"],
+    ]);
+  });
+
+  test("every transition in the table publishes through the same exec idiom queue-mark-read uses, and a repeat writes nothing", async () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    // Awaited between each so every transition gets its own single-flight
+    // slot rather than colliding with the next — the burst-collapsing case is
+    // covered separately below.
+    fire("agent_start"); // -> streaming
+    await settle();
+    fire("agent_settled"); // -> idle
+    await settle();
+    fire("session_before_compact"); // -> compacting
+    await settle();
+    fire("session_compact"); // -> idle
+    await settle();
+    // Both session_compact (just above) and session_compact_failed land on
+    // "idle" — the tracker is already there, so this transition must write
+    // NOTHING. A naive publisher that fires on every event, rather than on
+    // every actual CHANGE, would produce six calls here instead of five.
+    fire("session_compact_failed"); // -> idle again: writes nothing
+    await settle();
+    fire("session_shutdown"); // -> shutting_down, best-effort
+    await settle();
+
+    expect(calls.map((c) => [c.command, c.args])).toEqual([
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"]],
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'idle'"]],
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'compacting'"]],
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'idle'"]],
+      ["nu", ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'shutting_down'"]],
+    ]);
+  });
+
+  test("a transition landing while a write is already in flight collapses into ONE follow-up call carrying the LATER state, never the first", async () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    // All fired in the same synchronous tick, so the first is already in
+    // flight (its exec promise has not resolved yet — that needs at least one
+    // microtask turn) when the rest arrive.
+    fire("agent_start"); // -> streaming: nothing is in flight, publishes immediately
+    fire("session_before_compact"); // -> compacting: queued, overwriting nothing yet
+    fire("session_compact"); // -> idle: queued, OVERWRITES "compacting"
+    fire("session_shutdown"); // -> shutting_down: queued, OVERWRITES "idle"
+
+    expect(calls.length).toBe(1); // only the first has actually gone out so far
+    await settle();
+
+    // Exactly two real `nu -c` forks for four transitions: the one already
+    // running when the burst landed, and ONE follow-up carrying the last
+    // state queued — "compacting" and "idle" were each briefly the pending
+    // value but never got their own call.
+    expect(calls.map((c) => c.args)).toEqual([
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"],
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'shutting_down'"],
+    ]);
+  });
+
+  test("session_shutdown firing while a write is already in flight neither hangs nor throws — the shutdown write is merely QUEUED, so a process torn down before it runs simply loses it (the documented stale-by-age outcome, not a hang or a half-write)", () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    fire("agent_start"); // -> streaming: publishes immediately, now in flight
+    expect(() => fire("session_shutdown")).not.toThrow(); // -> shutting_down: queued behind it
+
+    // Asserted with NO await: at the instant a real process would tear down
+    // right here, only the write already forked before shutdown fired has
+    // gone out. The queued "shutting_down" write has not happened — nothing
+    // here blocks on it, and if the process exits now that write is simply
+    // never made. That is the acceptable loss sp030's known_limitations
+    // documents (presence goes stale by age), not a hang and not a write
+    // that half-completes or outlives the session unexpectedly.
+    expect(calls.map((c) => c.args)).toEqual([
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"],
+    ]);
+  });
+
+  test("a transition that bounces back to the currently-in-flight state while queued cancels the queue instead of re-publishing it", async () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    fire("agent_start"); // -> streaming: publishes immediately, now in flight
+    fire("session_before_compact"); // -> compacting: queued
+    fire("session_compact"); // -> idle: queued, overwrites "compacting"
+    fire("agent_start"); // -> streaming again: the state ALREADY in flight — queue is cleared, not re-armed
+
+    await settle();
+
+    expect(calls.map((c) => c.args)).toEqual([
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"],
+    ]);
+  });
+
+  test("an empty uid (PI_WORKER_UID unset) skips publishing entirely — no exec call at all", () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "", exec, modulePath: "/mod/pi-worker.nu" });
+
+    fire("agent_start");
+    fire("agent_settled");
+    fire("session_shutdown");
+
+    expect(calls.length).toBe(0);
+  });
+
+  test("a synchronously throwing exec does not propagate into the caller", () => {
+    const { source, fire } = fakeSource();
+    const throwingExec: ExecFn = (() => {
+      throw new Error("spawn nu ENOENT");
+    }) as unknown as ExecFn;
+    createAgentStateTracker(source, { uid: "impl-a", exec: throwingExec, modulePath: "/mod/pi-worker.nu" });
+
+    expect(() => fire("agent_start")).not.toThrow();
+  });
+
+  test("a rejecting exec does not propagate and is logged, not thrown", async () => {
+    const { source, fire } = fakeSource();
+    let attempts = 0;
+    const rejectingExec = async () => {
+      attempts++;
+      throw new Error("boom");
+    };
+    const logged: string[] = [];
+    await withSilencedConsoleError(async () => {
+      createAgentStateTracker(source, { uid: "impl-a", exec: rejectingExec, modulePath: "/mod/pi-worker.nu" });
+      expect(() => fire("agent_start")).not.toThrow();
+      await settle();
+      expect(attempts).toBe(1);
+      expect(logged.length).toBe(1);
+    }, logged);
+  });
+
+  test("a 'no claimed address' refusal — the shape a self-claimed or released uid gets — is expected and NOT logged", async () => {
+    const { exec } = stubExec(async () => ({
+      stdout: "",
+      stderr:
+        "self-abc123 has no claimed address in this project: presence cannot be written for a worker that was never spawned, or one already released. Nothing was written",
+      code: 1,
+      killed: false,
+    }));
+    const { source, fire } = fakeSource();
+    const logged: string[] = [];
+    await withSilencedConsoleError(async () => {
+      createAgentStateTracker(source, { uid: "self-abc123", exec, modulePath: "/mod/pi-worker.nu" });
+      fire("agent_start");
+      await settle();
+      expect(logged.length).toBe(0);
+    }, logged);
+  });
+
+  test("a persistent distinct failure (e.g. nu missing from PATH) is logged ONCE, not once per transition", async () => {
+    const { exec } = stubExec(async () => {
+      throw new Error("spawn nu ENOENT");
+    });
+    const { source, fire } = fakeSource();
+    const logged: string[] = [];
+    await withSilencedConsoleError(async () => {
+      createAgentStateTracker(source, { uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+      fire("agent_start"); // -> streaming
+      await settle();
+      fire("agent_settled"); // -> idle
+      await settle();
+      fire("session_before_compact"); // -> compacting
+      await settle();
+      expect(logged.length).toBe(1);
+    }, logged);
+  });
+
+  test("an unsafe uid refuses to shell out rather than building an injected command", () => {
+    const { exec, calls } = stubExec();
+    const { source, fire } = fakeSource();
+    createAgentStateTracker(source, { uid: "impl-a'; rm -rf /", exec, modulePath: "/mod/pi-worker.nu" });
+
+    fire("agent_start");
+    expect(calls.length).toBe(0);
+  });
+
+  test("createPresencePublisher itself (no tracker involved) dedups a direct repeat call", async () => {
+    // createAgentStateTracker only ever calls this returned function when a
+    // transition actually changes its OWN local `state` variable, so the
+    // exact-repeat case above never reaches the publisher through the
+    // tracker. This pins the publisher's OWN dedup, independent of that
+    // caller discipline, so the two are not both silently relying on the
+    // other one never breaking.
+    const { exec, calls } = stubExec();
+    const publish = createPresencePublisher({ uid: "impl-a", exec, modulePath: "/mod/pi-worker.nu" });
+
+    publish("idle"); // publishes immediately
+    publish("idle"); // the state already in flight — dropped
+    publish("streaming"); // queued, since "idle" is still in flight
+
+    await settle();
+
+    expect(calls.map((c) => c.args)).toEqual([
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'idle'"],
+      ["-c", "use '/mod/pi-worker.nu' *; presence-write 'impl-a' 'streaming'"],
+    ]);
   });
 });
 

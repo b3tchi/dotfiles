@@ -252,12 +252,193 @@ export interface AgentStateTracker {
  * `shutting_down` is terminal: a late event must not make a dying session look
  * deliverable again.
  */
-export function createAgentStateTracker(source: StateEventSource): AgentStateTracker {
+/**
+ * Configuration for publishing this session's own state (sp030 T4).
+ *
+ * The write goes out exactly the way `queue-mark-read` already does — one
+ * `nu -c 'use <module> *; presence-write ...'` per transition, through the
+ * `ExecFn` the extension already holds — because nushell owns the bus layout
+ * ([[adr0001]]); a second writer in a second language is how that layout
+ * starts drifting. No `node:fs` write is added here.
+ */
+export interface PresencePublishOptions {
+  /** This session's own address in the current project's bus. Empty skips publishing entirely (a session outside a project, or one that never claimed an address). */
+  uid: string;
+  exec: ExecFn;
+  /** Absolute path to pi-worker.nu, resolved once at activation. */
+  modulePath: string;
+  /**
+   * The worker's own worktree (`process.cwd()`), passed through as
+   * `presence-write --repo`. `presence-write` already resolves the identical
+   * project when this is omitted — via `current-repo` reading the SAME cwd
+   * off the spawned `nu` process — so this changes no behavior; it only lets
+   * `presence-write` skip `current-repo`'s own `git rev-parse
+   * --show-toplevel` fork (measured, T4: `resolve-project-slug` still shells
+   * to git a second time via `main-worktree` regardless, so this saves one of
+   * two git forks, not both — a real but partial win). Omitted entirely skips
+   * the flag, matching `presence-write`'s own cwd-derived default.
+   */
+  repo?: string;
+}
+
+// uid/state are ours — generated, or drawn from AgentState's own small fixed
+// vocabulary — never a value read off the bus. Same charset createFsIo's
+// `safe` guard already applies to a uid/id pair before it reaches a shell
+// argument.
+const SAFE_PRESENCE_TOKEN = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Publish this session's own state on each transition, fire-and-forget.
+ *
+ * Measured (T4, 2026-09-12, this repo): ~75-155ms wall-clock per
+ * `presence-write` call — nu startup plus one or two `git` forks
+ * `resolve-project-slug` makes to find the project. `PresencePublishOptions.
+ * repo` (the worker's own cwd, passed as `presence-write --repo`) skips one of
+ * those forks (`current-repo`'s `git rev-parse --show-toplevel`); the other
+ * (`main-worktree`, inside `resolve-project-slug`) shells to git regardless,
+ * so it is a real but partial win, not a way to make the call free. That cost
+ * either way is NOT
+ * turn-visible: the call below is never awaited by the event handler that
+ * triggers it (`createAgentStateTracker`'s `set()`), so it runs as detached
+ * background CPU a few times per turn rather than something the operator
+ * waits on. A fixed-delay debounce was considered and rejected for exactly
+ * that reason — it would spend a timer, a pending-state slot and an
+ * ordering rule to hide a cost nothing perceives.
+ *
+ * What the delay-free design still needs, and gets, is **single-flight**
+ * rather than **unlimited concurrency**: at most one `nu -c presence-write`
+ * runs for this session at a time. Two independent forked processes racing
+ * to write the same file have no ordering guarantee on which one FINISHES
+ * last, so without this a late-completing write for an EARLIER transition
+ * could silently overwrite a later one already on disk — the exact failure
+ * a fire-and-forget design has to rule out, not just a performance nicety.
+ * A transition landing while a write is already in flight is queued (at
+ * most one slot, latest wins); one landing while nothing is in flight
+ * publishes immediately, with no artificial wait. Combined with "a state
+ * equal to the last one published writes nothing" (the criterion that does
+ * most of the real work, since a quiet agent re-publishing `idle` is the
+ * common case), a burst still costs at most two real `nu -c` forks: the one
+ * already running, and one follow-up carrying whatever state was still
+ * pending when it finished.
+ *
+ * The exec call's own exceptions are always caught: both a synchronous
+ * throw (a stub, or a spawn failure) and a rejected promise are turned into
+ * a logged line rather than propagating — matching the discipline already
+ * around `source.on(...)` in createAgentStateTracker.
+ *
+ * A non-zero exit whose message says the uid has no claimed address is the
+ * ordinary shape of publishing for a session `presence-write` was never
+ * asked to spawn (a self-claimed session claims no address; T3's
+ * `presence-write` refuses rather than creates one) — expected, not a
+ * failure to surface (adr0017: presence is the worker's own evidence about
+ * itself, and there is none to report for a uid nothing spawned). Any other
+ * failure — a thrown/rejected exec, `nu` missing from PATH, some other
+ * non-zero exit — is logged once per distinct message rather than once per
+ * transition, so a persistently missing `nu` costs one line, not a stream of
+ * them.
+ */
+export function createPresencePublisher(opts: PresencePublishOptions): (state: AgentState) => void {
+  const { uid, exec, modulePath, repo } = opts;
+  // `repo`, like `modulePath`, is a trusted path this process derived for
+  // itself (`process.cwd()`) rather than anything read off the bus — quoted
+  // the same way modulePath already is, not run through SAFE_PRESENCE_TOKEN
+  // (which is for the small uid/state vocabulary, not filesystem paths).
+  const repoFlag = repo ? ` --repo '${repo}'` : "";
+  let lastPublished: AgentState | null = null;
+  let inFlight = false;
+  let queued: AgentState | null = null;
+  const loggedFailures = new Set<string>();
+
+  // Deduped on the underlying failure (`key`), not on the printed message: the
+  // message embeds the target STATE, which changes every transition, and a
+  // key built from that would make "nu missing from PATH" log once PER
+  // DISTINCT STATE rather than once, period — exactly the spam the edge case
+  // calls out.
+  const logOnce = (key: string, msg: string) => {
+    if (loggedFailures.has(key)) return;
+    loggedFailures.add(key);
+    console.error(msg);
+  };
+
+  // Exactly one `nu -c` per call, never awaited by the CALLER of this
+  // function (see runNext below) — it returns a promise only so the
+  // single-flight queue knows when it is safe to start the next write, not
+  // so an event handler can block on it.
+  const sendOnce = async (state: AgentState): Promise<void> => {
+    if (!SAFE_PRESENCE_TOKEN.test(uid) || !SAFE_PRESENCE_TOKEN.test(state)) {
+      logOnce(
+        "unsafe-token",
+        `pi-worker: refusing to publish presence — unsafe uid or state (${uid}, ${state})`,
+      );
+      return;
+    }
+    try {
+      const out = await exec(
+        "nu",
+        ["-c", `use '${modulePath}' *; presence-write '${uid}' '${state}'${repoFlag}`],
+        {},
+      );
+      if (out.code === 0) return;
+      const detail = (out.stderr || out.stdout || "").trim();
+      if (/no claimed address/.test(detail)) return;
+      logOnce(detail, `pi-worker: presence-write failed for ${uid} -> ${state}: ${detail}`);
+    } catch (err) {
+      logOnce(String(err), `pi-worker: presence-write threw for ${uid} -> ${state}: ${err}`);
+    }
+  };
+
+  const runNext = () => {
+    if (queued === null) {
+      inFlight = false;
+      return;
+    }
+    const state = queued;
+    queued = null;
+    lastPublished = state;
+    inFlight = true;
+    void sendOnce(state).finally(runNext);
+  };
+
+  return (state: AgentState) => {
+    // A bounce back to the state already published — or already in flight
+    // and about to become "last published" — writes nothing, including
+    // cancelling anything this same bounce might otherwise have queued.
+    if (state === lastPublished) {
+      queued = null;
+      return;
+    }
+    if (inFlight) {
+      queued = state;
+      return;
+    }
+    lastPublished = state;
+    inFlight = true;
+    void sendOnce(state).finally(runNext);
+  };
+}
+
+/**
+ * Track what the agent is doing by watching its lifecycle events, optionally
+ * publishing every transition as this session's own presence (sp030 T4).
+ *
+ * `publish` is omitted entirely by every existing caller and test above this
+ * comment's diff — passing it is what turns on the `nu -c presence-write`
+ * side effect; nothing here changes for a caller that does not.
+ */
+export function createAgentStateTracker(
+  source: StateEventSource,
+  publish?: PresencePublishOptions,
+): AgentStateTracker {
   let state: AgentState = "idle";
+  // Empty uid means "skip publishing entirely" (PI_WORKER_UID unset, or a
+  // session outside a project) — the bridge already treats that as a normal
+  // case, not a caller that forgot to pass options.
+  const publishState = publish && publish.uid ? createPresencePublisher(publish) : null;
 
   const set = (next: AgentState) => () => {
     if (state === "shutting_down") return;
     state = next;
+    publishState?.(next);
   };
 
   const transitions: Array<[string, () => void]> = [
@@ -270,6 +451,13 @@ export function createAgentStateTracker(source: StateEventSource): AgentStateTra
       "session_shutdown",
       () => {
         state = "shutting_down";
+        // Best-effort, deliberately: if this particular write is lost (the
+        // process dies before the detached `nu -c` call finishes, or `nu` is
+        // unreachable at the exact moment the host tears down), the loss is
+        // acceptable — a dead session's presence goes stale and reads
+        // `unknown` by age (sp030 known_limitations), and `unknown` licenses
+        // nothing, so nothing downstream is misled by a missed beat.
+        publishState?.("shutting_down");
       },
     ],
   ];
@@ -2840,7 +3028,16 @@ export default function piWorker(pi: ExtensionAPI): void {
 
       const selfUid = claimSelfAddress();
       const busIo = createFsIo(busDir, exec, modulePath);
-      const tracker = createAgentStateTracker(pi as unknown as StateEventSource);
+      // A self-claimed session never runs `claim-address` (claimSelfAddress
+      // mints only a name, not a directory), so presence-write refuses every
+      // publish for it — the expected "no claimed address" outcome
+      // createPresencePublisher swallows rather than logs.
+      const tracker = createAgentStateTracker(pi as unknown as StateEventSource, {
+        uid: selfUid,
+        exec,
+        modulePath,
+        repo: process.cwd(),
+      });
       const api = pi as unknown as WatcherHost;
       const host: WatcherHost = {
         sendUserMessage: api.sendUserMessage?.bind(pi),
@@ -2880,7 +3077,23 @@ export default function piWorker(pi: ExtensionAPI): void {
   // the watcher needs is derived here and handed in. This is the correction of
   // the ft014 assumption that a `host.agentState()` existed: the watcher's
   // contract is unchanged, its data source is now real.
-  const tracker = createAgentStateTracker(pi as unknown as StateEventSource);
+  //
+  // Publishing is only wired up when the host exposes exec — the same
+  // feature-detected guard every other bus write in this function already
+  // uses. A worker reaching this line always carries a non-empty
+  // PI_WORKER_UID (workerInboxDir's guard above already returned otherwise),
+  // so there is no separate "unset uid" branch needed here.
+  const tracker = createAgentStateTracker(
+    pi as unknown as StateEventSource,
+    exec
+      ? {
+          uid,
+          exec,
+          modulePath: join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu"),
+          repo: identity.cwd,
+        }
+      : undefined,
+  );
   const api = pi as unknown as WatcherHost;
   const host: WatcherHost = {
     sendUserMessage: api.sendUserMessage?.bind(pi),

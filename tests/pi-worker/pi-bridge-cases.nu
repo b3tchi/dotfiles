@@ -15,6 +15,74 @@
 use harness.nu *
 use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
+# ---------------------------------------------------------- presence (T4) —
+# the extension publishes its own state
+#
+# T4's decisions (exact argv, dedup-on-repeat, single-flight coalescing on a
+# burst, a throwing or failing exec never propagating) are unit-tested against
+# a stub ExecFn in extensions/pi.test.ts, under `bun test`. What this case
+# covers is the seam those unit tests cannot reach from nu: driving the REAL
+# `createAgentStateTracker` (imported straight from pi.ts, not reimplemented
+# here) with a REAL `exec` that shells out to the REAL `nu` on PATH, against a
+# REAL claimed address — and reading the presence file back off disk
+# afterward. If the argv idiom in pi.ts and the `presence-write` signature in
+# pi-worker.nu ever drift apart, this is what turns that drift into a failing
+# case instead of two green suites that silently disagree about each other's
+# contract.
+#
+# A driver script rather than a stub: nushell cannot call into pi.ts's
+# TypeScript directly, so the case writes a small bun script that imports the
+# real module and fires the same lifecycle events Pi does, then waits for the
+# real `nu` calls in flight to finish before exiting.
+def presence-driver-script []: nothing -> string {
+    r#'
+const [uid, modulePath, piTsPath, repoPath, eventsCsv] = process.argv.slice(2);
+const mod = await import(piTsPath);
+
+const handlers = new Map();
+const source = {
+  on: (event, handler) => handlers.set(event, handler),
+};
+const fire = (event) => handlers.get(event)?.({});
+
+// The exact exec idiom pi.ts is built to receive: a command, an argv array,
+// and options carrying only `cwd` — matching `ExecFn`'s shape so this is the
+// real production call, not a shape the test invented.
+const exec = async (command, args, options) => {
+  const proc = Bun.spawn([command, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: options && options.cwd,
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, code, killed: false };
+};
+
+// A 4th argv (repoPath) exercises the same `--repo` argv T4 adds to skip
+// presence-write's own git rev-parse fork; an empty one (as in the
+// unclaimed-uid case below) matches production's "component omitted" shape.
+mod.createAgentStateTracker(source, { uid, exec, modulePath, ...(repoPath ? { repo: repoPath } : {}) });
+
+// A full simulated lifecycle, defaulting to one ending in the terminal state
+// but overridable (5th argv, comma-separated) so a case can pin latest-wins
+// against an ORDINARY final state, decoupled from shutdown's own best-effort
+// semantics. Fired all in the same synchronous burst on purpose: this proves
+// the single-flight queue collapses to the LAST transition (never the first,
+// and never one racing process per transition) rather than firing one
+// overlapping `nu` call per transition.
+const events = eventsCsv
+  ? eventsCsv.split(",")
+  : ["agent_start", "agent_settled", "session_before_compact", "session_compact", "session_shutdown"];
+for (const event of events) fire(event);
+
+await new Promise((r) => setTimeout(r, 700));
+'#
+}
+
 # A private tmux server plus a stub `pi`. The stub is what makes the case
 # hermetic: a real Pi would need a model, a network, and minutes.
 def make-tmux [tag: string, pi_body: string]: nothing -> record {
@@ -538,6 +606,83 @@ let cases = [
             }
         }
         rm -f $marker; rm -f $done; drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
+    # -------------------------------------------------------- presence (T4)
+    (run-case "presence/a-simulated-session-lifecycle-leaves-a-presence-file-matching-the-last-transition" {
+        let repo = (make-repo "presence-publish")
+        let module = (worker-script $env.FILE_PWD)
+        let pi_ts = (pi-extension $env.FILE_PWD)
+        let uid = "impl-a"
+        claim-address $repo $uid
+
+        let script = ([(fixture-base) $"piw-t4-driver-(random chars --length 6).ts"] | path join)
+        (presence-driver-script) | save -f $script
+
+        # The driver runs with the repo as its cwd — the same way the real
+        # extension always runs from inside the worker's own worktree — AND
+        # passes `repo` explicitly, exercising the `--repo` argv T4 adds
+        # (real production wiring passes the worker's own cwd this way).
+        let cmd = $"cd \"($repo)\" && bun run \"($script)\" \"($uid)\" \"($module)\" \"($pi_ts)\" \"($repo)\""
+        let out = (^bash -c $cmd | complete)
+        assert-eq $out.exit_code 0 $"driver failed: ($out.stderr)"
+
+        let got = (presence-read $uid --repo $repo)
+        assert-eq $got.state "shutting_down" "the presence file carries the LAST transition of the burst, not the first"
+
+        rm -f $script; rm -rf $repo
+    })
+
+    (run-case "presence/latest-wins-on-disk-independent-of-shutdowns-own-best-effort-semantics" {
+        # The load-bearing property of single-flight coalescing is not the
+        # CALL COUNT, it is that the state actually persisted is the LATEST
+        # transition, never an earlier one an out-of-order-finishing write
+        # could otherwise leave behind. Pinned here with an ORDINARY final
+        # state (never reaching session_shutdown at all), so this failing
+        # would implicate the coalescing queue itself, not shutdown's separate
+        # best-effort carve-out — see the sibling case above for that one.
+        let repo = (make-repo "presence-latest-wins")
+        let module = (worker-script $env.FILE_PWD)
+        let pi_ts = (pi-extension $env.FILE_PWD)
+        let uid = "impl-a"
+        claim-address $repo $uid
+
+        let script = ([(fixture-base) $"piw-t4-driver-latest-(random chars --length 6).ts"] | path join)
+        (presence-driver-script) | save -f $script
+
+        let events = "agent_start,session_before_compact,session_compact"
+        let cmd = $"cd \"($repo)\" && bun run \"($script)\" \"($uid)\" \"($module)\" \"($pi_ts)\" \"($repo)\" \"($events)\""
+        let out = (^bash -c $cmd | complete)
+        assert-eq $out.exit_code 0 $"driver failed: ($out.stderr)"
+
+        let got = (presence-read $uid --repo $repo)
+        assert-eq $got.state "idle" "session_compact's 'idle' is the LAST transition fired — never 'streaming' or 'compacting', which a naive fire-every-transition publisher (or a coalescing bug letting an earlier write finish last) could otherwise leave on disk"
+
+        rm -f $script; rm -rf $repo
+    })
+
+    (run-case "presence/an-unclaimed-uid-publishes-quietly-and-writes-nothing" {
+        # A self-claimed session (sp029 T7) mints a uid but never calls
+        # claim-address for it, so `presence-write` refuses every publish —
+        # the expected shape [[adr0017]] treats as ordinary, not a fault. This
+        # pins the observable half from the nu side: no address, no presence
+        # file, and (implicitly, via the driver's own exit code below) no
+        # exception reaching the process either.
+        let repo = (make-repo "presence-unclaimed-publish")
+        let module = (worker-script $env.FILE_PWD)
+        let pi_ts = (pi-extension $env.FILE_PWD)
+        let uid = "self-neverclaimed"
+
+        let script = ([(fixture-base) $"piw-t4-driver-unclaimed-(random chars --length 6).ts"] | path join)
+        (presence-driver-script) | save -f $script
+
+        let cmd = $"cd \"($repo)\" && bun run \"($script)\" \"($uid)\" \"($module)\" \"($pi_ts)\""
+        let out = (^bash -c $cmd | complete)
+        assert-eq $out.exit_code 0 $"driver failed: ($out.stderr)"
+
+        assert-eq (presence-read $uid --repo $repo) null "nothing was ever written for an address nobody claimed"
+
+        rm -f $script; rm -rf $repo
     })
 
 ]
