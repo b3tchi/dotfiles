@@ -44,6 +44,16 @@ def make-world [tag: string]: nothing -> string {
     $root
 }
 
+# Add a `pi-worker` stub to an existing world, reporting two pi agents: one
+# running in `alpha` (a project the claude side also occupies) and one
+# waiting_human in a pi-only project `gamma` (sp030 T6).
+def add-pi-stub [root: string] {
+    let payload = '[{"run":"r1","uid":"impl-9","state":"running","unacked":0,"task":"","window":"impl-fix@alpha","resume":"pi --session x","presence":"running"},{"run":"r2","uid":"impl-8","state":"waiting_human","unacked":1,"task":"","window":"impl-review@gamma","resume":"pi --session y","presence":""}]'
+    $payload | save -f ($root | path join "pi-workers.json")
+    let body = ('printf "%s" "$(<' + $root + '/pi-workers.json)"')
+    write-stub $root "pi-worker" $body
+}
+
 # A world shaped like the real machine: one RUNNING agent plus historical job
 # records. The historical ones deliberately carry NEITHER pid NOR status --
 # upstream emits `status` only while a process exists, so its absence is what
@@ -301,6 +311,64 @@ let results = [
         let parsed = (try { $out.stdout | from json } catch { null })
         assert-true ($parsed != null) "stdout must be valid JSON"
         assert-true (($parsed | describe) =~ '^(list|table)') "JSON must decode to rows"
+    })
+
+    # ---- pi runtime (sp030 T6) ---------------------------------------------
+
+    (run-case "cli/--detail carries runtime for both claude and pi agents" {
+        let w = (make-world "piboth")
+        add-pi-stub $w
+        let detail = ((run-action $w "--json" "--detail").stdout | from json)
+        assert-true (($detail | where runtime == "claude" | length) > 0) "claude rows must be present"
+        assert-true (($detail | where runtime == "pi" | length) > 0) "pi rows must be present"
+        let pi_rows = ($detail | where runtime == "pi")
+        for r in $pi_rows {
+            assert-true ($r.uid | is-not-empty) "pi rows must carry uid"
+            assert-true ($r.role | is-not-empty) "pi rows must carry role"
+        }
+    })
+
+    (run-case "cli/a project running both runtimes reports one merged count row" {
+        let w = (make-world "pimerge")
+        add-pi-stub $w
+        let rows = ((run-action $w "--json").stdout | from json)
+        let alpha = ($rows | where project == "alpha" | first)
+        # claude's alpha: pid 4242 busy -> working (via the pane), plus the
+        # pi stub's impl-9 running -> working: two working, not two rows.
+        assert-eq ($rows | where project == "alpha" | length) 1 "one row per project, not one per runtime"
+        assert-eq $alpha.working 2 "claude's working agent plus pi's running agent"
+        # gamma exists only on the pi side.
+        let gamma = ($rows | where project == "gamma" | first)
+        assert-eq $gamma.blocked 1 "pi's waiting_human worker buckets as blocked"
+        assert-eq $gamma.path null "pi has no registry path of its own"
+    })
+
+    (run-case "cli/pi-worker missing from PATH degrades to a claude-only census, exit 0" {
+        # No add-pi-stub call: `pi-worker` is simply absent from this
+        # sandbox's PATH, the same as any machine that never ran one.
+        let w = (make-world "pimissing")
+        let out = (run-action $w "--json" "--detail")
+        assert-eq $out.exit_code 0
+        let rows = ($out.stdout | from json)
+        assert-true (($rows | length) > 0) "the claude agents must still be reported"
+        assert-eq ($rows | get runtime | uniq) ["claude"] "no pi rows must appear at all"
+    })
+
+    (run-case "cli/regression guard: a claude-only census keeps its exact original shape" {
+        # The count-row column set is the one thing that must NEVER gain a
+        # `runtime` field -- only detail rows carry it. If a future change
+        # accidentally tags count rows too, or leaks a pi-only column onto
+        # them, this goes red.
+        let w = (make-world "piregression")
+        let rows = ((run-action $w "--json").stdout | from json)
+        let cols = ($rows | columns | sort)
+        assert-eq $cols ([accounts blocked cwds done idle other path project total working] | sort)
+        # And the totals match exactly what the pre-pi suite already asserts
+        # for this same stub world (see cli/json-and-table-agree).
+        let alpha = ($rows | where project == "alpha" | first)
+        assert-eq $alpha.working 1
+        assert-eq $alpha.blocked 2
+        assert-eq $alpha.total 3
     })
 ]
 

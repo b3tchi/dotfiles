@@ -1,0 +1,82 @@
+[
+  {
+    "run": "r1",
+    "uid": "impl-1",
+    "state": "unknown",
+    "unacked": 0,
+    "task": "",
+    "window": "",
+    "resume": "",
+    "presence": ""
+  },
+  {
+    "run": "r1",
+    "uid": "verify-1",
+    "state": "unknown",
+    "unacked": 0,
+    "task": "",
+    "window": "",
+    "resume": "",
+    "presence": ""
+  },
+  {
+    "run": "r2",
+    "uid": "audit-sample-probe",
+    "state": "accepted",
+    "unacked": 1,
+    "task": "",
+    "window": "probe-audit-sample-task@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000001",
+    "presence": ""
+  },
+  {
+    "run": "r3",
+    "uid": "demo-alice",
+    "state": "accepted",
+    "unacked": 2,
+    "task": "",
+    "window": "peer-demo-alice@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000002",
+    "presence": ""
+  },
+  {
+    "run": "r4",
+    "uid": "demo-bob",
+    "state": "accepted",
+    "unacked": 2,
+    "task": "",
+    "window": "peer-demo-bob@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000003",
+    "presence": ""
+  },
+  {
+    "run": "r5",
+    "uid": "demo-1",
+    "state": "complete",
+    "unacked": 1,
+    "task": "",
+    "window": "demo-ping@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000004",
+    "presence": ""
+  },
+  {
+    "run": "r6",
+    "uid": "demo-2",
+    "state": "complete",
+    "unacked": 1,
+    "task": "",
+    "window": "demo-pong@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000005",
+    "presence": ""
+  },
+  {
+    "run": "r7",
+    "uid": "demo-3",
+    "state": "complete",
+    "unacked": 1,
+    "task": "",
+    "window": "demo-echo@dotfiles",
+    "resume": "pi --session 00000000-0000-4000-8000-000000000006",
+    "presence": ""
+  }
+]
