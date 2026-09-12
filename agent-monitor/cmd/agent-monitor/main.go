@@ -26,11 +26,22 @@ import (
 	"golang.org/x/term"
 )
 
-// pollInterval is the roster's slow tick. ~600ms is the measured cost of one
-// underlying probe per account (ft012); this cadence keeps a poll from
-// overlapping the previous one under normal conditions while still feeling
-// live. `r` bypasses it entirely for an on-demand full read.
-const pollInterval = 3 * time.Second
+const (
+	// pollInterval is the gated poll's cadence: cheap (agent-census's
+	// --fast/--if-changed path), so a few seconds is fine. `r` bypasses it
+	// entirely for an on-demand full read.
+	pollInterval = 3 * time.Second
+
+	// piBoundInterval is the forced, ungated refresh's cadence. It exists
+	// because agent-census's --if-changed gate fingerprints claude account
+	// files only (dotfiles-eee4) — a pi worker changing state never opens
+	// the gate, so relying on pollInterval alone would leave pi rows stale
+	// indefinitely on a machine where claude happens to stay quiet. This
+	// clock pays the full per-account probe cost (~600ms, ft012) on purpose,
+	// far less often than pollInterval, to put a finite ceiling on pi
+	// staleness instead.
+	piBoundInterval = 20 * time.Second
+)
 
 func main() {
 	project := flag.String("project", "", "restrict the roster to one project")
@@ -71,7 +82,7 @@ func main() {
 	}
 	draw()
 
-	go source.RunLoop(ctx, monitor, pollInterval, func(changed bool) {
+	go source.RunLoop(ctx, monitor, pollInterval, piBoundInterval, func(changed bool) {
 		if changed {
 			draw()
 		}

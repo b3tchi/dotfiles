@@ -152,6 +152,15 @@ func Available() error {
 // rows" would blank the roster every tick; Poll's job is to make that
 // mistake impossible to make by accident: nil-with-no-error is the ONLY
 // unchanged signal, and it is never returned alongside rows.
+//
+// The gate is blind to pi workers (dotfiles-eee4): agent-census's
+// --if-changed token fingerprints only each claude account's session/job
+// files, so a pi worker spawning, changing state, publishing presence or
+// exiting never opens the gate on its own. Silence from THIS call means
+// "no claude account file moved" — it says nothing about pi. Do not read
+// "unchanged" as "the whole world is unchanged"; that is exactly why
+// RunLoop below runs a second, ungated clock to bound how stale a pi row
+// can get regardless of what claude is doing.
 func (s *Sampler) Poll(ctx context.Context) (*Sample, error) {
 	out, err := s.Exec(ctx, censusBinary,
 		"--json", "--detail", "--fast", "--if-changed", s.StampPath)
@@ -242,29 +251,51 @@ func (m *Monitor) Refresh(ctx context.Context) bool {
 	return true
 }
 
-// RunLoop drives Tick on a ticker until ctx is cancelled, calling onSample
-// after every tick (whether or not the frame changed, so a caller tracking
-// staleness-by-age can still redraw the header). It carries adr0014's three
-// guards, named:
+// RunLoop drives two clocks against one Monitor until ctx is cancelled:
+//
+//   - fast ticks call Tick — the cheap, gated poll. Correct and sufficient
+//     for claude rows, which are what the gate was built to protect against
+//     re-probing on every tick.
+//   - bound ticks call Refresh — the full, ungated probe, on a much slower
+//     cadence. This clock exists ONLY because the gate is blind to pi
+//     (dotfiles-eee4, see Poll's doc): without it, a machine where claude
+//     stays quiet would never re-read pi state at all, no matter how long
+//     agent-monitor ran. bound is what puts a finite ceiling on pi
+//     staleness. It also happens to re-validate claude, which is harmless.
+//
+// onTick(changed) fires after every fast or bound tick, whichever produced
+// it, so a caller tracking frame age can redraw on either clock.
+//
+// It carries adr0014's three guards, named:
 //
 //   - guard 1, fail fast on unrecoverable setup: checked by Available()
 //     before RunLoop is ever called (see cmd/agent-monitor/main.go) — a
 //     missing dependency is not retried from inside this loop.
-//   - guard 2, a sleep floor on every iteration: the ticker interval itself
-//     is that floor. No failure path inside Tick can make the loop spin
-//     faster than one exec per interval.
-//   - guard 3, retry bounded by a timer outside the loop: a failed Tick is
-//     retried only on the ticker's NEXT firing, never inline and never
-//     immediately — the same shape adr0014 requires of a respawn.
-func RunLoop(ctx context.Context, m *Monitor, interval time.Duration, onTick func(changed bool)) {
-	ticker := time.NewTicker(interval) // guard 2: sleep floor
-	defer ticker.Stop()
+//   - guard 2, a sleep floor on every iteration: each ticker's own interval
+//     is its floor. No failure path inside Tick or Refresh can make either
+//     clock spin faster than one exec per interval. bound must be >= fast
+//     (callers are expected to pass a slower bound; RunLoop does not
+//     re-derive one from the other, since the two costs are deliberately
+//     different by an order of magnitude, not a ratio worth computing).
+//   - guard 3, retry bounded by a timer outside the loop: a failed Tick or
+//     Refresh is retried only on ITS OWN ticker's next firing, never inline
+//     and never immediately — the same shape adr0014 requires of a respawn.
+func RunLoop(ctx context.Context, m *Monitor, fast, bound time.Duration, onTick func(changed bool)) {
+	fastTicker := time.NewTicker(fast) // guard 2: sleep floor for the gated poll
+	defer fastTicker.Stop()
+	boundTicker := time.NewTicker(bound) // guard 2: sleep floor for the forced, pi-bounding refresh
+	defer boundTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			changed := m.Tick(ctx) // guard 3: bounded retry, next tick only
+		case <-fastTicker.C:
+			changed := m.Tick(ctx) // guard 3: bounded retry, next fast tick only
+			if onTick != nil {
+				onTick(changed)
+			}
+		case <-boundTicker.C:
+			changed := m.Refresh(ctx) // guard 3: bounded retry, next bound tick only
 			if onTick != nil {
 				onTick(changed)
 			}

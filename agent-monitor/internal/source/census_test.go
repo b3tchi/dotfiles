@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -215,6 +216,82 @@ func assertNotContains(t *testing.T, argv []string, unwanted string) {
 		if a == unwanted {
 			t.Fatalf("argv %v contains forbidden %q (forced refresh must bypass fast/gate)", argv, unwanted)
 		}
+	}
+}
+
+// gatedExec simulates agent-census's real behaviour under a gate that never
+// opens for pi: any call carrying --if-changed (the gated poll) returns
+// empty output forever, as if no claude account file ever moves; any call
+// WITHOUT --if-changed (a forced refresh) returns a real payload. This is
+// exactly dotfiles-eee4's shape: the gate is blind to pi, so a naive
+// single-clock loop would never see the pi rows in fullPayload at all.
+type gatedExec struct {
+	fullPayload []byte
+	pollCalls   int
+	forceCalls  int
+	mu          sync.Mutex
+}
+
+func (g *gatedExec) run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, a := range args {
+		if a == "--if-changed" {
+			g.pollCalls++
+			return []byte(""), nil // gate never opens
+		}
+	}
+	g.forceCalls++
+	return g.fullPayload, nil
+}
+
+// TestRunLoop_BoundClockRefreshesPiDataWhenGateNeverOpens is the regression
+// test for dotfiles-eee4: a single fast, gated clock alone would never
+// install pi rows on a machine where claude stays quiet, because
+// agent-census's --if-changed token never fingerprints pi state. RunLoop's
+// second, ungated "bound" clock must install a real sample anyway, on its
+// own schedule, independent of the gate ever opening.
+func TestRunLoop_BoundClockRefreshesPiDataWhenGateNeverOpens(t *testing.T) {
+	g := &gatedExec{fullPayload: []byte(mixedPayload)}
+	m := &Monitor{sampler: &Sampler{Exec: g.run, StampPath: "/tmp/stamp"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	changes := 0
+	done := make(chan struct{})
+	go func() {
+		RunLoop(ctx, m, 10*time.Millisecond, 30*time.Millisecond, func(changed bool) {
+			if changed {
+				changes++
+			}
+		})
+		close(done)
+	}()
+	<-done
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.forceCalls == 0 {
+		t.Fatal("bound clock never fired an ungated refresh — pi rows would never be seen")
+	}
+	if g.pollCalls == 0 {
+		t.Fatal("fast clock never fired a gated poll")
+	}
+	if m.Last() == nil || len(m.Last().Rows) != 5 {
+		t.Fatalf("Monitor never installed the forced sample despite an always-closed gate: %+v", m.Last())
+	}
+	var sawPi bool
+	for _, r := range m.Last().Rows {
+		if r.Runtime == "pi" {
+			sawPi = true
+		}
+	}
+	if !sawPi {
+		t.Fatal("forced sample installed but carries no pi rows")
+	}
+	if changes == 0 {
+		t.Fatal("onTick never reported a change, even though the bound clock installed a real sample")
 	}
 }
 
