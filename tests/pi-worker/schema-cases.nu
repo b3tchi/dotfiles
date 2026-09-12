@@ -282,6 +282,139 @@ let n = ($env.PIW_MINT_N | into int)
         assert-eq ($all | uniq | length) 10_000 "no id was minted twice across processes"
         rm -rf $root
     })
+
+    # ------------------------------------------------- sp030 T5: `messages`
+
+    (run-case "messages/an-empty-bus-is-an-empty-list-not-an-error" {
+        let repo = (make-repo "messages-empty")
+        let root = (make-runtime "messages-empty")
+        with-runtime $root {
+            let got = (do { cd $repo; bus-messages })
+            assert-true ($got | is-empty) "no messages yet is empty, not an error"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/returns-every-envelope-in-id-order-with-exactly-six-fields" {
+        let repo = (make-repo "messages-order")
+        let root = (make-runtime "messages-order")
+        with-runtime $root {
+            let a = (do { cd $repo; bus-send --to ["x"] --from "s1" --content "first" })
+            let b = (do { cd $repo; bus-send --to ["y"] --from "s2" --content "second" })
+            let c = (do { cd $repo; bus-send --to ["z" "w"] --from "s3" --content "third" })
+
+            let got = (do { cd $repo; bus-messages })
+            assert-eq ($got | length) 3 "every envelope in the project bus is returned"
+            assert-eq ($got | get id) ([$a.id $b.id $c.id] | sort) "returned in lexical id order — ids are lexically sortable, so no sequence arithmetic is involved"
+            for row in $got {
+                assert-eq (($row | columns) | sort) (["at" "content" "from" "id" "kind" "to"] | sort) "exactly the six documented fields, nothing invented"
+            }
+
+            let first = ($got | where id == $a.id | first)
+            assert-eq $first.from "s1" ""
+            assert-eq $first.to ["x"] ""
+            assert-eq $first.kind "inbox" "kind is passed through as the bus stored it, not translated"
+            assert-eq $first.content "first" "content travels untouched"
+
+            let third = ($got | where id == $c.id | first)
+            assert-eq $third.to ["z" "w"] "a multi-recipient envelope keeps every recipient"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/content-with-newlines-json-and-a-64-KiB-payload-round-trips-byte-identical" {
+        let repo = (make-repo "messages-fidelity")
+        let root = (make-runtime "messages-fidelity")
+        with-runtime $root {
+            let blob = (filler 65000)
+            let payload = $"line one\nline two\n{\"nested\": [1, 2, 3]}\n($blob)"
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "s" --content $payload })
+
+            let got = (do { cd $repo; bus-messages })
+            let row = ($got | where id == $sent.id | first)
+            assert-eq $row.content $payload "content round-trips byte-identical, including newlines, embedded JSON text, and a large payload — no parsing, no truncation"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/a-queue-row-naming-an-envelope-not-published-yet-is-skipped-not-raised" {
+        # Fan-out order: bus-stage-message appends every recipient's queue row
+        # BEFORE the envelope is renamed into place. A row can therefore name
+        # an id `messages/` does not hold yet (or ever, if the writer crashed
+        # between the two halves) — this must not raise, and it must not stop
+        # the rest of the log from being read.
+        let repo = (make-repo "messages-half-fanout")
+        let root = (make-runtime "messages-half-fanout")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            do { cd $repo; queue-append "z" "01NEVERPUBLISHEDNEVERPUB01" }
+            let sent = (do { cd $repo; bus-send --to ["z"] --from "s" --content "the real one" })
+
+            let got = (do { cd $repo; bus-messages })
+            assert-eq ($got | length) 1 "the row naming an unpublished envelope contributes nothing and does not raise"
+            assert-eq $got.0.id $sent.id ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/an-unreadable-or-truncated-envelope-is-skipped-and-logged-not-raised" {
+        let repo = (make-repo "messages-corrupt")
+        let root = (make-runtime "messages-corrupt")
+        with-runtime $root {
+            let good = (do { cd $repo; bus-send --to ["a"] --from "s" --content "fine" })
+            let dir = (do { cd $repo; project-dir })
+            "{\"protocol\":2,\"kind\":\"in" | save -f ($dir | path join "messages" "01TRUNCATEDTRUNCATEDTRUNC")
+
+            let got = (do { cd $repo; bus-messages })
+            assert-eq ($got | length) 1 "one bad file does not blank the rest of the log"
+            assert-eq $got.0.id $good.id ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/reading-never-marks-anything-read-wait-still-returns-the-mail" {
+        let repo = (make-repo "messages-non-consuming")
+        let root = (make-runtime "messages-non-consuming")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "s" --content "hi" })
+            do { cd $repo; bus-messages } | ignore
+
+            let mail = (do { cd $repo; bus-wait --as "a" })
+            assert-eq ($mail | length) 1 "messages never costs a worker its mail: wait still sees it"
+            assert-eq $mail.0.id $sent.id ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/a-legacy-run-uid-tree-alongside-the-peer-bus-reports-each-message-once" {
+        # bus-result dual-writes a commissioned worker's completion: once into
+        # the legacy run/uid outbox (claim-slot), and once as an ordinary peer
+        # message via bus-send because a commissioner is recorded. `messages`
+        # only ever reads bus/messages/, so the legacy copy is invisible to it
+        # and the completion is reported exactly once.
+        let repo = (make-repo "messages-legacy-dedup")
+        let root = (make-runtime "messages-legacy-dedup")
+        with-runtime $root {
+            do {
+                cd $repo
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t.0"
+                    session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orch-1"
+                }
+                bus-result "impl-a" --run "r1" --result {
+                    status: "complete", summary: "done", validation: "PASS"
+                    session: "sid-a", resume: "pi --session sid-a"
+                }
+            }
+
+            let got = (do { cd $repo; bus-messages })
+            assert-eq ($got | length) 1 "the same completion appears once in the peer bus even though the legacy run/uid tree also holds a copy"
+            assert-eq $got.0.from "impl-a" ""
+            assert-eq $got.0.to ["orch-1"] ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
 ]
 
 $cases | to json

@@ -1572,6 +1572,81 @@ export def bus-prune []: nothing -> record {
     {pruned: $pruned}
 }
 
+# Every envelope in the CURRENT project's bus, oldest first.
+#
+# sp030 T5: `wait`/`bus-inbox` are deliberately scoped to one address's own
+# queue (`## plan`'s "no privileged reader"); nothing answers "what has been
+# said, project-wide". This is not a privileged reader either — it opens
+# nothing but `bus/messages/`, which is keyed by message id and not by any
+# single agent's address, so reading it names no queue but its own. `content`
+# travels untouched: the transport interprets no flow (adr0028), so this
+# returns exactly the six documented fields and invents no `subject`.
+#
+# Lists `messages/` directly rather than resolving ids through `queue/` rows.
+# Two things fall out of that for free:
+#
+#   - Fan-out stages the envelope's scratch file BEFORE any queue row is
+#     appended and renames it into place LAST (`bus-stage-message`), so the
+#     only way an in-flight fan-out could appear here is as a `.tmp.<id>`
+#     file, filtered out by name and never opened. A queue row can still name
+#     an id that never got published (the reverse ordering `bus-wait` already
+#     treats as inert) — reading `messages/` alone means this function never
+#     consults `queue/` at all, so there is nothing for it to skip; the row
+#     simply plays no part in this answer.
+#   - The legacy run/uid tree is never touched, so a project carrying both
+#     never double-counts: `bus-result`'s additional peer-message write for a
+#     commissioned worker lands in `messages/` exactly once, the same as any
+#     other `bus-send`, and the legacy outbox copy sits in a tree this
+#     function does not read.
+#
+# Fails closed per envelope, not per call: `read-box` raises on a corrupt
+# file because the one caller reading a worker's own inbox can afford to, but
+# a whole project's message log serves an operator asking "what happened",
+# and one bad envelope blanking that answer is worse than one line missing
+# from it — so a file that will not parse is skipped with its id logged to
+# stderr instead.
+export def bus-messages []: nothing -> list<record> {
+    let dir = (project-dir | path join "messages")
+    if not ($dir | path exists) { return [] }
+
+    let files = (
+        ls $dir
+        | where type == file
+        | get name
+        # `ls` already hides dotfiles (so `.tmp.<id>` scratch files never
+        # appear here), but the check is explicit rather than relied on.
+        | where {|n| not ($n | path basename | str starts-with ".tmp.") }
+        | sort-by {|n| $n | path basename }
+    )
+
+    $files
+    | each {|f|
+        let id = ($f | path basename)
+        let parsed = (try {
+            let raw = (open --raw $f)
+            let value = (try { $raw | from json } catch { null })
+            # `from json` is lenient on bare text (returns it as a string
+            # rather than raising), so the shape has to be checked explicitly
+            # — same reasoning as `read-box`.
+            if (($value | describe) | str starts-with "record") { $value } else { null }
+        } catch { null })
+        if $parsed == null {
+            print --stderr $"pi-worker messages: skipping unreadable envelope ($id) in ($dir)"
+            null
+        } else {
+            {
+                at: ($parsed | get -o created | default "")
+                id: ($parsed | get -o id | default $id)
+                from: ($parsed | get -o from | default "")
+                to: ($parsed | get -o to | default [])
+                kind: ($parsed | get -o kind | default "")
+                content: ($parsed | get -o content)
+            }
+        }
+    }
+    | compact
+}
+
 # Write a worker's outcome to its outbox.
 export def bus-result [
     uid: string
@@ -4659,6 +4734,8 @@ def usage []: nothing -> string {
         "  inspect  <uid>                        identity, last result, resume command"
         "  ps       [--socket]                   every worker, where it is and whether it lives"
         "  workers                               every worker in this project, from the bus alone"
+        "  messages [--json]                    every envelope in this project's bus, oldest"
+        "                                       first — a table by default, JSON with --json"
         "  resume   <uid> --feedback             send back to the ORIGINAL session"
         "  accept   <uid> --repo                 close the window, remove the worktree"
         "  respawn  <uid> --repo                 bring a reclaimed worker back: a NEW uid"
@@ -5067,6 +5144,22 @@ def "main workers" [] {
         ls $root | where type == dir | get name | each {|d| $d | path basename }
     } else { [] })
     ($runs | each {|r| run-workers $r } | flatten) | to json | print
+}
+
+# A table by default, JSON on request — same split as `timeline` and for the
+# same reason: every other observation verb answers a machine, but a person
+# asking "what has been said" wants columns, not `content` rendered as a wall
+# of escaped JSON. The extension asks for --json (VERB_FIXED_FLAGS); a person
+# at a prompt gets a table.
+def "main messages" [--json] {
+    let events = (bus-messages)
+    if $json {
+        $events | to json | print
+    } else if ($events | is-empty) {
+        print "no messages recorded for this project"
+    } else {
+        $events | select at from to kind content | print
+    }
 }
 
 def "main resume" [uid: string, --feedback: string = "", --socket: string = ""] {

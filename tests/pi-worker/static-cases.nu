@@ -379,6 +379,35 @@ let cases = [
         )
         assert-eq $tool_verbs $expected_tool_verbs "pi_worker's INITIATOR_VERBS must match the CLI's verb set exactly (minus result/settled/reclaim/doctor)"
     })
+
+    # ------------------------------------------- sp030 T5: `messages --json`
+    (run-case "static/messages-is-a-fixed-json-flag-like-timeline" {
+        # dotfiles-f9kw's lesson (see the doc comment on VERB_FIXED_FLAGS):
+        # --json is not a caller-supplied parameter, it is how the extension
+        # talks to the CLI, so it belongs in VERB_FIXED_FLAGS and NOT in
+        # VERB_FLAGS. `messages` must follow the same shape `timeline` does —
+        # this is a structural check, not a string search, so it fails if
+        # someone "fixes" the drift test instead of the flag placement.
+        let extension_text = (open --raw $extension)
+
+        let flags_start = ($extension_text | str index-of "export const VERB_FLAGS")
+        assert-true ($flags_start >= 0) "pi.ts must declare VERB_FLAGS"
+        let flags_end = ($extension_text | str index-of --range $flags_start.. "} as const satisfies")
+        let flags_block = ($extension_text | str substring $flags_start..$flags_end)
+        let messages_line_start = ($flags_block | str index-of "messages:")
+        assert-true ($messages_line_start >= 0) "VERB_FLAGS must declare an entry for messages"
+        let messages_line_end = ($flags_block | str index-of --range $messages_line_start.. "\n")
+        let messages_line = ($flags_block | str substring $messages_line_start..$messages_line_end)
+        assert-true ($messages_line | str contains "[]") "messages takes no caller-supplied flags, same as timeline"
+        assert-true (not ($messages_line | str contains "json")) "json must never appear in VERB_FLAGS for messages — it is a fixed flag, not a parameter"
+
+        let fixed_start = ($extension_text | str index-of "export const VERB_FIXED_FLAGS")
+        assert-true ($fixed_start >= 0) "pi.ts must declare VERB_FIXED_FLAGS"
+        let fixed_end = ($extension_text | str index-of --range $fixed_start.. "\n};")
+        let fixed_block = ($extension_text | str substring $fixed_start..$fixed_end)
+        assert-true ($fixed_block | str contains 'timeline: ["json"]') "sanity: timeline is still the precedent this follows"
+        assert-true ($fixed_block | str contains 'messages: ["json"]') "messages must fix --json exactly like timeline"
+    })
     ]
 
 $cases | to json
