@@ -919,6 +919,134 @@ def release-address-at [slug: string, uid: string]: nothing -> nothing {
     if ($dir | path exists) { rm -rf $dir }
 }
 
+# ------------------------------------------------------ presence (sp030 T3)
+#
+# The worker's own evidence about its own state ([[adr0017]]: only a
+# component's own evidence about itself may license anything, and here it
+# licenses nothing at all — presence is read, never acted on). Published
+# under the SAME directory `claim-address` mints, rather than a fresh
+# `agents/<run>/<uid>/` bucket of its own: `release-address`'s `rm -rf` on
+# that directory is then ALSO the presence cleanup, so a released uid can
+# never carry a stale presence file nobody remembers to prune.
+#
+# Exactly because presence lives there, `presence-write` must never CREATE
+# that directory — doing so would let a call for a released or never-claimed
+# uid conjure the very claim it is supposed to find already made, resurrecting
+# an address nothing else has taken. It refuses instead, the same way any
+# other verb here refuses to act on an address it does not recognise.
+def presence-dir [slug: string, uid: string]: nothing -> string {
+    address-dir $slug | path join $uid
+}
+
+def presence-path [slug: string, uid: string]: nothing -> string {
+    presence-dir $slug $uid | path join "presence"
+}
+
+# How stale a reported state may be before `main workers` stops trusting it
+# and reports `unknown` in its place.
+#
+# There is no periodic heartbeat here (sp030's `## known_limitations`): the
+# extension (Task 4) writes only on a lifecycle TRANSITION, so a worker
+# sitting in one state — mid-turn, streaming a long tool call — is silent by
+# design for as long as that turn takes, and that silence must not itself
+# read as staleness. 90s is chosen against that shape: comfortably longer
+# than the gap between two ordinary transitions in an active turn, while
+# still short enough to flag a worker whose extension crashed or whose window
+# died before `session_shutdown` ever fired. adr0017's own warning applies
+# either way this number is missed: a beat that never comes and a beat that
+# came 91s ago are deliberately indistinguishable from here — both read
+# `unknown`, and `unknown` licenses nothing. Task 4 records the measured
+# per-transition cost; if that cost forces debouncing, this bound is the
+# first knob to revisit, not the debounce interval.
+const PRESENCE_FRESH_SECS = 90
+
+# The raw stored record, or a sentinel — never a raise. Three outcomes, and
+# they are deliberately NOT the same shape: `null` means no worker has ever
+# published here (an ordinary, common case — most roles are never spawned),
+# while the literal string `"unknown"` means a file exists but could not be
+# trusted (truncated write, foreign JSON shape, missing fields). Collapsing
+# both to `null` would make `main workers` unable to tell "empty" from
+# "unknown" apart, which is exactly the distinction its `presence` column
+# has to draw.
+def presence-read-at [slug: string, uid: string]: nothing -> any {
+    let path = (presence-path $slug $uid)
+    if not ($path | path exists) { return null }
+    let raw = (open --raw $path)
+    let parsed = (try { $raw | from json } catch { null })
+    if $parsed == null { return "unknown" }
+    # `from json` is lenient the same way `read-box` already documents: given
+    # bare or partial text it can return a plain string instead of raising, so
+    # the shape has to be checked explicitly rather than trusted.
+    if not (($parsed | describe) | str starts-with "record") { return "unknown" }
+    if not ("state" in ($parsed | columns)) or not ("at" in ($parsed | columns)) {
+        return "unknown"
+    }
+    {state: $parsed.state, at: $parsed.at}
+}
+
+# `presence-write <uid> <state>` — the module function Task 4's extension
+# shells out to exactly the way it already calls `queue-mark-read`: one
+# `nu -c` per transition, run from inside the worker's own worktree so
+# `--repo`'s cwd-derived default resolves the same project every other verb
+# does.
+#
+# Scratch name then rename, mode `0600` before the link is visible — the same
+# discipline `write-marker`/`record-agent-slug` already use for a single
+# mutable file, not `claim-slot`'s exclusive `link(2)`: presence has exactly
+# one writer (the worker about itself) and the latest transition is always
+# the one that should win, so there is nothing here to arbitrate between.
+# Concurrent writes from that one writer still resolve cleanly — a reader
+# either opens the file before or after the `mv`, and `mv` on the same
+# filesystem is atomic, so it never observes a half-written record.
+export def presence-write [uid: string, state: string, --repo: string = ""]: nothing -> nothing {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    let dir = (presence-dir $slug $uid)
+    if not ($dir | path exists) {
+        error make {msg: $"($uid) has no claimed address in this project: presence cannot be written for a worker that was never spawned, or one already released. Nothing was written"}
+    }
+    let scratch = ($dir | path join $".tmp.(random chars --length 10)")
+    {state: $state, at: (now-stamp)} | to json | save -f $scratch
+    chmod 600 $scratch
+    mv -f $scratch (presence-path $slug $uid)
+}
+
+# `presence-read <uid>` — the record `{state, at}`, or `null` when the worker
+# has never published (or was released before it did). Never raises: an
+# unspawned or already-released uid is the ordinary case, not a failure.
+export def presence-read [uid: string, --repo: string = ""]: nothing -> any {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    presence-read-at (resolve-project-slug $base) $uid
+}
+
+# Where a worker's presence record lives on disk. Exported the same way
+# `project-dir` is, purely so a case can locate the physical file to assert
+# its mode or plant a corrupt one directly — it is never how `presence-write`/
+# `presence-read` find their own path, which stays internal to this section.
+export def presence-file [uid: string, --repo: string = ""]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    presence-path (resolve-project-slug $base) $uid
+}
+
+# The value `main workers` renders in its `presence` column: the reported
+# state when the reading is within `PRESENCE_FRESH_SECS`, `unknown` when it is
+# older (a negative age — the clock moved backward — counts as older, never
+# as fresh forever) or unparseable, empty when no presence file exists at
+# all. `unknown` is returned as plain observational data; nothing here or in
+# any verb branches on it to decide a worker is alive, stopped or reapable
+# ([[adr0017]]).
+def presence-column [slug: string, uid: string]: nothing -> string {
+    let raw = (presence-read-at $slug $uid)
+    if $raw == null {
+        ""
+    } else if ($raw | describe) == "string" {
+        "unknown"
+    } else {
+        let age = (try { ((date now) - ($raw.at | into datetime)) / 1sec } catch { -1.0 })
+        if $age < 0 { "unknown" } else if $age > $PRESENCE_FRESH_SECS { "unknown" } else { $raw.state }
+    }
+}
+
 # Write `envelope` into `dir` at the next free sequence.
 #
 # The scratch file is created with the final mode BEFORE it is linked into
@@ -3751,9 +3879,11 @@ export def resume-hint [identity: record, --sessions-dir: string = ""]: nothing 
 # This is what makes an initiator restartable: no part of a run's shape lives
 # in the orchestrator's memory, so a fresh process can list the workers, their
 # states, their undelivered results and their resume commands.
-export def run-workers [run: string]: nothing -> list<record> {
+export def run-workers [run: string, --repo: string = ""]: nothing -> list<record> {
     let dir = (bus-root | path join $run)
     if not ($dir | path exists) { return [] }
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
     ls $dir | where type == dir | get name | sort | each {|w|
         let uid = ($w | path basename)
         let status = (bus-status $uid --run $run)
@@ -3773,6 +3903,9 @@ export def run-workers [run: string]: nothing -> list<record> {
             task: (if $identity == null { "" } else { $identity | get -o task | default "" })
             window: (if $identity == null { "" } else { $identity.window })
             resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
+            # sp030 T3: the worker's own reported state, `unknown` past its
+            # freshness bound (or unparseable), empty when it never published.
+            presence: (presence-column $slug $uid)
         }
     }
 }
