@@ -112,6 +112,58 @@ func TestForceRefresh_R(t *testing.T) {
 	}
 }
 
+// TestDetailVisible_DefaultsTrue pins sp031 T5's "present by default"
+// success criterion.
+func TestDetailVisible_DefaultsTrue(t *testing.T) {
+	m := NewModel()
+	if !m.DetailVisible {
+		t.Fatalf("expected DetailVisible to default true")
+	}
+}
+
+// TestDetailVisible_ToggleKeyFlipsIt asserts `d` (lower and upper case) is
+// the toggle sp031 T5 requires, and that it never falls through to any
+// other key's behaviour (quit, refresh, movement).
+func TestDetailVisible_ToggleKeyFlipsIt(t *testing.T) {
+	for _, k := range []Key{{Rune: 'd'}, {Rune: 'D'}} {
+		m := NewModel()
+		out := m.HandleKey(k)
+		if out.Quit || out.ForceRefresh {
+			t.Fatalf("key %+v must only toggle the detail pane, got Outcome %+v", k, out)
+		}
+		if m.DetailVisible {
+			t.Fatalf("key %+v: expected DetailVisible false after first toggle", k)
+		}
+		m.HandleKey(k)
+		if !m.DetailVisible {
+			t.Fatalf("key %+v: expected DetailVisible true after second toggle", k)
+		}
+	}
+}
+
+// TestDetailVisible_ToggleDoesNotAffectSelection is the edge case: toggling
+// the pane off while the cursor is in the message pane, then back on, must
+// still select the same message — DetailVisible and MessagesCursor are
+// independent fields, so this should hold trivially, but it is the
+// behaviour a reviewer needs pinned rather than assumed.
+func TestDetailVisible_ToggleDoesNotAffectSelection(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneMessages
+	m.SetMessagesLen(5)
+	m.HandleKey(Key{Rune: 'j'})
+	m.HandleKey(Key{Rune: 'j'})
+	if m.MessagesCursor != 2 {
+		t.Fatalf("setup: expected cursor at 2, got %d", m.MessagesCursor)
+	}
+
+	m.HandleKey(Key{Rune: 'd'}) // off
+	m.HandleKey(Key{Rune: 'd'}) // on
+
+	if m.MessagesCursor != 2 {
+		t.Fatalf("toggling detail pane must not move selection: got cursor %d, want 2", m.MessagesCursor)
+	}
+}
+
 // TestFilter_EmptyCommittedFilterDiffersFromNoFilter pins the subtle
 // success criterion: typing `/` then confirming with nothing typed must
 // still flip Filter.Set, distinct from a Model that never entered filter
@@ -166,6 +218,28 @@ func TestFilter_QWhileEditingIsTextNotQuit(t *testing.T) {
 	m.HandleKey(Key{Special: KeyEnter})
 	if m.Filter.Query != "q" {
 		t.Fatalf("expected 'q' captured into the filter text, got %q", m.Filter.Query)
+	}
+}
+
+// TestFilter_DWhileEditingIsTextNotDetailToggle is
+// TestFilter_QWhileEditingIsTextNotQuit's twin for the detail-pane toggle
+// added by sp031 T5: 'd' joined the same switch that 'q'/'r'/'j'/'k' live
+// in, so typing a filter containing 'd' must stay text and must not flip
+// DetailVisible behind the user's back.
+func TestFilter_DWhileEditingIsTextNotDetailToggle(t *testing.T) {
+	m := NewModel()
+	before := m.DetailVisible
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Rune: 'd'})
+	if m.DetailVisible != before {
+		t.Fatalf("'d' while editing a filter must not toggle the detail pane (was %v, now %v)", before, m.DetailVisible)
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+	if m.Filter.Query != "d" {
+		t.Fatalf("expected 'd' captured into the filter text, got %q", m.Filter.Query)
+	}
+	if m.DetailVisible != before {
+		t.Fatalf("committing the filter must not toggle the detail pane either (was %v, now %v)", before, m.DetailVisible)
 	}
 }
 

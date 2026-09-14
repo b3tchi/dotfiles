@@ -56,6 +56,28 @@ const (
 	// is a local file read, cheap enough to re-read in full every tick — so
 	// there is only one clock here, not two (sp030 T9 design note).
 	messagesInterval = 2 * time.Second
+
+	// detailCapRows and detailCapDivisor bound the detail pane's share of the
+	// frame (sp031 T5): at most height/detailCapDivisor lines, or
+	// detailCapRows, whichever is smaller — the cap TestFitPanes_
+	// DetailCapNeverExceedsThirdOrEight pins so an 80-row terminal never
+	// gives the pane half the screen.
+	detailCapRows    = 8
+	detailCapDivisor = 3
+
+	// headerLines is how many lines Render/RenderLog always spend on a
+	// pane's own header (the status line plus the column header row),
+	// regardless of how many data rows follow. It converts a pane's total
+	// rendered line budget into the data-row viewport
+	// SetRosterViewport/SetMessagesViewport expect.
+	headerLines = 2
+
+	// minPaneRows is the floor, in total RENDERED lines (header included) per
+	// pane, below which roster or messages is considered squeezed into
+	// uselessness. detailCap checks roster+messages' combined line budget
+	// against minPaneRows*2 and hides the detail pane rather than push
+	// either of them under it.
+	minPaneRows = 2
 )
 
 func main() {
@@ -205,61 +227,208 @@ func runInteractive() {
 	}
 }
 
-// buildFrame stacks the roster pane over the message pane, separated by one
-// blank line, into a single list of terminal lines. Neither pane's Render
-// function talks to the other; this is the only place that joins them, and
-// it joins rendered TEXT, not data — the two samples never touch. model's
-// committed filter and each pane's scroll offset are applied here, to a
-// COPY of the last good sample — Monitor.Last() itself is never mutated, so
-// a later change to the filter or scroll can still see every row the
-// sampler ever captured.
-// height is the terminal's row count, or 0 for "do not clamp" — which is what
-// --once passes, because a pipe has no height and a consumer asked for the
-// whole frame.
+// buildFrame is runInteractive's and runOnce's entry point: it resolves the
+// two monitors' last samples and staleness, then hands off to renderFrame,
+// which does the actual composition and is what tests drive directly (a
+// *source.Monitor's last sample is unexported and only settable by execing
+// a real or stubbed binary — renderFrame takes samples directly so a test
+// can hand-build one).
 func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int) []string {
-	roster := render.Render(filteredCensusSample(model, censusMonitor.Last()), censusMonitor.Stale(), now, width)
-	log := render.RenderLog(filteredMessageSample(model, msgMonitor.Last()), msgMonitor.Stale(), now, width)
+	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height)
+}
+
+// renderFrame stacks the roster pane, the message pane and (when it fits)
+// the detail pane, separated by blank lines, into a single list of terminal
+// lines. Neither render function talks to another; this is the only place
+// that joins them, and it joins rendered TEXT, not data. model's committed
+// filter, each pane's cursor-derived scroll, and the detail toggle are all
+// applied here, to a COPY of the last good sample — the sample itself is
+// never mutated, so a later change to the filter or scroll can still see
+// every row the sampler ever captured.
+//
+// height is the terminal's row count, or 0 for "do not clamp, no detail, no
+// toggle" — which is what --once passes (runOnce/buildFrame's height==0
+// path): a pipe has no cursor and no height, so a consumer asked for the
+// whole frame exactly as it rendered before this task.
+func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int) []string {
+	// Order matters, and is the whole point of this arrangement (sp031 T1's
+	// binding criterion: a resized terminal cannot leave the cursor
+	// off-screen). Filter FIRST — that fixes each pane's row count and, via
+	// SetRosterLen/SetMessagesLen, clamps the cursor. Derive THIS frame's
+	// pane budgets from those counts and THIS frame's height, and report the
+	// resulting viewports to the model. Only THEN slice by scroll and
+	// render: the scroll the slice uses is now the one this height implies,
+	// so a shrunk terminal re-fits within the draw that observed it rather
+	// than one draw later. Deriving the budgets before rendering is what
+	// breaks the apparent circularity (slicing needs pane sizes, pane sizes
+	// looked like they needed rendered output): paneBudgets needs only LINE
+	// COUNTS, and a pane's line count is a pure function of its row count.
+	rosterRows := filterRosterRows(model, censusSample)
+	msgRows := filterMessageRows(model, msgSample)
+	rosterLines := paneLines(censusSample != nil, len(rosterRows))
+	logLines := paneLines(msgSample != nil, len(msgRows))
+
 	if height > 0 {
-		roster, log = fitPanes(roster, log, height)
+		rosterBudget, logBudget, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible)
+		model.SetRosterViewport(viewportRows(min(rosterLines, rosterBudget)))
+		model.SetMessagesViewport(viewportRows(min(logLines, logBudget)))
 	}
+
+	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width)
+	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width)
+
+	// fitPanes re-derives the same budgets from the rendered line counts and
+	// does the actual trimming. The two derivations agree: a pane whose
+	// rendered length differs from rosterLines/logLines is one that scrolled,
+	// and a pane only scrolls when it is at or over its budget — so the
+	// "is this pane shorter than its share?" test lands the same way either
+	// way, and the surplus is redistributed identically.
+	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
 
 	var lines []string
 	lines = append(lines, roster...)
 	lines = append(lines, "")
 	lines = append(lines, log...)
+
+	if detailShown {
+		lines = append(lines, "")
+		lines = append(lines, render.RenderDetail(selectedMessage(model, msgSample), width, detailBudget)...)
+	}
 	return lines
 }
 
-// fitPanes trims two stacked panes so the whole frame fits in height rows.
+// viewportRows converts a pane's total rendered line count (its fixed
+// headerLines plus data rows, or the "(no agents)"/"(no messages)"
+// placeholder) into the data-row viewport tui.Model's SetRosterViewport /
+// SetMessagesViewport expect. Never negative, even for a pane clamped down
+// to just its header.
+func viewportRows(paneLines int) int {
+	n := paneLines - headerLines
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// selectedMessage returns the message under the message pane's cursor, from
+// the full FILTERED list — not the slice already scrolled into RenderLog's
+// view — so the detail pane tracks selection regardless of what happens to
+// be scrolled on screen. nil means nothing is selected: an empty log, or (as
+// a guard, not expected given SetMessagesLen's same-pass clamp) a cursor
+// past the end; either way RenderDetail's own nil case is the placeholder.
+func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Message {
+	if sample == nil {
+		return nil
+	}
+	msgs := model.FilterMessages(sample.Messages)
+	if model.MessagesCursor < 0 || model.MessagesCursor >= len(msgs) {
+		return nil
+	}
+	return &msgs[model.MessagesCursor]
+}
+
+// fitPanes trims three stacked panes so the whole frame fits in height rows:
+// roster, messages, and — when there is room and the toggle allows it — the
+// detail pane.
 //
-// dotfiles-9x2m: without this the frame is however many lines the data
-// happens to produce, writeFrame prints all of them, and a frame taller than
-// the terminal makes the TERMINAL scroll — carrying the roster off the top
-// where no amount of in-pane scrolling can bring it back. The pane scroll
-// offsets were being applied correctly and were simply invisible.
+// dotfiles-9x2m / dotfiles-m0km: without this the frame is however many
+// lines the data happens to produce, writeFrame prints all of them, and a
+// frame taller than the terminal makes the TERMINAL scroll — carrying the
+// roster off the top where no amount of in-pane scrolling can bring it
+// back. The pane scroll offsets were being applied correctly and were
+// simply invisible. A third region makes that failure mode cheaper to
+// reintroduce, so the invariant is re-asserted here rather than assumed.
 //
-// Each pane gets half the rows, minus the blank separator; whatever a short
-// pane does not use goes to the other, so a machine with three agents and a
-// busy bus still fills the screen with messages rather than padding. Trimming
-// takes from the BOTTOM, which keeps each pane's header line — a pane whose
-// header scrolled away is unreadable, and the header is what carries the
-// staleness indicator.
-func fitPanes(roster, log []string, height int) ([]string, []string) {
-	avail := height - 1 // the blank line between the panes
+// height<=0 (the --once contract) returns roster and log untouched and
+// detail always hidden — no clamping at all, exactly as before this task.
+//
+// The detail pane is capped independently at roughly a third of height or
+// detailCapRows, whichever is smaller, and hides itself (falling back to
+// the original two-way split) when detailVisible is false or when giving it
+// that budget would leave less than minPaneRows*2 lines for roster+messages
+// combined — the "squeezed into uselessness" floor the edge_cases call out.
+// Below that, roster and messages redistribute surplus exactly as they did
+// before detail existed: each gets half the remaining rows, minus the blank
+// separator(s); whatever a short pane does not use goes to the other, so a
+// machine with three agents and a busy bus still fills the screen with
+// messages rather than padding. Trimming takes from the BOTTOM, which keeps
+// each pane's header line — a pane whose header scrolled away is
+// unreadable, and the header is what carries the staleness indicator.
+func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, logOut []string, detailBudget int, detailShown bool) {
+	rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(len(roster), len(log), height, detailVisible)
+	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown
+}
+
+// paneBudgets is fitPanes' arithmetic with the []string arguments replaced
+// by their lengths, so renderFrame can ask for this frame's budgets BEFORE
+// anything is rendered — the ordering sp031 T1's criterion needs (see
+// renderFrame). A budget of -1 means "do not clamp" (the height<=0 --once
+// contract); clamp treats any negative n that way.
+func paneBudgets(rosterLines, logLines, height int, detailVisible bool) (rosterBudget, logBudget, detailBudget int, detailShown bool) {
+	if height <= 0 {
+		return -1, -1, 0, false
+	}
+
+	detailBudget, detailShown = detailCap(height)
+	if !detailVisible {
+		detailBudget, detailShown = 0, false
+	}
+
+	seps := 1 // the blank line between roster and messages
+	if detailShown {
+		seps = 2 // plus the blank line between messages and detail
+	}
+
+	avail := height - seps - detailBudget
 	if avail < 2 {
 		// Degenerate terminal: one row each is the most that is still two
 		// panes. Below that there is nothing useful to show.
-		return clamp(roster, 1), clamp(log, 1)
+		return 1, 1, detailBudget, detailShown
 	}
 
-	rosterBudget := avail / 2
-	logBudget := avail - rosterBudget
-	if len(roster) < rosterBudget {
-		logBudget += rosterBudget - len(roster)
-	} else if len(log) < logBudget {
-		rosterBudget += logBudget - len(log)
+	rosterBudget = avail / 2
+	logBudget = avail - rosterBudget
+	if rosterLines < rosterBudget {
+		logBudget += rosterBudget - rosterLines
+	} else if logLines < logBudget {
+		rosterBudget += logBudget - logLines
 	}
-	return clamp(roster, rosterBudget), clamp(log, logBudget)
+	return rosterBudget, logBudget, detailBudget, detailShown
+}
+
+// paneLines predicts how many lines render.Render/render.RenderLog will
+// produce for a pane holding rows data rows, without rendering it: one line
+// for the "waiting for first sample" state, headerLines+1 for the empty
+// placeholder, headerLines+rows otherwise. It is the inverse of viewportRows
+// and the reason the budgets can be computed before the render.
+func paneLines(haveSample bool, rows int) int {
+	if !haveSample {
+		return 1
+	}
+	if rows == 0 {
+		return headerLines + 1 // the "(no agents)"/"(no messages)" placeholder
+	}
+	return headerLines + rows
+}
+
+// detailCap decides the detail pane's line budget (header included) for a
+// given terminal height: at most height/detailCapDivisor, or detailCapRows,
+// whichever is smaller. It hides the pane (0, false) when that budget would
+// leave roster+messages less than minPaneRows*2 combined lines — the point
+// past which a third region stops being a convenience and starts being the
+// reason the other two are unreadable.
+func detailCap(height int) (budget int, shown bool) {
+	budget = height / detailCapDivisor
+	if budget > detailCapRows {
+		budget = detailCapRows
+	}
+	if budget < 1 {
+		return 0, false
+	}
+	if height-budget-2 < minPaneRows*2 {
+		return 0, false
+	}
+	return budget, true
 }
 
 func clamp(lines []string, n int) []string {
@@ -269,29 +438,48 @@ func clamp(lines []string, n int) []string {
 	return lines[:n]
 }
 
-// filteredCensusSample applies model's committed filter and the roster
-// pane's own scroll offset (dropping that many rows from the top — a
-// scrolled-past row is simply not in the slice render.Render receives) to
-// sample, without mutating it. It calls SetRosterLen so the NEXT keystroke's
-// scroll bound reflects the CURRENT (post-filter) row count — a filter that
-// just shrank the roster must not leave scroll pointing past its new end.
-func filteredCensusSample(model *tui.Model, sample *source.Sample) *source.Sample {
+// filterRosterRows applies model's committed filter to sample's rows without
+// mutating sample, and calls SetRosterLen so scroll is bounded by the
+// CURRENT (post-filter) row count — a filter that just shrank the roster
+// must not leave scroll pointing past its new end. It deliberately does NOT
+// apply scroll: scrolling is scrolledCensusSample's job, and happens only
+// after this frame's viewport has been set (see renderFrame).
+func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 	if sample == nil {
 		return nil
 	}
 	rows := model.FilterRoster(sample.Rows)
 	model.SetRosterLen(len(rows))
-	return &source.Sample{Rows: rows[model.RosterScroll:], At: sample.At}
+	return rows
 }
 
-// filteredMessageSample is filteredCensusSample's twin for the message pane.
-func filteredMessageSample(model *tui.Model, sample *source.MessageSample) *source.MessageSample {
+// filterMessageRows is filterRosterRows' twin for the message pane.
+func filterMessageRows(model *tui.Model, sample *source.MessageSample) []source.Message {
 	if sample == nil {
 		return nil
 	}
 	msgs := model.FilterMessages(sample.Messages)
 	model.SetMessagesLen(len(msgs))
-	return &source.MessageSample{Messages: msgs[model.MessagesScroll:], At: sample.At}
+	return msgs
+}
+
+// scrolledCensusSample applies the roster pane's scroll offset (dropping
+// that many rows from the top — a scrolled-past row is simply not in the
+// slice render.Render receives) to already-filtered rows, returning a fresh
+// sample so the original is never mutated.
+func scrolledCensusSample(sample *source.Sample, rows []source.Row, scroll int) *source.Sample {
+	if sample == nil {
+		return nil
+	}
+	return &source.Sample{Rows: rows[scroll:], At: sample.At}
+}
+
+// scrolledMessageSample is scrolledCensusSample's twin for the message pane.
+func scrolledMessageSample(sample *source.MessageSample, msgs []source.Message, scroll int) *source.MessageSample {
+	if sample == nil {
+		return nil
+	}
+	return &source.MessageSample{Messages: msgs[scroll:], At: sample.At}
 }
 
 // readKeys feeds raw stdin bytes to ch, closing it on EOF/error (stdin

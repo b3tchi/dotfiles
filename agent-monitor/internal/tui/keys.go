@@ -82,12 +82,19 @@ type Model struct {
 	MessagesScroll   int
 	MessagesLen      int
 	MessagesViewport int
+
+	// DetailVisible is the detail pane's on/off state (sp031 T5): present by
+	// default, toggled by `d`. It is independent of MessagesCursor — hiding
+	// the pane never touches selection, so toggling it off and back on shows
+	// the same message (see TestDetailVisible_ToggleDoesNotAffectSelection).
+	DetailVisible bool
 }
 
 // NewModel builds a Model with no filter set, roster focused, both panes
-// empty (length 0, scroll 0) until the first sample sets a real length.
+// empty (length 0, scroll 0) until the first sample sets a real length, and
+// the detail pane visible (sp031 T5: present by default).
 func NewModel() *Model {
-	return &Model{Focus: PaneRoster}
+	return &Model{Focus: PaneRoster, DetailVisible: true}
 }
 
 // SetRosterLen records the roster's current row count (after filtering,
@@ -264,10 +271,11 @@ type Outcome struct {
 
 // HandleKey drives ft016's key surface: `q`/Ctrl-C quit, `r` forces a
 // refresh, `tab` moves focus, `/` opens filter editing, arrows/jk move the
-// focused pane's cursor (the view follows — see moveCursor/deriveScroll).
-// While Editing is true, every key belongs to the filter draft instead
-// (Enter commits, Backspace edits, any other rune appends) — see the
-// Editing field doc for why this must come first.
+// focused pane's cursor (the view follows — see moveCursor/deriveScroll),
+// `d` toggles the detail pane (sp031 T5). While Editing is true, every key
+// belongs to the filter draft instead (Enter commits, Backspace edits, any
+// other rune appends) — see the Editing field doc for why this must come
+// first.
 func (m *Model) HandleKey(k Key) Outcome {
 	if m.Editing {
 		return m.handleEditingKey(k)
@@ -278,6 +286,8 @@ func (m *Model) HandleKey(k Key) Outcome {
 		return Outcome{Quit: true}
 	case k.Rune == 'r' || k.Rune == 'R':
 		return Outcome{ForceRefresh: true}
+	case k.Rune == 'd' || k.Rune == 'D':
+		m.DetailVisible = !m.DetailVisible
 	case k.Special == KeyTab:
 		m.toggleFocus()
 	case k.Rune == '/':
