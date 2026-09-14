@@ -48,7 +48,18 @@ type Filter struct {
 
 // Model is agent-monitor's key-driven state: which pane has focus, the
 // committed filter (if any), an in-progress filter draft while `/` editing
-// is open, and each pane's own scroll offset bounded to its own length.
+// is open, and each pane's own cursor plus the scroll offset DERIVED from
+// it.
+//
+// Selection lives in the *Cursor fields — the row j/k and the arrows
+// actually move. *Scroll is no longer moved directly; it is recomputed
+// every time the cursor, the list length or the viewport changes, so it
+// always keeps the cursor inside [scroll, scroll+viewport-1]. *Viewport is
+// how many rows of the pane are visible on screen this frame, reported by
+// the caller via SetRosterViewport/SetMessagesViewport — without it (the
+// zero value) there is no window to keep the cursor inside, so scroll
+// simply tracks the cursor 1:1, which is what keeps every caller that only
+// ever set *Len (never *Viewport) working exactly as before this refactor.
 type Model struct {
 	Focus  Pane
 	Filter Filter
@@ -62,11 +73,15 @@ type Model struct {
 	Editing bool
 	draft   string
 
-	RosterScroll int
-	RosterLen    int
+	RosterCursor   int
+	RosterScroll   int
+	RosterLen      int
+	RosterViewport int
 
-	MessagesScroll int
-	MessagesLen    int
+	MessagesCursor   int
+	MessagesScroll   int
+	MessagesLen      int
+	MessagesViewport int
 }
 
 // NewModel builds a Model with no filter set, roster focused, both panes
@@ -76,18 +91,36 @@ func NewModel() *Model {
 }
 
 // SetRosterLen records the roster's current row count (after filtering,
-// before scrolling — see main.go's filteredCensusSample) and clamps
-// RosterScroll into [0, len-1] (or 0 when len is 0), so a filter that
-// shrinks the row count can never leave scroll pointing past the new end.
+// before scrolling — see main.go's filteredCensusSample), clamps
+// RosterCursor into [0, len-1] (or 0 when len is 0) IN THE SAME PASS, and
+// recomputes RosterScroll from the clamped cursor — so a filter that
+// shrinks the row count can never leave the cursor (or its derived scroll)
+// pointing past the new end, even before the next keystroke.
 func (m *Model) SetRosterLen(n int) {
 	m.RosterLen = n
-	m.RosterScroll = clamp(m.RosterScroll, 0, maxScroll(n))
+	m.RosterCursor = clamp(m.RosterCursor, 0, maxScroll(n))
+	m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 }
 
 // SetMessagesLen is SetRosterLen's twin for the message pane.
 func (m *Model) SetMessagesLen(n int) {
 	m.MessagesLen = n
-	m.MessagesScroll = clamp(m.MessagesScroll, 0, maxScroll(n))
+	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxScroll(n))
+	m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+}
+
+// SetRosterViewport records how many rows of the roster pane are visible
+// this frame (0 if the caller does not track it) and recomputes
+// RosterScroll so a terminal resize can never leave the cursor off-screen.
+func (m *Model) SetRosterViewport(n int) {
+	m.RosterViewport = n
+	m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
+}
+
+// SetMessagesViewport is SetRosterViewport's twin for the message pane.
+func (m *Model) SetMessagesViewport(n int) {
+	m.MessagesViewport = n
+	m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 }
 
 func maxScroll(n int) int {
@@ -107,12 +140,48 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-func (m *Model) scroll(delta int) {
+// deriveScroll computes the scroll offset that keeps cursor visible inside
+// a viewport of the given height over a list of the given length, using
+// the previous scroll as the starting point so the window moves the
+// minimum amount needed rather than re-centering on every keystroke.
+//
+// viewport <= 0 means the caller has never reported a real viewport height
+// (or the pane has pathologically collapsed to nothing) — there is no
+// window to keep the cursor inside, so scroll degrades to tracking the
+// cursor directly. This is deliberate, not just a safe default: it is what
+// keeps every caller written before this refactor (none of which call
+// SetRosterViewport/SetMessagesViewport) working exactly as before, since
+// the old `scroll` field WAS the cursor in every observable way.
+func deriveScroll(prevScroll, cursor, length, viewport int) int {
+	if viewport <= 0 {
+		return cursor
+	}
+	maxTop := length - viewport
+	if maxTop <= 0 {
+		// The whole list fits inside the viewport — nothing to scroll.
+		return 0
+	}
+	scroll := prevScroll
+	if cursor < scroll {
+		scroll = cursor
+	} else if cursor > scroll+viewport-1 {
+		scroll = cursor - viewport + 1
+	}
+	return clamp(scroll, 0, maxTop)
+}
+
+// moveCursor shifts the focused pane's cursor by delta, clamped to the
+// pane's current bounds, then recomputes that pane's derived scroll so the
+// new cursor position stays visible. An empty list (len 0) clamps the
+// cursor to 0 and is a valid no-op, never a negative index.
+func (m *Model) moveCursor(delta int) {
 	switch m.Focus {
 	case PaneRoster:
-		m.RosterScroll = clamp(m.RosterScroll+delta, 0, maxScroll(m.RosterLen))
+		m.RosterCursor = clamp(m.RosterCursor+delta, 0, maxScroll(m.RosterLen))
+		m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 	case PaneMessages:
-		m.MessagesScroll = clamp(m.MessagesScroll+delta, 0, maxScroll(m.MessagesLen))
+		m.MessagesCursor = clamp(m.MessagesCursor+delta, 0, maxScroll(m.MessagesLen))
+		m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 	}
 }
 
@@ -194,10 +263,11 @@ type Outcome struct {
 }
 
 // HandleKey drives ft016's key surface: `q`/Ctrl-C quit, `r` forces a
-// refresh, `tab` moves focus, `/` opens filter editing, arrows/jk scroll
-// the focused pane. While Editing is true, every key belongs to the filter
-// draft instead (Enter commits, Backspace edits, any other rune appends) —
-// see the Editing field doc for why this must come first.
+// refresh, `tab` moves focus, `/` opens filter editing, arrows/jk move the
+// focused pane's cursor (the view follows — see moveCursor/deriveScroll).
+// While Editing is true, every key belongs to the filter draft instead
+// (Enter commits, Backspace edits, any other rune appends) — see the
+// Editing field doc for why this must come first.
 func (m *Model) HandleKey(k Key) Outcome {
 	if m.Editing {
 		return m.handleEditingKey(k)
@@ -214,9 +284,9 @@ func (m *Model) HandleKey(k Key) Outcome {
 		m.Editing = true
 		m.draft = ""
 	case k.Special == KeyUp || k.Rune == 'k':
-		m.scroll(-1)
+		m.moveCursor(-1)
 	case k.Special == KeyDown || k.Rune == 'j':
-		m.scroll(1)
+		m.moveCursor(1)
 	}
 	return Outcome{}
 }
