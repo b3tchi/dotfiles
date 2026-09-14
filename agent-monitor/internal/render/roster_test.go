@@ -141,6 +141,50 @@ func TestFitColumns_ProjectOutranksRoleStateActivityAge(t *testing.T) {
 	}
 }
 
+// TestFitColumns_ProjectDropsBetweenRuntimeAndItsOwnWidth pins the OTHER
+// half of the drop-priority claim: PROJECT itself gets dropped, and RUNTIME
+// survives past it. Cumulative declared widths (with separators) are
+// uid=14, +runtime=22, +project=31, +role=39, +state=53, +activity=63,
+// +age=69. So width 25 sits in the 22-30 band: wide enough for uid+runtime
+// (22) but not for uid+runtime+project (31), which is exactly the boundary
+// TestFitColumns_ProjectOutranksRoleStateActivityAge (at width 31, one past
+// this band) does not exercise -- that test proves project survives past
+// role/state/activity/age, not that project itself ever drops, nor that
+// runtime outlasts it.
+func TestFitColumns_ProjectDropsBetweenRuntimeAndItsOwnWidth(t *testing.T) {
+	const width = 25
+	want := []column{colUIDName, colRuntime}
+	got := fitColumns(width)
+	if !colsEqual(got, want) {
+		t.Fatalf("fitColumns(%d) = %v, want %v (project dropped, runtime kept)", width, got, want)
+	}
+
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := at.Add(90 * time.Second)
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+	lines := Render(sample, false, now, width)
+	assertMaxLineWidth(t, lines, width)
+
+	colHeader := lines[1]
+	if strings.Contains(colHeader, "PROJECT") {
+		t.Fatalf("column header %q at width %d still contains dropped column PROJECT", colHeader, width)
+	}
+	if !strings.Contains(colHeader, "RUNTIME") {
+		t.Fatalf("column header %q at width %d missing kept column RUNTIME", colHeader, width)
+	}
+
+	// The dropped column's VALUE must also be absent from row lines, not
+	// just its header -- checked via the claude row's project ("copacks"),
+	// which (unlike "dotfiles") shares no substring with any kept column's
+	// legitimate content: sampleRows' third row's own NAME is
+	// "dotfiles-ad", so asserting "dotfiles" is absent would false-fail on
+	// the kept UID/NAME cell rather than catching a real PROJECT leak.
+	claudeLine := lines[len(lines)-1]
+	if strings.Contains(claudeLine, "copacks") {
+		t.Errorf("row line %q leaks dropped PROJECT value at width %d", claudeLine, width)
+	}
+}
+
 func colsEqual(a, b []column) bool {
 	if len(a) != len(b) {
 		return false
