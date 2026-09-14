@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp031|agent-monitor-detail-and-project]]
+
 - [[sp030|agent-monitor]]
 
 - [[sp029|pi-worker-peer-addressed-bus]]
