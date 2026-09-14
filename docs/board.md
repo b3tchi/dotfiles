@@ -20,6 +20,8 @@ sections when status flips.
 
 ## spec
 
+- [[sp031|agent-monitor-detail-and-project]]
+
 
 ## ready
 
