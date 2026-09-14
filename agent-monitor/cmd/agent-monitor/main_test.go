@@ -43,7 +43,7 @@ func TestRunOnce_NoRawModeNoAltScreen_ExitsCleanly(t *testing.T) {
 	defer os.Setenv("PATH", oldPath)
 
 	var buf bytes.Buffer
-	if err := runOnce(&buf); err != nil {
+	if err := runOnce(&buf, ""); err != nil {
 		t.Fatalf("runOnce: %v", err)
 	}
 
@@ -94,8 +94,82 @@ func TestRunOnce_MissingBinary_ReturnsError(t *testing.T) {
 	defer os.Setenv("PATH", oldPath)
 
 	var buf bytes.Buffer
-	if err := runOnce(&buf); err == nil {
+	if err := runOnce(&buf, ""); err == nil {
 		t.Fatalf("expected an error when agent-census/pi-worker are not on PATH")
+	}
+}
+
+// mixedProjectStub is a captured mixed-project agent-census payload: two
+// projects, one row each, so a --project filter has something to actually
+// shrink (test_plan bullet 1).
+const mixedProjectStub = `[` +
+	`{"project":"dotfiles","runtime":"claude","uid":"u1","name":"peer-dotfiles","status":"idle","bucket":"idle"},` +
+	`{"project":"copacks","runtime":"claude","uid":"u2","name":"peer-copacks","status":"idle","bucket":"idle"}` +
+	`]`
+
+// TestRunOnce_ProjectFlag_RestrictsRosterToMatchingProject is sp031 T3's
+// core success criterion exercised through the --once one-shot path
+// (test_plan bullet 4: "--once --project asserts the flag reaches the
+// one-shot path") — runOnce(w, project) is the exact function main() calls
+// with *project when --once is set, so driving it directly here proves the
+// flag's value actually reaches that code path, not just tui.Model in
+// isolation.
+func TestRunOnce_ProjectFlag_RestrictsRosterToMatchingProject(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '"+mixedProjectStub+"'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
+	}
+	defer os.Setenv("PATH", oldPath)
+
+	var unfiltered bytes.Buffer
+	if err := runOnce(&unfiltered, ""); err != nil {
+		t.Fatalf("runOnce (unfiltered): %v", err)
+	}
+	if !strings.Contains(unfiltered.String(), "peer-copacks") {
+		t.Fatalf("sanity check failed: unfiltered render should contain peer-copacks, got %q", unfiltered.String())
+	}
+
+	var filtered bytes.Buffer
+	if err := runOnce(&filtered, "dotfiles"); err != nil {
+		t.Fatalf("runOnce (--project dotfiles): %v", err)
+	}
+	out := filtered.String()
+	if !strings.Contains(out, "peer-dotfiles") {
+		t.Fatalf("expected the matching project's row in output, got %q", out)
+	}
+	if strings.Contains(out, "peer-copacks") {
+		t.Fatalf("expected --project dotfiles to exclude the copacks row, got %q", out)
+	}
+}
+
+// TestRunOnce_UnmatchedProject_EmptyRosterExitZero is the edge case: a
+// --project value with no matching rows is an ANSWER (empty roster, header
+// intact), not an error — ft012's contract for a project with no agents.
+func TestRunOnce_UnmatchedProject_EmptyRosterExitZero(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '"+mixedProjectStub+"'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
+	}
+	defer os.Setenv("PATH", oldPath)
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, "no-such-project"); err != nil {
+		t.Fatalf("expected exit 0 (nil error) for an unmatched --project, got %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "peer-dotfiles") || strings.Contains(out, "peer-copacks") {
+		t.Fatalf("expected an empty roster for an unmatched project, got %q", out)
+	}
+	if !strings.Contains(out, "agents") {
+		t.Fatalf("expected the roster header intact even when empty, got %q", out)
 	}
 }
 
@@ -385,6 +459,96 @@ func TestRenderFrame_OnceHeight_NoDetailNoToggle(t *testing.T) {
 	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 0)
 	if containsSubstring(lines, "no message selected") || containsSubstring(lines, "alice →") {
 		t.Fatalf("height 0 (--once) must never render a detail pane, got %v", lines)
+	}
+}
+
+// TestRenderFrame_ProjectFiltersRosterButNotMessages is the load-bearing
+// test_plan bullet: "Message pane asserts UNCHANGED row count under
+// --project" — the one that would fail if someone "helpfully" filtered both
+// panes. model.Project restricts the roster (mixed-project sample: 2 rows,
+// one per project) but the message pane's sender is unrelated to either
+// project and must still render regardless.
+func TestRenderFrame_ProjectFiltersRosterButNotMessages(t *testing.T) {
+	roster := &source.Sample{Rows: []source.Row{
+		{Project: "dotfiles", UID: "u1", Name: "peer-dotfiles"},
+		{Project: "copacks", UID: "u2", Name: "peer-copacks"},
+	}}
+	msgs := &source.MessageSample{Messages: []source.Message{
+		sampleMessage("alice", `"first"`),
+		sampleMessage("bob", `"second"`),
+	}}
+
+	unfiltered := tui.NewModel()
+	unfilteredLines := renderFrame(unfiltered, roster, false, msgs, false, time.Now(), 80, 40)
+
+	filtered := tui.NewModel()
+	filtered.Project = "dotfiles"
+	filteredLines := renderFrame(filtered, roster, false, msgs, false, time.Now(), 80, 40)
+
+	// Roster: --project must actually shrink it.
+	if !containsSubstring(unfilteredLines, "peer-copacks") {
+		t.Fatalf("sanity check failed: unfiltered roster should contain peer-copacks, got %v", unfilteredLines)
+	}
+	if containsSubstring(filteredLines, "peer-copacks") {
+		t.Fatalf("expected --project dotfiles to drop the copacks roster row, got %v", filteredLines)
+	}
+	if !containsSubstring(filteredLines, "peer-dotfiles") {
+		t.Fatalf("expected the matching roster row to survive, got %v", filteredLines)
+	}
+
+	// Messages: row count (and content) must be IDENTICAL whether or not
+	// --project is set.
+	unfilteredMsgCount := countOccurrences(unfilteredLines, "alice") + countOccurrences(unfilteredLines, "bob")
+	filteredMsgCount := countOccurrences(filteredLines, "alice") + countOccurrences(filteredLines, "bob")
+	if unfilteredMsgCount == 0 {
+		t.Fatalf("sanity check failed: expected message senders in output, got %v", unfilteredLines)
+	}
+	if filteredMsgCount != unfilteredMsgCount {
+		t.Fatalf("--project must not filter the message pane: unfiltered=%d filtered=%d", unfilteredMsgCount, filteredMsgCount)
+	}
+}
+
+func countOccurrences(lines []string, sub string) int {
+	n := 0
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestRenderFrame_ProjectComposesWithCommittedFilter proves --project and the
+// interactive `/` filter both apply together rather than one replacing the
+// other (test_plan bullet 2).
+func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
+	roster := &source.Sample{Rows: []source.Row{
+		{Project: "dotfiles", UID: "u1", Name: "peer-one"},
+		{Project: "dotfiles", UID: "u2", Name: "peer-two"},
+		{Project: "copacks", UID: "u3", Name: "peer-one"},
+	}}
+
+	model := tui.NewModel()
+	model.Project = "dotfiles"
+	model.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "peer-one" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+	model.HandleKey(tui.Key{Special: tui.KeyEnter})
+
+	lines := renderFrame(model, roster, false, nil, false, time.Now(), 80, 40)
+	if !containsSubstring(lines, "peer-one") {
+		t.Fatalf("expected the row matching both --project and the filter, got %v", lines)
+	}
+	if containsSubstring(lines, "peer-two") {
+		t.Fatalf("expected the / filter to still exclude peer-two even though its project matches, got %v", lines)
+	}
+	// copacks' peer-one matches the NAME filter but not --project: if only
+	// the filter (not --project) were applied, "peer-one" would appear
+	// twice (once per project). Exactly one occurrence proves both
+	// predicates narrowed the result, not just the filter alone.
+	if got := countOccurrences(lines, "peer-one"); got != 1 {
+		t.Fatalf("expected exactly 1 peer-one row (dotfiles only, --project excludes the copacks one), got %d in %v", got, lines)
 	}
 }
 

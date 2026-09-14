@@ -64,6 +64,17 @@ type Model struct {
 	Focus  Pane
 	Filter Filter
 
+	// Project is the --project flag's value (sp031 T3): main.go sets it once
+	// at startup and no keystroke ever touches it — unlike Filter, there is
+	// no Editing/commit step here, since it is a CLI argument, not something
+	// typed interactively. Empty means unset (that includes an explicit
+	// `--project ""`: flag.String gives both the same zero value, so no
+	// special-casing is needed to tell them apart). It restricts only the
+	// roster (FilterRoster) — FilterMessages never reads it, because the bus
+	// is already scoped by repository, so every message in view is in scope
+	// regardless of which project a roster row belongs to.
+	Project string
+
 	// Editing is true from `/` until Enter commits (or the model is fed
 	// another `/`, restarting the draft). Every rune key belongs to the
 	// draft while Editing is true — including 'q' and 'r', which would
@@ -200,22 +211,48 @@ func (m *Model) toggleFocus() {
 	}
 }
 
-// FilterRoster applies the committed filter to rows on the field the
-// roster pane declares as its own: uid/name (source.DisplayName), the same
-// column that identifies a row on screen, matched case-insensitively as a
-// substring. An unset filter (Filter.Set == false) returns rows unchanged.
+// FilterRoster applies --project (m.Project) and the committed interactive
+// filter (m.Filter) to rows, in that order, and BOTH apply when both are
+// set — sp031 T3's composition rule, not a replacement of one by the other.
+//
+// m.Project matches source.Row.Project EXACTLY, case-insensitively: a
+// project name is a slug/identifier (ft012/adr0024's tmux-pane attribution
+// for claude rows, parse-pi-window's session-group read for pi rows), not
+// free text, so a substring match would let "dotfiles" silently also catch a
+// hypothetical "dotfiles-extra" project. Case-insensitivity is deliberate
+// the other way: nothing guarantees a canonical case for that slug, and it
+// keeps --project consistent with the interactive filter below, which
+// already lower-cases its own match. Project == "" (unset, including an
+// explicit --project "") is a no-op — it never means "rows with no
+// project".
+//
+// The interactive filter still matches uid/name (source.DisplayName), the
+// same column that identifies a row on screen, as a case-insensitive
+// substring. An unset filter (Filter.Set == false) leaves that stage a
+// no-op too.
 func (m *Model) FilterRoster(rows []source.Row) []source.Row {
+	out := rows
+	if m.Project != "" {
+		p := strings.ToLower(m.Project)
+		filtered := make([]source.Row, 0, len(out))
+		for _, r := range out {
+			if strings.ToLower(r.Project) == p {
+				filtered = append(filtered, r)
+			}
+		}
+		out = filtered
+	}
 	if !m.Filter.Set {
-		return rows
+		return out
 	}
 	q := strings.ToLower(m.Filter.Query)
-	out := make([]source.Row, 0, len(rows))
-	for _, r := range rows {
+	filtered := make([]source.Row, 0, len(out))
+	for _, r := range out {
 		if strings.Contains(strings.ToLower(source.DisplayName(r)), q) {
-			out = append(out, r)
+			filtered = append(filtered, r)
 		}
 	}
-	return out
+	return filtered
 }
 
 // FilterMessages applies the committed filter to messages on the field the

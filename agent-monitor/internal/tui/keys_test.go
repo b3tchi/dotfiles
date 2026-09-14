@@ -282,6 +282,111 @@ func TestFilterRoster_UnsetFilterReturnsRowsUnchanged(t *testing.T) {
 	}
 }
 
+// --- sp031 T3: --project stops being scaffold ---
+//
+// Model.Project is the --project flag's value, set once at startup (main.go
+// wires *project into it before the first frame) and never touched by a
+// keystroke — unlike Filter, it has no Editing state and no commit step.
+// FilterRoster applies it as an EXACT match, case-insensitive: project names
+// are slugs/identifiers (ft012/adr0024's tmux-pane attribution, or
+// parse-pi-window's session-group read), not free text, so a substring match
+// would let "dotfiles" silently swallow a hypothetical "dotfiles-extra"
+// project too. Case-insensitivity is deliberate the other way: nothing in
+// adr0024 or parse-pi-window guarantees a canonical case for the slug, and
+// the interactive `/` filter already lower-cases its own match for the same
+// reason (see FilterRoster's DisplayName comparison above).
+
+func TestFilterRoster_ProjectRestrictsRosterToMatchingRows(t *testing.T) {
+	m := NewModel()
+	m.Project = "dotfiles"
+	rows := []source.Row{
+		{Project: "dotfiles", Name: "peer-1"},
+		{Project: "copacks", Name: "peer-2"},
+		{Project: "dotfiles", Name: "peer-3"},
+	}
+	got := m.FilterRoster(rows)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 dotfiles rows to survive, got %d: %+v", len(got), got)
+	}
+	for _, r := range got {
+		if r.Project != "dotfiles" {
+			t.Fatalf("row %+v does not belong to project dotfiles", r)
+		}
+	}
+	// and the count must differ from the unfiltered render (test_plan bullet 1).
+	m.Project = ""
+	unfiltered := m.FilterRoster(rows)
+	if len(unfiltered) == len(got) {
+		t.Fatalf("expected --project to actually shrink the roster: filtered=%d unfiltered=%d", len(got), len(unfiltered))
+	}
+}
+
+func TestFilterRoster_ProjectIsCaseInsensitiveExactMatch(t *testing.T) {
+	m := NewModel()
+	m.Project = "DotFiles"
+	rows := []source.Row{
+		{Project: "dotfiles", Name: "peer-1"},
+		{Project: "dotfiles-extra", Name: "peer-2"}, // must NOT match: exact, not substring
+	}
+	got := m.FilterRoster(rows)
+	if len(got) != 1 || got[0].Name != "peer-1" {
+		t.Fatalf("expected only the exact-match row to survive, got %+v", got)
+	}
+}
+
+func TestFilterRoster_ProjectComposesWithInteractiveFilter(t *testing.T) {
+	m := NewModel()
+	m.Project = "dotfiles"
+	m.HandleKey(Key{Rune: '/'})
+	for _, r := range "peer-1" {
+		m.HandleKey(Key{Rune: r})
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+
+	rows := []source.Row{
+		{Project: "dotfiles", Name: "peer-1"},
+		{Project: "dotfiles", Name: "peer-2"}, // right project, wrong name: filter excludes it
+		{Project: "copacks", Name: "peer-1"},  // right name, wrong project: --project excludes it
+	}
+	got := m.FilterRoster(rows)
+	if len(got) != 1 || got[0].Name != "peer-1" || got[0].Project != "dotfiles" {
+		t.Fatalf("expected both --project and the / filter applied (intersection), got %+v", got)
+	}
+}
+
+func TestFilterRoster_ProjectUnmatchedYieldsEmptyRoster(t *testing.T) {
+	m := NewModel()
+	m.Project = "nope"
+	rows := []source.Row{{Project: "dotfiles", Name: "peer-1"}}
+	got := m.FilterRoster(rows)
+	if len(got) != 0 {
+		t.Fatalf("expected an empty roster for an unmatched project, got %+v", got)
+	}
+}
+
+func TestFilterRoster_EmptyProjectStringIsUnsetNotEmptyMatch(t *testing.T) {
+	m := NewModel()
+	m.Project = "" // explicit empty (--project ""), same zero value as never setting it
+	rows := []source.Row{
+		{Project: "dotfiles", Name: "peer-1"},
+		{Project: "", Name: "peer-2"}, // a row with genuinely no project attribution
+	}
+	got := m.FilterRoster(rows)
+	if len(got) != 2 {
+		t.Fatalf("expected --project \"\" to be treated as unset (all rows pass), got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterMessages_UnaffectedByProject(t *testing.T) {
+	m := NewModel()
+	m.Project = "dotfiles"
+	msgs := []source.Message{{From: "peer-1"}, {From: "peer-2"}}
+	got := m.FilterMessages(msgs)
+	if len(got) != 2 {
+		t.Fatalf("--project must not filter the message pane (bus is already repo-scoped), got %d", len(got))
+	}
+}
+
 // --- sp031 T1: cursor in the model, viewport follows ---
 //
 // These tests pin the refactor where j/k and the arrows move a per-pane

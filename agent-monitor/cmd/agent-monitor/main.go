@@ -84,17 +84,16 @@ func main() {
 	project := flag.String("project", "", "restrict the roster to one project")
 	once := flag.Bool("once", false, "render one frame to stdout and exit 0: no raw mode, no alternate screen, so it composes in a pipe")
 	flag.Parse()
-	_ = project // scaffold: project filtering lands with a later task
 
 	if *once {
-		if err := runOnce(os.Stdout); err != nil {
+		if err := runOnce(os.Stdout, *project); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	runInteractive()
+	runInteractive(*project)
 }
 
 // runOnce renders exactly one frame — a forced roster refresh plus one
@@ -102,7 +101,12 @@ func main() {
 // no cursor-home/clear escape, no alternate-screen or raw-mode sequence.
 // That is what "composes in a pipe" means: the byte stream w receives must
 // contain nothing a terminal would interpret as a control sequence.
-func runOnce(w io.Writer) error {
+//
+// project is --project's value, forwarded verbatim from main() (sp031 T3):
+// --once has no key input, so nothing ever commits an interactive filter,
+// but --project is a startup argument, not a keystroke, and applies here
+// exactly as it does in runInteractive.
+func runOnce(w io.Writer, project string) error {
 	if err := source.Available(); err != nil {
 		return err
 	}
@@ -119,9 +123,13 @@ func runOnce(w io.Writer) error {
 	msgMonitor.Tick(ctx)
 
 	// --once has no key input, so nothing ever filters or scrolls a frame
-	// it renders — a fresh, untouched Model is exactly "no filter, no
-	// scroll", the same state an interactive session starts in too.
-	for _, line := range buildFrame(tui.NewModel(), censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0) {
+	// it renders via a keystroke — a fresh, untouched Model is exactly "no
+	// interactive filter, no scroll", the same state an interactive session
+	// starts in too. --project is set directly, since it is not something a
+	// key ever commits.
+	model := tui.NewModel()
+	model.Project = project
+	for _, line := range buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0) {
 		fmt.Fprintln(w, line)
 	}
 	return nil
@@ -129,7 +137,10 @@ func runOnce(w io.Writer) error {
 
 // runInteractive drives two samplers (roster + messages), a tui.Model for
 // key-driven state, and draws their combined, filtered, scrolled frame.
-func runInteractive() {
+// project is --project's value (sp031 T3), set on the model once here and
+// never touched again — no key mutates it, unlike the interactive `/`
+// filter.
+func runInteractive(project string) {
 	// adr0014 guard 1, fail fast on unrecoverable setup: checked once, here,
 	// before any loop starts. A missing dependency is not something a retry
 	// fixes, so agent-monitor says so once and exits — never an empty UI
@@ -146,6 +157,7 @@ func runInteractive() {
 	censusMonitor := source.NewMonitor(source.NewSampler(stampPath()))
 	msgMonitor := source.NewMessagesMonitor(source.NewMessagesSampler())
 	model := tui.NewModel()
+	model.Project = project
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
