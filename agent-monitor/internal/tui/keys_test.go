@@ -221,6 +221,28 @@ func TestFilter_QWhileEditingIsTextNotQuit(t *testing.T) {
 	}
 }
 
+// TestFilter_DWhileEditingIsTextNotDetailToggle is
+// TestFilter_QWhileEditingIsTextNotQuit's twin for the detail-pane toggle
+// added by sp031 T5: 'd' joined the same switch that 'q'/'r'/'j'/'k' live
+// in, so typing a filter containing 'd' must stay text and must not flip
+// DetailVisible behind the user's back.
+func TestFilter_DWhileEditingIsTextNotDetailToggle(t *testing.T) {
+	m := NewModel()
+	before := m.DetailVisible
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Rune: 'd'})
+	if m.DetailVisible != before {
+		t.Fatalf("'d' while editing a filter must not toggle the detail pane (was %v, now %v)", before, m.DetailVisible)
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+	if m.Filter.Query != "d" {
+		t.Fatalf("expected 'd' captured into the filter text, got %q", m.Filter.Query)
+	}
+	if m.DetailVisible != before {
+		t.Fatalf("committing the filter must not toggle the detail pane either (was %v, now %v)", before, m.DetailVisible)
+	}
+}
+
 func TestFilterRoster_MatchesNameCaseInsensitive(t *testing.T) {
 	m := NewModel()
 	m.HandleKey(Key{Rune: '/'})

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,4 +395,57 @@ func containsSubstring(lines []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// logRowHasSender reports whether the MESSAGE PANE (not the detail pane)
+// contains a row for sender. "→" only ever appears in the detail pane's
+// `from → to` header, so excluding it separates "this sender has a visible
+// log row" from "the detail pane happens to describe this sender" — the
+// exact distinction the resize bug turned on.
+func logRowHasSender(lines []string, sender string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sender) && !strings.Contains(l, "→") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame is sp031 T1's
+// binding criterion — "scroll is computed from cursor plus viewport, so a
+// resized terminal cannot leave the cursor off-screen" — seen from T5, its
+// first real caller. The frame that OBSERVES a resize must already honour
+// it: a frame that renders the cursor's row only on the NEXT draw has
+// dropped the row, not delayed it.
+//
+// Every other fitPanes/renderFrame test drives one fixed height per
+// scenario, so none of them exercises the ordering this pins: the pane
+// budgets a frame slices against must be derived from THIS frame's height,
+// not from the viewport the previous frame left behind.
+func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	var msgs []source.Message
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, sampleMessage(fmt.Sprintf("sender%02d", i), `"x"`))
+	}
+	sample := &source.MessageSample{Messages: msgs}
+
+	// Settle on a tall terminal (a real session always draws before reading
+	// a key), then walk the cursor deep into the list.
+	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	for i := 0; i < 30; i++ {
+		model.HandleKey(tui.Key{Rune: 'j'})
+	}
+	lines := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	if !logRowHasSender(lines, "sender30") {
+		t.Fatalf("height 40: expected the cursor's row visible before the resize, got %v", lines)
+	}
+
+	// A single draw at a much shorter height. sender30 must be in THIS
+	// frame's message pane.
+	lines = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8)
+	if !logRowHasSender(lines, "sender30") {
+		t.Fatalf("height 8: the cursor's row is absent from the message pane in the frame that observed the resize, got %v", lines)
+	}
 }

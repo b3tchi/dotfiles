@@ -251,18 +251,39 @@ func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *sou
 // path): a pipe has no cursor and no height, so a consumer asked for the
 // whole frame exactly as it rendered before this task.
 func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int) []string {
-	roster := render.Render(filteredCensusSample(model, censusSample), censusStale, now, width)
-	log := render.RenderLog(filteredMessageSample(model, msgSample), msgStale, now, width)
-
-	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
+	// Order matters, and is the whole point of this arrangement (sp031 T1's
+	// binding criterion: a resized terminal cannot leave the cursor
+	// off-screen). Filter FIRST — that fixes each pane's row count and, via
+	// SetRosterLen/SetMessagesLen, clamps the cursor. Derive THIS frame's
+	// pane budgets from those counts and THIS frame's height, and report the
+	// resulting viewports to the model. Only THEN slice by scroll and
+	// render: the scroll the slice uses is now the one this height implies,
+	// so a shrunk terminal re-fits within the draw that observed it rather
+	// than one draw later. Deriving the budgets before rendering is what
+	// breaks the apparent circularity (slicing needs pane sizes, pane sizes
+	// looked like they needed rendered output): paneBudgets needs only LINE
+	// COUNTS, and a pane's line count is a pure function of its row count.
+	rosterRows := filterRosterRows(model, censusSample)
+	msgRows := filterMessageRows(model, msgSample)
+	rosterLines := paneLines(censusSample != nil, len(rosterRows))
+	logLines := paneLines(msgSample != nil, len(msgRows))
 
 	if height > 0 {
-		// Report this frame's actual visible height back to the model so the
-		// NEXT cursor move (or resize) derives scroll against real numbers —
-		// see tui.Model.SetRosterViewport/SetMessagesViewport (sp031 T1).
-		model.SetRosterViewport(viewportRows(len(roster)))
-		model.SetMessagesViewport(viewportRows(len(log)))
+		rosterBudget, logBudget, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible)
+		model.SetRosterViewport(viewportRows(min(rosterLines, rosterBudget)))
+		model.SetMessagesViewport(viewportRows(min(logLines, logBudget)))
 	}
+
+	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width)
+	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width)
+
+	// fitPanes re-derives the same budgets from the rendered line counts and
+	// does the actual trimming. The two derivations agree: a pane whose
+	// rendered length differs from rosterLines/logLines is one that scrolled,
+	// and a pane only scrolls when it is at or over its budget — so the
+	// "is this pane shorter than its share?" test lands the same way either
+	// way, and the surplus is redistributed identically.
+	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
 
 	var lines []string
 	lines = append(lines, roster...)
@@ -334,8 +355,18 @@ func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Mes
 // each pane's header line — a pane whose header scrolled away is
 // unreadable, and the header is what carries the staleness indicator.
 func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, logOut []string, detailBudget int, detailShown bool) {
+	rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(len(roster), len(log), height, detailVisible)
+	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown
+}
+
+// paneBudgets is fitPanes' arithmetic with the []string arguments replaced
+// by their lengths, so renderFrame can ask for this frame's budgets BEFORE
+// anything is rendered — the ordering sp031 T1's criterion needs (see
+// renderFrame). A budget of -1 means "do not clamp" (the height<=0 --once
+// contract); clamp treats any negative n that way.
+func paneBudgets(rosterLines, logLines, height int, detailVisible bool) (rosterBudget, logBudget, detailBudget int, detailShown bool) {
 	if height <= 0 {
-		return roster, log, 0, false
+		return -1, -1, 0, false
 	}
 
 	detailBudget, detailShown = detailCap(height)
@@ -352,17 +383,32 @@ func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, 
 	if avail < 2 {
 		// Degenerate terminal: one row each is the most that is still two
 		// panes. Below that there is nothing useful to show.
-		return clamp(roster, 1), clamp(log, 1), detailBudget, detailShown
+		return 1, 1, detailBudget, detailShown
 	}
 
-	rosterBudget := avail / 2
-	logBudget := avail - rosterBudget
-	if len(roster) < rosterBudget {
-		logBudget += rosterBudget - len(roster)
-	} else if len(log) < logBudget {
-		rosterBudget += logBudget - len(log)
+	rosterBudget = avail / 2
+	logBudget = avail - rosterBudget
+	if rosterLines < rosterBudget {
+		logBudget += rosterBudget - rosterLines
+	} else if logLines < logBudget {
+		rosterBudget += logBudget - logLines
 	}
-	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown
+	return rosterBudget, logBudget, detailBudget, detailShown
+}
+
+// paneLines predicts how many lines render.Render/render.RenderLog will
+// produce for a pane holding rows data rows, without rendering it: one line
+// for the "waiting for first sample" state, headerLines+1 for the empty
+// placeholder, headerLines+rows otherwise. It is the inverse of viewportRows
+// and the reason the budgets can be computed before the render.
+func paneLines(haveSample bool, rows int) int {
+	if !haveSample {
+		return 1
+	}
+	if rows == 0 {
+		return headerLines + 1 // the "(no agents)"/"(no messages)" placeholder
+	}
+	return headerLines + rows
 }
 
 // detailCap decides the detail pane's line budget (header included) for a
@@ -392,29 +438,48 @@ func clamp(lines []string, n int) []string {
 	return lines[:n]
 }
 
-// filteredCensusSample applies model's committed filter and the roster
-// pane's own scroll offset (dropping that many rows from the top — a
-// scrolled-past row is simply not in the slice render.Render receives) to
-// sample, without mutating it. It calls SetRosterLen so the NEXT keystroke's
-// scroll bound reflects the CURRENT (post-filter) row count — a filter that
-// just shrank the roster must not leave scroll pointing past its new end.
-func filteredCensusSample(model *tui.Model, sample *source.Sample) *source.Sample {
+// filterRosterRows applies model's committed filter to sample's rows without
+// mutating sample, and calls SetRosterLen so scroll is bounded by the
+// CURRENT (post-filter) row count — a filter that just shrank the roster
+// must not leave scroll pointing past its new end. It deliberately does NOT
+// apply scroll: scrolling is scrolledCensusSample's job, and happens only
+// after this frame's viewport has been set (see renderFrame).
+func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 	if sample == nil {
 		return nil
 	}
 	rows := model.FilterRoster(sample.Rows)
 	model.SetRosterLen(len(rows))
-	return &source.Sample{Rows: rows[model.RosterScroll:], At: sample.At}
+	return rows
 }
 
-// filteredMessageSample is filteredCensusSample's twin for the message pane.
-func filteredMessageSample(model *tui.Model, sample *source.MessageSample) *source.MessageSample {
+// filterMessageRows is filterRosterRows' twin for the message pane.
+func filterMessageRows(model *tui.Model, sample *source.MessageSample) []source.Message {
 	if sample == nil {
 		return nil
 	}
 	msgs := model.FilterMessages(sample.Messages)
 	model.SetMessagesLen(len(msgs))
-	return &source.MessageSample{Messages: msgs[model.MessagesScroll:], At: sample.At}
+	return msgs
+}
+
+// scrolledCensusSample applies the roster pane's scroll offset (dropping
+// that many rows from the top — a scrolled-past row is simply not in the
+// slice render.Render receives) to already-filtered rows, returning a fresh
+// sample so the original is never mutated.
+func scrolledCensusSample(sample *source.Sample, rows []source.Row, scroll int) *source.Sample {
+	if sample == nil {
+		return nil
+	}
+	return &source.Sample{Rows: rows[scroll:], At: sample.At}
+}
+
+// scrolledMessageSample is scrolledCensusSample's twin for the message pane.
+func scrolledMessageSample(sample *source.MessageSample, msgs []source.Message, scroll int) *source.MessageSample {
+	if sample == nil {
+		return nil
+	}
+	return &source.MessageSample{Messages: msgs[scroll:], At: sample.At}
 }
 
 // readKeys feeds raw stdin bytes to ch, closing it on EOF/error (stdin
