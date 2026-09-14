@@ -13,12 +13,14 @@ import (
 // column is one roster column, in a fixed left-to-right display order. When
 // the terminal is too narrow for every column, columns drop from the RIGHT
 // of this list — age first, then activity, then state, then role, then
-// runtime. uid/name never drops: it is the one column that identifies a row.
+// project, then runtime. uid/name never drops: it is the one column that
+// identifies a row.
 type column int
 
 const (
 	colUIDName column = iota
 	colRuntime
+	colProject
 	colRole
 	colState
 	colActivity
@@ -26,11 +28,21 @@ const (
 )
 
 // columnOrder is the fixed left-to-right, drop-from-the-right priority.
-var columnOrder = []column{colUIDName, colRuntime, colRole, colState, colActivity, colAge}
+//
+// colProject sits third, right after colRuntime, so it survives longer than
+// colRole, colState, colActivity and colAge when the terminal narrows: on a
+// machine running several projects at once, which workspace a row belongs
+// to is more identifying than its role or how long ago it moved -- it is
+// the detail an operator reaches for to tell rows apart before any of
+// those. It still ranks below colUIDName (the one column that never drops)
+// and colRuntime (a row's own identity, then its runtime kind -- pi vs
+// claude -- are more fundamental than which project it belongs to).
+var columnOrder = []column{colUIDName, colRuntime, colProject, colRole, colState, colActivity, colAge}
 
 var columnHeader = map[column]string{
 	colUIDName:  "UID/NAME",
 	colRuntime:  "RUNTIME",
+	colProject:  "PROJECT",
 	colRole:     "ROLE",
 	colState:    "STATE",
 	colActivity: "ACTIVITY",
@@ -43,6 +55,7 @@ var columnHeader = map[column]string{
 var columnWidth = map[column]int{
 	colUIDName:  14,
 	colRuntime:  7,
+	colProject:  8,
 	colRole:     7,
 	colState:    13,
 	colActivity: 9,
@@ -110,6 +123,15 @@ func cellFor(c column, r source.Row, age string) string {
 	switch c {
 	case colUIDName:
 		return orDash(source.DisplayName(r))
+	case colProject:
+		// r.Project came straight from the census row for both runtimes
+		// (ft012) -- nothing here re-derives it from a cwd, a window name
+		// or a path. Empty renders blank via orDash, the same "no value"
+		// convention every other column already uses; it must never guess
+		// the literal word "unknown", which adr0017 owns as an
+		// observational verdict at a different layer (the aggregate
+		// count-row grouping, not this per-agent cell).
+		return orDash(r.Project)
 	case colRuntime:
 		return orDash(r.Runtime)
 	case colRole:
@@ -134,15 +156,17 @@ func orDash(s string) string {
 
 // pad truncates or right-pads s to exactly width display cells, using an
 // ellipsis on truncation so a line is never longer than its column budget.
+// Truncation is cell-aware (truncateCells, subject.go) rather than rune-
+// counted: a project name or any other cell value carrying CJK/emoji runes
+// must be bounded by its actual terminal width, not by how many runes it
+// takes to encode that width, or a wide-character cell could overrun its
+// column and the line's declared width with it.
 func pad(s string, width int) string {
-	r := []rune(s)
-	if len(r) > width {
-		if width <= 1 {
-			return string(r[:width])
-		}
-		return string(r[:width-1]) + "…"
+	w := displayWidth(s)
+	if w > width {
+		return truncateCells(s, width)
 	}
-	return s + spaces(width-len(r))
+	return s + spaces(width-w)
 }
 
 func spaces(n int) string {

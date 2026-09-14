@@ -12,7 +12,7 @@ func sampleRows() []source.Row {
 	return []source.Row{
 		{Project: "dotfiles", Runtime: "pi", Role: "peer", State: "waiting_human", Status: "idle", Bucket: "blocked", Name: "peer-3"},
 		{Project: "dotfiles", Runtime: "pi", Role: "peer", State: "running", Status: "streaming", Bucket: "working", Name: "peer-2"},
-		{Project: "dotfiles", Runtime: "claude", Role: "", State: "", Status: "idle", Bucket: "idle", Name: "dotfiles-ad"},
+		{Project: "copacks", Runtime: "claude", Role: "", State: "", Status: "idle", Bucket: "idle", Name: "dotfiles-ad"},
 	}
 }
 
@@ -40,14 +40,14 @@ func TestRender_GoldenAt80_AllColumnsPresent(t *testing.T) {
 		t.Fatalf("header line = %q", lines[0])
 	}
 	colHeader := lines[1]
-	for _, want := range []string{"UID/NAME", "RUNTIME", "ROLE", "STATE", "ACTIVITY", "AGE"} {
+	for _, want := range []string{"UID/NAME", "RUNTIME", "PROJECT", "ROLE", "STATE", "ACTIVITY", "AGE"} {
 		if !strings.Contains(colHeader, want) {
 			t.Errorf("column header %q missing %q", colHeader, want)
 		}
 	}
 	// Declared left-to-right order.
 	prevIdx := -1
-	for _, want := range []string{"UID/NAME", "RUNTIME", "ROLE", "STATE", "ACTIVITY", "AGE"} {
+	for _, want := range []string{"UID/NAME", "RUNTIME", "PROJECT", "ROLE", "STATE", "ACTIVITY", "AGE"} {
 		idx := strings.Index(colHeader, want)
 		if idx <= prevIdx {
 			t.Fatalf("column %q out of order in header %q", want, colHeader)
@@ -55,12 +55,18 @@ func TestRender_GoldenAt80_AllColumnsPresent(t *testing.T) {
 		prevIdx = idx
 	}
 
-	// Row content, including the sample-level age repeated per row.
+	// Row content, including the sample-level age repeated per row. The pi
+	// row's PROJECT ("dotfiles") and the claude row's PROJECT ("copacks")
+	// prove both runtimes populate the column from the census row itself.
 	blockedLine := lines[2]
-	for _, want := range []string{"peer-3", "pi", "peer", "waiting_human", "idle", "1m"} {
+	for _, want := range []string{"peer-3", "dotfiles", "pi", "peer", "waiting_human", "idle", "1m"} {
 		if !strings.Contains(blockedLine, want) {
 			t.Errorf("row line %q missing %q", blockedLine, want)
 		}
+	}
+	claudeLine := lines[len(lines)-1]
+	if !strings.Contains(claudeLine, "copacks") {
+		t.Errorf("claude row line %q missing PROJECT value %q", claudeLine, "copacks")
 	}
 }
 
@@ -73,16 +79,18 @@ func TestRender_GoldenAt40_DropsColumnsInDeclaredOrder(t *testing.T) {
 	assertMaxLineWidth(t, lines, 40)
 
 	colHeader := lines[1]
-	// Declared drop order is age, then activity, then state (right to left);
-	// at width 40 only uid/name, runtime and role fit (see fitColumns table
-	// test below for the exact boundary), so none of the dropped headers may
-	// appear, and the kept ones must still be present.
+	// Declared drop order is age, then activity, then state, then role (right
+	// to left); at width 40 uid/name, project, runtime and role fit (see
+	// fitColumns table test below for the exact boundary), so none of the
+	// dropped headers may appear, and the kept ones must still be present.
+	// PROJECT surviving here -- ahead of role/state/activity/age -- is the
+	// drop-priority this column adds, not an accident of the width chosen.
 	for _, dropped := range []string{"AGE", "ACTIVITY", "STATE"} {
 		if strings.Contains(colHeader, dropped) {
 			t.Errorf("column header %q at width 40 still contains dropped column %q", colHeader, dropped)
 		}
 	}
-	for _, kept := range []string{"UID/NAME", "RUNTIME", "ROLE"} {
+	for _, kept := range []string{"UID/NAME", "RUNTIME", "PROJECT", "ROLE"} {
 		if !strings.Contains(colHeader, kept) {
 			t.Errorf("column header %q at width 40 missing %q", colHeader, kept)
 		}
@@ -97,15 +105,15 @@ func TestRender_GoldenAt40_DropsColumnsInDeclaredOrder(t *testing.T) {
 }
 
 func TestFitColumns_DropsFromTheRight(t *testing.T) {
-	all := []column{colUIDName, colRuntime, colRole, colState, colActivity, colAge}
+	all := []column{colUIDName, colRuntime, colProject, colRole, colState, colActivity, colAge}
 	if got := fitColumns(80); !colsEqual(got, all) {
 		t.Fatalf("fitColumns(80) = %v, want all columns %v", got, all)
 	}
 
-	// Width 40 keeps exactly uid/name, runtime, role per the fixed widths
-	// declared in columnWidth (14+1+7+1+7 = 30 <= 40; adding state's 13 would
-	// make 44 > 40).
-	want40 := []column{colUIDName, colRuntime, colRole}
+	// Width 40 keeps exactly uid/name, runtime, project, role per the fixed
+	// widths declared in columnWidth (14+1+7+1+8+1+7 = 39 <= 40; adding
+	// state's 13 would make 53 > 40).
+	want40 := []column{colUIDName, colRuntime, colProject, colRole}
 	if got := fitColumns(40); !colsEqual(got, want40) {
 		t.Fatalf("fitColumns(40) = %v, want %v", got, want40)
 	}
@@ -115,6 +123,21 @@ func TestFitColumns_DropsFromTheRight(t *testing.T) {
 	got := fitColumns(1)
 	if len(got) != 1 || got[0] != colUIDName {
 		t.Fatalf("fitColumns(1) = %v, want [colUIDName] alone", got)
+	}
+}
+
+// TestFitColumns_ProjectOutranksRoleStateActivityAge pins PROJECT's
+// drop-priority directly against fitColumns, independent of the width-40
+// golden render above: at a width that fits uid/name, runtime and project
+// but not role (31 = 14+1+7+1+8), PROJECT must still be present and ROLE,
+// STATE, ACTIVITY and AGE must all be gone. That is the "more identifying
+// than ROLE or AGE" ordering the success criteria calls for, pinned as its
+// own assertion so a future column reorder cannot pass by accident.
+func TestFitColumns_ProjectOutranksRoleStateActivityAge(t *testing.T) {
+	want := []column{colUIDName, colRuntime, colProject}
+	got := fitColumns(31)
+	if !colsEqual(got, want) {
+		t.Fatalf("fitColumns(31) = %v, want %v (project kept, role/state/activity/age dropped)", got, want)
 	}
 }
 
@@ -190,5 +213,81 @@ func TestRender_UnrecognisedBucketRendersVerbatim(t *testing.T) {
 	// for -- it degrades to the default (empty) style.
 	if style := StyleFor("a-bucket-this-build-has-never-seen"); style != "" {
 		t.Fatalf("StyleFor unrecognised bucket = %q, want empty (default style)", style)
+	}
+}
+
+// TestCellFor_EmptyProjectRendersBlankNotUnknown pins the blank-not-guessed
+// rule directly: a row with no project attribution (e.g. ft012's unknown
+// attribution row, whose per-agent Project field is empty even though the
+// aggregate count view groups it under the literal "unknown" key) must never
+// render the word "unknown" here -- that would collide with adr0017's
+// observational verdict, which owns that word for a different layer. It
+// renders the same blank glyph every other column already uses for "no
+// value", so a future "helpful" default cannot slip in unnoticed.
+func TestCellFor_EmptyProjectRendersBlankNotUnknown(t *testing.T) {
+	row := source.Row{Project: "", Runtime: "claude", Name: "dotfiles-ad"}
+	got := cellFor(colProject, row, "1m")
+	if got != emptyCell {
+		t.Fatalf("cellFor(colProject, empty project) = %q, want the blank glyph %q", got, emptyCell)
+	}
+	if strings.Contains(got, "unknown") {
+		t.Fatalf("cellFor(colProject, empty project) = %q, must never guess \"unknown\"", got)
+	}
+}
+
+// TestRender_EmptyProjectRendersBlankInFullFrame is the same rule proven
+// through the public Render path: the PROJECT cell for a row with no
+// project is blank in the actual rendered line, not just at the cellFor
+// unit.
+func TestRender_EmptyProjectRendersBlankInFullFrame(t *testing.T) {
+	at := time.Now()
+	rows := []source.Row{
+		{Project: "", Runtime: "claude", Name: "dotfiles-ad", Status: "idle", Bucket: "idle"},
+	}
+	sample := &source.Sample{Rows: rows, At: at}
+
+	lines := Render(sample, false, at, 80)
+	last := lines[len(lines)-1]
+	if strings.Contains(last, "unknown") {
+		t.Fatalf("row line %q must never render a guessed \"unknown\" project", last)
+	}
+}
+
+// TestRender_CJKProjectName_TruncatesOnCellsNotRunes proves the PROJECT
+// column truncates by display cell, not by rune count: a CJK project name
+// wider than the declared column width must still fit within it, and the
+// whole line must never exceed the terminal width when measured in cells
+// (a rune-count check would under-count wide characters and miss an
+// overflow). The width used here (69) is the exact sum of every declared
+// column width plus separators -- the tightest width at which all columns
+// still fit -- deliberately chosen so any per-column overflow (a
+// rune-counting truncator letting the PROJECT cell run to 15 cells instead
+// of its declared 8) blows the total budget and this test catches it. A
+// looser width like 80 has slack that hides exactly that bug.
+func TestRender_CJKProjectName_TruncatesOnCellsNotRunes(t *testing.T) {
+	at := time.Now()
+	rows := []source.Row{
+		{Project: "工程项目服务平台名称", Runtime: "claude", Name: "dotfiles-ad", Status: "idle", Bucket: "idle"},
+	}
+	sample := &source.Sample{Rows: rows, At: at}
+
+	lines := Render(sample, false, at, 69)
+	assertMaxLineCellWidth(t, lines, 69)
+
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "…") {
+		t.Fatalf("row line %q does not show truncation of the long CJK project name", last)
+	}
+}
+
+// assertMaxLineCellWidth is assertMaxLineWidth's cell-aware counterpart: a
+// rune count under-measures wide (CJK/emoji) characters, which would let a
+// genuine overflow slip past a rune-only check.
+func assertMaxLineCellWidth(t *testing.T, lines []string, width int) {
+	t.Helper()
+	for i, l := range lines {
+		if n := displayWidth(l); n > width {
+			t.Fatalf("line %d exceeds width %d (got %d display cells): %q", i, width, n, l)
+		}
 	}
 }
