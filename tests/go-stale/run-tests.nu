@@ -5,23 +5,28 @@
 #
 # Exit status is 0 when every case passes, 1 when any case fails.
 #
-# Three suites, each run as a subprocess so a module that fails to PARSE
+# Four suites, each run as a subprocess so a module that fails to PARSE
 # reports as one failed suite instead of taking the runner down with it:
 #
-#   transform-cases.nu   pure classify-module logic, synthetic records
-#   probe-cases.nu       real files/mtimes against a throwaway sandbox —
-#                        the load-bearing "source newer than artifact ->
-#                        STALE, named" proof
-#   cli-cases.nu         the assembled `go-stale` action, end to end,
-#                        including a real go-build round trip in rebuild mode
+#   transform-cases.nu        pure classify-module logic, synthetic records
+#   probe-cases.nu            real files/mtimes against a throwaway sandbox —
+#                             the load-bearing "source newer than artifact ->
+#                             STALE, named" proof
+#   manifest-verify-cases.nu  the manifest-vs-dot.yaml drift check (rejection
+#                             #1 gap 1) — every real shell idiom, plus a real
+#                             DRIFT case
+#   cli-cases.nu              the assembled `go-stale` action, end to end,
+#                             including a real go-build round trip in rebuild
+#                             mode
 
 use harness.nu *
 
 const SUITES = [
     [label, file];
-    ["transform", "transform-cases.nu"]
-    ["probe",     "probe-cases.nu"]
-    ["cli",       "cli-cases.nu"]
+    ["transform",       "transform-cases.nu"]
+    ["probe",           "probe-cases.nu"]
+    ["manifest-verify", "manifest-verify-cases.nu"]
+    ["cli",             "cli-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {

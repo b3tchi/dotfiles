@@ -122,6 +122,28 @@ let cases = [
         }
     })
 
+    (run-case "cli/verify-flags-a-drifted-manifest-row" {
+        # Rejection #1 gap 1: the manifest itself can drift from its
+        # dot.yaml (renamed -o target, moved artifact) without any
+        # check/rebuild run ever noticing — `verify` is the dedicated,
+        # fail-on-drift command for exactly that.
+        let root = (widget-repo "verify-drift")
+        mkdir ($root | path join "hotkeyd")
+        "linux:\n  installs:\n    cmd: |\n      go build -C \"$SRC\" -o \"$TMP\" ./cmd/hotkeyd\n      mv -f \"$TMP\" \"$SRC/hotkeyd-renamed\"\n" | save -f ($root | path join "hotkeyd/dot.yaml")
+
+        let out = (run-action ["verify" "--repo" $root])
+
+        assert-eq $out.exit_code 1
+        assert-str-contains $out.stdout "DRIFT" "a drifted row must be reported as DRIFT"
+        assert-str-contains $out.stdout "hotkeyd" "must name the drifted module"
+    })
+
+    (run-case "cli/verify-passes-against-the-real-repo-dot-yaml-files" {
+        let real_repo = ($env.FILE_PWD | path join "../.." | path expand)
+        let out = (run-action ["verify" "--repo" $real_repo])
+        assert-eq $out.exit_code 0
+    })
+
     (run-case "cli/since-scopes-check-to-modules-the-diff-actually-touched" {
         # This is what work-merge's post-merge gate relies on: --since
         # <ORIG_HEAD> must report only the module(s) the merge changed, not

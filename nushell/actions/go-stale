@@ -33,13 +33,16 @@
 # out of scope for closing that gap.
 #
 # Usage:
-#   go-stale [check] [--repo <path>] [--modules <key,key,...>]
-#   go-stale rebuild [--repo <path>] [--modules <key,key,...>]
+#   go-stale [check] [--repo <path>] [--modules <key,key,...>] [--since <rev>]
+#   go-stale rebuild [--repo <path>] [--modules <key,key,...>] [--since <rev>]
 #   go-stale list
+#   go-stale verify [--repo <path>]
 #
 # check   (default, safe): report every stale/missing module, exit 1 if any
 #         module is STALE (a MISSING artifact — never built on this host,
 #         e.g. gopass off WSL — is reported but does not fail the check).
+#         Also prints (stderr) any manifest-coverage / manifest-drift
+#         warnings from `verify`, without failing on them — see `verify`.
 # rebuild: rebuild every STALE or MISSING module. Builds to a temp file in
 #          the artifact's own directory, then `mv -f` over the target —
 #          matching agent-monitor/dot.yaml's and hotkeyd/dot.yaml's header
@@ -48,10 +51,20 @@
 #          resolves next. Refuses (exit 1) with an explicit message if no Go
 #          toolchain is on PATH — never a silent no-op.
 # list:    print the manifest (key / artifact / build dir+pkg / sources).
+# verify:  cross-check every manifest row's `artifact` against what its own
+#          dot.yaml's `go build` actually declares, and exit 1 if any row
+#          has DRIFTed (dot.yaml changed, manifest didn't) or is
+#          UNRECOGNIZED (couldn't find/parse the dot.yaml's build line at
+#          all). This is what catches the manifest ITSELF going stale — see
+#          the "manifest self-check" section below for why that is a
+#          different failure than manifest-coverage-warnings catches.
+#          Ignores --modules/--since (it checks the whole manifest).
 #
-# --modules restricts either subcommand to a comma-separated set of manifest
-# keys (see `go-stale list`) — this is how work-merge's post-merge gate scopes
-# a rebuild to only the modules a given merge actually touched.
+# --modules restricts check/rebuild to a comma-separated set of manifest
+# keys (see `go-stale list`). --since <rev> restricts them instead to
+# modules whose build_dir was touched by `git diff --name-only <rev> HEAD`
+# — this is how work-merge's post-merge gate scopes a rebuild to only the
+# modules a given merge actually touched.
 
 # ---------------------------------------------------------------- manifest
 
@@ -217,6 +230,88 @@ export def manifest-coverage-warnings [repo_root: string] {
   | each {|d| $"WARNING: ($d) declares a 'go build' with no matching entry in go-stale's manifest \(nushell/actions/go-stale, go-modules\) — add one so this module's staleness gets checked" }
 }
 
+# ----------------------------------------------------- manifest self-check
+
+# manifest-coverage-warnings (above) catches a dot.yaml GAINING a `go build`
+# with no manifest row. It does NOT catch an EXISTING row whose dot.yaml
+# build target CHANGES while the row/key stay put -- go-stale would keep
+# probing the old artifact path forever and report FRESH on a binary nobody
+# builds any more. That is the same failure shape this whole tool exists to
+# catch (a derived copy silently drifting from its source), just one level
+# up: the manifest IS a derived copy of each dot.yaml's `go build -o`.
+#
+# Runtime parsing of six different shell idioms to DRIVE check/rebuild was
+# ruled out as brittle (see the manifest's own header comment) -- that
+# argument does not apply here. This is a one-shot, TEST-TIME cross-check:
+# cheap, fails loudly, and cannot corrupt check/rebuild's actual behaviour
+# even if a future dot.yaml's shell is too weird for it to parse (that shows
+# up as UNRECOGNIZED, not a false OK).
+#
+# Extracts the literal `-o` target from the `go build` line matching this
+# module (disambiguated by build_dir's basename appearing on that line --
+# matters for gopass/dot.yaml, which declares two builds), then resolves
+# the one indirection this repo's dot.yaml files use: a `-o "$TMP"` write
+# followed by `mv -f "$TMP" <dest>` (agent-monitor, hotkeyd). Returns the
+# resolved destination's basename, or null when no recognisable build line
+# is found for this module.
+export def declared-artifact-basename [dot_yaml_content: string, build_dir: string] {
+  let marker = ($build_dir | path basename)
+  let build_line = (
+    $dot_yaml_content
+    | lines
+    | where {|l| not ($l | str trim | str starts-with "#") }
+    | where {|l| ($l | str contains "go build") and ($l | str contains $marker) and ($l =~ '-o\s') }
+    | first
+  )
+  if ($build_line | is-empty) { return null }
+
+  let o_match = ($build_line | parse -r '-o\s+"?(?<tok>[^"\s]+)"?')
+  if ($o_match | is-empty) { return null }
+  let token = ($o_match | first).tok
+
+  if $token == "$TMP" {
+    let mv_match = (
+      $dot_yaml_content
+      | lines
+      | where {|l| $l | str contains 'mv -f "$TMP"' }
+      | each {|l| ($l | parse -r 'mv -f "\$TMP" "?(?<dest>[^"\s]+)"?') }
+      | flatten
+      | first
+    )
+    if ($mv_match | is-empty) { return null }
+    ($mv_match.dest | path basename)
+  } else {
+    ($token | path basename)
+  }
+}
+
+# Cross-check every manifest row's `artifact` basename against what its own
+# dot.yaml actually builds. One record per row: {key, status, detail} where
+# status is "OK", "DRIFT" (manifest disagrees with the dot.yaml — the
+# manifest is wrong and needs updating), or "UNRECOGNIZED" (no parseable
+# `go build` line found for this module — reported, never silently treated
+# as OK, since an unparseable dot.yaml is exactly the shape real drift could
+# take).
+export def verify-manifest [repo_root: string] {
+  go-modules | each {|m|
+    let path = ([$repo_root $m.dot_yaml] | path join)
+    if not ($path | path exists) {
+      {key: $m.key, status: "UNRECOGNIZED", detail: $"($m.dot_yaml) does not exist"}
+    } else {
+      let content = (open --raw $path)
+      let declared = (declared-artifact-basename $content $m.build_dir)
+      let expected = ($m.artifact | path basename)
+      if $declared == null {
+        {key: $m.key, status: "UNRECOGNIZED", detail: $"could not find/parse a 'go build' line for ($m.build_dir) in ($m.dot_yaml)"}
+      } else if $declared != $expected {
+        {key: $m.key, status: "DRIFT", detail: $"manifest says '($expected)', but ($m.dot_yaml) actually builds '($declared)' — update go-stale's manifest \(nushell/actions/go-stale, go-modules\)"}
+      } else {
+        {key: $m.key, status: "OK", detail: ""}
+      }
+    }
+  }
+}
+
 # ------------------------------------------------------------------- build
 
 # Rebuild one module: temp file in the artifact's own directory, then
@@ -292,6 +387,9 @@ export def touched-module-keys [repo_root: string, since: string] {
 
 def print-coverage-warnings [repo_root: string] {
   for w in (manifest-coverage-warnings $repo_root) { print -e $w }
+  for r in (verify-manifest $repo_root | where status != "OK") {
+    print -e $"WARNING: ($r.key): ($r.detail)"
+  }
 }
 
 def status-mark [status: string] {
@@ -351,8 +449,21 @@ def cmd-list [] {
   go-modules | select key artifact build_dir build_pkg sources
 }
 
+# `check`/`rebuild` surface manifest DRIFT/UNRECOGNIZED as warnings (via
+# print-coverage-warnings) but don't fail on them, to keep their exit code
+# scoped to staleness. `verify` is the dedicated, fail-on-drift command --
+# the one a CI/test gate calls to catch the manifest itself going stale.
+def cmd-verify [repo_root: string] {
+  let results = (verify-manifest $repo_root)
+  for r in $results {
+    let msg = if ($r.detail | is-empty) { "manifest matches its dot.yaml's go build" } else { $r.detail }
+    print $"[($r.status)] ($r.key): ($msg)"
+  }
+  if ($results | where status != "OK" | length) > 0 { exit 1 } else { exit 0 }
+}
+
 def main [
-  subcommand?: string        # check (default) | rebuild | list
+  subcommand?: string        # check (default) | rebuild | list | verify
   --repo: string = ""        # repo root override (default: git toplevel of cwd)
   --modules: string = ""     # comma-separated manifest keys to restrict to
   --since: string = ""       # restrict to modules touched by `git diff --name-only <since> HEAD`
@@ -360,6 +471,14 @@ def main [
   let repo_root = if ($repo | is-not-empty) { $repo } else { (default-repo-root) }
   let explicit_keys = (parse-keys $modules)
   let sub = ($subcommand | default "check")
+
+  # verify ignores --modules/--since -- it is a manifest-wide integrity
+  # check (does every row still match what its own dot.yaml builds), not a
+  # staleness scan, so there is nothing to scope it to.
+  if $sub == "verify" {
+    cmd-verify $repo_root
+    return
+  }
 
   # `selected-modules []` means "no filter, take everything" -- correct for
   # a bare `check`/`rebuild`, wrong when `--since` legitimately touched zero
@@ -378,7 +497,7 @@ def main [
       "rebuild" => { cmd-rebuild $repo_root $keys }
       "list" => { cmd-list }
       _ => {
-        print "Usage: go-stale [check|rebuild|list] [--repo <path>] [--modules <key,key,...>] [--since <rev>]"
+        print "Usage: go-stale [check|rebuild|list|verify] [--repo <path>] [--modules <key,key,...>] [--since <rev>]"
         exit 1
       }
     }
@@ -391,7 +510,7 @@ def main [
     "rebuild" => { cmd-rebuild $repo_root $keys }
     "list" => { cmd-list }
     _ => {
-      print "Usage: go-stale [check|rebuild|list] [--repo <path>] [--modules <key,key,...>]"
+      print "Usage: go-stale [check|rebuild|list|verify] [--repo <path>] [--modules <key,key,...>]"
       exit 1
     }
   }
