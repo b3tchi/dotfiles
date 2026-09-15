@@ -106,8 +106,11 @@ let rule_cases = [
     (run-case "transition/settling-without-result-is-a-protocol-error" {
         let envelope = (settled-without-result "run-42" "impl-x" 3 "2026-09-05T10:00:00Z")
         validate-envelope $envelope
-        assert-eq $envelope.kind "error" "a silent settle produces an error envelope"
-        assert-eq $envelope.content.code "protocol_error" "and never a completion"
+        # dotfiles-oj4c: a silent settle is a STATE whose status is
+        # `protocol_error` — the same value the retired `error` kind carried
+        # under the name `code`. There was never a second type here.
+        assert-eq $envelope.kind "state" "a silent settle produces a state envelope"
+        assert-eq $envelope.content.status "protocol_error" "and never a completion"
         assert-true (legal-transition? "running" "protocol_error") "running must be able to record a protocol error"
     })
     (run-case "transition/created-cannot-report-an-outcome" {

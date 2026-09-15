@@ -184,7 +184,7 @@ let cases = [
             let before = (settled-pane-text $t.socket "bystander")
 
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t1"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t1"
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"

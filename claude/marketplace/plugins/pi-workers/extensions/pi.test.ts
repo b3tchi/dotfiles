@@ -53,6 +53,7 @@ import {
   MAX_SUMMARY_BYTES,
   oneLine,
   PROTOCOL_VERSION,
+  ENVELOPE_KINDS,
   createBusWatcher,
   createFsIo,
   parseQueueRows,
@@ -65,23 +66,25 @@ import {
   createDualWatcher,
 } from "./pi.ts";
 
+// dotfiles-oj4c: the shape the nushell writer ACTUALLY produces. These
+// fixtures used to carry `payload: {stage, task}` — a record the writer can no
+// longer emit, which is precisely why a green suite sat over a consumer that
+// dropped every real message. A fixture that cannot come off the wire proves
+// nothing about the wire.
 const workEnvelope = {
-  protocol: 2 as const,
+  protocol: 3 as const,
   sequence: 3,
-  run: "run-1",
-  uid: "impl-a",
-  kind: "inbox" as const,
+  id: "01K4ZQ7X8Y0000000000000000",
+  kind: "message" as const,
+  from: "run-1",
+  to: ["impl-a"],
   created: "2026-09-05T10:00:00Z",
-  payload: { stage: "wk-build" as const, task: "dotfiles-963w.4" },
+  content: "dotfiles-963w.4",
 };
 
 const akmEnvelope = {
   ...workEnvelope,
-  payload: {
-    stage: "doc-plan",
-    instructions: "Refine the spec into tasks.",
-    artifacts: ["sp028", "ft014"],
-  },
+  content: "Refine the spec into tasks.\n\nArtifacts: sp028, ft014",
 };
 
 const identity = {
@@ -148,61 +151,53 @@ describe("delivery decisions", () => {
 });
 
 describe("user payload shaping", () => {
-  test("a work stage sends exactly the bd task id", () => {
+  test("a message's content is delivered verbatim as the user text", () => {
     expect(userPayloadFor(workEnvelope)).toBe("dotfiles-963w.4");
   });
 
-  test("a work payload carries no prose, framing, or skill name", () => {
+  test("a work message carries no prose, framing, or skill name", () => {
+    // Unchanged in substance: a work stage still sends exactly the bd task id.
+    // What changed is WHERE that rule lives — the sender composes the text now,
+    // because a message is prose and the transport reads none of it.
     const text = userPayloadFor(workEnvelope);
     expect(text).not.toMatch(/wk-build/);
     expect(text).not.toMatch(/please|implement|you are/i);
     expect(text.split(/\s+/)).toHaveLength(1);
   });
 
-  test("an AKM stage sends its instructions and artifact ids", () => {
+  test("prose with artifact ids arrives whole", () => {
     const text = userPayloadFor(akmEnvelope);
     expect(text).toContain("Refine the spec into tasks.");
     expect(text).toContain("sp028");
     expect(text).toContain("ft014");
   });
 
-  test("a work envelope carrying extra fields is rejected, not trimmed", () => {
-    // Trimming would hide the caller's mistake and ship a payload the
-    // protocol says cannot exist.
-    const bad = { ...workEnvelope, payload: { ...workEnvelope.payload, design: "copied prose" } };
-    expect(() => userPayloadFor(bad as never)).toThrow(/work/i);
+  // dotfiles-oj4c: the consumer's half of the writer's pairing rule. The
+  // nushell side refuses a record stamped `message` before it is written; this
+  // refuses one if it somehow arrives, rather than coercing it. `String(x)` on
+  // a record delivers "[object Object]" to an agent as though a person typed
+  // it — a wrong message that LOOKS like a message, which is worse than an
+  // error.
+  test("a record content is refused, not coerced into [object Object]", () => {
+    const bad = { ...workEnvelope, content: { status: "complete", summary: "s" } };
+    expect(() => userPayloadFor(bad as never)).toThrow(/must carry a JSON string/i);
   });
 
-  test("the converged envelope carries its body under content", () => {
-    // dotfiles-v1zt: the nushell writer no longer mirrors the body into a
-    // second `payload` field. An envelope written from here on carries
-    // `content` alone, and the watcher must deliver it.
-    const converged = {
-      protocol: 2 as const,
-      sequence: 3,
-      id: "01K4ZQ7X8Y0000000000000000",
-      kind: "inbox" as const,
-      from: "run-1",
-      to: ["impl-a"],
-      created: "2026-09-05T10:00:00Z",
-      content: { stage: "wk-build" as const, task: "dotfiles-963w.4" },
-    };
-    expect(userPayloadFor(converged as never)).toBe("dotfiles-963w.4");
+  test("the refusal names what it got, so the shape mismatch is diagnosable", () => {
+    const bad = { ...workEnvelope, content: { stage: "wk-build", task: "t" } };
+    expect(() => userPayloadFor(bad as never)).toThrow(/got object/i);
   });
 
-  test("an envelope already in a worker's inbox still delivers from payload", () => {
-    // The fallback is why the writer could change under a running worker:
-    // a legacy-shaped envelope sitting in an inbox when this landed is still
-    // delivered rather than crashing the watcher.
-    expect(userPayloadFor(workEnvelope)).toBe("dotfiles-963w.4");
+  test("a missing content is refused rather than delivered as \"undefined\"", () => {
+    const bad = { ...workEnvelope, content: undefined };
+    expect(() => userPayloadFor(bad as never)).toThrow(/must carry a JSON string/i);
   });
 
-  test("a payload with neither task nor instructions is rejected", () => {
-    // sp029 T8: there is no registry to refuse an unknown stage up front any
-    // more — the transport does not know what a stage is. What it can still
-    // check is the one thing it owns: the payload must carry SOMETHING.
-    const bad = { ...workEnvelope, payload: { stage: "mystery" } };
-    expect(() => userPayloadFor(bad as never)).toThrow(/must carry either a task id or instructions/i);
+  test("a null content is named as null, not as object", () => {
+    // typeof null === "object" in JS, so an unguarded message would misreport
+    // the one case an operator is most likely to hit.
+    const bad = { ...workEnvelope, content: null };
+    expect(() => userPayloadFor(bad as never)).toThrow(/got null/i);
   });
 });
 
@@ -2239,18 +2234,23 @@ describe("inbox watcher against a fake Pi", () => {
   }
 
   type AgentStateName = string;
-  const envelope = (sequence: number, payload: unknown) => ({
-    protocol: 1,
+  // dotfiles-oj4c: one helper, producing exactly what the writer produces.
+  // This used to build `{protocol: 1, run, uid, payload}` — a shape no writer
+  // had emitted for two protocol versions — which is how the consumer drifted
+  // out from under a green suite.
+  const envelope = (sequence: number, content: string) => ({
+    protocol: 3,
     sequence,
-    run: "run-1",
-    uid: "impl-a",
-    kind: "inbox",
+    kind: "message",
+    id: "01K4ZQ7X8Y0000000000000000",
+    from: "run-1",
+    to: ["impl-a"],
     created: "2026-09-05T10:00:00Z",
-    payload,
+    content,
   });
 
-  test("delivers a work message as the bare ticket id", () => {
-    const { io } = fakeIO({ "1.json": envelope(1, { stage: "wk-build", task: "dotfiles-963w.4" }) });
+  test("delivers a work message as the bare ticket id the sender composed", () => {
+    const { io } = fakeIO({ "1.json": envelope(1, "dotfiles-963w.4") });
     const { host, sent } = fakeHost("idle");
     const w = createInboxWatcher(host, identity, "/inbox", io);
 
@@ -2260,9 +2260,9 @@ describe("inbox watcher against a fake Pi", () => {
     ]);
   });
 
-  test("delivers an AKM message as instructions plus artifacts", () => {
+  test("delivers an AKM message with its instructions and artifact ids intact", () => {
     const { io } = fakeIO({
-      "1.json": envelope(1, { stage: "doc-retro", instructions: "Run the retro.", artifacts: ["sp028"] }),
+      "1.json": envelope(1, "Run the retro.\n\nArtifacts: sp028"),
     });
     const { host, sent } = fakeHost("idle");
     createInboxWatcher(host, identity, "/inbox", io).poll();
@@ -2271,12 +2271,50 @@ describe("inbox watcher against a fake Pi", () => {
     expect(sent[0].text).toContain("sp028");
   });
 
+  // THE case this gap needed. The writer and this consumer disagreed about
+  // the shape of `content`, and the disagreement was SILENT: the throw was
+  // caught, logged, and the envelope marked read, so reviewer feedback was
+  // consumed and never delivered. Asserting on `sent` — not on the absence of
+  // a throw — is what makes that visible, because the old code did not throw
+  // either.
+  test("delivers a bare-string message as the user text", () => {
+    const { io } = fakeIO({ "1.json": envelope(1, "criterion 2 is unmet") });
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+
+    expect(w.poll()).toEqual([1]);
+    expect(sent).toEqual([
+      { text: "criterion 2 is unmet", deliverAs: "followUp", mode: undefined },
+    ]);
+  });
+
+  test("a multi-line string message is delivered whole, not trimmed to a first line", () => {
+    const body = "fix the gate\n\nspecifically: the empty-string case at :391";
+    const { io } = fakeIO({ "1.json": envelope(1, body) });
+    const { host, sent } = fakeHost("idle");
+    createInboxWatcher(host, identity, "/inbox", io).poll();
+
+    expect(sent[0]!.text).toBe(body);
+  });
+
+  test("an empty string message is still delivered, not refused as malformed", () => {
+    // An empty message is a sender mistake, not a malformed envelope — and
+    // the writer already permits it. Refusing here would mark it read and
+    // lose it, which is the failure mode this whole case exists to close.
+    const { io } = fakeIO({ "1.json": envelope(1, "") });
+    const { host, sent } = fakeHost("idle");
+
+    expect(createInboxWatcher(host, identity, "/inbox", io).poll()).toEqual([1]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toBe("");
+  });
+
   test("holds a message back while the agent is streaming, and delivers it once idle", () => {
     // dotfiles-nhit. This asserted a steer, and the mark advances on the call:
     // a steer Pi drops is gone, with no redelivery and nothing to check. The
     // message now waits for the turn to end and arrives as an ordinary one —
     // one poll later, and actually there.
-    const files = { "1.json": envelope(1, { stage: "wk-build", task: "t" }) };
+    const files = { "1.json": envelope(1, "t") };
     const { io } = fakeIO(files);
     const busy = createInboxWatcher({ agentState: () => "streaming", sendUserMessage: () => {} }, identity, "/inbox", io);
     expect(busy.poll()).toEqual([]);
@@ -2288,7 +2326,7 @@ describe("inbox watcher against a fake Pi", () => {
   });
 
   test("delivers nothing while compacting, and delivers it later", () => {
-    const files = { "1.json": envelope(1, { stage: "wk-build", task: "t" }) };
+    const files = { "1.json": envelope(1, "t") };
     const { io } = fakeIO(files);
     const busy = createInboxWatcher({ agentState: () => "compacting", sendUserMessage: () => {} }, identity, "/inbox", io);
     expect(busy.poll()).toEqual([]);
@@ -2302,8 +2340,8 @@ describe("inbox watcher against a fake Pi", () => {
     // Delivering 2 while 1 is undeliverable would reorder the conversation.
     let calls = 0;
     const { io } = fakeIO({
-      "1.json": envelope(1, { stage: "wk-build", task: "one" }),
-      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+      "1.json": envelope(1, "one"),
+      "2.json": envelope(2, "two"),
     });
     const host = {
       agentState: () => (calls++ === 0 ? "compacting" : "idle"),
@@ -2314,8 +2352,8 @@ describe("inbox watcher against a fake Pi", () => {
 
   test("never redelivers what it already sent", () => {
     const { io } = fakeIO({
-      "1.json": envelope(1, { stage: "wk-build", task: "one" }),
-      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+      "1.json": envelope(1, "one"),
+      "2.json": envelope(2, "two"),
     });
     const { host, sent } = fakeHost("idle");
     const w = createInboxWatcher(host, identity, "/inbox", io);
@@ -2335,8 +2373,8 @@ describe("inbox watcher against a fake Pi", () => {
     // appeared nowhere in the worker's transcript, and the initiator waited
     // for a round that could not come.
     const { io } = fakeIO({
-      "1.json": envelope(1, { stage: "wk-build", task: "one" }),
-      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+      "1.json": envelope(1, "one"),
+      "2.json": envelope(2, "two"),
     });
     let state: AgentStateName = "idle";
     const sent: string[] = [];
@@ -2361,7 +2399,7 @@ describe("inbox watcher against a fake Pi", () => {
 
   test("skips a scratch file without treating it as a message", () => {
     const { io } = fakeIO({
-      "1.json": envelope(1, { stage: "wk-build", task: "one" }),
+      "1.json": envelope(1, "one"),
       ".tmp.abc123": "{partial",
     });
     const { host, sent } = fakeHost("idle");
@@ -2372,7 +2410,7 @@ describe("inbox watcher against a fake Pi", () => {
   test("a corrupt envelope does not block the messages behind it", () => {
     const { io, logs } = fakeIO({
       "1.json": "not json at all",
-      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+      "2.json": envelope(2, "two"),
     });
     const { host, sent } = fakeHost("idle");
     createInboxWatcher(host, identity, "/inbox", io).poll();
@@ -2380,10 +2418,15 @@ describe("inbox watcher against a fake Pi", () => {
     expect(logs.join(" ")).toMatch(/unreadable/i);
   });
 
-  test("a protocol-violating payload is refused, logged, and not retried forever", () => {
+  test("a content that violates the kind pairing is refused, logged, and not retried forever", () => {
+    // dotfiles-oj4c: the violation is now a SHAPE violation — a record stamped
+    // `message`. The nushell writer refuses this before it is written, so an
+    // envelope like this can only arrive from something that bypassed the
+    // writer; the watcher still refuses it rather than delivering
+    // "[object Object]" as though a person had typed it.
     const { io, logs } = fakeIO({
-      "1.json": envelope(1, { stage: "wk-build", task: "one", design: "copied prose" }),
-      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+      "1.json": { ...envelope(1, ""), content: { stage: "wk-build", task: "one" } },
+      "2.json": envelope(2, "two"),
     });
     const { host, sent } = fakeHost("idle");
     createInboxWatcher(host, identity, "/inbox", io).poll();
@@ -2394,13 +2437,13 @@ describe("inbox watcher against a fake Pi", () => {
   test("a host with no sendUserMessage is inert and says so, rather than throwing", () => {
     // The Pi package is not installed here, so the API shape is an assumption.
     // A mismatch must not take the host down with it.
-    const { io, logs } = fakeIO({ "1.json": envelope(1, { stage: "wk-build", task: "one" }) });
+    const { io, logs } = fakeIO({ "1.json": envelope(1, "one") });
     expect(createInboxWatcher({}, identity, "/inbox", io).poll()).toEqual([]);
     expect(logs.join(" ")).toMatch(/inert/i);
   });
 
   test("a host that reports no agent state defers rather than guessing", () => {
-    const { io } = fakeIO({ "1.json": envelope(1, { stage: "wk-build", task: "one" }) });
+    const { io } = fakeIO({ "1.json": envelope(1, "one") });
     const { host, sent } = fakeHost();
     expect(createInboxWatcher({ sendUserMessage: host.sendUserMessage }, identity, "/inbox", io).poll()).toEqual([]);
     expect(sent).toHaveLength(0);
@@ -2473,8 +2516,8 @@ describe("parsing queue rows", () => {
 describe("peer message text", () => {
   const message = (content: unknown) =>
     peerMessageText({
-      protocol: 2,
-      kind: "inbox",
+      protocol: 3,
+      kind: "message",
       id: "x",
       from: "peer-b",
       to: ["self-a"],
@@ -2522,7 +2565,7 @@ describe("delivery decision table (sp029 T7: reused, not rewritten)", () => {
 describe("bus watcher against a fake Pi", () => {
   const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
   const envelope = (from: string, content: unknown, to: string[] = ["self-a"]) =>
-    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+    JSON.stringify({ protocol: 3, kind: "message", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
 
   function fakeBusIo(opts: {
     rows?: Array<{ id: string; read?: boolean }>;
@@ -2682,16 +2725,20 @@ describe("bus watcher against a fake Pi", () => {
 describe("dual watcher: a spawned worker reads both sources through one arbiter (dotfiles-uddc)", () => {
   const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
   const peerEnvelope = (from: string, content: unknown, to: string[] = ["impl-a"]) =>
-    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+    JSON.stringify({ protocol: 3, kind: "message", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
 
-  const inboxEnvelope = (sequence: number, payload: unknown) => ({
-    protocol: 1,
+  // dotfiles-oj4c: the legacy TREE is still legacy — run/uid-addressed, slot
+  // -numbered — but the envelope in it is the one converged shape, and its
+  // content is prose. `payload` is gone.
+  const inboxEnvelope = (sequence: number, content: string) => ({
+    protocol: 3,
     sequence,
-    run: "run-1",
-    uid: "impl-a",
-    kind: "inbox",
+    kind: "message",
+    id: "01K4ZQ7X8Y0000000000000000",
+    from: "run-1",
+    to: ["impl-a"],
     created: "2026-09-05T10:00:00Z",
-    payload,
+    content,
   });
 
   function fakeInboxIO(files: Record<string, unknown>) {
@@ -2745,7 +2792,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
   }
 
   test("delivers from the legacy inbox and never even reads the bus that tick", async () => {
-    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, "one") });
     const b = rowId("b1");
     const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
     const { host, sent } = fakeHost("idle");
@@ -2775,7 +2822,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
   test("a message on both sources at once still yields exactly one delivery this tick", async () => {
     // The regression this bug's fix must not reintroduce: two independent
     // loops would both see `idle` and both deliver into the same window.
-    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "legacy" }) });
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, "legacy") });
     const b = rowId("b1");
     const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "bus") } });
     const { host, sent } = fakeHost("idle");
@@ -2800,7 +2847,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
   });
 
   test("a mid-turn message on either source is deferred, not delivered, and neither is marked", async () => {
-    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, "one") });
     const b = rowId("b1");
     const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
     const { host, sent } = fakeHost("streaming");
@@ -2837,7 +2884,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
   });
 
   test("a host with no sendUserMessage is inert on both sources, not just one", async () => {
-    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, "one") });
     const b = rowId("b1");
     const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hi") } });
 
@@ -2855,7 +2902,7 @@ describe("filesystem-backed bus IO", () => {
     writeFileSync(join(dir, "queue", "self-a"), `${a}${" ".repeat(QUEUE_SUFFIX_CHARS)}\n`);
     writeFileSync(
       join(dir, "messages", a),
-      JSON.stringify({ protocol: 2, kind: "inbox", id: a, from: "peer-b", to: ["self-a"], created: "t", content: "hi" }),
+      JSON.stringify({ protocol: 3, kind: "message", id: a, from: "peer-b", to: ["self-a"], created: "t", content: "hi" }),
     );
     const exec = async () => ({ stdout: "", stderr: "", code: 0, killed: false });
     const io = createFsIo(dir, exec, "/mod.nu");
@@ -3665,5 +3712,23 @@ describe("protocol version agrees with the nushell module (sp029 T2)", () => {
       throw new Error("could not find `export const PROTOCOL_VERSION = <n>` in pi-worker.nu");
     }
     expect(PROTOCOL_VERSION).toBe(Number(match[1]));
+  });
+
+  // dotfiles-oj4c: the same check for the kind vocabulary, which is the thing
+  // that actually drifted. `inbox` on the wire vs `message` on the card cost a
+  // consumer that special-cased a kind never arriving (dotfiles-9oa4); a
+  // rename on one side and not the other would do it again, silently, because
+  // an unknown kind is simply a branch nothing takes.
+  test("ENVELOPE_KINDS is the same vocabulary on both sides", () => {
+    const nuSource = readFileSync(
+      join(import.meta.dir, "../scripts/pi-worker.nu"),
+      "utf8",
+    );
+    const match = nuSource.match(/^export const ENVELOPE_KINDS = \[(.*)\]/m);
+    if (!match) {
+      throw new Error("could not find `export const ENVELOPE_KINDS = [...]` in pi-worker.nu");
+    }
+    const nuKinds = match[1]!.match(/"([^"]+)"/g)!.map((q) => q.slice(1, -1));
+    expect([...ENVELOPE_KINDS]).toEqual(nuKinds);
   });
 });

@@ -64,7 +64,22 @@ export const ISOLATIONS = ["worktree" "main"]
 # have meant refusing the identity records durable state is holding right now
 # — and unlike the runtime bus, that tree is not disposable: it is what keeps
 # an accepted worker resumable across a logout.
-export const PROTOCOL_VERSION = 2
+#
+# 2 -> 3 (dotfiles-oj4c): the kind vocabulary collapses to `message`|`state`
+# and the kind now correlates with the SHAPE of `content` by rule. A v2 record
+# carries a retired kind, so it can no longer be read.
+#
+# Bumped for the FAILURE MESSAGE, not for compatibility: this landed as a hard
+# cutover with zero live workers, so nothing is being bridged. Without the
+# bump, a stale record would die in `validate-envelope` on its kind — "unknown
+# envelope kind 'identity'", which reads like corruption. With it, the version
+# check fires first and says the true thing: "unknown protocol version 2: this
+# build speaks version 3". One constant, a diagnosis an operator can act on.
+#
+# The stale records under `state-root` are deliberately NOT rewritten. They
+# belong to stopped/accepted/gone workers, nothing resumable is lost, and
+# deleting durable state is an operator's decision rather than a migration's.
+export const PROTOCOL_VERSION = 3
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
 # record. Anything approaching this size means prose is being copied that
@@ -75,7 +90,44 @@ export const MAX_ENVELOPE_BYTES = 65536
 # worker window and the Pi JSONL.
 export const MAX_SUMMARY_BYTES = 4096
 
-export const ENVELOPE_KINDS = ["inbox" "result" "error" "identity"]
+# The bus vocabulary, and the whole of it. Two kinds, because there were only
+# ever two SHAPES:
+#
+#     message   content is a JSON string  — freetext prose
+#     state     content is a JSON object carrying `status`
+#
+# The kind is not a label a writer picks freely: `validate-envelope` enforces
+# the pairing, so an object stamped `message` is refused before anything is
+# written. That check is what makes the bug this vocabulary replaced —
+# a result rendering as a bare `{` for weeks — structurally impossible rather
+# than merely fixed.
+#
+# What retired, and why none of it was a distinct type (dotfiles-oj4c):
+#
+#   inbox    -> message. The name ft014's card always used. The wire said
+#               `inbox`, the card said `message`, and a consumer written from
+#               the card special-cased a kind that never arrives
+#               (dotfiles-9oa4). Renaming the wire closes the drift.
+#   result   -> state.
+#   error    -> state. Its `content.code` becomes `content.status`, whose only
+#               value — `protocol_error` — was ALREADY in WORKER_STATES beside
+#               complete/failed/blocked/accepted/stopped. `error` was never a
+#               type, only a second spelling of one field.
+#   identity -> leaves the bus vocabulary entirely. It is not a bus envelope:
+#               it lives in the durable state root by design (sp029 T6) so an
+#               accepted worker survives cleanup and logout. It is a durable
+#               RECORD, validated on its own path by `validate-identity-record`
+#               and never by this gate. See `IDENTITY_KIND`.
+export const ENVELOPE_KINDS = ["message" "state"]
+
+# The type tag a durable identity record wears. Deliberately NOT in
+# ENVELOPE_KINDS: an identity never crosses the bus, so it is never validated
+# by the bus gate. `validate-identity-record` is its gate, and `read-identity-
+# box` / `write-identity-record` are the only readers and writers that apply
+# it. Keeping the tag on the record means the file still says what it is when
+# an operator opens it; keeping it out of the vocabulary means no bus consumer
+# has to know the word.
+export const IDENTITY_KIND = "identity"
 
 # Persisted worker states.
 export const WORKER_STATES = [
@@ -361,23 +413,50 @@ export def --env mint-msg-id []: nothing -> string {
 # accepted and ignored: a v1 caller (read-box) still passes it, and a content
 # size check has nothing to re-litigate against a registry that may have
 # changed, so stored and fresh envelopes are checked identically now.
-def validate-inbox-payload [content: any, --stored] {
+#
+# dotfiles-oj4c: "opaque" now means "opaque PROSE". A `message` carries a JSON
+# string and nothing else — the kind names the shape, and that is what lets a
+# consumer read `content.status` off a `state` without first guessing whether
+# it has one. A caller with structure to send either sends a `state` (if what
+# it is sending is a status) or serialises its own vocabulary into the string;
+# the transport still interprets neither.
+def validate-message-content [content: any, --stored] {
+    let shape = ($content | describe)
+    if $shape != "string" {
+        error make {msg: $"a 'message' envelope must carry a JSON string as its content, got ($shape): prose travels as a message, a status record travels as a state"}
+    }
     let size = (content-bytes $content)
     if $size > $MAX_ENVELOPE_BYTES {
         error make {msg: $"message content is ($size) bytes, over the 64 KiB cap: a bus message addresses work, it does not carry it"}
     }
 }
 
-def validate-result-payload [content: record] {
-    # sp029 T5: `window` drops off the required list — the narrowed result
-    # shape is status/validation/summary/session/resume (## solution: "The
-    # typed result survives, narrowed"). Legacy callers may still set it as
-    # an extra field; nothing here forbids that.
+# A `state` envelope's content is a status record: one required field,
+# `status`, plus whatever that status owes.
+#
+# This absorbed the old `error` kind whole (dotfiles-oj4c). The error payload
+# was `{code, detail}` and its `code` was always `protocol_error` — a value
+# already sitting in WORKER_STATES. Renaming that field to `status` is the
+# entire difference between the two "types", which is why there is now one.
+#
+# The status therefore decides what else is required, and the branch is on the
+# FIELD rather than on a kind — the point of the collapse. A reported outcome
+# (RESULT_STATUSES) owes summary/session/resume; a `protocol_error` owes the
+# detail that says what went wrong.
+def validate-state-content [content: any] {
+    let shape = ($content | describe)
+    if not ($shape | str starts-with "record") {
+        error make {msg: $"a 'state' envelope must carry a JSON object as its content, got ($shape): a status record travels as a state, prose travels as a message"}
+    }
+
     let fields = ($content | columns)
-    for required in ["status" "summary" "session" "resume"] {
-        if $required not-in $fields {
-            error make {msg: $"result payload must carry ($required)"}
-        }
+    if "status" not-in $fields {
+        error make {msg: "state content must carry 'status': `kind: state` means exactly 'this content is a status record', so a state without one says nothing"}
+    }
+
+    let size = (content-bytes $content)
+    if $size > $MAX_ENVELOPE_BYTES {
+        error make {msg: $"state content is ($size) bytes, over the 64 KiB cap: a bus message addresses work, it does not carry it"}
     }
 
     let status = $content.status
@@ -387,8 +466,29 @@ def validate-result-payload [content: record] {
     if $status == "accepted" {
         error make {msg: "a worker cannot report status 'accepted': acceptance is the initiator's verdict, granted only after a completion is reviewed or a merge succeeds"}
     }
+
+    # The bus's own report about a worker, rather than a worker's report about
+    # itself: it is the only status here nothing spawned says, so it is the
+    # only one that owes `detail` instead of the result contract.
+    if $status == "protocol_error" {
+        if "detail" not-in $fields {
+            error make {msg: "a 'protocol_error' state must carry 'detail': the absence of a result is itself the report, and the report has to say what was absent"}
+        }
+        return
+    }
+
     if $status not-in $RESULT_STATUSES {
         error make {msg: $"unknown result status '($status)': not one of ($RESULT_STATUSES | str join ', ')"}
+    }
+
+    # sp029 T5: `window` drops off the required list — the narrowed result
+    # shape is status/validation/summary/session/resume (## solution: "The
+    # typed result survives, narrowed"). Legacy callers may still set it as
+    # an extra field; nothing here forbids that.
+    for required in ["summary" "session" "resume"] {
+        if $required not-in $fields {
+            error make {msg: $"result payload must carry ($required)"}
+        }
     }
 
     # adr0027: completion is never inferred from prose. A `complete` result
@@ -421,12 +521,90 @@ def validate-identity [payload: record] {
     }
 }
 
-def validate-error-payload [payload: record] {
-    for required in ["code" "detail"] {
-        if $required not-in ($payload | columns) {
-            error make {msg: $"error payload must carry ($required)"}
+# ----------------------------------------------------------- shared addressing
+#
+# `from`, `to` and `created` mean the same thing on every record this module
+# writes, so they are checked in exactly one place.
+#
+# Pulled out by dotfiles-oj4c rather than copied: the identity gate was split
+# off `validate-envelope` and silently lost these three checks, keeping only
+# the PRESENCE test that `ENVELOPE_REQUIRED` already does. Presence is not
+# validation — an identity whose `from` is "" is as unusable as one with no
+# `from` at all, and `worker-timeline` calls `into datetime` on `created`
+# without a guard, so a stamp that only had to EXIST crashed somewhere with no
+# idea which file it came from. Two validators for one rule is how that
+# happens; one validator is the fix.
+#
+# `what` names the record kind in the message so a refusal still reads
+# correctly whichever gate raised it.
+def validate-addressing [record: record, what: string] {
+    if ($record.from | describe) != "string" or ($record.from | is-empty) {
+        error make {msg: $"($what) field 'from' must be a non-empty address"}
+    }
+
+    # `to` is a list of at least one address. Duplicates (including the
+    # sender addressing itself) are legal — fan-out (T3) dedupes rather than
+    # refusing, since re-sending to an address already in the list is a
+    # sender mistake worth ignoring, not a protocol violation.
+    if not ($record.to | describe | str starts-with "list") {
+        error make {msg: $"($what) field 'to' must be a list of addresses"}
+    }
+    if ($record.to | is-empty) {
+        error make {msg: $"($what) field 'to' must name at least one address"}
+    }
+    if ($record.to | any {|addr| ($addr | describe) != "string" or ($addr | is-empty) }) {
+        error make {msg: $"($what) field 'to' must contain only non-empty addresses"}
+    }
+
+    if ($record.created | is-empty) {
+        error make {msg: $"($what) field 'created' must not be empty"}
+    }
+    if not (try { $record.created | into datetime; true } catch { false }) {
+        error make {msg: $"($what) field 'created' must be an ISO timestamp, got '($record.created)'"}
+    }
+}
+
+# ------------------------------------------------------- identity record gate
+#
+# dotfiles-oj4c: identity left ENVELOPE_KINDS, so it needs a gate of its own.
+#
+# This is deliberately NOT a narrower `validate-envelope`. An identity is not
+# a bus envelope that happens to be stored somewhere else — it is a durable
+# placement record that has never travelled the bus and never will (sp029 T6
+# put it under `state-root` precisely so an accepted worker survives cleanup
+# and a logout). It reuses the envelope's field layout because the layout is a
+# good one and `make-envelope` already builds it, not because it is one.
+#
+# The `run`/`uid` addressing it carries in `from`/`to` is what ties the record
+# to the worker it places; `content` is the identity itself.
+export def validate-identity-record [record: record] {
+    let fields = ($record | columns)
+
+    for required in $ENVELOPE_REQUIRED {
+        if $required not-in $fields {
+            error make {msg: $"identity record is missing required field '($required)'"}
         }
     }
+
+    # Version FIRST, then shape: a record from an older build is outdated, not
+    # malformed, and saying so is the whole reason PROTOCOL_VERSION moved.
+    if $record.protocol != $PROTOCOL_VERSION {
+        error make {msg: $"unknown protocol version ($record.protocol): this build speaks version ($PROTOCOL_VERSION) only"}
+    }
+
+    if $record.kind != $IDENTITY_KIND {
+        error make {msg: $"expected an identity record of kind '($IDENTITY_KIND)', got '($record.kind)'"}
+    }
+
+    # The same rule the bus gate applies, from the same function. This is what
+    # ties the record to the worker it places, so it is checked, not assumed.
+    validate-addressing $record "identity record"
+
+    if not (($record.content | describe) | str starts-with "record") {
+        error make {msg: $"identity record content must be a record, got ($record.content | describe)"}
+    }
+
+    validate-identity $record.content
 }
 
 # ------------------------------------------------------------- envelope gate
@@ -451,30 +629,7 @@ export def validate-envelope [envelope: record, --stored] {
         error make {msg: $"unknown envelope kind '($envelope.kind)': not one of ($ENVELOPE_KINDS | str join ', ')"}
     }
 
-    if ($envelope.from | describe) != "string" or ($envelope.from | is-empty) {
-        error make {msg: "envelope field 'from' must be a non-empty address"}
-    }
-
-    # `to` is a list of at least one address. Duplicates (including the
-    # sender addressing itself) are legal — fan-out (T3) dedupes rather than
-    # refusing, since re-sending to an address already in the list is a
-    # sender mistake worth ignoring, not a protocol violation.
-    if not ($envelope.to | describe | str starts-with "list") {
-        error make {msg: "envelope field 'to' must be a list of addresses"}
-    }
-    if ($envelope.to | is-empty) {
-        error make {msg: "envelope field 'to' must name at least one address"}
-    }
-    if ($envelope.to | any {|addr| ($addr | describe) != "string" or ($addr | is-empty) }) {
-        error make {msg: "envelope field 'to' must contain only non-empty addresses"}
-    }
-
-    if ($envelope.created | is-empty) {
-        error make {msg: "envelope field 'created' must not be empty"}
-    }
-    if not (try { $envelope.created | into datetime; true } catch { false }) {
-        error make {msg: $"envelope field 'created' must be an ISO timestamp, got '($envelope.created)'"}
-    }
+    validate-addressing $envelope "envelope"
 
     # Every kind is validated against `content`, the one field
     # `ENVELOPE_REQUIRED` guarantees.
@@ -488,11 +643,14 @@ export def validate-envelope [envelope: record, --stored] {
     # dotfiles-v1zt removed the second shape instead: there is no `payload` to
     # prefer any more, and a stored legacy envelope carries `content` holding
     # the identical value, so the fallback has nothing left to do.
+    # dotfiles-oj4c: the kind names the SHAPE of `content`, and this is where
+    # that stops being a convention. `message` means string, `state` means an
+    # object carrying `status` — so a consumer that has read the kind may read
+    # the content without guarding, which is exactly what no consumer could do
+    # while four kinds shared two shapes and nothing checked the pairing.
     match $envelope.kind {
-        "inbox" => { validate-inbox-payload $envelope.content --stored=$stored }
-        "result" => { validate-result-payload $envelope.content }
-        "error" => { validate-error-payload $envelope.content }
-        "identity" => { validate-identity $envelope.content }
+        "message" => { validate-message-content $envelope.content --stored=$stored }
+        "state" => { validate-state-content $envelope.content }
     }
 }
 
@@ -502,15 +660,19 @@ export def validate-envelope [envelope: record, --stored] {
 # failure this envelope exists to prevent, so the absence of a result is itself
 # reported, as a protocol error.
 export def settled-without-result [run: string, uid: string, sequence: int, created: string]: nothing -> record {
+    # dotfiles-oj4c: `code` became `status`. The value did not change, because
+    # it never needed to — `protocol_error` was already a WORKER_STATE. That
+    # the rename was the whole content of the old `error` kind is why there is
+    # no `error` kind any more.
     let payload = {
-        code: "protocol_error"
+        status: "protocol_error"
         detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
     }
     # Addressed worker-to-initiator because that is the direction this report
     # travels — declared, not read off the kind. `sequence` and `created` are
     # the caller's to supply: this is also the shape `bus-settled` writes into
     # the legacy tree, where `claim-slot` stamps the real slot number.
-    make-envelope "error" $payload --from $uid --to [$run]
+    make-envelope "state" $payload --from $uid --to [$run]
     | merge {sequence: $sequence, created: $created}
 }
 
@@ -1078,7 +1240,14 @@ def presence-column [slug: string, uid: string]: nothing -> string {
 # write run/uid-addressed, sequence-numbered envelopes pending T5 (result)
 # and T6 (identity); they retire for real once those migrate onto
 # `queue-append` (dotfiles-v1zt).
-def claim-slot [dir: string, envelope: record] {
+# `--validate` names the gate the record must pass. It defaults to the bus
+# gate, because almost everything written into a numbered slot IS a bus
+# envelope — but identity is not (dotfiles-oj4c), and it is written through
+# exactly this function into exactly this layout. Passing the gate in is what
+# lets identity leave ENVELOPE_KINDS without either duplicating this
+# slot-claiming loop or smuggling a fifth kind back into the vocabulary so it
+# can reuse it.
+def claim-slot [dir: string, envelope: record, --validate: closure] {
     let scratch = ($dir | path join $".tmp.(random chars --length 10)")
 
     mut seq = ((next-sequence $dir) - 1)
@@ -1095,7 +1264,7 @@ def claim-slot [dir: string, envelope: record] {
         # carries no `sequence` of its own — the slot number is this layer's
         # to assign, and only the legacy tree has slots at all.
         let sealed = ($envelope | merge {sequence: $seq})
-        validate-envelope $sealed
+        if $validate == null { validate-envelope $sealed } else { do $validate $sealed }
         $sealed | to json | save -f $scratch
         chmod 600 $scratch
 
@@ -1144,7 +1313,7 @@ def next-sequence [dir: string]: nothing -> int {
 # delivered to the initiator as a bare string with no error anywhere — the
 # exact silent-failure mode "fail closed" exists to prevent. Do not "simplify"
 # this back into `each` without re-measuring that behavior.
-def read-box [dir: string]: nothing -> list<record> {
+def read-box [dir: string, --validate: closure]: nothing -> list<record> {
     if not ($dir | path exists) { return [] }
     let files = (
         ls $dir
@@ -1166,7 +1335,12 @@ def read-box [dir: string]: nothing -> list<record> {
         }
         # `--stored`: the structure is still checked, but the stage is not
         # re-resolved against a registry that may have changed since.
-        try { validate-envelope $parsed --stored } catch {|e|
+        # `--validate` mirrors `claim-slot`'s: the identity log lives in this
+        # same layout and is read back through here, but is gated by
+        # `validate-identity-record` rather than by the bus gate.
+        try {
+            if $validate == null { validate-envelope $parsed --stored } else { do $validate $parsed }
+        } catch {|e|
             error make {msg: $"invalid envelope ($n | path basename) in ($dir): ($e.msg)"}
         }
         $envelopes = ($envelopes | append $parsed)
@@ -1245,14 +1419,20 @@ export def make-envelope [
 # project-scoped bus rather than a run. This function, `claim-slot` and
 # `next-sequence` retire together, tracked as dotfiles-v1zt, once T5
 # (bus-result/bus-settled) and T6 (identity) stop needing them.
+# dotfiles-oj4c: `--payload: record` became `--content: string`. The record it
+# used to take (`{instructions, artifacts}`, `{stage, task}`) was the last
+# structured thing travelling as an ordinary message, and the new pairing rule
+# refuses it at the writer — a message is prose. Nothing was lost: the only
+# production caller is `worker-resume`, which had one string to send and was
+# wrapping it in a record with a permanently-empty `artifacts: []` beside it.
 export def legacy-inbox-send [
     uid: string
     --run: string
-    --payload: record
+    --content: string
 ]: nothing -> record {
     # Addressed initiator-to-worker, said here rather than inferred from the
     # kind: this function knows the direction, the envelope builder does not.
-    let envelope = (make-envelope "inbox" $payload --from $run --to [$uid])
+    let envelope = (make-envelope "message" $content --from $run --to [$uid])
     # Validate before creating anything: a rejected message must leave no trace
     # in the runtime directory, not even an empty worker tree.
     validate-envelope $envelope
@@ -1421,14 +1601,14 @@ export def bus-stage-message [
     --from: string
     --content: any
     # dotfiles-56lh: what the message IS, not merely what it says. This used
-    # to be hardcoded `inbox`, so every envelope that ever travelled the bus
-    # was `inbox` by construction and a reader had to parse `content` to tell
-    # an outcome from prose — the shape-sniffing sp030's plan forbids and
-    # sp031 deliberately preserved. Defaulting to `inbox` keeps every existing
-    # caller writing exactly what it wrote before; the value is checked
-    # against ENVELOPE_KINDS by `validate-envelope` below, before anything is
-    # created, so an unknown kind leaves no trace in the runtime directory.
-    --kind: string = "inbox"
+    # to be hardcoded, so every envelope that ever travelled the bus carried
+    # one kind by construction and a reader had to parse `content` to tell an
+    # outcome from prose — the shape-sniffing sp030's plan forbids and sp031
+    # deliberately preserved. The default is the prose kind, which is what an
+    # unqualified `send` means; the value is checked against ENVELOPE_KINDS by
+    # `validate-envelope` below, before anything is created, so an unknown
+    # kind leaves no trace in the runtime directory.
+    --kind: string = "message"
 ]: nothing -> record {
     # Validate before creating anything: a rejected message must leave no
     # trace in the runtime directory, not even an empty project tree —
@@ -1497,8 +1677,8 @@ export def bus-send [
     --to: list<string>
     --from: string
     --content: any
-    # See `bus-stage-message`: `inbox` unless the sender says otherwise.
-    --kind: string = "inbox"
+    # See `bus-stage-message`: prose unless the sender says otherwise.
+    --kind: string = "message"
 ]: nothing -> record {
     bus-publish-message (bus-stage-message --to $to --from $from --content $content --kind $kind)
 }
@@ -1741,7 +1921,7 @@ export def bus-result [
     }
 
     # Addressed worker-to-initiator by this call site, not by its kind.
-    let envelope = (make-envelope "result" $result --from $uid --to [$run])
+    let envelope = (make-envelope "state" $result --from $uid --to [$run])
     validate-envelope $envelope
     ensure-worker-dirs $run $uid
     let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
@@ -1756,12 +1936,13 @@ export def bus-result [
     # therefore still here, not cleared).
     let commissioner = ($identity | get -o commissioner)
     if ($commissioner | is-not-empty) {
-        # dotfiles-56lh: stamped `result`, not `inbox`. The relay stays
+        # dotfiles-56lh: stamped as an outcome, not as prose. The relay stays
         # additive — the same content still reaches the commissioner — but it
-        # now arrives correctly TYPED, so a bus consumer distinguishes an
-        # outcome from prose by reading `kind` rather than by guessing at the
-        # shape of `content`.
-        bus-send --to [$commissioner] --from $uid --kind "result" --content $result
+        # arrives correctly TYPED, so a bus consumer distinguishes an outcome
+        # from prose by reading `kind` rather than by guessing at the shape of
+        # `content`. dotfiles-oj4c made that guess impossible to need: `state`
+        # and `message` no longer share a shape.
+        bus-send --to [$commissioner] --from $uid --kind "state" --content $result
     }
 
     $written
@@ -2185,13 +2366,11 @@ export def derive-state [results: list<record>, markers: record]: nothing -> str
     # different response from "reported once and was sent back to work".
     if ($results | is-empty) { return "created" }
 
-    # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
-    # (content.status) and `error` envelopes (content.code) — different shapes
-    # — so reading `content.status` off whatever came last crashed with
-    # "column 'status' is missing" the first time a worker settled without
-    # reporting.
-    let latest = ($results | last)
-    if $latest.kind == "error" { $latest.content.code } else { $latest.content.status }
+    # One shape, one field. Every envelope in an outbox is a `state`, and a
+    # `state` carries `status` by rule (`validate-state-content`), so there is
+    # nothing here to dispatch on — the kind check this replaced existed only
+    # because `result` and `error` spelled one field two ways.
+    $results | last | get content.status
 }
 
 # The markers that bear on a worker's state, as derive-state wants them.
@@ -2528,26 +2707,38 @@ def bus-claims [repo: string]: nothing -> list<record> {
     # `run` level is still there. A uid appears under exactly one of them now
     # that uniqueness is project-wide (dotfiles-bg65), so this walks the level
     # rather than meaning anything by it.
-    ls $dir | where type == dir | get name | each {|run_dir|
+    # Nested `for`, not nested `each`, for the reason the NOTE ON THE LOOP over
+    # `read-box` documents: nushell 0.115 does not surface an `error make`
+    # raised inside an `each` closure as itself. Here it does not vanish — the
+    # outer pipeline still fails — but it arrives as the bare "Eval block
+    # failed with pipeline input", throwing away the named file and named
+    # reason `read-identity-box` went to the trouble of producing.
+    #
+    # That was theoretical until dotfiles-oj4c: nothing in a live state root
+    # failed to validate, so this path never raised. After the protocol bump
+    # every stale record does, and this bare error became the ONLY thing an
+    # operator running `reclaim` sees. An operator cannot fix a record the
+    # refusal will not name.
+    mut claims = []
+    for run_dir in (ls $dir | where type == dir | get name) {
         let run = ($run_dir | path basename)
-        ls $run_dir | where type == dir | get name | each {|uid_dir|
+        for uid_dir in (ls $run_dir | where type == dir | get name) {
             let uid = ($uid_dir | path basename)
-            let records = (read-box ($uid_dir | path join "identity"))
-            if ($records | is-empty) { [] } else {
-                let envelope = ($records | last)
-                let identity = $envelope.content
-                [{
-                    run: $run
-                    uid: $uid
-                    state: (bus-status $uid --run $run | get state)
-                    cwd: (expand-path $identity.cwd)
-                    branch: $identity.branch
-                    window: (window-target $identity)
-                    window_name: $identity.window
-                }]
-            }
-        } | flatten
-    } | flatten
+            let records = (read-identity-box ($uid_dir | path join "identity"))
+            if ($records | is-empty) { continue }
+            let identity = ($records | last | get content)
+            $claims = ($claims | append {
+                run: $run
+                uid: $uid
+                state: (bus-status $uid --run $run | get state)
+                cwd: (expand-path $identity.cwd)
+                branch: $identity.branch
+                window: (window-target $identity)
+                window_name: $identity.window
+            })
+        }
+    }
+    $claims
 }
 
 # The states in which a worker still has work in flight, and its directory is
@@ -2950,7 +3141,11 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
     # durable state (sp029 T6) rather than on the tmpfs bus, so an accepted
     # worker stays resumable across a logout — dotfiles-v1zt converged the
     # SHAPE of this envelope and deliberately left its LOCATION alone.
-    let sealed = (claim-slot $dir (make-envelope "identity" $identity --from $uid --to [$run]))
+    let sealed = (
+        claim-slot $dir
+            (make-envelope $IDENTITY_KIND $identity --from $uid --to [$run])
+            --validate {|r| validate-identity-record $r }
+    )
     # Recorded AFTER the write succeeds: a caller resolving `(run, uid)` back
     # to a slug must never find a pointer to a record that is not there yet.
     record-agent-slug $run $uid $slug
@@ -2963,10 +3158,18 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
 # stamp and the payload does not. That stamp is the only record of when a
 # worker was spawned, so anything asking "how long has this been running"
 # needs the envelope rather than what is inside it.
+# `read-box` for the identity log. Same layout, same fail-closed reading, its
+# own gate (dotfiles-oj4c): an identity is a durable record, not a bus
+# envelope, so `validate-envelope` — which now knows only `message` and
+# `state` — is the wrong thing to hold it to.
+def read-identity-box [dir: string]: nothing -> list<record> {
+    read-box $dir --validate {|r| validate-identity-record $r }
+}
+
 export def bus-identity-envelope [uid: string, --run: string]: nothing -> any {
     let dir = (identity-log-dir $run $uid)
     if $dir == null { return null }
-    let records = (read-box $dir)
+    let records = (read-identity-box $dir)
     if ($records | is-empty) { return null }
     $records | last
 }
@@ -2981,170 +3184,17 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
     $envelope | get content
 }
 
-# ------------------------------------------------------- v1 import (sp029 T6)
+# ------------------------------------------------- v1 import: REMOVED (oj4c)
 #
-# v1 wrote identity under the RUNTIME bus tree
-# ($XDG_RUNTIME_DIR/pi-worker/<run>/<uid>/identity), which is wiped at logout.
-# A worktree it names can outlive that wipe, so this is the one-way bridge
-# onto durable storage for whatever v1 identity is still sitting on the bus
-# when this lands.
+# A one-way bridge used to live here, importing protocol-1 identity records
+# off the runtime bus onto durable storage. It is gone.
 #
-# Keyed by each record's own `cwd`, not by `(run, uid)`: a v1 uid was only
-# ever unique within its OWN run, so two independent runs may have minted the
-# same uid for two different worktrees, and importing by uid alone would let
-# the second overwrite the first's placement record without either side ever
-# refusing. `cwd` is what `accept`/`reclaim` actually act on, and only one
-# live worktree can hold it.
-#
-# Idempotent by construction rather than by a separate ledger: a `(run, uid)`
-# that already resolves a slug was either imported by a previous call or
-# written natively, and either way there is nothing left for THIS call to do.
-# The import reads v1 BYTES, so it carries its own reader rather than going
-# through `read-box`. `read-box` calls `validate-envelope`, which is the v2
-# gate: it requires `from`/`to`/`content` and refuses `protocol: 1` outright.
-# That refusal is correct and must stay — a v2 reader acting on a v1 message
-# is exactly the confusion the version field exists to prevent — but it is
-# also, literally, a refusal to read the only thing this bridge exists to
-# read. The two requirements are not in conflict once they stop sharing one
-# validator: the bus gate keeps refusing v1, and the import validates the v1
-# shape it actually expects.
-#
-# That shape is what the shipped v1 writer produced (`envelope-for` before
-# sp029 T2): `{protocol: 1, sequence, run, uid, kind, created, payload}` —
-# no `from`, no `to`, no `content`. Anything else in a legacy identity dir is
-# named and refused, never coerced: a record this build cannot account for is
-# a record an operator has to look at, and the alternative (skip it) loses a
-# placement whose worktree may still be occupied.
-const V1_PROTOCOL = 1
-const V1_IDENTITY_REQUIRED = ["protocol" "run" "uid" "kind" "created" "payload"]
-
-def validate-v1-identity-envelope [envelope: record] {
-    let fields = ($envelope | columns)
-
-    # Version FIRST, then shape: which fields are required is itself a
-    # function of the version, so "missing required field 'run'" is a
-    # misleading thing to say about a v2 record that never had one.
-    if "protocol" not-in $fields {
-        error make {msg: "v1 identity envelope is missing required field 'protocol'"}
-    }
-    if $envelope.protocol != $V1_PROTOCOL {
-        error make {msg: $"expected a v1 identity envelope \(protocol ($V1_PROTOCOL)), got protocol ($envelope.protocol): the import bridges v1 records only, and this build writes v($PROTOCOL_VERSION) natively"}
-    }
-
-    for required in $V1_IDENTITY_REQUIRED {
-        if $required not-in $fields {
-            error make {msg: $"v1 identity envelope is missing required field '($required)'"}
-        }
-    }
-
-    if $envelope.kind != "identity" {
-        error make {msg: $"expected a v1 envelope of kind 'identity', got '($envelope.kind)'"}
-    }
-
-    if not (($envelope.payload | describe) | str starts-with "record") {
-        error make {msg: $"v1 identity payload must be a record, got ($envelope.payload | describe)"}
-    }
-
-    # The same field set `bus-identity` enforces on write, so a record that
-    # passes here is one the durable writer will accept unchanged.
-    validate-identity $envelope.payload
-}
-
-# `read-box` for v1 identity logs. Fails closed for the same reason it does:
-# a named file an operator can fix beats a placement that quietly vanished.
-def read-v1-identity-box [dir: string]: nothing -> list<record> {
-    if not ($dir | path exists) { return [] }
-    let files = (
-        ls $dir
-        | get name
-        | where {|n| ($n | path basename | str ends-with ".json") }
-        | sort-by {|n| $n | path basename | str replace ".json" "" | into int }
-    )
-
-    # `for`, not `each`, for the reason spelled out over `read-box`: nushell
-    # 0.115 swallows an `error make` raised inside an `each` closure.
-    mut envelopes = []
-    for n in $files {
-        let raw = (open --raw $n)
-        let parsed = (try { $raw | from json } catch {
-            error make {msg: $"unparseable v1 identity ($n | path basename) in ($dir): the import fails closed rather than skipping a placement record"}
-        })
-        if not (($parsed | describe) | str starts-with "record") {
-            error make {msg: $"unparseable v1 identity ($n | path basename) in ($dir): expected a JSON object, got ($parsed | describe)"}
-        }
-        try { validate-v1-identity-envelope $parsed } catch {|e|
-            error make {msg: $"invalid v1 identity ($n | path basename) in ($dir): ($e.msg)"}
-        }
-        $envelopes = ($envelopes | append $parsed)
-    }
-    $envelopes
-}
-
-export def import-v1-identities []: nothing -> record {
-    let root = (bus-root)
-    if not ($root | path exists) {
-        return {imported: [], already: []}
-    }
-
-    # Nested `for` rather than nested `each`, for the reason the NOTE ON THE
-    # LOOP over `read-box` documents: an `error make` raised inside an `each`
-    # closure does not surface as itself. Here it does not vanish outright —
-    # the outer pipeline still fails — but it arrives as the bare "Eval block
-    # failed with pipeline input", losing the named file and named reason the
-    # reader went to the trouble of producing. An operator cannot fix a record
-    # the refusal will not name.
-    mut found = []
-    for run_dir in (ls $root | where type == dir | get name) {
-        let run = ($run_dir | path basename)
-        for worker_dir in (ls $run_dir | where type == dir | get name) {
-            let uid = ($worker_dir | path basename)
-            let records = (read-v1-identity-box ($worker_dir | path join "identity"))
-            if ($records | is-not-empty) {
-                $found = ($found | append {run: $run, uid: $uid, payload: ($records | last | get payload)})
-            }
-        }
-    }
-
-    if ($found | is-empty) {
-        return {imported: [], already: []}
-    }
-
-    # Every refusal collected BEFORE anything is touched — the same
-    # discipline `worktree-cleanup-guard` uses, and for the same reason: an
-    # import is not the moment to guess which of two conflicting records is
-    # the real one.
-    let cwds = ($found | get payload.cwd | uniq)
-    mut conflicts = []
-    for cwd in $cwds {
-        let group = ($found | where {|r| $r.payload.cwd == $cwd })
-        if ($group | length) > 1 {
-            let names = ($group | each {|r| $"($r.run)/($r.uid)" } | str join " and ")
-            $conflicts = ($conflicts | append $"($names) both hold an identity for cwd ($cwd)")
-        }
-    }
-    if ($conflicts | is-not-empty) {
-        error make {msg: $"refusing to import v1 identities: ($conflicts | str join '; '). Remove the one that is not current by hand and import again"}
-    }
-
-    mut imported = []
-    mut already = []
-    for rec in $found {
-        if (resolve-agent-slug $rec.run $rec.uid) != null {
-            $already = ($already | append {run: $rec.run, uid: $rec.uid})
-            continue
-        }
-        bus-identity $rec.uid --run $rec.run --identity $rec.payload
-        # Never silently dropped: a worktree that no longer exists is still
-        # imported as a record, with that fact named rather than hidden.
-        $imported = ($imported | append {
-            run: $rec.run
-            uid: $rec.uid
-            cwd: $rec.payload.cwd
-            worktree_exists: ($rec.payload.cwd | path exists)
-        })
-    }
-    {imported: $imported, already: $already}
-}
+# Not because it stopped working, but because a no-backward-compatibility
+# policy makes it dead weight by definition: this build speaks protocol 3 and
+# refuses 2, so bridging 1 is bridging across a gap that nothing on the far
+# side can cross anyway. Checked before removing, rather than assumed: nothing
+# in this module called `import-v1-identities`, and its only callers anywhere
+# were the five cases in the test suite that exercised the bridge itself.
 
 # ====================================================== visible Pi workers
 #
@@ -4179,7 +4229,7 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
     # `(run, uid)` index `bus-identity-envelope` uses.
     let idir = (identity-log-dir $run $uid)
     let identity = (
-        (if $idir == null { [] } else { read-box $idir })
+        (if $idir == null { [] } else { read-identity-box $idir })
         | enumerate
         | each {|e|
             {
@@ -4203,13 +4253,12 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
     let inbox = (
         read-box ($dir | path join "inbox")
         | each {|e|
-            let content = $e.content
-            let what = (if ("task" in ($content | columns)) {
-                $"ticket ($content.task)"
-            } else {
-                $"($content | get -o instructions | default '' | str length) chars of instructions"
-            })
-            {at: $e.created, class: "inbox", envelope: null, value: "", event: $"sent seq ($e.sequence)", detail: $"stage ($content | get -o stage | default '?') · ($what)"}
+            # dotfiles-oj4c: an inbox message is prose, so there is no
+            # `stage`/`task`/`instructions` structure left to read off it. The
+            # first line is what a person scanning a timeline wants anyway;
+            # the full text is one `messages` call away.
+            let text = ($e.content | lines | first 1 | get -o 0 | default "")
+            {at: $e.created, class: "inbox", envelope: null, value: "", event: $"sent seq ($e.sequence)", detail: $text}
         }
     )
 
@@ -4217,10 +4266,15 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
         read-box ($dir | path join "outbox")
         | each {|e|
             let content = $e.content
-            let verdict = (if $e.kind == "error" {
-                $"($content | get -o code | default 'error'): ($content | get -o detail | default '')"
+            # dotfiles-oj4c: branches on the STATUS, not on a kind. A
+            # protocol_error carries `detail` instead of a summary — it is the
+            # bus reporting an absence, not a worker reporting an outcome —
+            # and that difference is now visible where it actually lives.
+            let status = ($content | get -o status | default '?')
+            let verdict = (if $status == "protocol_error" {
+                $"($status): ($content | get -o detail | default '')"
             } else {
-                $"($content | get -o status | default '?') — ($content | get -o summary | default '')"
+                $"($status) — ($content | get -o summary | default '')"
             })
             {at: $e.created, class: "result", envelope: $e, value: "", event: $"reported seq ($e.sequence)", detail: $verdict}
         }
@@ -4424,10 +4478,7 @@ export def worker-resume [
         error make {msg: $"cannot resume ($run)/($uid): its window ($seen.identity.window) is ($alive.verdict), so nothing would read the feedback. Bring it back on its own session first: `respawn ($uid) --run ($run) --repo <repo>`"}
     }
 
-    legacy-inbox-send $uid --run $run --payload {
-        instructions: $feedback
-        artifacts: []
-    }
+    legacy-inbox-send $uid --run $run --content $feedback
 
     # `complete -> running` is a legal edge precisely so a rejected result can
     # be sent back without inventing a new worker — validated here so a resume

@@ -78,7 +78,7 @@ func TestParseMessages_MultiRecipientRow_KeepsFullList(t *testing.T) {
 
 func TestParseMessages_ObjectContent_PassedThroughOpaque(t *testing.T) {
 	// adr0028: content is opaque. The third fixture row carries an object
-	// (status/summary/...) under kind "inbox" — ParseMessages must not
+	// (status/summary/...) under kind "message" — ParseMessages must not
 	// interpret it, just carry the raw bytes through.
 	msgs, err := ParseMessages(fixture(t))
 	if err != nil {

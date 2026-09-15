@@ -255,7 +255,7 @@ export def pi-extension [caller_dir: string]: nothing -> string {
 # convergence removed.
 export def sample-envelope [kind: string]: nothing -> record {
     let base = {
-        protocol: 2
+        protocol: 3
         kind: $kind
         id: "01K4ZQ7X8Y0000000000000000"
         from: "impl-dotfiles-963w.1-a1"
@@ -263,16 +263,21 @@ export def sample-envelope [kind: string]: nothing -> record {
         created: "2026-09-05T10:00:00Z"
     }
     let payload = match $kind {
-        "inbox" => "do the thing"
-        "result" => {
+        # dotfiles-oj4c: the vocabulary is `message` | `state`, and the kind
+        # names the SHAPE of content — prose is a string, a status record is
+        # an object. `identity` is here too, but it is NOT a bus kind: it is
+        # the durable placement record, gated by `validate-identity-record`.
+        "message" => "do the thing"
+        "state" => {
             status: "complete"
             summary: "protocol module landed"
             validation: "PASS"
+            # An extra field, not a required one (sp029 T5). Kept on the
+            # sample so the case that proves it is OPTIONAL has one to reject.
             window: "impl-dotfiles-963w.1@dotfiles"
             session: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
             resume: "pi --session 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
         }
-        "error" => {code: "protocol_error", detail: "agent settled without calling the result tool"}
         "identity" => {
             role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
             session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
