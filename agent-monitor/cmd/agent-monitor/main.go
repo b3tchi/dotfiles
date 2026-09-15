@@ -297,6 +297,23 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// way, and the surplus is redistributed identically.
 	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
 
+	// Make the cursor and the focus VISIBLE (dotfiles-uyih). sp031 shipped a
+	// cursor that moves, a scroll that follows it and a detail pane that
+	// tracks it — and nothing that drew any of it, so `tab` looked like a
+	// dead key. Marking happens HERE, after rendering and trimming, for two
+	// reasons: render/ stays free of escape bytes, so its own "no line
+	// exceeds the width" tests keep measuring real text; and reverse video
+	// costs zero display cells, so marking cannot break that invariant in
+	// the first place.
+	//
+	// height > 0 is the interactive gate. --once renders through this same
+	// function and must emit no ESC byte at all (sp030 T9, asserted in
+	// TestRunOnce): a pipe has no cursor to show.
+	if height > 0 {
+		roster = markPane(roster, model.Focus == tui.PaneRoster, model.RosterCursor, model.RosterScroll, len(rosterRows))
+		log = markPane(log, model.Focus == tui.PaneMessages, model.MessagesCursor, model.MessagesScroll, len(msgRows))
+	}
+
 	var lines []string
 	lines = append(lines, roster...)
 	lines = append(lines, "")
@@ -307,6 +324,48 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 		lines = append(lines, render.RenderDetail(selectedMessage(model, msgSample), width, detailBudget)...)
 	}
 	return lines
+}
+
+// styleOn/styleOff are the reverse-video pair that marks the focused pane's
+// header and the selected row. Both are SGR attribute toggles, not colours:
+// they cost zero display cells, so a marked line occupies exactly the width
+// its text did, and they restore only the attribute they set (27 turns off
+// reverse, unlike a blanket 0 reset) so no other styling is clobbered.
+const (
+	styleOn  = "\x1b[7m"
+	styleOff = "\x1b[27m"
+)
+
+// markPane applies one pane's interactive affordances: its header line in
+// reverse video when the pane holds focus, and its selected data row in
+// reverse video.
+//
+// cursor is an index into the pane's FULL filtered row list and scroll is
+// the first row currently visible, so cursor-scroll is the selected row's
+// offset within the lines this pane actually rendered. rows is that full
+// list's length: zero means there is nothing to select, and the
+// "(no agents)"/"(no messages)" placeholder occupying the first data line
+// must NOT be marked as though it were a row.
+func markPane(lines []string, focused bool, cursor, scroll, rows int) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	copy(out, lines)
+
+	if focused {
+		out[0] = styleOn + out[0] + styleOff
+	}
+	if rows <= 0 {
+		return out
+	}
+	// headerLines is the pane header plus the column header; data rows start
+	// after them. A pane still waiting for its first sample renders a single
+	// line and never reaches here.
+	if i := headerLines + (cursor - scroll); i > headerLines-1 && i < len(out) {
+		out[i] = styleOn + out[i] + styleOff
+	}
+	return out
 }
 
 // viewportRows converts a pane's total rendered line count (its fixed

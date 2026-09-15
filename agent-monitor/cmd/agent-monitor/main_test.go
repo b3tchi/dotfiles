@@ -613,3 +613,102 @@ func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
 		t.Fatalf("height 8: the cursor's row is absent from the message pane in the frame that observed the resize, got %v", lines)
 	}
 }
+
+// --- dotfiles-uyih: the cursor and the focused pane must be VISIBLE -------
+//
+// sp031 shipped a cursor that moves, a scroll that follows it and a detail
+// pane that tracks it, and no way to see any of it: nothing in render/ ever
+// received the cursor or the focus, so `tab` was indistinguishable from a
+// dead key and `j`/`k` only showed an effect when the list was long enough
+// to scroll. These tests pin the affordances that make it observable.
+//
+// The styling deliberately lives in cmd/ rather than render/: reverse video
+// costs zero display cells, so every "no line exceeds the width" invariant
+// sp031 T2 and T5 re-asserted stays true against render/'s own output, which
+// stays free of escapes.
+
+// selectionStyle is the reverse-video pair the frame uses to mark both the
+// focused pane's header and the selected row.
+const testStyleOn, testStyleOff = "\x1b[7m", "\x1b[27m"
+
+func styledLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		if strings.Contains(l, testStyleOn) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func TestRenderFrame_FocusedPaneHeaderIsMarked(t *testing.T) {
+	model := tui.NewModel() // focus starts on the roster
+	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
+	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
+
+	lines := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	if !containsSubstring(lines, testStyleOn+"agents") {
+		t.Fatalf("roster has focus, so its header must be marked; got %v", lines)
+	}
+	if containsSubstring(lines, testStyleOn+"messages") {
+		t.Fatalf("messages pane does NOT have focus; its header must not be marked; got %v", lines)
+	}
+
+	model.HandleKey(tui.Key{Special: tui.KeyTab})
+	lines = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	if !containsSubstring(lines, testStyleOn+"messages") {
+		t.Fatalf("after tab the messages pane has focus and must be marked; got %v", lines)
+	}
+	if containsSubstring(lines, testStyleOn+"agents") {
+		t.Fatalf("after tab the roster no longer has focus; got %v", lines)
+	}
+}
+
+func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	msgs := &source.MessageSample{Messages: []source.Message{
+		sampleMessage("alice", `"first"`),
+		sampleMessage("carol", `"second"`),
+	}}
+
+	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	marked := styledLines(lines)
+	if !anyContains(marked, "alice") {
+		t.Fatalf("cursor at 0: alice's LOG ROW must be marked, got marked=%v all=%v", marked, lines)
+	}
+	if anyContains(marked, "carol") {
+		t.Fatalf("cursor at 0: carol's row must not be marked, got marked=%v", marked)
+	}
+
+	model.HandleKey(tui.Key{Rune: 'j'})
+	lines = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	marked = styledLines(lines)
+	if !anyContains(marked, "carol") {
+		t.Fatalf("cursor at 1: carol's row must be marked, got marked=%v all=%v", marked, lines)
+	}
+}
+
+// An empty list has nothing to select. The placeholder must never be marked
+// as though it were a row — the same honesty adr0017 asks of a verdict.
+func TestRenderFrame_EmptyListHasNoSelectionMark(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	msgs := &source.MessageSample{Messages: nil}
+
+	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	for _, l := range styledLines(lines) {
+		if strings.Contains(l, "(no messages)") {
+			t.Fatalf("the empty-list placeholder must not be marked as a selected row: %q", l)
+		}
+	}
+}
+
+func anyContains(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}
