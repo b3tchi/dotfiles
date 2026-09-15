@@ -533,6 +533,88 @@ let n = ($env.PIW_MINT_N | into int)
         }
     })
 
+    # ------------------------- the identity gate is a GATE, not a rename (oj4c)
+    #
+    # Identity left ENVELOPE_KINDS onto its own validator, and the danger in
+    # that move is silent WEAKENING: a record that used to be held to the
+    # envelope's addressing and timestamp rules now passing a gate that only
+    # checks the fields are present. Presence is not validation — an identity
+    # whose `from` is "" is exactly as unusable as one with no `from` at all,
+    # and the gate's own comment says the run/uid addressing is "what ties the
+    # record to the worker it places".
+    #
+    # So both gates share one `validate-addressing` (there is no second copy to
+    # drift), and these cases pin the shared half through the identity path
+    # specifically — the path that had no rejection coverage of any kind.
+    (run-case "schema/an-identity-record-with-an-empty-from-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update from "")
+        } "from" "an identity that names no sender is not tied to a worker"
+    })
+
+    (run-case "schema/an-identity-record-whose-to-is-not-a-list-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update to "run-42")
+        } "to" "a bare address is not a recipient list, here as on the bus"
+    })
+
+    (run-case "schema/an-identity-record-with-an-empty-to-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update to [])
+        } "to" "an identity addressed to nobody places nothing"
+    })
+
+    (run-case "schema/an-identity-record-with-an-empty-address-in-to-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update to ["run-42" ""])
+        } "to" "an empty address in the list is refused, not skipped"
+    })
+
+    (run-case "schema/an-identity-record-with-an-unparseable-created-is-refused" {
+        # worker-timeline does `first | get at | into datetime` on this stamp.
+        # A gate that let garbage through would move the crash somewhere with
+        # no idea which file it came from.
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update created "not-a-date")
+        } "created" "an unparseable timestamp is named here, not crashed on later"
+    })
+
+    (run-case "schema/an-identity-record-with-an-empty-created-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update created "")
+        } "created" "an empty timestamp is refused as strictly as a malformed one"
+    })
+
+    (run-case "schema/an-identity-record-of-the-wrong-kind-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update kind "state")
+        } "identity" "the record says what it is, and the gate checks"
+    })
+
+    (run-case "schema/an-identity-record-whose-content-is-prose-is-refused" {
+        assert-rejects {
+            validate-identity-record (sample-envelope "identity" | update content "impl-a at /tmp")
+        } "content" "an identity is a record of fields, never a line of prose"
+    })
+
+    (run-case "schema/the-two-gates-hold-addressing-to-the-same-rule" {
+        # The anti-drift case. Whatever `from`/`to`/`created` mean, they mean
+        # the same thing on both paths — asserted by feeding ONE malformation
+        # to both gates and requiring both to refuse. A future edit that
+        # loosens one and not the other fails here.
+        for bad in [
+            {field: "from", value: ""}
+            {field: "created", value: "not-a-date"}
+        ] {
+            assert-rejects {
+                validate-envelope (sample-envelope "message" | update $bad.field $bad.value)
+            } $bad.field $"the bus gate refuses a bad ($bad.field)"
+            assert-rejects {
+                validate-identity-record (sample-envelope "identity" | update $bad.field $bad.value)
+            } $bad.field $"and the identity gate refuses the same bad ($bad.field)"
+        }
+    })
+
     (run-case "schema/a-stale-record-fails-on-its-version-not-its-kind" {
         # Why PROTOCOL_VERSION bumps to 3 under a hard cutover that needs no
         # compatibility: a protocol-2 record on disk carries a retired kind, so

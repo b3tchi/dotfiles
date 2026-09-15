@@ -1017,6 +1017,65 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    # ------------------------------- a refusal has to name its file (oj4c)
+    #
+    # `read-box` and `read-identity-box` fail CLOSED and go to real trouble to
+    # name the offending file, because an operator can fix a named file and
+    # cannot notice a record that was silently skipped. `bus-claims` walked
+    # the state root with a NESTED `each`, and nushell 0.115 does not surface
+    # an `error make` raised inside an `each` closure as itself — the same
+    # behaviour this module already documents over `read-box` and already
+    # fixed with `for` in `import-v1-identities`. So the named refusal
+    # collapsed into a bare "Eval block failed with pipeline input".
+    #
+    # Theoretical before dotfiles-oj4c, because nothing in a live state root
+    # failed to validate. After the protocol bump, every stale record does —
+    # so this bare error became the only thing an operator sees from
+    # `reclaim`.
+    (run-case "worktree/an-unreadable-identity-refusal-names-the-file-it-could-not-read" {
+        let repo = (make-repo "claims-refusal")
+        let root = (make-runtime "claims-refusal")
+        with-runtime $root {
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+
+            # A second agent whose identity record this build cannot read —
+            # exactly the shape the ~185 stale records on the live state root
+            # have: a previous protocol's envelope, still on disk, untouched.
+            # Located by globbing rather than by recomputing the slug:
+            # `project-slug` is private, and a test that re-derives a private
+            # key is a test that can agree with itself while disagreeing with
+            # the code. XDG_STATE_HOME is sandboxed per case, so exactly one
+            # project lives under it.
+            let agents_r1 = (glob (state-root | path join "*" "agents" "r1") | first)
+            let stale = ($agents_r1 | path join "impl-2" "identity")
+            mkdir $stale
+            {
+                protocol: 2, kind: "identity", id: "01K4ZQ7X8Y0000000000000000"
+                from: "impl-2", to: ["r1"], sequence: 1
+                created: "2026-01-01T00:00:00.000000Z"
+                content: {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t2.0"
+                    session: "sid-2", skill: "wk-build", window: "impl-2@dotfiles"
+                }
+            } | to json | save -f ($stale | path join "1.json")
+
+            # Refusing is correct and is NOT what this case is about. What it
+            # asserts is that the refusal still carries the two things an
+            # operator needs: which file, and why.
+            assert-rejects {
+                worktrees-reclaim --repo $repo --dry-run
+            } "1.json" "the refusal names the file it could not read"
+            assert-rejects {
+                worktrees-reclaim --repo $repo --dry-run
+            } "protocol version 2" "and says the record is outdated, not corrupt"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     # ------------------------------------------ v1 import: REMOVED (oj4c)
     #
     # Four cases exercised a one-way bridge from protocol-1 identity records on

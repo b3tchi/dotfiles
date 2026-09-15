@@ -521,6 +521,49 @@ def validate-identity [payload: record] {
     }
 }
 
+# ----------------------------------------------------------- shared addressing
+#
+# `from`, `to` and `created` mean the same thing on every record this module
+# writes, so they are checked in exactly one place.
+#
+# Pulled out by dotfiles-oj4c rather than copied: the identity gate was split
+# off `validate-envelope` and silently lost these three checks, keeping only
+# the PRESENCE test that `ENVELOPE_REQUIRED` already does. Presence is not
+# validation — an identity whose `from` is "" is as unusable as one with no
+# `from` at all, and `worker-timeline` calls `into datetime` on `created`
+# without a guard, so a stamp that only had to EXIST crashed somewhere with no
+# idea which file it came from. Two validators for one rule is how that
+# happens; one validator is the fix.
+#
+# `what` names the record kind in the message so a refusal still reads
+# correctly whichever gate raised it.
+def validate-addressing [record: record, what: string] {
+    if ($record.from | describe) != "string" or ($record.from | is-empty) {
+        error make {msg: $"($what) field 'from' must be a non-empty address"}
+    }
+
+    # `to` is a list of at least one address. Duplicates (including the
+    # sender addressing itself) are legal — fan-out (T3) dedupes rather than
+    # refusing, since re-sending to an address already in the list is a
+    # sender mistake worth ignoring, not a protocol violation.
+    if not ($record.to | describe | str starts-with "list") {
+        error make {msg: $"($what) field 'to' must be a list of addresses"}
+    }
+    if ($record.to | is-empty) {
+        error make {msg: $"($what) field 'to' must name at least one address"}
+    }
+    if ($record.to | any {|addr| ($addr | describe) != "string" or ($addr | is-empty) }) {
+        error make {msg: $"($what) field 'to' must contain only non-empty addresses"}
+    }
+
+    if ($record.created | is-empty) {
+        error make {msg: $"($what) field 'created' must not be empty"}
+    }
+    if not (try { $record.created | into datetime; true } catch { false }) {
+        error make {msg: $"($what) field 'created' must be an ISO timestamp, got '($record.created)'"}
+    }
+}
+
 # ------------------------------------------------------- identity record gate
 #
 # dotfiles-oj4c: identity left ENVELOPE_KINDS, so it needs a gate of its own.
@@ -553,6 +596,10 @@ export def validate-identity-record [record: record] {
         error make {msg: $"expected an identity record of kind '($IDENTITY_KIND)', got '($record.kind)'"}
     }
 
+    # The same rule the bus gate applies, from the same function. This is what
+    # ties the record to the worker it places, so it is checked, not assumed.
+    validate-addressing $record "identity record"
+
     if not (($record.content | describe) | str starts-with "record") {
         error make {msg: $"identity record content must be a record, got ($record.content | describe)"}
     }
@@ -582,30 +629,7 @@ export def validate-envelope [envelope: record, --stored] {
         error make {msg: $"unknown envelope kind '($envelope.kind)': not one of ($ENVELOPE_KINDS | str join ', ')"}
     }
 
-    if ($envelope.from | describe) != "string" or ($envelope.from | is-empty) {
-        error make {msg: "envelope field 'from' must be a non-empty address"}
-    }
-
-    # `to` is a list of at least one address. Duplicates (including the
-    # sender addressing itself) are legal — fan-out (T3) dedupes rather than
-    # refusing, since re-sending to an address already in the list is a
-    # sender mistake worth ignoring, not a protocol violation.
-    if not ($envelope.to | describe | str starts-with "list") {
-        error make {msg: "envelope field 'to' must be a list of addresses"}
-    }
-    if ($envelope.to | is-empty) {
-        error make {msg: "envelope field 'to' must name at least one address"}
-    }
-    if ($envelope.to | any {|addr| ($addr | describe) != "string" or ($addr | is-empty) }) {
-        error make {msg: "envelope field 'to' must contain only non-empty addresses"}
-    }
-
-    if ($envelope.created | is-empty) {
-        error make {msg: "envelope field 'created' must not be empty"}
-    }
-    if not (try { $envelope.created | into datetime; true } catch { false }) {
-        error make {msg: $"envelope field 'created' must be an ISO timestamp, got '($envelope.created)'"}
-    }
+    validate-addressing $envelope "envelope"
 
     # Every kind is validated against `content`, the one field
     # `ENVELOPE_REQUIRED` guarantees.
@@ -2683,26 +2707,38 @@ def bus-claims [repo: string]: nothing -> list<record> {
     # `run` level is still there. A uid appears under exactly one of them now
     # that uniqueness is project-wide (dotfiles-bg65), so this walks the level
     # rather than meaning anything by it.
-    ls $dir | where type == dir | get name | each {|run_dir|
+    # Nested `for`, not nested `each`, for the reason the NOTE ON THE LOOP over
+    # `read-box` documents: nushell 0.115 does not surface an `error make`
+    # raised inside an `each` closure as itself. Here it does not vanish — the
+    # outer pipeline still fails — but it arrives as the bare "Eval block
+    # failed with pipeline input", throwing away the named file and named
+    # reason `read-identity-box` went to the trouble of producing.
+    #
+    # That was theoretical until dotfiles-oj4c: nothing in a live state root
+    # failed to validate, so this path never raised. After the protocol bump
+    # every stale record does, and this bare error became the ONLY thing an
+    # operator running `reclaim` sees. An operator cannot fix a record the
+    # refusal will not name.
+    mut claims = []
+    for run_dir in (ls $dir | where type == dir | get name) {
         let run = ($run_dir | path basename)
-        ls $run_dir | where type == dir | get name | each {|uid_dir|
+        for uid_dir in (ls $run_dir | where type == dir | get name) {
             let uid = ($uid_dir | path basename)
             let records = (read-identity-box ($uid_dir | path join "identity"))
-            if ($records | is-empty) { [] } else {
-                let envelope = ($records | last)
-                let identity = $envelope.content
-                [{
-                    run: $run
-                    uid: $uid
-                    state: (bus-status $uid --run $run | get state)
-                    cwd: (expand-path $identity.cwd)
-                    branch: $identity.branch
-                    window: (window-target $identity)
-                    window_name: $identity.window
-                }]
-            }
-        } | flatten
-    } | flatten
+            if ($records | is-empty) { continue }
+            let identity = ($records | last | get content)
+            $claims = ($claims | append {
+                run: $run
+                uid: $uid
+                state: (bus-status $uid --run $run | get state)
+                cwd: (expand-path $identity.cwd)
+                branch: $identity.branch
+                window: (window-target $identity)
+                window_name: $identity.window
+            })
+        }
+    }
+    $claims
 }
 
 # The states in which a worker still has work in flight, and its directory is

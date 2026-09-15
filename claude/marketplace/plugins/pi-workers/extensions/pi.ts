@@ -503,51 +503,38 @@ export function createAgentStateTracker(
 /**
  * The user-visible message text for an inbox envelope.
  *
- * sp029 T8: which shape a payload carries is no longer read from a stage
- * registry — the transport cannot interpret content, so it cannot gate its
- * shape. This reads the shape off which field the payload actually carries:
- * `task` (a bd ticket id and nothing else) or `instructions` (prose plus
- * optional artifact ids). Exactly one must be present.
+ * dotfiles-oj4c: a `message` envelope's content IS the user text. There is no
+ * shape to read any more — the nushell writer refuses anything but a JSON
+ * string under `message` (`validate-message-content`), so this is the
+ * consumer's half of that same rule rather than a second opinion about it.
  *
- * For a ticket-shaped payload this is the bare bd task id and nothing else —
- * no framing, no skill name, no instructions. The worker resolves its
- * contract with that id, and any prose here becomes a second description of
- * the work that drifts from bd the moment the ticket is edited.
+ * WHAT THIS REPLACED, and why it was the bug this task exists to delete: this
+ * used to sniff `content` for `stage`/`task`/`instructions`/`artifacts` and
+ * throw when it found none of them. The writer stopped producing that shape
+ * and this side was not ported, so every `pi-worker resume --feedback` threw
+ * "payload for '' must carry either a task id or instructions" — and the
+ * caller CATCHES that, logs it, and marks the envelope read. Reviewer feedback
+ * was consumed and never delivered, silently, with a green test suite over it
+ * because the fixtures still built the shape nothing writes.
  *
- * A payload that violates the shape is REJECTED rather than trimmed to fit:
- * trimming would hide the caller's mistake and deliver a message the protocol
- * says cannot exist.
+ * So the lesson is recorded in the code rather than only in the ticket: a
+ * consumer that infers meaning from the shape of `content` is the failure
+ * mode. Read the kind, trust the pairing, do not guess.
+ *
+ * A non-string content is still REJECTED rather than coerced. `String(x)` on a
+ * record would deliver "[object Object]" to an agent as though a person had
+ * typed it, which is worse than the refusal: it looks like a message.
  */
 export function userPayloadFor(envelope: Envelope): string {
-  // dotfiles-v1zt: the envelope carries its body ONCE, under `content`. It
-  // used to be mirrored into a second `payload` field by the nushell writer,
-  // and this read that mirror; `payload` is gone from everything written from
-  // here on, and `content` holds the identical value on every envelope that
-  // still carries both. Read `content` first, fall back to `payload` so an
-  // envelope already sitting in a live worker's inbox is still delivered.
-  const payload = (envelope.content ?? envelope.payload) as Record<string, unknown>;
-  const stage = String(payload.stage ?? "");
-  const hasTask = payload.task !== undefined && payload.task !== null && payload.task !== "";
-  const hasInstructions =
-    payload.instructions !== undefined && payload.instructions !== null && payload.instructions !== "";
-
-  if (hasTask) {
-    const extra = Object.keys(payload).filter((k) => k !== "stage" && k !== "task");
-    if (extra.length > 0) {
-      throw new Error(
-        `work-stage payload for '${stage}' may carry only stage and task; found ${extra.join(", ")}`,
-      );
-    }
-    return String(payload.task);
+  const content = envelope.content;
+  if (typeof content !== "string") {
+    throw new Error(
+      `a 'message' envelope must carry a JSON string as its content, got ${
+        content === null ? "null" : typeof content
+      }: prose travels as a message, a status record travels as a state`,
+    );
   }
-
-  if (!hasInstructions) {
-    throw new Error(`payload for '${stage}' must carry either a task id or instructions`);
-  }
-  const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
-  return artifacts.length > 0
-    ? `${payload.instructions}\n\nArtifacts: ${artifacts.join(", ")}`
-    : String(payload.instructions);
+  return content;
 }
 
 /**
