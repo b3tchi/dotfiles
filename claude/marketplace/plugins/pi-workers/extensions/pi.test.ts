@@ -173,6 +173,30 @@ describe("user payload shaping", () => {
     expect(() => userPayloadFor(bad as never)).toThrow(/work/i);
   });
 
+  test("the converged envelope carries its body under content", () => {
+    // dotfiles-v1zt: the nushell writer no longer mirrors the body into a
+    // second `payload` field. An envelope written from here on carries
+    // `content` alone, and the watcher must deliver it.
+    const converged = {
+      protocol: 2 as const,
+      sequence: 3,
+      id: "01K4ZQ7X8Y0000000000000000",
+      kind: "inbox" as const,
+      from: "run-1",
+      to: ["impl-a"],
+      created: "2026-09-05T10:00:00Z",
+      content: { stage: "wk-build" as const, task: "dotfiles-963w.4" },
+    };
+    expect(userPayloadFor(converged as never)).toBe("dotfiles-963w.4");
+  });
+
+  test("an envelope already in a worker's inbox still delivers from payload", () => {
+    // The fallback is why the writer could change under a running worker:
+    // a legacy-shaped envelope sitting in an inbox when this landed is still
+    // delivered rather than crashing the watcher.
+    expect(userPayloadFor(workEnvelope)).toBe("dotfiles-963w.4");
+  });
+
   test("a payload with neither task nor instructions is rejected", () => {
     // sp029 T8: there is no registry to refuse an unknown stage up front any
     // more — the transport does not know what a stage is. What it can still

@@ -170,45 +170,45 @@ let cases = [
     # suite, just run against a v2 envelope.
     (run-case "schema/rejects-result-without-resume-command" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | reject payload.resume)
+            validate-envelope (sample-envelope "result" | reject content.resume)
         } "resume" "a result must carry its exact resume command"
     })
     (run-case "schema/rejects-unknown-result-status" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.status "finished")
+            validate-envelope (sample-envelope "result" | update content.status "finished")
         } "status" "an unknown result status must be rejected"
     })
     (run-case "schema/rejects-result-claiming-accepted" {
         # `accepted` is the initiator's verdict, never the worker's claim.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.status "accepted")
+            validate-envelope (sample-envelope "result" | update content.status "accepted")
         } "accepted" "a worker must not accept its own work"
     })
     (run-case "schema/rejects-result-claiming-unknown" {
         # adr0017: `unknown` is an observation, never a reported outcome.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.status "unknown")
+            validate-envelope (sample-envelope "result" | update content.status "unknown")
         } "unknown" "unknown is observational and cannot be reported as a result"
     })
     (run-case "schema/accepts-blocked-result-without-verdict" {
         # Only `complete` needs a verdict; a blocked worker reports why.
         validate-envelope (
             sample-envelope "result"
-            | update payload.status "blocked"
-            | update payload.validation null
+            | update content.status "blocked"
+            | update content.validation null
         )
     })
     (run-case "schema/rejects-oversized-summary" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.summary (filler 5000))
+            validate-envelope (sample-envelope "result" | update content.summary (filler 5000))
         } "4 KiB" "summary cap must be enforced and named"
     })
     (run-case "schema/accepts-summary-at-the-cap" {
-        validate-envelope (sample-envelope "result" | update payload.summary (filler 4096))
+        validate-envelope (sample-envelope "result" | update content.summary (filler 4096))
     })
     (run-case "schema/rejects-oversized-summary-naming-the-exact-byte-count" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.summary (filler 4097))
+            validate-envelope (sample-envelope "result" | update content.summary (filler 4097))
         } "4097" "the refusal must name the exact byte count, not just the cap"
     })
 
@@ -217,25 +217,25 @@ let cases = [
         # adr0027: completion is never inferred from prose. A 'complete'
         # result must carry its own typed verdict.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation null)
+            validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation null)
         } "validation" "the refusal must name the missing field"
     })
     (run-case "schema/rejects-complete-with-empty-string-validation" {
         # Empty is refused exactly as strictly as null — a validator that
         # only checked for null would let "" pass as a real answer.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation "")
+            validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation "")
         } "validation" "an empty string must be refused, not treated as present"
     })
     (run-case "schema/accepts-complete-with-a-non-empty-validation" {
-        validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation "PASS")
+        validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation "PASS")
     })
     (run-case "schema/window-is-no-longer-required-on-a-result" {
         # The narrowed field set is status/validation/summary/session/resume
         # (## solution: "The typed result survives, narrowed") — window was
         # the legacy display concept and nothing reads it off a result
         # payload any more.
-        validate-envelope (sample-envelope "result" | reject payload.window)
+        validate-envelope (sample-envelope "result" | reject content.window)
     })
 
     # ---------------------------------------------------------- message ids
@@ -415,6 +415,50 @@ let n = ($env.PIW_MINT_N | into int)
         }
         rm -rf $root; rm -rf $repo
     })
+    # ------------------------------------------- one envelope shape (dotfiles-v1zt)
+    #
+    # Two envelope shapes lived under one protocol version: the legacy
+    # `{sequence, run, uid, kind, ..., content, payload}` the run/uid tree
+    # wrote, and the `{id, kind, from, to, content}` the peer bus wrote.
+    # `protocol` could not tell them apart, so a reader had to guess which one
+    # it held — and the first bus-shaped `result` died in the validator on a
+    # `payload` column only the legacy shape carried. One shape, and addressing
+    # that every call site declares for itself, is the cure.
+    (run-case "schema/an-envelope-takes-its-addressing-from-the-caller-not-its-kind" {
+        # The legacy builder derived `from`/`to` from `kind` — "inbox travels
+        # initiator-to-worker, everything else worker-to-initiator" — so a
+        # mis-stamped kind silently reversed who the envelope was addressed to,
+        # and `from`/`to` carried no information of their own.
+        let inward = (make-envelope "error" {code: "x", detail: "y"} --from "run-1" --to ["impl-a"])
+        assert-eq $inward.from "run-1" "the declared sender stands, whatever the kind implies"
+        assert-eq $inward.to ["impl-a"] "the declared recipients stand, whatever the kind implies"
+
+        let outward = (make-envelope "inbox" "do the thing" --from "impl-a" --to ["run-1"])
+        assert-eq $outward.from "impl-a" "an `inbox` envelope is addressed by its caller too"
+        assert-eq $outward.to ["run-1"] ""
+    })
+
+    (run-case "schema/an-envelope-carries-its-content-exactly-once" {
+        let e = (make-envelope "inbox" "hello" --from "a" --to ["b"])
+        assert-eq ($e | columns | sort) ([content created from id kind protocol to] | sort) "one shape: no `payload` duplicate of `content`, no kind-derived `run`/`uid`"
+        assert-eq $e.protocol 2 ""
+        assert-eq $e.content "hello" ""
+        assert-eq ($e.id | str length) 26 "every envelope is identified the same way, on the bus and in the legacy tree"
+        validate-envelope $e
+    })
+
+    (run-case "schema/a-typed-kind-is-validated-off-content-alone" {
+        # `validate-envelope` dispatched typed kinds on `.payload`, a field
+        # only the legacy shape carried, with a `payload`-or-`content`
+        # fallback bolted on after a bus-shaped result crashed on it. With one
+        # shape the fallback has nothing left to fall back to: `content` is
+        # what `ENVELOPE_REQUIRED` guarantees, so it is what the typed
+        # validators read.
+        assert-rejects {
+            validate-envelope (make-envelope "result" {status: "complete", summary: "s", session: "x", resume: "y"} --from "a" --to ["b"])
+        } "validation" "a `complete` with no validation verdict is refused on its content"
+    })
+
 ]
 
 $cases | to json

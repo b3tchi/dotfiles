@@ -71,8 +71,8 @@ let cases = [
 
             # The initiator reads a compact envelope, not a transcript.
             let done = (legacy-bus-wait --run "run-1")
-            assert-eq $done.payload.status "complete" ""
-            assert-eq $done.payload.resume "pi --session sid-impl-a" "and can resume the named worker"
+            assert-eq $done.content.status "complete" ""
+            assert-eq $done.content.resume "pi --session sid-impl-a" "and can resume the named worker"
             assert-true ((envelope-bytes $done) < 2048) "the completion stays compact"
             legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
 
@@ -215,7 +215,7 @@ let cases = [
             assert-eq $resumed.session "sid-impl-a" "the SAME session, not a fresh worker"
             assert-eq $resumed.window $impl.window "in the same window"
             let inbox = (bus-inbox "impl-a" --run "run-1")
-            assert-eq ($inbox | last | get payload.instructions) "criterion 2 is unmet" "feedback arrives as an addressed message"
+            assert-eq ($inbox | last | get content.instructions) "criterion 2 is unmet" "feedback arrives as an addressed message"
             assert-eq (bus-status "impl-a" --run "run-1" | get state) "running" "and the worker is running again"
         }
     })
@@ -228,8 +228,8 @@ let cases = [
             complete-with "impl-a" "first attempt"
             worker-resume "impl-a" --run "run-1" --feedback "fix the gate" --socket $t.socket
             let msg = (bus-inbox "impl-a" --run "run-1" | last)
-            assert-true ("task" not-in ($msg.payload | columns)) "feedback is not disguised as a ticket"
-            assert-true ("instructions" in ($msg.payload | columns)) ""
+            assert-true ("task" not-in ($msg.content | columns)) "feedback is not disguised as a ticket"
+            assert-true ("instructions" in ($msg.content | columns)) ""
         }
     })
 
@@ -260,7 +260,7 @@ let cases = [
 
             complete-with "impl-a" "second attempt"
             let fresh = (legacy-bus-wait --run "run-1")
-            assert-eq $fresh.payload.summary "second attempt" "what arrives is the round the worker just reported"
+            assert-eq $fresh.content.summary "second attempt" "what arrives is the round the worker just reported"
             assert-eq $fresh.sequence 2 ""
         }
     })
@@ -300,8 +300,8 @@ let cases = [
             complete-with "impl-b" "sibling done"
 
             let got = (legacy-bus-wait --run "run-1")
-            assert-eq $got.uid "impl-b" "the run-wide wait skips the superseded envelope, not the run"
-            assert-eq $got.payload.summary "sibling done" ""
+            assert-eq $got.from "impl-b" "the run-wide wait skips the superseded envelope, not the run"
+            assert-eq $got.content.summary "sibling done" ""
         }
     })
 
@@ -323,9 +323,9 @@ let cases = [
             let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 2 "neither completion masks the other"
             let first = (legacy-bus-wait --run "run-1")
-            legacy-bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
+            legacy-bus-ack --run "run-1" --uid $first.from --sequence $first.sequence
             let second = (legacy-bus-wait --run "run-1")
-            assert-true ($second.uid != $first.uid) ""
+            assert-true ($second.from != $first.from) ""
         }
     })
 
@@ -570,7 +570,7 @@ let cases = [
                     session: "sid-1", resume: "pi --session sid-1"
                 }
             })
-            assert-eq $sent.uid "impl-a" "reporting succeeds even though nobody will ever read long-gone's queue"
+            assert-eq $sent.from "impl-a" "reporting succeeds even though nobody will ever read long-gone's queue"
             let dir = (do { cd $repo; project-dir })
             assert-true (($dir | path join "queue" "long-gone") | path exists) "the row sits in a queue nobody reads — that is fine, not an error"
         }
@@ -764,9 +764,14 @@ let cases = [
             })
             assert-eq $out.exit_code 0 $"($out.stderr)"
             let written = ($out.stdout | from json)
-            assert-eq ($written | columns | sort) ["content" "created" "from" "kind" "payload" "protocol" "run" "sequence" "to" "uid"] "result's JSON shape is exactly these fields"
-            assert-eq $written.payload.status "complete" ""
-            assert-eq $written.payload.validation "PASS" ""
+            # dotfiles-v1zt: one envelope shape. `payload` (the duplicate of
+            # `content`) and the kind-derived `run`/`uid` are gone; `id`
+            # identifies the envelope here exactly as it does on the bus, and
+            # `sequence` is the legacy tree's slot number.
+            assert-eq ($written | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "sequence" "to"] "result's JSON shape is exactly these fields"
+            assert-eq $written.from "impl-a" "addressed by its call site, not derived from its kind"
+            assert-eq $written.content.status "complete" ""
+            assert-eq $written.content.validation "PASS" ""
         }
         rm -rf $root; rm -rf $repo
     })
@@ -824,8 +829,8 @@ let cases = [
     # identity at all. That created a stray outbox directory under the bus
     # root keyed by the unresolved uid, and only THEN failed — on
     # `validate-envelope`'s "to must contain only non-empty addresses" (`to:
-    # [""]`, since `envelope-for` addresses an "error" envelope back to `run`,
-    # which was empty), naming neither the uid nor the project.
+    # [""]`, since `bus-settled` addresses its report back to `run`, which was
+    # empty), naming neither the uid nor the project.
     # `resolve-run-or-refuse` now refuses before `bus-settled` is ever called,
     # so nothing is created. Asserts both halves: the message, and the litter.
     (run-case "pipeline/settled-refuses-an-unknown-uid-before-any-litter-lands-on-the-bus" {

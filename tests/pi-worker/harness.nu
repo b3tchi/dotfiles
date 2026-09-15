@@ -248,18 +248,16 @@ export def pi-extension [caller_dir: string]: nothing -> string {
 # A minimal well-formed v2 envelope of each kind. Cases mutate one field at a
 # time so a rejection is attributable to that field and nothing else.
 #
-# `content` and `payload` carry the same value on purpose, mirroring the
-# bridge `envelope-for` builds in the v1 pipeline (sp029 T2): `result`/
-# `error`/`identity` are still validated off `.payload`, `inbox` off
-# `.content`, and a sample usable against either dispatch path needs both
-# names present.
+# One shape (dotfiles-v1zt): the body is carried once, under `content`, and
+# every kind is validated off it. The sample used to mirror the same value
+# into a second `payload` field because the typed kinds were validated off
+# THAT — two names for one value, which is exactly the ambiguity the
+# convergence removed.
 export def sample-envelope [kind: string]: nothing -> record {
     let base = {
         protocol: 2
-        sequence: 1
-        run: "run-42"
-        uid: "impl-dotfiles-963w.1-a1"
         kind: $kind
+        id: "01K4ZQ7X8Y0000000000000000"
         from: "impl-dotfiles-963w.1-a1"
         to: ["run-42"]
         created: "2026-09-05T10:00:00Z"
@@ -281,7 +279,7 @@ export def sample-envelope [kind: string]: nothing -> record {
         }
         _ => {}
     }
-    $base | insert content $payload | insert payload $payload
+    $base | insert content $payload
 }
 
 # --------------------------------------------------------- bus sandboxes
