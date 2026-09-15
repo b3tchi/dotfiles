@@ -499,6 +499,37 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    # dotfiles-56lh: the relay used to stamp the result `inbox`, so every
+    # envelope on the bus was `inbox` by construction and no consumer could
+    # tell an outcome from prose without parsing `content` — which sp030's
+    # plan forbids and sp031 deliberately preserved. `result` was already in
+    # ENVELOPE_KINDS; it simply never reached the bus.
+    (run-case "pipeline/a-relayed-result-is-stamped-kind-result-on-the-bus" {
+        let repo = (make-repo "t5-kind")
+        let root = (make-runtime "t5-kind")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orchestrator-1"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "complete", summary: "done", validation: "PASS"
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+            }
+            let mail = (do { cd $repo; bus-wait --as "orchestrator-1" })
+            assert-eq ($mail | length) 1 ""
+            assert-eq $mail.0.kind "result" "a relayed outcome is typed, so a reader never sniffs content shape to recognise it"
+            let seen = (do { cd $repo; bus-messages })
+            assert-eq ($seen | length) 1 "`messages` still reports the completion exactly once"
+            assert-eq $seen.0.kind "result" "`pi-worker messages --json` reports the kind the bus stored"
+            assert-eq $seen.0.content.status "complete" "the same content still reaches the commissioner — the relay is additive"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "pipeline/a-commissioned-agent-reporting-twice-delivers-both-the-bus-does-not-dedupe" {
         let repo = (make-repo "t5-twice")
         let root = (make-runtime "t5-twice")

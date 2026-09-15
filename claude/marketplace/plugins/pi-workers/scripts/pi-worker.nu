@@ -465,11 +465,21 @@ export def validate-envelope [envelope: record, --stored] {
         error make {msg: $"envelope field 'created' must be an ISO timestamp, got '($envelope.created)'"}
     }
 
+    # dotfiles-56lh: the typed kinds used to read `.payload` unconditionally,
+    # which silently assumed every non-`inbox` envelope came from the v1
+    # bridge (`envelope-for`, which mirrors payload into content). A v2
+    # peer-addressed envelope carries `content` and nothing else — the shape
+    # `bus-send` writes and `ENVELOPE_REQUIRED` actually guarantees — so a
+    # `kind: "result"` message on the bus would have failed here on a column
+    # that does not exist. `content` is the guaranteed name; `payload` is the
+    # legacy mirror, preferred only while it is still present so a v1
+    # envelope is validated against exactly what it was before.
+    let typed = ($envelope | get -o payload | default $envelope.content)
     match $envelope.kind {
         "inbox" => { validate-inbox-payload $envelope.content --stored=$stored }
-        "result" => { validate-result-payload $envelope.payload }
-        "error" => { validate-error-payload $envelope.payload }
-        "identity" => { validate-identity $envelope.payload }
+        "result" => { validate-result-payload $typed }
+        "error" => { validate-error-payload $typed }
+        "identity" => { validate-identity $typed }
     }
 }
 
@@ -1388,6 +1398,15 @@ export def bus-stage-message [
     --to: list<string>
     --from: string
     --content: any
+    # dotfiles-56lh: what the message IS, not merely what it says. This used
+    # to be hardcoded `inbox`, so every envelope that ever travelled the bus
+    # was `inbox` by construction and a reader had to parse `content` to tell
+    # an outcome from prose — the shape-sniffing sp030's plan forbids and
+    # sp031 deliberately preserved. Defaulting to `inbox` keeps every existing
+    # caller writing exactly what it wrote before; the value is checked
+    # against ENVELOPE_KINDS by `validate-envelope` below, before anything is
+    # created, so an unknown kind leaves no trace in the runtime directory.
+    --kind: string = "inbox"
 ]: nothing -> record {
     # Validate before creating anything: a rejected message must leave no
     # trace in the runtime directory, not even an empty project tree —
@@ -1396,7 +1415,7 @@ export def bus-stage-message [
     let msg_id = (mint-msg-id)
     let envelope = {
         protocol: $PROTOCOL_VERSION
-        kind: "inbox"
+        kind: $kind
         id: $msg_id
         from: $from
         to: $recipients
@@ -1462,8 +1481,10 @@ export def bus-send [
     --to: list<string>
     --from: string
     --content: any
+    # See `bus-stage-message`: `inbox` unless the sender says otherwise.
+    --kind: string = "inbox"
 ]: nothing -> record {
-    bus-publish-message (bus-stage-message --to $to --from $from --content $content)
+    bus-publish-message (bus-stage-message --to $to --from $from --content $content --kind $kind)
 }
 
 # Every unread row in `as`'s own queue, resolved against `bus/messages/` —
@@ -1717,7 +1738,12 @@ export def bus-result [
     # therefore still here, not cleared).
     let commissioner = ($identity | get -o commissioner)
     if ($commissioner | is-not-empty) {
-        bus-send --to [$commissioner] --from $uid --content $result
+        # dotfiles-56lh: stamped `result`, not `inbox`. The relay stays
+        # additive — the same content still reaches the commissioner — but it
+        # now arrives correctly TYPED, so a bus consumer distinguishes an
+        # outcome from prose by reading `kind` rather than by guessing at the
+        # shape of `content`.
+        bus-send --to [$commissioner] --from $uid --kind "result" --content $result
     }
 
     $written

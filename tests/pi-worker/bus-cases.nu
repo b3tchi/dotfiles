@@ -1547,6 +1547,54 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         rm -rf $root; rm -rf $repo
     })
 
+    # dotfiles-56lh: `kind` is the field that tells a reader a result from
+    # prose without parsing `content` (the anti-pattern sp030's plan forbids
+    # and sp031 preserved). Once `bus-send` can stamp another kind, the
+    # DEFAULT is the thing that can silently drift — so it is pinned here.
+    (run-case "send/a-plain-send-is-stamped-inbox-by-default" {
+        let repo = (make-repo "send-default-kind")
+        let root = (make-runtime "send-default-kind")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "prose" })
+            assert-eq $sent.kind "inbox" "an ordinary message keeps the default kind"
+            let mail = (do { cd $repo; bus-wait --as "a" })
+            assert-eq $mail.0.kind "inbox" "and the default is what the reader sees on disk too"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/a-kind-outside-the-envelope-vocabulary-is-refused-by-name" {
+        let repo = (make-repo "send-bad-kind")
+        let root = (make-runtime "send-bad-kind")
+        with-runtime $root {
+            assert-rejects {
+                do { cd $repo; bus-send --to ["a"] --from "sender-1" --kind "gossip" --content "hi" }
+            } "gossip" "widening the kind parameter must not widen the vocabulary"
+            let dir = (do { cd $repo; project-dir })
+            let queued = (if (($dir | path join "queue" "a") | path exists) { (do { cd $repo; queue-rows "a" }) } else { [] })
+            assert-eq ($queued | length) 0 "a rejected message leaves no row behind"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/an-explicit-kind-rides-through-to-the-reader" {
+        let repo = (make-repo "send-typed-kind")
+        let root = (make-runtime "send-typed-kind")
+        with-runtime $root {
+            let payload = {
+                status: "blocked", summary: "stuck", validation: null
+                session: "sid-a", resume: "pi --session sid-a"
+            }
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --kind "result" --content $payload })
+            assert-eq $sent.kind "result" "the sender's kind is what is stamped"
+            assert-eq ($sent | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "to"] "a kind is stamped on the existing envelope, not carried in a new field"
+            let mail = (do { cd $repo; bus-wait --as "a" })
+            assert-eq $mail.0.kind "result" "and it survives the round trip to the recipient"
+            assert-eq $mail.0.content.status "blocked" "content still travels untouched"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "send/a-recipients-queue-file-is-created-0600-on-first-append" {
         let repo = (make-repo "send-perm")
         let root = (make-runtime "send-perm")
