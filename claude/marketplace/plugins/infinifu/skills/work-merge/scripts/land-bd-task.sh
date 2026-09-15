@@ -122,6 +122,34 @@ if [ "${LAND_SKIP_INSTALL:-}" != "1" ]; then
   fi
 fi
 
+# ── Go artifact rebuild (dotfiles-xwg0) ─────────────────────────────────
+# A merge that changes a Go module's source leaves its COMPILED artifact
+# stale: `go test` (the usual TEST_CMD) exercises source, not the installed
+# binary, so the existing test gate says nothing about it. This bit twice in
+# one session before anyone built a gate for it (agent-monitor, then
+# akm-graph) — a human caught it, not a gate, both times.
+#
+# Scoped to modules the merge actually touched (`go-stale rebuild --since
+# ORIG_HEAD`, using ORIG_HEAD exactly as the dep-sync diff above does) so an
+# unrelated merge doesn't pay to rebuild all seven artifacts. Same
+# rollback contract as the dep-sync and test gates: a build failure means
+# the merge itself is bad, so it is treated the same as a failing test, not
+# swallowed.
+#
+# Env:
+#   LAND_SKIP_GO_REBUILD=1   opt out entirely.
+GO_STALE="$AKM_ROOT/nushell/actions/go-stale"
+if [ "${LAND_SKIP_GO_REBUILD:-}" != "1" ] && [ -x "$GO_STALE" ] && command -v nu >/dev/null 2>&1; then
+  if ! nu "$GO_STALE" rebuild --repo "$AKM_ROOT" --since ORIG_HEAD; then
+    echo "POST-MERGE GO REBUILD FAILED — rolling back" >&2
+    git -C "$AKM_ROOT" reset --hard ORIG_HEAD
+    bd update "$ID" --status in_progress \
+      --append-notes "POST-MERGE FAIL (go rebuild): 'go-stale rebuild --since ORIG_HEAD' failed after merging $BRANCH into $BASE. A Go module this merge touched no longer builds — not a test failure, the source change itself is broken." \
+      >/dev/null
+    exit 2
+  fi
+fi
+
 # Post-merge test gate
 if [ -n "$TEST_CMD" ]; then
   echo "Running post-merge tests: $TEST_CMD"
