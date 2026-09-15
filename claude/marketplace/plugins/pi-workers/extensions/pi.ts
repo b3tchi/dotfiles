@@ -87,7 +87,8 @@ export interface Envelope<P = unknown> {
   uid: string;
   kind: EnvelopeKind;
   created: string;
-  payload: P;
+  /** Legacy mirror of `content`; absent on everything written since dotfiles-v1zt. */
+  payload?: P;
   from?: string;
   to?: string[];
   content?: P;
@@ -497,7 +498,13 @@ export function createAgentStateTracker(
  * says cannot exist.
  */
 export function userPayloadFor(envelope: Envelope): string {
-  const payload = envelope.payload as Record<string, unknown>;
+  // dotfiles-v1zt: the envelope carries its body ONCE, under `content`. It
+  // used to be mirrored into a second `payload` field by the nushell writer,
+  // and this read that mirror; `payload` is gone from everything written from
+  // here on, and `content` holds the identical value on every envelope that
+  // still carries both. Read `content` first, fall back to `payload` so an
+  // envelope already sitting in a live worker's inbox is still delivered.
+  const payload = (envelope.content ?? envelope.payload) as Record<string, unknown>;
   const stage = String(payload.stage ?? "");
   const hasTask = payload.task !== undefined && payload.task !== null && payload.task !== "";
   const hasInstructions =

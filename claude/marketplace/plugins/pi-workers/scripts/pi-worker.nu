@@ -41,10 +41,11 @@ export const ISOLATIONS = ["worktree" "main"]
 # unknown version fails closed rather than guessing at the fields.
 #
 # 1 -> 2 (sp029 T2): the envelope becomes peer-addressed. `from`/`to`/`content`
-# join the schema; `sequence`/`run`/`uid`/`payload` stay on the wire for the
-# v1 pipeline (legacy-inbox-send/bus-result/bus-settled/identity, all still
-# `claim-slot`-based) but are no longer part of what a v2 reader requires. T3
-# gives `send` its own project/queue-addressed path (`bus-send`, `queue-append`)
+# join the schema; `sequence` survives only on envelopes stored in a numbered
+# slot in the legacy tree (legacy-inbox-send/bus-result/bus-settled/identity,
+# all still `claim-slot`-based), and is not part of what a v2 reader requires.
+#
+# T3 gives `send` its own project/queue-addressed path (`bus-send`, `queue-append`)
 # alongside this legacy one; T9 moved the `main send`/`main wait` CLI verbs
 # onto it (`--as`/`--to`, no `--run`), but `worker-resume`'s own inbox write
 # still calls `legacy-inbox-send` directly — that is a task-instruction path
@@ -54,6 +55,15 @@ export const ISOLATIONS = ["worktree" "main"]
 # `bus-identity`) still pinning it, none of which this task's file scope
 # touches. No migration: the bus lives in $XDG_RUNTIME_DIR, so the bump costs
 # at most an in-flight project thread.
+#
+# NOT bumped by dotfiles-v1zt, which dropped the duplicate `payload` and the
+# kind-derived `run`/`uid` from everything this module writes. That is a
+# narrowing, not an incompatible change: the converged shape is exactly the v2
+# required set plus `id`, so every record already on disk still validates, and
+# a reader of either vintage finds what it needs under `content`. A bump would
+# have meant refusing the identity records durable state is holding right now
+# — and unlike the runtime bus, that tree is not disposable: it is what keeps
+# an accepted worker resumable across a logout.
 export const PROTOCOL_VERSION = 2
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
@@ -123,11 +133,12 @@ export const RESULT_STATUSES = ["complete" "waiting_human" "blocked" "failed"]
 # Fields that betray a copied task body in a work-stage payload.
 const WORK_PAYLOAD_ALLOWED = ["stage" "task"]
 
-# v2: addressing (`from`/`to`) and opaque `content` replace `sequence`/`run`/
-# `uid`/`payload` as what a reader is guaranteed. The legacy fields still ride
-# along on every envelope the v1 pipeline writes (legacy-inbox-send, bus-result,
-# ..., pending T5/T6) for their own bookkeeping, but a v2 validator no longer
-# requires them.
+# v2: addressing (`from`/`to`) and opaque `content` are what a reader is
+# guaranteed, on the peer bus and in the legacy run/uid tree alike — one shape,
+# built by `make-envelope` (dotfiles-v1zt). The only field that rides beyond
+# this list is `sequence`, the slot number `claim-slot` stamps onto the
+# envelopes it links into the legacy tree; nothing that is not stored in a
+# numbered slot carries one, so it is not required here.
 const ENVELOPE_REQUIRED = ["protocol" "kind" "from" "to" "created" "content"]
 
 # ------------------------------------------------------------ state machine
@@ -465,21 +476,23 @@ export def validate-envelope [envelope: record, --stored] {
         error make {msg: $"envelope field 'created' must be an ISO timestamp, got '($envelope.created)'"}
     }
 
-    # dotfiles-56lh: the typed kinds used to read `.payload` unconditionally,
-    # which silently assumed every non-`inbox` envelope came from the v1
-    # bridge (`envelope-for`, which mirrors payload into content). A v2
-    # peer-addressed envelope carries `content` and nothing else — the shape
-    # `bus-send` writes and `ENVELOPE_REQUIRED` actually guarantees — so a
-    # `kind: "result"` message on the bus would have failed here on a column
-    # that does not exist. `content` is the guaranteed name; `payload` is the
-    # legacy mirror, preferred only while it is still present so a v1
-    # envelope is validated against exactly what it was before.
-    let typed = ($envelope | get -o payload | default $envelope.content)
+    # Every kind is validated against `content`, the one field
+    # `ENVELOPE_REQUIRED` guarantees.
+    #
+    # dotfiles-56lh: the typed kinds used to read `.payload`, which silently
+    # assumed every non-`inbox` envelope came from the legacy bridge (the only
+    # writer that mirrored content into a second `payload` field). A
+    # peer-addressed envelope carries `content` alone, so the first
+    # `kind: "result"` message on the bus failed here on a column that does
+    # not exist, and the fix at the time was a payload-or-content fallback.
+    # dotfiles-v1zt removed the second shape instead: there is no `payload` to
+    # prefer any more, and a stored legacy envelope carries `content` holding
+    # the identical value, so the fallback has nothing left to do.
     match $envelope.kind {
         "inbox" => { validate-inbox-payload $envelope.content --stored=$stored }
-        "result" => { validate-result-payload $typed }
-        "error" => { validate-error-payload $typed }
-        "identity" => { validate-identity $typed }
+        "result" => { validate-result-payload $envelope.content }
+        "error" => { validate-error-payload $envelope.content }
+        "identity" => { validate-identity $envelope.content }
     }
 }
 
@@ -493,18 +506,12 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
         code: "protocol_error"
         detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
     }
-    {
-        protocol: $PROTOCOL_VERSION
-        sequence: $sequence
-        run: $run
-        uid: $uid
-        kind: "error"
-        created: $created
-        from: $uid
-        to: [$run]
-        content: $payload
-        payload: $payload
-    }
+    # Addressed worker-to-initiator because that is the direction this report
+    # travels — declared, not read off the kind. `sequence` and `created` are
+    # the caller's to supply: this is also the shape `bus-settled` writes into
+    # the legacy tree, where `claim-slot` stamps the real slot number.
+    make-envelope "error" $payload --from $uid --to [$run]
+    | merge {sequence: $sequence, created: $created}
 }
 
 # ============================================================== message bus
@@ -1084,7 +1091,10 @@ def claim-slot [dir: string, envelope: record] {
             error make {msg: $"could not claim a sequence in ($dir) after ($MAX_SEQUENCE_ATTEMPTS) attempts"}
         }
 
-        let sealed = ($envelope | update sequence $seq)
+        # `merge`, not `update`: the converged envelope (`make-envelope`)
+        # carries no `sequence` of its own — the slot number is this layer's
+        # to assign, and only the legacy tree has slots at all.
+        let sealed = ($envelope | merge {sequence: $seq})
         validate-envelope $sealed
         $sealed | to json | save -f $scratch
         chmod 600 $scratch
@@ -1175,41 +1185,50 @@ def now-stamp []: nothing -> string {
     date now | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ"
 }
 
-# sp029 T2 bridge: the v1 pipeline (legacy-inbox-send/bus-result/bus-settled/
-# identity, all still `run`/`uid`-addressed) still calls this with a run and a
-# worker uid, not a resolved peer list. It derives a v2-shaped `from`/`to`
-# from the direction the kind already implies — `inbox` travels
-# initiator-to-worker, everything else worker-to-initiator — so every
-# envelope this module writes satisfies the v2 validator without every caller
-# needing to know an address it cannot yet supply. `content` mirrors
-# `payload`: T3's own peer-addressed `bus-send` (below) does not call this
-# bridge at all — it builds a real `from`/`to`/`content` envelope directly —
-# so the mirroring here still only serves the v1 callers.
+# The one envelope builder (dotfiles-v1zt).
 #
-# It survives past T5/T6/T9 landing, and NOT because retiring it is any one
-# of their job — dotfiles-6nvx.19 named T5 for this, which was wrong: T5 (this
-# module's `bus-result`/`bus-settled`) and T6 (`bus-identity`) both migrated
-# their OUTPUT (a real peer message is now sent alongside), but their v1
-# callers still exist and still call this bridge for the legacy outbox/inbox
-# write underneath, and T9 (this task) did not touch that call graph either —
-# CLI verbs move to new addressing, the internal v1 functions they used to
-# call directly do not. This bridge retires only when `legacy-inbox-send`,
-# `bus-result`, `bus-settled`'s error path and `bus-identity` — the same four
-# sites dotfiles-v1zt already tracks for `claim-slot`/`next-sequence` — stop
-# writing the v1 shape at all.
-def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
-    let addressing = if $kind == "inbox" { {from: $run, to: [$uid]} } else { {from: $uid, to: [$run]} }
+# Two shapes used to live under one protocol version: this bridge's
+# `{sequence, run, uid, kind, ..., content, payload}` for the legacy run/uid
+# tree, and `bus-stage-message`'s `{id, kind, from, to, content}` for the peer
+# bus. `protocol` said 2 for both, so nothing on the wire could tell them
+# apart — which is how the first bus-shaped `result` reached
+# `validate-envelope` and died on a `payload` column only the legacy shape
+# carried. Every writer in this module builds through this function now, so
+# there is exactly one shape to read.
+#
+# Addressing is DECLARED, never derived. The bridge read it off the kind —
+# "inbox travels initiator-to-worker, everything else worker-to-initiator" —
+# which meant `from`/`to` carried no information of their own, a mis-stamped
+# `kind` silently reversed who an envelope was addressed to, and peer-to-peer
+# was structurally unsayable. Every call site now names its own direction, so
+# a wrong `kind` is only ever a wrong `kind`.
+#
+# `content` is carried ONCE. The bridge mirrored it into `payload` as well, so
+# every reader had two names for one value and no rule about which to trust.
+# `content` is the name `ENVELOPE_REQUIRED` guarantees, so `content` is the
+# name everything reads.
+#
+# `sequence` is not minted here: it is a slot number in a directory, stamped
+# by `claim-slot` onto the envelopes it links into the legacy tree, and a
+# message on the peer bus has no slot and needs none. `id` identifies an
+# envelope everywhere, on the bus and in the tree alike.
+export def make-envelope [
+    kind: string
+    content: any
+    --from: string
+    --to: list<string>
+]: nothing -> record {
     {
         protocol: $PROTOCOL_VERSION
-        sequence: 0
-        run: $run
-        uid: $uid
         kind: $kind
+        id: (mint-msg-id)
+        from: $from
+        # Deduplicated at the source: addressing one agent twice (including
+        # the sender addressing itself) is a sender mistake worth ignoring
+        # rather than a protocol violation — see `validate-envelope` on `to`.
+        to: ($to | default [] | uniq)
         created: (now-stamp)
-        from: $addressing.from
-        to: $addressing.to
-        content: $payload
-        payload: $payload
+        content: $content
     }
 }
 
@@ -1231,11 +1250,14 @@ export def legacy-inbox-send [
     --run: string
     --payload: record
 ]: nothing -> record {
+    # Addressed initiator-to-worker, said here rather than inferred from the
+    # kind: this function knows the direction, the envelope builder does not.
+    let envelope = (make-envelope "inbox" $payload --from $run --to [$uid])
     # Validate before creating anything: a rejected message must leave no trace
     # in the runtime directory, not even an empty worker tree.
-    validate-envelope (envelope-for $run $uid "inbox" $payload)
+    validate-envelope $envelope
     ensure-worker-dirs $run $uid
-    claim-slot (worker-dir $run $uid | path join "inbox") (envelope-for $run $uid "inbox" $payload)
+    claim-slot (worker-dir $run $uid | path join "inbox") $envelope
 }
 
 # ------------------------------------------------------- peer-addressed send (sp029 T3)
@@ -1411,17 +1433,11 @@ export def bus-stage-message [
     # Validate before creating anything: a rejected message must leave no
     # trace in the runtime directory, not even an empty project tree —
     # `ensure-bus-dirs` runs only once the envelope is known-good.
-    let recipients = ($to | default [] | uniq)
-    let msg_id = (mint-msg-id)
-    let envelope = {
-        protocol: $PROTOCOL_VERSION
-        kind: $kind
-        id: $msg_id
-        from: $from
-        to: $recipients
-        created: (now-stamp)
-        content: $content
-    }
+    # dotfiles-v1zt: built by the same `make-envelope` the legacy tree writers
+    # use, so "the bus shape" and "the tree shape" are one shape.
+    let envelope = (make-envelope $kind $content --from $from --to ($to | default []))
+    let recipients = $envelope.to
+    let msg_id = $envelope.id
     validate-envelope $envelope
 
     # sp029 dotfiles-6nvx.14: `validate-envelope` (and T2's `content-bytes`
@@ -1724,9 +1740,11 @@ export def bus-result [
         }
     }
 
-    validate-envelope (envelope-for $run $uid "result" $result)
+    # Addressed worker-to-initiator by this call site, not by its kind.
+    let envelope = (make-envelope "result" $result --from $uid --to [$run])
+    validate-envelope $envelope
     ensure-worker-dirs $run $uid
-    let written = (claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result))
+    let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
 
     # sp029 T5: "a result is one message kind in the thread rather than the
     # bus's purpose" (## solution). When a commissioner is recorded, the
@@ -1787,10 +1805,10 @@ export def bus-settled [uid: string, --run: string]: nothing -> record {
         return {reported: false, reason: "an outcome was already reported", run: $run, uid: $uid}
     }
 
-    let envelope = (envelope-for $run $uid "error" {
-        code: "protocol_error"
-        detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
-    })
+    # The report's shape lives with `settled-without-result`, which is the
+    # function that documents WHY the absence of a result is itself reported.
+    # Sequence 0 is a placeholder: `claim-slot` stamps the real slot.
+    let envelope = (settled-without-result $run $uid 0 (now-stamp))
     validate-envelope $envelope
     let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
     {reported: true, run: $run, uid: $uid, sequence: $written.sequence}
@@ -2041,7 +2059,12 @@ export def legacy-bus-wait [
         # (dotfiles-idzp's stale-state shape, in the mailbox rather than the
         # window list).
         let all = (legacy-bus-pending $run)
-        let scoped = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
+        # Scoped on `from`, the envelope's declared sender, which for an
+        # outbox result IS the worker. It used to filter on a `uid` field the
+        # legacy shape carried beside its addressing; dotfiles-v1zt dropped
+        # that duplicate, and `from` says the same thing on every envelope
+        # ever written here, old or new.
+        let scoped = (if ($uid | is-empty) { $all } else { $all | where from == $uid })
         let pending = (if $after > 0 { $scoped | where sequence > $after } else { $scoped })
         if ($pending | is-not-empty) {
             let next = ($pending | first)
@@ -2163,12 +2186,12 @@ export def derive-state [results: list<record>, markers: record]: nothing -> str
     if ($results | is-empty) { return "created" }
 
     # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
-    # (payload.status) and `error` envelopes (payload.code) — different shapes
-    # — so reading `payload.status` off whatever came last crashed with
+    # (content.status) and `error` envelopes (content.code) — different shapes
+    # — so reading `content.status` off whatever came last crashed with
     # "column 'status' is missing" the first time a worker settled without
     # reporting.
     let latest = ($results | last)
-    if $latest.kind == "error" { $latest.payload.code } else { $latest.payload.status }
+    if $latest.kind == "error" { $latest.content.code } else { $latest.content.status }
 }
 
 # The markers that bear on a worker's state, as derive-state wants them.
@@ -2512,7 +2535,7 @@ def bus-claims [repo: string]: nothing -> list<record> {
             let records = (read-box ($uid_dir | path join "identity"))
             if ($records | is-empty) { [] } else {
                 let envelope = ($records | last)
-                let identity = $envelope.payload
+                let identity = $envelope.content
                 [{
                     run: $run
                     uid: $uid
@@ -2923,7 +2946,11 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
     ensure-state-dirs $slug $run $uid
     let dir = (agent-state-dir $slug $run $uid | path join "identity")
     ensure-dir $dir
-    let sealed = (claim-slot $dir (envelope-for $run $uid "identity" $identity))
+    # Addressed worker-to-initiator by this call site. The record lives in
+    # durable state (sp029 T6) rather than on the tmpfs bus, so an accepted
+    # worker stays resumable across a logout — dotfiles-v1zt converged the
+    # SHAPE of this envelope and deliberately left its LOCATION alone.
+    let sealed = (claim-slot $dir (make-envelope "identity" $identity --from $uid --to [$run]))
     # Recorded AFTER the write succeeds: a caller resolving `(run, uid)` back
     # to a slug must never find a pointer to a record that is not there yet.
     record-agent-slug $run $uid $slug
@@ -2948,7 +2975,10 @@ export def bus-identity-envelope [uid: string, --run: string]: nothing -> any {
 export def bus-identity-of [uid: string, --run: string]: nothing -> any {
     let envelope = (bus-identity-envelope $uid --run $run)
     if $envelope == null { return null }
-    $envelope | get payload
+    # `content`, which every envelope carries — including the ones written
+    # before dotfiles-v1zt dropped the duplicate `payload` field, where the
+    # two held the identical value.
+    $envelope | get content
 }
 
 # ------------------------------------------------------- v1 import (sp029 T6)
@@ -3845,7 +3875,7 @@ export def worker-inspect [uid: string, --run: string, --sessions-dir: string = 
         uid: $uid
         identity: $identity
         state: (bus-status $uid --run $run | get state)
-        last_result: (if ($results | is-empty) { null } else { $results | last | get payload })
+        last_result: (if ($results | is-empty) { null } else { $results | last | get content })
         resume: (resume-hint $identity --sessions-dir $sessions_dir)
         transcript: (pi-session-file $identity.session --sessions-dir $sessions_dir)
     }
@@ -4035,7 +4065,7 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
             ls $dir | where type == dir | get name | sort | each {|w|
                 let uid = ($w | path basename)
                 let envelope = (bus-identity-envelope $uid --run $r)
-                let identity = (if $envelope == null { null } else { $envelope.payload })
+                let identity = (if $envelope == null { null } else { $envelope.content })
                 let window = (if $identity == null { "" } else { $identity.window })
                 let target = (if $identity == null { "" } else { window-target $identity })
                 let state = (bus-status $uid --run $r | get state)
@@ -4160,10 +4190,10 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
                 event: (if $e.index == 0 { "spawned" } else { "identity" })
                 detail: (
                     if $e.index == 0 {
-                        $"($e.item.payload.window) · branch ($e.item.payload.branch) · ($e.item.payload.cwd)"
+                        $"($e.item.content.window) · branch ($e.item.content.branch) · ($e.item.content.cwd)"
                     } else {
                         # The re-record exists to add the window id tmux chose.
-                        $"window_id ($e.item.payload | get -o window_id | default '?')"
+                        $"window_id ($e.item.content | get -o window_id | default '?')"
                     }
                 )
             }
@@ -4173,24 +4203,24 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
     let inbox = (
         read-box ($dir | path join "inbox")
         | each {|e|
-            let payload = $e.payload
-            let what = (if ("task" in ($payload | columns)) {
-                $"ticket ($payload.task)"
+            let content = $e.content
+            let what = (if ("task" in ($content | columns)) {
+                $"ticket ($content.task)"
             } else {
-                $"($payload | get -o instructions | default '' | str length) chars of instructions"
+                $"($content | get -o instructions | default '' | str length) chars of instructions"
             })
-            {at: $e.created, class: "inbox", envelope: null, value: "", event: $"sent seq ($e.sequence)", detail: $"stage ($payload.stage) · ($what)"}
+            {at: $e.created, class: "inbox", envelope: null, value: "", event: $"sent seq ($e.sequence)", detail: $"stage ($content | get -o stage | default '?') · ($what)"}
         }
     )
 
     let outbox = (
         read-box ($dir | path join "outbox")
         | each {|e|
-            let payload = $e.payload
+            let content = $e.content
             let verdict = (if $e.kind == "error" {
-                $"($payload | get -o code | default 'error'): ($payload | get -o detail | default '')"
+                $"($content | get -o code | default 'error'): ($content | get -o detail | default '')"
             } else {
-                $"($payload | get -o status | default '?') — ($payload | get -o summary | default '')"
+                $"($content | get -o status | default '?') — ($content | get -o summary | default '')"
             })
             {at: $e.created, class: "result", envelope: $e, value: "", event: $"reported seq ($e.sequence)", detail: $verdict}
         }
@@ -4680,7 +4710,7 @@ export def worker-stop [uid: string, --run: string, --socket: string = ""]: noth
 # so a later completion does not erase an earlier failure — the history stays
 # auditable rather than being overwritten by the latest word.
 export def read-results [uid: string, --run: string]: nothing -> list<record> {
-    read-box (worker-dir $run $uid | path join "outbox") | each {|e| $e.payload }
+    read-box (worker-dir $run $uid | path join "outbox") | each {|e| $e.content }
 }
 
 # Record acceptance without touching tmux or git. worker-accept is the verb an

@@ -74,7 +74,7 @@ let cases = [
             legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "dotfiles-963w.2"}
             let pending = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($pending | length) 1 "the worker sees exactly its own message"
-            assert-eq $pending.0.payload.task "dotfiles-963w.2" "payload survives the round trip"
+            assert-eq $pending.0.content.task "dotfiles-963w.2" "payload survives the round trip"
             assert-eq $pending.0.kind "inbox" ""
         }
         rm -rf $root
@@ -161,7 +161,7 @@ let cases = [
             let first = (legacy-bus-wait --run "run-1")
             let second = (legacy-bus-wait --run "run-1")
             assert-eq $first.sequence $second.sequence "wait is non-destructive until acknowledged"
-            assert-eq $first.payload.status "complete" ""
+            assert-eq $first.content.status "complete" ""
         }
         rm -rf $root
     })
@@ -222,10 +222,10 @@ let cases = [
 
             let one = (legacy-bus-wait --run "run-1")
             let two = (legacy-bus-wait --run "run-2")
-            assert-eq $one.payload.summary "from run one" ""
-            assert-eq $two.payload.summary "from run two" ""
-            assert-eq $one.uid "impl-a" ""
-            assert-eq $two.uid "impl-b" ""
+            assert-eq $one.content.summary "from run one" ""
+            assert-eq $two.content.summary "from run two" ""
+            assert-eq $one.from "impl-a" ""
+            assert-eq $two.from "impl-b" ""
 
             # Acknowledging one run must not silence the other.
             legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $one.sequence
@@ -243,12 +243,12 @@ let cases = [
             put-result "run-1" "rev-a" {summary: "b done"}
             let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 2 "both completions are pending"
-            assert-eq ($pending | get uid | sort) ["impl-a" "rev-a"] ""
+            assert-eq ($pending | get from | sort) ["impl-a" "rev-a"] ""
 
             let first = (legacy-bus-wait --run "run-1")
-            legacy-bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
+            legacy-bus-ack --run "run-1" --uid $first.from --sequence $first.sequence
             let second = (legacy-bus-wait --run "run-1")
-            assert-true ($second.uid != $first.uid) "the second worker's result is still delivered"
+            assert-true ($second.from != $first.from) "the second worker's result is still delivered"
         }
         rm -rf $root
     })
@@ -282,7 +282,7 @@ let cases = [
             let inbox = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($inbox | length) 30 "every message survives the race"
             assert-eq ($inbox | get sequence | uniq | length) 30 "no two messages share a sequence"
-            assert-eq ($inbox | get payload.task | uniq | length) 30 "no message was overwritten"
+            assert-eq ($inbox | get content.task | uniq | length) 30 "no message was overwritten"
         }
         rm -rf $root
     })
@@ -381,9 +381,9 @@ let cases = [
             put-result "run-1" "impl-a"
             let got = (legacy-bus-wait --run "run-1")
             for field in ["status" "validation" "window" "session" "resume"] {
-                assert-true ($field in ($got.payload | columns)) $"the completion envelope must carry ($field)"
+                assert-true ($field in ($got.content | columns)) $"the completion envelope must carry ($field)"
             }
-            assert-eq $got.payload.resume "pi --session 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" "the resume command is exact"
+            assert-eq $got.content.resume "pi --session 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" "the resume command is exact"
             assert-true ((envelope-bytes $got) <= $MAX_ENVELOPE_BYTES) "the delivered envelope respects the cap"
         }
         rm -rf $root
@@ -418,7 +418,7 @@ let cases = [
     })
     (run-case "bus/a-settled-worker-reports-state-protocol-error-not-a-crash" {
         # `protocol_error` was already a declared WORKER_STATE, but bus-status
-        # derived state as `results | last | get payload.status` — which only
+        # derived state as `results | last | get content.status` — which only
         # exists on a RESULT payload. No error envelope was ever written before
         # dotfiles-87bt, so the reader never met one; the first real settle
         # crashed it with "column 'status' is missing". The envelope's KIND is
@@ -1050,7 +1050,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             let waited = ((date now) - $started)
 
             assert-true ($got != null) "it came back with the result, not with nothing"
-            assert-eq $got.payload.status "complete" "and it is the worker's own report"
+            assert-eq $got.content.status "complete" "and it is the worker's own report"
             assert-true ($waited > 500ms) "it actually waited rather than peeking once"
             assert-true ($waited < 9sec) "and returned as soon as the result landed"
         }
@@ -1139,10 +1139,10 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             }
 
             # Unscoped keeps its meaning: oldest first, across the run.
-            assert-eq (legacy-bus-wait --run "r1" | get uid) "old" "the run-wide wait is unchanged"
+            assert-eq (legacy-bus-wait --run "r1" | get from) "old" "the run-wide wait is unchanged"
             # Scoped answers about the worker asked about.
-            assert-eq (legacy-bus-wait --run "r1" --uid "new" | get payload.summary) "fresh" "scoped to the worker"
-            assert-eq (legacy-bus-wait --run "r1" --uid "old" | get payload.summary) "stale" ""
+            assert-eq (legacy-bus-wait --run "r1" --uid "new" | get content.summary) "fresh" "scoped to the worker"
+            assert-eq (legacy-bus-wait --run "r1" --uid "old" | get content.summary) "stale" ""
         }
         rm -rf $root
     })
@@ -1164,7 +1164,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             put-result "run-1" "impl-a" {summary: "second round"}
             let newer = (legacy-bus-wait --run "run-1" --uid "impl-a" --after 1)
             assert-eq $newer.sequence 2 "the round the caller had not seen"
-            assert-eq $newer.payload.summary "second round" ""
+            assert-eq $newer.content.summary "second round" ""
             assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "the plain wait is unchanged: oldest unacked first"
         }
         rm -rf $root
@@ -1218,7 +1218,7 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
 
             assert-true ($got != null) "the blocking wait came back with the new round"
             assert-eq $got.sequence 2 ""
-            assert-eq $got.payload.summary "second round" ""
+            assert-eq $got.content.summary "second round" ""
             assert-true ($waited > 500ms) "it waited rather than returning the envelope it was told to skip"
         }
         rm -rf $root
@@ -2095,6 +2095,89 @@ def main [repo: string, big: string] {
         sleep 400ms
         rm -f $script
         rm -rf $repo
+    })
+
+    # ------------------------------------------ one envelope shape (dotfiles-v1zt)
+    #
+    # The load-bearing property: an envelope written by ANY writer in this
+    # module has one shape, and its `from`/`to` are what the call site
+    # declared rather than what its `kind` implies.
+    (run-case "bus/every-writer-writes-the-same-envelope-shape" {
+        let root = (make-runtime "one-shape")
+        with-runtime $root {
+            let shape = ([content created from id kind protocol sequence to] | sort)
+
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            let inbox = (bus-inbox "impl-a" --run "run-1" | first)
+            assert-eq ($inbox | columns | sort) $shape "the inbox writer writes the converged shape"
+            assert-eq $inbox.from "run-1" "addressed initiator-to-worker, because that is what the call site declared"
+            assert-eq $inbox.to ["impl-a"] ""
+
+            put-result "run-1" "impl-a"
+            let result = (legacy-bus-wait --run "run-1" --uid "impl-a")
+            assert-eq ($result | columns | sort) $shape "the result writer writes the converged shape"
+            assert-eq $result.from "impl-a" "addressed worker-to-initiator, because that is what the call site declared"
+            assert-eq $result.to ["run-1"] ""
+
+            let identity = (bus-identity-envelope "impl-a" --run "run-1")
+            assert-eq ($identity | columns | sort) $shape "the identity writer writes the converged shape"
+            assert-eq $identity.from "impl-a" ""
+            assert-eq $identity.to ["run-1"] ""
+
+            # The settled-without-result report, on a worker that never reported.
+            bus-identity "impl-b" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-impl-b.0"
+                session: "sid-b", skill: "wk-build", window: "impl-b@dotfiles"
+                commissioner: "orch-1"
+            }
+            bus-settled "impl-b" --run "run-1"
+            let settled = (legacy-bus-wait --run "run-1" --uid "impl-b")
+            assert-eq ($settled | columns | sort) $shape "the settled writer writes the converged shape"
+            assert-eq $settled.kind "error" ""
+            assert-eq $settled.from "impl-b" ""
+            assert-eq $settled.to ["run-1"] ""
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-record-written-before-the-convergence-is-still-read" {
+        # dotfiles-v1zt changed the WRITER, and deliberately did not rewrite
+        # what is already on disk: durable state is holding 177 identity
+        # envelopes in the old `{sequence, run, uid, ..., content, payload}`
+        # shape, and a migration that goes wrong costs resumability for every
+        # accepted worker. The readers accept both, which is what this proves
+        # — and they can, because the old shape carried the same value under
+        # `content` that it duplicated into `payload`.
+        let root = (make-runtime "legacy-record")
+        with-runtime $root {
+            bus-identity "impl-a" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-impl-a.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            let files = (glob (($env.XDG_STATE_HOME | path join "pi-worker") + "/**/identity/*.json"))
+            assert-eq ($files | length) 1 "one identity record was written"
+            let path = ($files | first)
+
+            # Rewritten in place into exactly what the old writer produced.
+            let converged = (open --raw $path | from json)
+            (
+                $converged
+                | reject id
+                | merge {run: "run-1", uid: "impl-a", payload: $converged.content}
+                | to json
+                | save -f $path
+            )
+
+            let identity = (bus-identity-of "impl-a" --run "run-1")
+            assert-eq $identity.branch "wk-impl-a.0" "the old shape still resolves to an identity"
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "created" "and still answers for its worker"
+
+            put-result "run-1" "impl-a"
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "complete" "a new result lands beside it"
+            let spawned = (worker-timeline "impl-a" --run "run-1" | where event == "spawned" | first)
+            assert-true ($spawned.detail | str contains "wk-impl-a.0") "and the old record still renders in the timeline"
+        }
+        rm -rf $root
     })
 
 ]

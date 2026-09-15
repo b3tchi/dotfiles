@@ -107,7 +107,7 @@ let rule_cases = [
         let envelope = (settled-without-result "run-42" "impl-x" 3 "2026-09-05T10:00:00Z")
         validate-envelope $envelope
         assert-eq $envelope.kind "error" "a silent settle produces an error envelope"
-        assert-eq $envelope.payload.code "protocol_error" "and never a completion"
+        assert-eq $envelope.content.code "protocol_error" "and never a completion"
         assert-true (legal-transition? "running" "protocol_error") "running must be able to record a protocol error"
     })
     (run-case "transition/created-cannot-report-an-outcome" {

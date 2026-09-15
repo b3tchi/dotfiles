@@ -170,7 +170,7 @@ let cases = [
 
             # And the completion did arrive — at the run-scoped waiter.
             let got = (legacy-bus-wait --run "run-1")
-            assert-eq $got.payload.status "complete" "the completion reached the CLI waiter"
+            assert-eq $got.content.status "complete" "the completion reached the CLI waiter"
         }
     })
 
