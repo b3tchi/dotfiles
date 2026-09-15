@@ -19,86 +19,85 @@ def filler [bytes: int]: nothing -> string {
 
 let cases = [
     # ---------------------------------------------------- accepts valid shapes
-    (run-case "schema/accepts-inbox" {
-        validate-envelope (sample-envelope "inbox")
+    (run-case "schema/accepts-identity-on-its-own-gate" {
+        # dotfiles-oj4c: an identity is NOT a bus envelope and the bus gate no
+        # longer knows the word. It is a durable placement record with its own
+        # validator, which is what lets the bus vocabulary stay at two kinds
+        # without either bending to hold it or losing it.
+        validate-identity-record (sample-envelope "identity")
+        assert-rejects {
+            validate-envelope (sample-envelope "identity")
+        } "not one of message, state" "the bus gate does not know identity"
     })
-    (run-case "schema/accepts-result" {
-        validate-envelope (sample-envelope "result")
-    })
-    (run-case "schema/accepts-error" {
-        validate-envelope (sample-envelope "error")
-    })
-    (run-case "schema/accepts-identity" {
-        validate-envelope (sample-envelope "identity")
-    })
-    (run-case "schema/accepts-arbitrary-opaque-content" {
-        # ft013/sp029: the bus interprets none of a message's content. A
-        # record shape that would have been refused as "not a declared
-        # stage" under the old registry gate is now simply opaque data.
+    (run-case "schema/accepts-arbitrary-opaque-prose" {
+        # ft013/sp029: the bus interprets none of a message's content — and
+        # dotfiles-oj4c narrowed what that content may BE to a string, so
+        # "opaque" now means opaque PROSE. A consumer with structure to send
+        # serialises its own vocabulary; the transport still reads none of it.
         validate-envelope (
-            sample-envelope "inbox"
-            | update content {anything: "goes", nested: {a: 1, b: [1 2 3]}}
+            sample-envelope "message"
+            | update content '{"anything": "goes", "nested": {"a": 1}}'
         )
     })
 
     # ------------------------------------------------------- required fields
     (run-case "schema/rejects-missing-protocol" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject protocol) } "protocol" "missing version must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject protocol) } "protocol" "missing version must be named"
     })
     (run-case "schema/rejects-missing-kind" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject kind) } "kind" "missing kind must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject kind) } "kind" "missing kind must be named"
     })
     (run-case "schema/rejects-missing-from" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject from) } "from" "missing sender must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject from) } "from" "missing sender must be named"
     })
     (run-case "schema/rejects-missing-to" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject to) } "to" "missing recipients must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject to) } "to" "missing recipients must be named"
     })
     (run-case "schema/rejects-missing-created" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject created) } "created" "missing timestamp must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject created) } "created" "missing timestamp must be named"
     })
     (run-case "schema/rejects-missing-content" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | reject content) } "content" "missing content must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | reject content) } "content" "missing content must be named"
     })
 
     # --------------------------------------------------------- version + kind
     (run-case "schema/rejects-protocol-1-naming-the-version-it-read" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update protocol 1) } "1" "the refusal must name the version it read"
+        assert-rejects { validate-envelope (sample-envelope "message" | update protocol 1) } "1" "the refusal must name the version it read"
     })
     (run-case "schema/rejects-an-unknown-future-protocol" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update protocol 3) } "protocol" "unknown version must be rejected"
+        assert-rejects { validate-envelope (sample-envelope "message" | update protocol 4) } "protocol" "unknown version must be rejected"
     })
     (run-case "schema/rejects-unknown-kind" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update kind "gossip") } "kind" "unknown kind must be rejected"
+        assert-rejects { validate-envelope (sample-envelope "message" | update kind "gossip") } "kind" "unknown kind must be rejected"
     })
 
     # --------------------------------------------------------------- from/to
     (run-case "schema/rejects-empty-from" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update from "") } "from" "an empty sender must be refused"
+        assert-rejects { validate-envelope (sample-envelope "message" | update from "") } "from" "an empty sender must be refused"
     })
     (run-case "schema/rejects-empty-to" {
         # An agent may address itself and mail may name the same address
         # twice — see accepts-self-addressed and accepts-duplicate-to below —
         # but it must name SOMEONE.
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update to []) } "to" "an empty recipient list must be refused"
+        assert-rejects { validate-envelope (sample-envelope "message" | update to []) } "to" "an empty recipient list must be refused"
     })
     (run-case "schema/rejects-to-that-is-not-a-list" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update to "impl-a") } "to" "a bare address is not a recipient list"
+        assert-rejects { validate-envelope (sample-envelope "message" | update to "impl-a") } "to" "a bare address is not a recipient list"
     })
     (run-case "schema/accepts-self-addressed-to" {
         # An agent addressing itself is legal — a note to self, or a
         # commissioner that is also a recipient of its own fan-out.
-        validate-envelope (sample-envelope "inbox" | update to ["impl-dotfiles-963w.1-a1"])
+        validate-envelope (sample-envelope "message" | update to ["impl-dotfiles-963w.1-a1"])
     })
     (run-case "schema/accepts-duplicate-to" {
         # Deduplication, if any, is the sender's business (T3's fan-out); the
         # validator does not refuse a list that repeats an address.
-        validate-envelope (sample-envelope "inbox" | update to ["a" "a" "b"])
+        validate-envelope (sample-envelope "message" | update to ["a" "a" "b"])
     })
 
     # ------------------------------------------------------------- created
     (run-case "schema/rejects-a-created-that-does-not-parse-as-a-timestamp" {
-        assert-rejects { validate-envelope (sample-envelope "inbox" | update created "not-a-date") } "created" "an unparseable timestamp must be named"
+        assert-rejects { validate-envelope (sample-envelope "message" | update created "not-a-date") } "created" "an unparseable timestamp must be named"
     })
     (run-case "schema/created-is-real-utc-not-local-time-wearing-a-Z" {
         # `created` ended in Z while carrying LOCAL wall clock, so every
@@ -112,7 +111,7 @@ let cases = [
                 role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
                 session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
             }
-            let written = (legacy-inbox-send "a" --run "r1" --payload {stage: "doc-plan", instructions: "go", artifacts: []})
+            let written = (legacy-inbox-send "a" --run "r1" --content "doc-plan: go")
 
             # Parsed as UTC because of the Z, then compared with real UTC now.
             let stamped = ($written.created | into datetime)
@@ -130,11 +129,11 @@ let cases = [
         # {protocol, from, to, created, ...} JSON pushes the WHOLE envelope
         # past 64 KiB, so this only passes if the cap is checked against
         # content specifically rather than the serialized envelope.
-        validate-envelope (sample-envelope "inbox" | update content (filler 65536))
+        validate-envelope (sample-envelope "message" | update content (filler 65536))
     })
     (run-case "schema/rejects-content-one-byte-over-64-KiB" {
         assert-rejects {
-            validate-envelope (sample-envelope "inbox" | update content (filler 65537))
+            validate-envelope (sample-envelope "message" | update content (filler 65537))
         } "65537" "the refusal must name the exact byte count"
     })
     (run-case "schema/the-cap-is-bytes-not-characters" {
@@ -145,7 +144,7 @@ let cases = [
         let multibyte = (0..<40000 | each {|_| "é" } | str join "")
         assert-eq ($multibyte | str length --grapheme-clusters) 40000 "sanity: 40000 characters"
         assert-rejects {
-            validate-envelope (sample-envelope "inbox" | update content $multibyte)
+            validate-envelope (sample-envelope "message" | update content $multibyte)
         } "80000" "the cap counts bytes, and 40000 two-byte characters is 80000 of them"
     })
 
@@ -157,58 +156,62 @@ let cases = [
     # rejection cases here is now one acceptance, proving the shape is no
     # longer enforced at this layer.
     (run-case "schema/no-longer-gates-on-stage-or-ticket-shape" {
+        # The registry gate is gone and nothing takes its place: the bus does
+        # not know what a stage is, and never looks. dotfiles-oj4c added the
+        # one check it does make — the kind must match the SHAPE — so the
+        # stage/ticket vocabulary travels as the prose it always was.
         validate-envelope (
-            sample-envelope "inbox"
-            | update content {stage: "wk-build", task: "t", design: "copied prose — legal now, opaque to the bus"}
+            sample-envelope "message"
+            | update content "stage wk-build · task t · copied prose, opaque to the bus"
         )
     })
 
     # ------------------------------------------------- result payload contract
     #
-    # sp029 T2 does not touch what a `result` kind requires (sp029 T5 moves it
-    # onto `content` as an ordinary message); these are unchanged from the v1
-    # suite, just run against a v2 envelope.
+    # sp029 T2 did not touch what a reported outcome requires (sp029 T5 moved
+    # it onto `content` as an ordinary message); dotfiles-oj4c moved the
+    # checks under `state` without weakening any of them.
     (run-case "schema/rejects-result-without-resume-command" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | reject content.resume)
+            validate-envelope (sample-envelope "state" | reject content.resume)
         } "resume" "a result must carry its exact resume command"
     })
     (run-case "schema/rejects-unknown-result-status" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.status "finished")
+            validate-envelope (sample-envelope "state" | update content.status "finished")
         } "status" "an unknown result status must be rejected"
     })
     (run-case "schema/rejects-result-claiming-accepted" {
         # `accepted` is the initiator's verdict, never the worker's claim.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.status "accepted")
+            validate-envelope (sample-envelope "state" | update content.status "accepted")
         } "accepted" "a worker must not accept its own work"
     })
     (run-case "schema/rejects-result-claiming-unknown" {
         # adr0017: `unknown` is an observation, never a reported outcome.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.status "unknown")
+            validate-envelope (sample-envelope "state" | update content.status "unknown")
         } "unknown" "unknown is observational and cannot be reported as a result"
     })
     (run-case "schema/accepts-blocked-result-without-verdict" {
         # Only `complete` needs a verdict; a blocked worker reports why.
         validate-envelope (
-            sample-envelope "result"
+            sample-envelope "state"
             | update content.status "blocked"
             | update content.validation null
         )
     })
     (run-case "schema/rejects-oversized-summary" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.summary (filler 5000))
+            validate-envelope (sample-envelope "state" | update content.summary (filler 5000))
         } "4 KiB" "summary cap must be enforced and named"
     })
     (run-case "schema/accepts-summary-at-the-cap" {
-        validate-envelope (sample-envelope "result" | update content.summary (filler 4096))
+        validate-envelope (sample-envelope "state" | update content.summary (filler 4096))
     })
     (run-case "schema/rejects-oversized-summary-naming-the-exact-byte-count" {
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.summary (filler 4097))
+            validate-envelope (sample-envelope "state" | update content.summary (filler 4097))
         } "4097" "the refusal must name the exact byte count, not just the cap"
     })
 
@@ -217,25 +220,25 @@ let cases = [
         # adr0027: completion is never inferred from prose. A 'complete'
         # result must carry its own typed verdict.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation null)
+            validate-envelope (sample-envelope "state" | update content.status "complete" | update content.validation null)
         } "validation" "the refusal must name the missing field"
     })
     (run-case "schema/rejects-complete-with-empty-string-validation" {
         # Empty is refused exactly as strictly as null — a validator that
         # only checked for null would let "" pass as a real answer.
         assert-rejects {
-            validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation "")
+            validate-envelope (sample-envelope "state" | update content.status "complete" | update content.validation "")
         } "validation" "an empty string must be refused, not treated as present"
     })
     (run-case "schema/accepts-complete-with-a-non-empty-validation" {
-        validate-envelope (sample-envelope "result" | update content.status "complete" | update content.validation "PASS")
+        validate-envelope (sample-envelope "state" | update content.status "complete" | update content.validation "PASS")
     })
     (run-case "schema/window-is-no-longer-required-on-a-result" {
         # The narrowed field set is status/validation/summary/session/resume
         # (## solution: "The typed result survives, narrowed") — window was
         # the legacy display concept and nothing reads it off a result
         # payload any more.
-        validate-envelope (sample-envelope "result" | reject content.window)
+        validate-envelope (sample-envelope "state" | reject content.window)
     })
 
     # ---------------------------------------------------------- message ids
@@ -313,7 +316,7 @@ let n = ($env.PIW_MINT_N | into int)
             let first = ($got | where id == $a.id | first)
             assert-eq $first.from "s1" ""
             assert-eq $first.to ["x"] ""
-            assert-eq $first.kind "inbox" "kind is passed through as the bus stored it, not translated"
+            assert-eq $first.kind "message" "kind is passed through as the bus stored it, not translated"
             assert-eq $first.content "first" "content travels untouched"
 
             let third = ($got | where id == $c.id | first)
@@ -425,23 +428,23 @@ let n = ($env.PIW_MINT_N | into int)
     # `payload` column only the legacy shape carried. One shape, and addressing
     # that every call site declares for itself, is the cure.
     (run-case "schema/an-envelope-takes-its-addressing-from-the-caller-not-its-kind" {
-        # The legacy builder derived `from`/`to` from `kind` — "inbox travels
-        # initiator-to-worker, everything else worker-to-initiator" — so a
+        # The legacy builder derived `from`/`to` from `kind` — "a message
+        # travels initiator-to-worker, everything else worker-to-initiator" — so a
         # mis-stamped kind silently reversed who the envelope was addressed to,
         # and `from`/`to` carried no information of their own.
-        let inward = (make-envelope "error" {code: "x", detail: "y"} --from "run-1" --to ["impl-a"])
+        let inward = (make-envelope "state" {status: "protocol_error", detail: "y"} --from "run-1" --to ["impl-a"])
         assert-eq $inward.from "run-1" "the declared sender stands, whatever the kind implies"
         assert-eq $inward.to ["impl-a"] "the declared recipients stand, whatever the kind implies"
 
-        let outward = (make-envelope "inbox" "do the thing" --from "impl-a" --to ["run-1"])
-        assert-eq $outward.from "impl-a" "an `inbox` envelope is addressed by its caller too"
+        let outward = (make-envelope "message" "do the thing" --from "impl-a" --to ["run-1"])
+        assert-eq $outward.from "impl-a" "a `message` envelope is addressed by its caller too"
         assert-eq $outward.to ["run-1"] ""
     })
 
     (run-case "schema/an-envelope-carries-its-content-exactly-once" {
-        let e = (make-envelope "inbox" "hello" --from "a" --to ["b"])
+        let e = (make-envelope "message" "hello" --from "a" --to ["b"])
         assert-eq ($e | columns | sort) ([content created from id kind protocol to] | sort) "one shape: no `payload` duplicate of `content`, no kind-derived `run`/`uid`"
-        assert-eq $e.protocol 2 ""
+        assert-eq $e.protocol 3 ""
         assert-eq $e.content "hello" ""
         assert-eq ($e.id | str length) 26 "every envelope is identified the same way, on the bus and in the legacy tree"
         validate-envelope $e
@@ -455,8 +458,90 @@ let n = ($env.PIW_MINT_N | into int)
         # what `ENVELOPE_REQUIRED` guarantees, so it is what the typed
         # validators read.
         assert-rejects {
-            validate-envelope (make-envelope "result" {status: "complete", summary: "s", session: "x", resume: "y"} --from "a" --to ["b"])
+            validate-envelope (make-envelope "state" {status: "complete", summary: "s", session: "x", resume: "y"} --from "a" --to ["b"])
         } "validation" "a `complete` with no validation verdict is refused on its content"
+    })
+
+    # ================================================ dotfiles-oj4c: message|state
+    #
+    # The vocabulary collapses to two kinds, and the kind now CORRELATES with
+    # the shape of `content` by rule rather than by convention:
+    #
+    #     message   content is a JSON string  — freetext prose
+    #     state     content is a JSON object carrying `status`
+    #
+    # `result` and `error` were never distinct types, only distinct spellings
+    # of one field: the error envelope's `code` was already a `status` value
+    # (`protocol_error` sits in WORKER_STATES beside complete/failed/blocked).
+    # Collapsing them means no consumer can dispatch on a discriminator the
+    # transport does not maintain — the failure that cost this project three
+    # separate bugs (dotfiles-56lh, dotfiles-u4oy, dotfiles-9oa4).
+    #
+    # This pairing check is what makes the original bug STRUCTURAL rather than
+    # merely fixed: a result stamped `message` rendered as a bare `{` for weeks
+    # because nothing refused it at the writer. Now something does.
+    (run-case "schema/refuses-an-object-stamped-message" {
+        # THE load-bearing case. A record content under `message` is refused
+        # at the writer, so a status record can never travel as prose again.
+        assert-rejects {
+            validate-envelope (make-envelope "message" {status: "complete", summary: "s"} --from "a" --to ["b"])
+        } "must carry a JSON string" "an object stamped `message` must be refused at the writer"
+    })
+
+    (run-case "schema/refuses-a-string-stamped-state" {
+        # The mirror: prose stamped `state` is refused too, so `content.status`
+        # is a field every consumer may read off a `state` without guarding.
+        assert-rejects {
+            validate-envelope (make-envelope "state" "complete, I think" --from "a" --to ["b"])
+        } "must carry a JSON object" "prose stamped `state` must be refused at the writer"
+    })
+
+    (run-case "schema/refuses-a-state-without-a-status" {
+        assert-rejects {
+            validate-envelope (make-envelope "state" {summary: "s", detail: "d"} --from "a" --to ["b"])
+        } "status" "a `state` with no status is refused, naming the field"
+    })
+
+    (run-case "schema/accepts-message" {
+        validate-envelope (sample-envelope "message")
+    })
+
+    (run-case "schema/accepts-state" {
+        validate-envelope (sample-envelope "state")
+    })
+
+    (run-case "schema/accepts-a-protocol-error-state" {
+        # What `error` used to be: `code` became `status`, and its only value
+        # was already a WORKER_STATE. One kind, one field.
+        validate-envelope (
+            sample-envelope "state"
+            | update content {status: "protocol_error", detail: "agent settled without calling the result tool"}
+        )
+    })
+
+    (run-case "schema/a-protocol-error-state-must-carry-its-detail" {
+        assert-rejects {
+            validate-envelope (sample-envelope "state" | update content {status: "protocol_error"})
+        } "detail" "a protocol_error state says what went wrong"
+    })
+
+    (run-case "schema/the-old-kinds-are-gone" {
+        for gone in ["inbox" "result" "error" "identity"] {
+            assert-rejects {
+                validate-envelope (make-envelope $gone "x" --from "a" --to ["b"])
+            } "not one of message, state" $"the retired kind '($gone)' is refused, naming the vocabulary that replaced it"
+        }
+    })
+
+    (run-case "schema/a-stale-record-fails-on-its-version-not-its-kind" {
+        # Why PROTOCOL_VERSION bumps to 3 under a hard cutover that needs no
+        # compatibility: a protocol-2 record on disk carries a retired kind, so
+        # WITHOUT the bump it would fail as "unknown envelope kind 'identity'"
+        # — which reads like corruption. With it, the version check fires
+        # first and says the true thing: the record is old.
+        assert-rejects {
+            validate-envelope (sample-envelope "message" | update protocol 2 | update kind "identity")
+        } "version 2" "a stale record is diagnosed as outdated, not as corrupt"
     })
 
 ]

@@ -71,11 +71,11 @@ let cases = [
     (run-case "bus/send-then-worker-reads-its-own-inbox" {
         let root = (make-runtime "roundtrip")
         with-runtime $root {
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "dotfiles-963w.2"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build dotfiles-963w.2"
             let pending = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($pending | length) 1 "the worker sees exactly its own message"
-            assert-eq $pending.0.content.task "dotfiles-963w.2" "payload survives the round trip"
-            assert-eq $pending.0.kind "inbox" ""
+            assert-eq $pending.0.content "wk-build dotfiles-963w.2" "content survives the round trip"
+            assert-eq $pending.0.kind "message" ""
         }
         rm -rf $root
     })
@@ -87,7 +87,7 @@ let cases = [
         # schema-cases.nu's `mint-msg-id` property cases for that guarantee.
         let root = (make-runtime "seq")
         with-runtime $root {
-            for i in 1..4 { legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $"t-($i)"} }
+            for i in 1..4 { legacy-inbox-send "impl-a" --run "run-1" --content $"wk-build t-($i)" }
             let seqs = (bus-inbox "impl-a" --run "run-1" | get sequence)
             assert-eq $seqs [1 2 3 4] "sequences increase by one and arrive in order"
         }
@@ -98,7 +98,7 @@ let cases = [
     (run-case "bus/runtime-directories-are-0700" {
         let root = (make-runtime "perm-dir")
         with-runtime $root {
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             for dir in [(bus-root) (bus-root | path join "run-1") (bus-root | path join "run-1" "impl-a")] {
                 assert-eq (dir-mode-of $dir) "rwx------" $"($dir) must not be readable by other users"
             }
@@ -109,7 +109,7 @@ let cases = [
     (run-case "bus/envelope-files-are-0600" {
         let root = (make-runtime "perm-file")
         with-runtime $root {
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             put-result "run-1" "impl-a"
             let files = (glob ((bus-root) + "/run-1/impl-a/**/*.json"))
             assert-true (($files | length) >= 2) "both an inbox and an outbox envelope exist"
@@ -270,7 +270,7 @@ let cases = [
         let root = (make-runtime "race")
         with-runtime $root {
             let script = ([$root "writer.nu"] | path join)
-            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { legacy-inbox-send \"impl-a\" --run \"run-1\" --payload {stage: \"wk-build\", task: \$\"t-\(\$n)-\(\$i)\"} }" | save -f $script
+            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { legacy-inbox-send \"impl-a\" --run \"run-1\" --content \$\"wk-build t-\(\$n)-\(\$i)\" }" | save -f $script
 
             let procs = ([1 2 3] | par-each {|n|
                 with-env {XDG_RUNTIME_DIR: $root, WRITER_N: ($n | into string)} {
@@ -282,7 +282,7 @@ let cases = [
             let inbox = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($inbox | length) 30 "every message survives the race"
             assert-eq ($inbox | get sequence | uniq | length) 30 "no two messages share a sequence"
-            assert-eq ($inbox | get content.task | uniq | length) 30 "no message was overwritten"
+            assert-eq ($inbox | get content | uniq | length) 30 "no message was overwritten"
         }
         rm -rf $root
     })
@@ -299,7 +299,7 @@ let cases = [
         with-runtime $root {
             let huge = ("x" | fill --width 70000 --character "x")
             assert-rejects {
-                legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $huge}
+                legacy-inbox-send "impl-a" --run "run-1" --content $huge
             } "64 KiB" "content violating the size cap never reaches the runtime dir"
             let written = (glob ((bus-root) + "/**/*.json"))
             assert-eq $written [] "nothing was written"
@@ -345,7 +345,7 @@ let cases = [
         with-runtime $root {
             # Let the bus create its own tree — a plain mkdir here would apply
             # the umask and the case would be judging its own 0755 directory.
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             # /proc is root-owned and always present; standing in for a planted tree.
             assert-rejects { bus-assert-owned "/proc" } "owner" "a directory owned by another user is refused"
             bus-assert-owned (bus-root)
@@ -356,7 +356,7 @@ let cases = [
     (run-case "bus/rejects-a-loosened-runtime-directory" {
         let root = (make-runtime "loose")
         with-runtime $root {
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             chmod 755 (bus-root)
             assert-rejects { bus-assert-owned (bus-root) } "0700" "a group- or world-readable bus directory is refused"
         }
@@ -392,7 +392,7 @@ let cases = [
     (run-case "bus/status-reports-a-worker-without-consuming-its-mail" {
         let root = (make-runtime "status")
         with-runtime $root {
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             put-result "run-1" "impl-a" {status: "blocked", validation: null, summary: "needs a decision"}
 
             let s = (bus-status "impl-a" --run "run-1")
@@ -459,17 +459,18 @@ let cases = [
             let written = (bus-settled "impl-a" --run "r1")
             assert-true $written.reported "a settle with nothing to show must be reported"
 
-            # read-results yields payloads; the envelope kind is read off disk
-            # so the test proves an `error` envelope was written, not a
-            # `result` one carrying an error-shaped payload.
+            # read-results yields contents; the envelope kind is read off disk
+            # so the test proves what was written. dotfiles-oj4c: there is one
+            # kind for both, and the DIFFERENCE an initiator acts on is the
+            # status — which is where it always actually lived.
             let results = (read-results "impl-a" --run "r1")
             assert-eq ($results | length) 1 "exactly one outcome"
             let payload = ($results | first)
-            assert-eq $payload.code "protocol_error" "with the protocol_error code"
+            assert-eq $payload.status "protocol_error" "with the protocol_error status"
             assert-true ($payload.detail | str contains "never inferred") "carrying the reason"
 
             let file = (ls ($env.XDG_RUNTIME_DIR | path join "pi-worker" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
-            assert-eq (open $file | get kind) "error" "it is an error envelope, not a result"
+            assert-eq (open $file | get kind) "state" "an outcome is a state, whatever its status"
         }
         rm -rf $root
     })
@@ -712,7 +713,7 @@ let cases = [
             }
 
             do $agrees   # created
-            legacy-inbox-send "w1" --run "r1" --payload {stage: "doc-draft", instructions: "do the thing"}
+            legacy-inbox-send "w1" --run "r1" --content "doc-draft: do the thing"
             do $agrees   # still created: being sent work is not reporting
 
             bus-result "w1" --run "r1" --result {
@@ -1013,10 +1014,10 @@ let cases = [
         let root = (make-runtime "next-run-id")
         with-runtime $root {
             assert-eq (next-run-id) "r1" "the first run of an empty bus"
-            legacy-inbox-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w" --run "r1" --content "wk-build t"
             assert-eq (next-run-id) "r2" "the next free one"
             # A run whose name is not `r<N>` must not confuse the counter.
-            legacy-inbox-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w" --run "custom" --content "wk-build t"
             assert-eq (next-run-id) "r2" "names outside the pattern are ignored, not parsed"
         }
         rm -rf $root
@@ -1060,7 +1061,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
     (run-case "bus/a-blocking-wait-gives-up-instead-of-hanging-forever" {
         let root = (make-runtime "wait-timeout")
         with-runtime $root {
-            legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w1" --run "r1" --content "wk-build t"
             let started = (date now)
             let got = (legacy-bus-wait --run "r1" --uid "w1" --block --timeout 2sec)
             let waited = ((date now) - $started)
@@ -1075,7 +1076,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         # Regression guard: scripts rely on `wait` answering immediately.
         let root = (make-runtime "wait-peek")
         with-runtime $root {
-            legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w1" --run "r1" --content "wk-build t"
             let started = (date now)
             assert-eq (legacy-bus-wait --run "r1" --uid "w1") null "still nothing pending"
             assert-true (((date now) - $started) < 500ms) "and it did not block to say so"
@@ -1096,7 +1097,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             }
             # A worker that has been addressed but never spawned: `send` creates
             # its directory before anything is recorded about a process.
-            legacy-inbox-send "b" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "b" --run "r1" --content "wk-build t"
 
             let roster = (worker-roster --run "r1")
             let a = ($roster | where uid == "a" | first)
@@ -1551,14 +1552,14 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
     # prose without parsing `content` (the anti-pattern sp030's plan forbids
     # and sp031 preserved). Once `bus-send` can stamp another kind, the
     # DEFAULT is the thing that can silently drift — so it is pinned here.
-    (run-case "send/a-plain-send-is-stamped-inbox-by-default" {
+    (run-case "send/a-plain-send-is-stamped-message-by-default" {
         let repo = (make-repo "send-default-kind")
         let root = (make-runtime "send-default-kind")
         with-runtime $root {
             let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "prose" })
-            assert-eq $sent.kind "inbox" "an ordinary message keeps the default kind"
+            assert-eq $sent.kind "message" "an ordinary message keeps the default kind"
             let mail = (do { cd $repo; bus-wait --as "a" })
-            assert-eq $mail.0.kind "inbox" "and the default is what the reader sees on disk too"
+            assert-eq $mail.0.kind "message" "and the default is what the reader sees on disk too"
         }
         rm -rf $root; rm -rf $repo
     })
@@ -1585,11 +1586,11 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
                 status: "blocked", summary: "stuck", validation: null
                 session: "sid-a", resume: "pi --session sid-a"
             }
-            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --kind "result" --content $payload })
-            assert-eq $sent.kind "result" "the sender's kind is what is stamped"
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --kind "state" --content $payload })
+            assert-eq $sent.kind "state" "the sender's kind is what is stamped"
             assert-eq ($sent | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "to"] "a kind is stamped on the existing envelope, not carried in a new field"
             let mail = (do { cd $repo; bus-wait --as "a" })
-            assert-eq $mail.0.kind "result" "and it survives the round trip to the recipient"
+            assert-eq $mail.0.kind "state" "and it survives the round trip to the recipient"
             assert-eq $mail.0.content.status "blocked" "content still travels untouched"
         }
         rm -rf $root; rm -rf $repo
@@ -2107,7 +2108,7 @@ def main [repo: string, big: string] {
         with-runtime $root {
             let shape = ([content created from id kind protocol sequence to] | sort)
 
-            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             let inbox = (bus-inbox "impl-a" --run "run-1" | first)
             assert-eq ($inbox | columns | sort) $shape "the inbox writer writes the converged shape"
             assert-eq $inbox.from "run-1" "addressed initiator-to-worker, because that is what the call site declared"
@@ -2133,7 +2134,7 @@ def main [repo: string, big: string] {
             bus-settled "impl-b" --run "run-1"
             let settled = (legacy-bus-wait --run "run-1" --uid "impl-b")
             assert-eq ($settled | columns | sort) $shape "the settled writer writes the converged shape"
-            assert-eq $settled.kind "error" ""
+            assert-eq $settled.kind "state" ""
             assert-eq $settled.from "impl-b" ""
             assert-eq $settled.to ["run-1"] ""
         }

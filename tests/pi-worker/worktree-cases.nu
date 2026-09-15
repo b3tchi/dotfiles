@@ -31,25 +31,6 @@ def mkdir-0700-chain [dirs: list<string>] {
     }
 }
 
-# A v1 identity: written straight onto the legacy runtime tree the way a
-# worker spawned before sp029 T6 did, bypassing the durable write entirely.
-# Built by hand rather than through `bus-identity` — that function IS the T6
-# write path, so using it here would test nothing about the import.
-def seed-v1-identity [run: string, uid: string, payload: record] {
-    let idir = (bus-root | path join $run $uid "identity")
-    mkdir-0700-chain [
-        (bus-root)
-        (bus-root | path join $run)
-        (bus-root | path join $run $uid)
-        $idir
-    ]
-    {
-        protocol: 1, sequence: 1, run: $run, uid: $uid, kind: "identity"
-        created: "2026-01-01T00:00:00.000000Z"
-        payload: $payload
-    } | to json | save -f ($idir | path join "1.json")
-}
-
 # A repo with a bare "origin" carrying three refs: the base, a merged worker
 # branch, and one with a commit of its own. Local worker branches are deleted
 # afterwards, which is the real situation — the local sweep has already run and
@@ -1036,96 +1017,13 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
-    # ------------------------------------------------------- v1 import (sp029 T6)
-
-    (run-case "worktree/v1-identity-import-is-idempotent" {
-        let repo = (make-repo "v1-import")
-        let root = (make-runtime "v1-import")
-        with-runtime $root {
-            let tree = (worktree-allocate --repo $repo --task "t1")
-            seed-v1-identity "r1" "impl-1" {
-                role: "impl", cwd: $tree.path, branch: $tree.branch
-                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
-            }
-
-            assert-eq (bus-identity-of "impl-1" --run "r1") null "not on durable storage before the import"
-
-            let first = (import-v1-identities)
-            assert-eq ($first.imported | length) 1 "the v1 identity is imported"
-            assert-eq ($first.imported.0.worktree_exists) true "the worktree it names is still there"
-            assert-eq (bus-identity-of "impl-1" --run "r1" | get session) "sid-1" "and now readable durably"
-
-            let snapshot = (bus-identity-envelope "impl-1" --run "r1")
-            let second = (import-v1-identities)
-            assert-eq ($second.imported | length) 0 "nothing left to import the second time"
-            assert-eq ($second.already | length) 1 "the existing record is recognised, not re-imported"
-            assert-eq (bus-identity-envelope "impl-1" --run "r1") $snapshot "byte-identical: no duplicate record, no re-write"
-        }
-        rm -rf $root; rm -rf $repo
-    })
-
-    (run-case "worktree/v1-import-keeps-a-record-whose-worktree-no-longer-exists" {
-        let root = (make-runtime "v1-gone")
-        with-runtime $root {
-            seed-v1-identity "r1" "impl-1" {
-                role: "impl", cwd: "/nonexistent/v1-gone-worktree", branch: "wk-t1.0"
-                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
-            }
-
-            let got = (import-v1-identities)
-            assert-eq ($got.imported | length) 1 "imported as a record, not silently dropped"
-            assert-eq ($got.imported.0.worktree_exists) false "and the gap is named rather than hidden"
-            assert-eq (bus-identity-of "impl-1" --run "r1" | get branch) "wk-t1.0" "the record itself is durably readable"
-        }
-        rm -rf $root
-    })
-
-    (run-case "worktree/v1-import-refuses-two-identities-for-one-cwd" {
-        let repo = (make-repo "v1-conflict")
-        let root = (make-runtime "v1-conflict")
-        with-runtime $root {
-            let tree = (worktree-allocate --repo $repo --task "t1")
-            for pair in [["r1" "impl-1"] ["r2" "impl-2"]] {
-                let run = ($pair | get 0)
-                let uid = ($pair | get 1)
-                seed-v1-identity $run $uid {
-                    role: "impl", cwd: $tree.path, branch: $tree.branch
-                    session: $"sid-($uid)", skill: "wk-build", window: $"($uid)@dotfiles"
-                }
-            }
-
-            assert-rejects { import-v1-identities } "r1/impl-1" "the refusal names the first conflicting identity"
-            assert-eq (bus-identity-of "impl-1" --run "r1") null "nothing was written for either side"
-            assert-eq (bus-identity-of "impl-2" --run "r2") null ""
-        }
-        rm -rf $root; rm -rf $repo
-    })
-
-    # The import carries its OWN reader (the v2 `validate-envelope` refuses
-    # protocol 1, which is the whole shape it exists to read). That reader has
-    # to be a validator and not a hole: a legacy dir holding something this
-    # build cannot account for must be named, not imported blind.
-    (run-case "worktree/v1-import-refuses-an-identity-file-that-is-not-v1" {
-        let root = (make-runtime "v1-not-v1")
-        with-runtime $root {
-            let idir = (bus-root | path join "r1" "impl-1" "identity")
-            mkdir-0700-chain [
-                (bus-root)
-                (bus-root | path join "r1")
-                (bus-root | path join "r1" "impl-1")
-                $idir
-            ]
-            # A v2-shaped envelope sitting where only v1 bytes belong.
-            {
-                protocol: 2, kind: "identity", from: "r1/impl-1", to: ["r1"]
-                created: "2026-01-01T00:00:00.000000Z", content: {}
-            } | to json | save -f ($idir | path join "1.json")
-
-            assert-rejects { import-v1-identities } "protocol 2" "the non-v1 record is named, not imported blind"
-            assert-eq (bus-identity-of "impl-1" --run "r1") null "and nothing was written for it"
-        }
-        rm -rf $root
-    })
+    # ------------------------------------------ v1 import: REMOVED (oj4c)
+    #
+    # Four cases exercised a one-way bridge from protocol-1 identity records on
+    # the runtime bus onto durable storage. The bridge is gone, so the cases
+    # are too: this build speaks protocol 3 and refuses 2, so bridging 1 was
+    # bridging across a gap nothing on the far side could cross. Verified
+    # before removal, not assumed — these cases were its only callers.
 
     (run-case "worktree/xdg-state-home-unset-falls-back-to-local-state-under-home" {
         let repo = (make-repo "state-fallback")

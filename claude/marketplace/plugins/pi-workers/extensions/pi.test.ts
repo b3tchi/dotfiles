@@ -53,6 +53,7 @@ import {
   MAX_SUMMARY_BYTES,
   oneLine,
   PROTOCOL_VERSION,
+  ENVELOPE_KINDS,
   createBusWatcher,
   createFsIo,
   parseQueueRows,
@@ -66,11 +67,11 @@ import {
 } from "./pi.ts";
 
 const workEnvelope = {
-  protocol: 2 as const,
+  protocol: 3 as const,
   sequence: 3,
   run: "run-1",
   uid: "impl-a",
-  kind: "inbox" as const,
+  kind: "message" as const,
   created: "2026-09-05T10:00:00Z",
   payload: { stage: "wk-build" as const, task: "dotfiles-963w.4" },
 };
@@ -178,10 +179,10 @@ describe("user payload shaping", () => {
     // second `payload` field. An envelope written from here on carries
     // `content` alone, and the watcher must deliver it.
     const converged = {
-      protocol: 2 as const,
+      protocol: 3 as const,
       sequence: 3,
       id: "01K4ZQ7X8Y0000000000000000",
-      kind: "inbox" as const,
+      kind: "message" as const,
       from: "run-1",
       to: ["impl-a"],
       created: "2026-09-05T10:00:00Z",
@@ -2244,7 +2245,7 @@ describe("inbox watcher against a fake Pi", () => {
     sequence,
     run: "run-1",
     uid: "impl-a",
-    kind: "inbox",
+    kind: "message",
     created: "2026-09-05T10:00:00Z",
     payload,
   });
@@ -2473,8 +2474,8 @@ describe("parsing queue rows", () => {
 describe("peer message text", () => {
   const message = (content: unknown) =>
     peerMessageText({
-      protocol: 2,
-      kind: "inbox",
+      protocol: 3,
+      kind: "message",
       id: "x",
       from: "peer-b",
       to: ["self-a"],
@@ -2522,7 +2523,7 @@ describe("delivery decision table (sp029 T7: reused, not rewritten)", () => {
 describe("bus watcher against a fake Pi", () => {
   const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
   const envelope = (from: string, content: unknown, to: string[] = ["self-a"]) =>
-    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+    JSON.stringify({ protocol: 3, kind: "message", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
 
   function fakeBusIo(opts: {
     rows?: Array<{ id: string; read?: boolean }>;
@@ -2682,14 +2683,14 @@ describe("bus watcher against a fake Pi", () => {
 describe("dual watcher: a spawned worker reads both sources through one arbiter (dotfiles-uddc)", () => {
   const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
   const peerEnvelope = (from: string, content: unknown, to: string[] = ["impl-a"]) =>
-    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+    JSON.stringify({ protocol: 3, kind: "message", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
 
   const inboxEnvelope = (sequence: number, payload: unknown) => ({
     protocol: 1,
     sequence,
     run: "run-1",
     uid: "impl-a",
-    kind: "inbox",
+    kind: "message",
     created: "2026-09-05T10:00:00Z",
     payload,
   });
@@ -2855,7 +2856,7 @@ describe("filesystem-backed bus IO", () => {
     writeFileSync(join(dir, "queue", "self-a"), `${a}${" ".repeat(QUEUE_SUFFIX_CHARS)}\n`);
     writeFileSync(
       join(dir, "messages", a),
-      JSON.stringify({ protocol: 2, kind: "inbox", id: a, from: "peer-b", to: ["self-a"], created: "t", content: "hi" }),
+      JSON.stringify({ protocol: 3, kind: "message", id: a, from: "peer-b", to: ["self-a"], created: "t", content: "hi" }),
     );
     const exec = async () => ({ stdout: "", stderr: "", code: 0, killed: false });
     const io = createFsIo(dir, exec, "/mod.nu");
@@ -3665,5 +3666,23 @@ describe("protocol version agrees with the nushell module (sp029 T2)", () => {
       throw new Error("could not find `export const PROTOCOL_VERSION = <n>` in pi-worker.nu");
     }
     expect(PROTOCOL_VERSION).toBe(Number(match[1]));
+  });
+
+  // dotfiles-oj4c: the same check for the kind vocabulary, which is the thing
+  // that actually drifted. `inbox` on the wire vs `message` on the card cost a
+  // consumer that special-cased a kind never arriving (dotfiles-9oa4); a
+  // rename on one side and not the other would do it again, silently, because
+  // an unknown kind is simply a branch nothing takes.
+  test("ENVELOPE_KINDS is the same vocabulary on both sides", () => {
+    const nuSource = readFileSync(
+      join(import.meta.dir, "../scripts/pi-worker.nu"),
+      "utf8",
+    );
+    const match = nuSource.match(/^export const ENVELOPE_KINDS = \[(.*)\]/m);
+    if (!match) {
+      throw new Error("could not find `export const ENVELOPE_KINDS = [...]` in pi-worker.nu");
+    }
+    const nuKinds = match[1]!.match(/"([^"]+)"/g)!.map((q) => q.slice(1, -1));
+    expect([...ENVELOPE_KINDS]).toEqual(nuKinds);
   });
 });

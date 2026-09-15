@@ -13,16 +13,20 @@ import (
 	"strings"
 )
 
-// kindResult is the one envelope kind that gets a derivation other than
-// "raw first line" — the bus's actual kind vocabulary (see
-// claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu's
-// ENVELOPE_KINDS) is "inbox" / "result" / "error" / "identity"; an ordinary
-// message travels as "inbox", not "message" — ft014's data_model says
-// "message" but the transport writes "inbox" (pi-worker.nu:1399), a card/
-// reality mismatch tracked as dotfiles-9oa4. This code follows the shipped
-// transport, not the card. "inbox", "error" and "identity" all render the
-// same way: the raw first line of content, untouched.
-const kindResult = "result"
+// kindState is the one envelope kind that gets a derivation other than "raw
+// first line". The bus vocabulary (pi-worker.nu's ENVELOPE_KINDS) is exactly
+// "message" and "state": prose travels as a "message" whose content is a JSON
+// string, an outcome travels as a "state" whose content is a JSON object
+// carrying `status`.
+//
+// This used to key off "result", one of four kinds where the card documented
+// two — the transport wrote "inbox" where ft014 said "message", and a consumer
+// built from the card special-cased a kind that never arrived (dotfiles-9oa4).
+// dotfiles-oj4c collapsed the vocabulary so the card and the wire say the same
+// words, and this branch widened with it: `status — summary` now covers what
+// used to be "error" envelopes and blocked/waiting workers too, none of which
+// it ever reached while "result" was one spelling among four.
+const kindState = "state"
 
 // DeriveSubject computes the message pane's SUBJECT cell for one envelope,
 // truncated to width display cells with an explicit ellipsis, and with
@@ -37,7 +41,7 @@ func DeriveSubject(kind string, content []byte, width int) string {
 
 // rawSubject computes the untruncated, unneutralised subject text.
 func rawSubject(kind string, content []byte) string {
-	if kind == kindResult {
+	if kind == kindState {
 		var r struct {
 			Status  string `json:"status"`
 			Summary string `json:"summary"`

@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
  * cross-language check in pi.test.ts, which is what catches the two halves
  * drifting silently (sp029 T2).
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * A bus message addresses work — it never carries it. This bounds the WHOLE
@@ -40,7 +40,28 @@ export const MAX_ENVELOPE_BYTES = 65536;
 /** What the initiator reads inline; detail stays in the window and the JSONL. */
 export const MAX_SUMMARY_BYTES = 4096;
 
-export type EnvelopeKind = "inbox" | "result" | "error";
+/**
+ * The bus vocabulary, and the whole of it (dotfiles-oj4c). The kind names the
+ * SHAPE of `content` by rule, and the nushell writer enforces the pairing:
+ *
+ *   message  content is a JSON string  — freetext prose
+ *   state    content is a JSON object carrying `status`
+ *
+ * `inbox`, `result` and `error` retired into these two. They were never three
+ * types: `error`'s `code` was a `status` under another name, and `inbox` was
+ * the wire's spelling of the `message` ft014's card always documented — a
+ * drift that cost a consumer written from the card (dotfiles-9oa4). `identity`
+ * is absent here for the same reason it is absent from ENVELOPE_KINDS: it is a
+ * durable placement record, not a bus envelope, and never reaches this side.
+ *
+ * A runtime array, not a bare type, so the cross-language check in pi.test.ts
+ * can compare it against the nushell module's own `$ENVELOPE_KINDS` the way
+ * the PROTOCOL_VERSION check already does. A type alone erases at runtime, and
+ * an erased contract is exactly the one that drifts.
+ */
+export const ENVELOPE_KINDS = ["message", "state"] as const;
+
+export type EnvelopeKind = (typeof ENVELOPE_KINDS)[number];
 
 /**
  * Persisted worker states. `unknown` is deliberately absent: it is an

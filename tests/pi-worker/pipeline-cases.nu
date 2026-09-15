@@ -215,21 +215,24 @@ let cases = [
             assert-eq $resumed.session "sid-impl-a" "the SAME session, not a fresh worker"
             assert-eq $resumed.window $impl.window "in the same window"
             let inbox = (bus-inbox "impl-a" --run "run-1")
-            assert-eq ($inbox | last | get content.instructions) "criterion 2 is unmet" "feedback arrives as an addressed message"
+            assert-eq ($inbox | last | get content) "criterion 2 is unmet" "feedback arrives as an addressed message"
             assert-eq (bus-status "impl-a" --run "run-1" | get state) "running" "and the worker is running again"
         }
     })
 
     (run-case "pipeline/rejection-feedback-is-not-a-work-payload" {
-        # Reviewer feedback is prose, so it travels as an AKM-shaped message.
-        # Squeezing it into a work payload would violate the ticket-id-only rule.
+        # Reviewer feedback is prose, so it travels as prose. dotfiles-oj4c
+        # made that structural rather than conventional: a `message` carries a
+        # string, so feedback CANNOT be disguised as a ticket record — the
+        # writer refuses the shape before anything is written.
         with-pipeline "feedback" {|t, repo|
             launch $t $repo "impl-a" "impl"
             complete-with "impl-a" "first attempt"
             worker-resume "impl-a" --run "run-1" --feedback "fix the gate" --socket $t.socket
             let msg = (bus-inbox "impl-a" --run "run-1" | last)
-            assert-true ("task" not-in ($msg.content | columns)) "feedback is not disguised as a ticket"
-            assert-true ("instructions" in ($msg.content | columns)) ""
+            assert-eq $msg.kind "message" "feedback travels as prose"
+            assert-eq ($msg.content | describe) "string" "and prose is all it can be"
+            assert-eq $msg.content "fix the gate" ""
         }
     })
 
@@ -504,7 +507,7 @@ let cases = [
     # tell an outcome from prose without parsing `content` — which sp030's
     # plan forbids and sp031 deliberately preserved. `result` was already in
     # ENVELOPE_KINDS; it simply never reached the bus.
-    (run-case "pipeline/a-relayed-result-is-stamped-kind-result-on-the-bus" {
+    (run-case "pipeline/a-relayed-result-is-stamped-kind-state-on-the-bus" {
         let repo = (make-repo "t5-kind")
         let root = (make-runtime "t5-kind")
         with-runtime $root {
@@ -521,10 +524,10 @@ let cases = [
             }
             let mail = (do { cd $repo; bus-wait --as "orchestrator-1" })
             assert-eq ($mail | length) 1 ""
-            assert-eq $mail.0.kind "result" "a relayed outcome is typed, so a reader never sniffs content shape to recognise it"
+            assert-eq $mail.0.kind "state" "a relayed outcome is typed, so a reader never sniffs content shape to recognise it"
             let seen = (do { cd $repo; bus-messages })
             assert-eq ($seen | length) 1 "`messages` still reports the completion exactly once"
-            assert-eq $seen.0.kind "result" "`pi-worker messages --json` reports the kind the bus stored"
+            assert-eq $seen.0.kind "state" "`pi-worker messages --json` reports the kind the bus stored"
             assert-eq $seen.0.content.status "complete" "the same content still reaches the commissioner — the relay is additive"
         }
         rm -rf $root; rm -rf $repo

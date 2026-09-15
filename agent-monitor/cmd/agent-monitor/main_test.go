@@ -353,7 +353,7 @@ func TestFitPanes_DetailVisibleFalseAlwaysHides(t *testing.T) {
 }
 
 func sampleMessage(from string, content string) source.Message {
-	return source.Message{At: "2026-01-01T00:00:00Z", ID: "m1", From: from, To: []string{"bob"}, Kind: "inbox", Content: []byte(content)}
+	return source.Message{At: "2026-01-01T00:00:00Z", ID: "m1", From: from, To: []string{"bob"}, Kind: "message", Content: []byte(content)}
 }
 
 // TestRenderFrame_DetailFollowsMessagesCursor is a success criterion: the

@@ -6,34 +6,34 @@ import (
 )
 
 func TestDeriveSubject_Message_FirstLineOfContent(t *testing.T) {
-	got := DeriveSubject("inbox", []byte(`"ping-verify"`), 40)
+	got := DeriveSubject("message", []byte(`"ping-verify"`), 40)
 	if got != "ping-verify" {
 		t.Fatalf("got %q, want %q", got, "ping-verify")
 	}
 }
 
 func TestDeriveSubject_Message_MultilineContent_TakesFirstLineOnly(t *testing.T) {
-	got := DeriveSubject("inbox", []byte(`"line one\nline two\nline three"`), 40)
+	got := DeriveSubject("message", []byte(`"line one\nline two\nline three"`), 40)
 	if got != "line one" {
 		t.Fatalf("got %q, want %q", got, "line one")
 	}
 }
 
-func TestDeriveSubject_Result_StatusEmDashSummary(t *testing.T) {
+func TestDeriveSubject_State_StatusEmDashSummary(t *testing.T) {
 	content := []byte(`{"status":"complete","summary":"delivered","window":"x@y","session":"s1"}`)
-	got := DeriveSubject("result", content, 60)
+	got := DeriveSubject("state", content, 60)
 	want := "complete — delivered"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
-func TestDeriveSubject_Result_MissingStatusOrSummary_FallsBackToRawFirstLine(t *testing.T) {
-	// A result envelope that (for whatever reason) lacks the expected fields
+func TestDeriveSubject_State_MissingStatusOrSummary_FallsBackToRawFirstLine(t *testing.T) {
+	// A state envelope that (for whatever reason) lacks the expected fields
 	// still must not blank the subject column: fall back to the same raw
 	// first-line treatment "anything else" gets.
 	content := []byte(`{"window":"x@y"}`)
-	got := DeriveSubject("result", content, 60)
+	got := DeriveSubject("state", content, 60)
 	if got == "" {
 		t.Fatalf("got empty subject, want raw fallback")
 	}
@@ -42,16 +42,35 @@ func TestDeriveSubject_Result_MissingStatusOrSummary_FallsBackToRawFirstLine(t *
 	}
 }
 
-func TestDeriveSubject_Error_RawFirstLineOfContent(t *testing.T) {
-	content := []byte(`{"code":"protocol_error","detail":"agent settled without calling the typed result tool"}`)
-	got := DeriveSubject("error", content, 200)
-	want := `{"code":"protocol_error","detail":"agent settled without calling the typed result tool"}`
+// dotfiles-oj4c: what used to be an "error" envelope is a state whose status
+// is `protocol_error`, so it now gets the SAME status-derived subject a
+// completion does — the widening this port was for. It used to fall through to
+// the raw JSON blob, because "error" was not the one kind the branch keyed on.
+func TestDeriveSubject_State_ProtocolError_GetsTheStatusDerivation(t *testing.T) {
+	content := []byte(`{"status":"protocol_error","detail":"agent settled without calling the typed result tool"}`)
+	got := DeriveSubject("state", content, 200)
+	want := "protocol_error — "
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
-func TestDeriveSubject_Identity_RawFirstLineOfContent(t *testing.T) {
+// A blocked worker's question is its summary (dotfiles-oj4c's design note), so
+// it reads in the log exactly like any other reported state. This is the other
+// half of the widening: `blocked` never reached this branch either.
+func TestDeriveSubject_State_Blocked_GetsTheStatusDerivation(t *testing.T) {
+	content := []byte(`{"status":"blocked","summary":"which workspace should I use?"}`)
+	got := DeriveSubject("state", content, 200)
+	want := "blocked — which workspace should I use?"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// A kind outside the vocabulary is not special-cased into anything: it gets
+// the raw first line, which is the honest rendering for content this code has
+// no contract for.
+func TestDeriveSubject_UnknownKind_RawFirstLineOfContent(t *testing.T) {
 	content := []byte(`{"run":"r1","uid":"peer-1"}`)
 	got := DeriveSubject("identity", content, 200)
 	want := `{"run":"r1","uid":"peer-1"}`
@@ -66,7 +85,7 @@ func TestDeriveSubject_Identity_RawFirstLineOfContent(t *testing.T) {
 // is asserted so nobody "fixes" it by parsing.
 func TestDeriveSubject_JSONBlobContent_TruncatedRawNotParsed(t *testing.T) {
 	content := []byte(`{"foo":"bar","baz":1,"nested":{"a":1}}`)
-	got := DeriveSubject("inbox", content, 15)
+	got := DeriveSubject("message", content, 15)
 	// Never longer than the declared width in display cells.
 	if w := displayWidth(got); w > 15 {
 		t.Fatalf("subject %q is %d cells wide, want <= 15", got, w)
@@ -87,7 +106,7 @@ func TestDeriveSubject_JSONBlobContent_TruncatedRawNotParsed(t *testing.T) {
 // pane above it.
 func TestDeriveSubject_ANSIEscapes_Neutralised(t *testing.T) {
 	content := []byte(`"[31mRED[0m ping"`)
-	got := DeriveSubject("inbox", content, 80)
+	got := DeriveSubject("message", content, 80)
 	if strings.ContainsRune(got, 0x1b) {
 		t.Fatalf("got %q, want no raw ESC byte reaching the render", got)
 	}
@@ -98,7 +117,7 @@ func TestDeriveSubject_ANSIEscapes_Neutralised(t *testing.T) {
 
 func TestDeriveSubject_ControlCharacters_Neutralised(t *testing.T) {
 	content := []byte(`"a\u0007b\u0000c"`) // BEL, NUL embedded mid-content
-	got := DeriveSubject("inbox", content, 80)
+	got := DeriveSubject("message", content, 80)
 	for _, r := range got {
 		if r < 0x20 {
 			t.Fatalf("got %q, contains raw control rune %U", got, r)
@@ -113,7 +132,7 @@ func TestDeriveSubject_ControlCharacters_Neutralised(t *testing.T) {
 // alone defuses the 7-bit form; this asserts the 8-bit form is stripped too.
 func TestDeriveSubject_C1ControlCode_Neutralised(t *testing.T) {
 	content := []byte(`"a\u009db"`)
-	got := DeriveSubject("inbox", content, 80)
+	got := DeriveSubject("message", content, 80)
 	for _, r := range got {
 		if r >= 0x80 && r <= 0x9f {
 			t.Fatalf("got %q, contains raw C1 control rune %U", got, r)
@@ -125,7 +144,7 @@ func TestDeriveSubject_C1ControlCode_Neutralised(t *testing.T) {
 // runes, and must never split a wide character across the cut.
 func TestDeriveSubject_CJK_TruncatesOnCellBoundary(t *testing.T) {
 	content := []byte(`"日本語テストabc"`) // each of the first four runes is 2 cells wide
-	got := DeriveSubject("inbox", content, 5)
+	got := DeriveSubject("message", content, 5)
 
 	if w := displayWidth(got); w > 5 {
 		t.Fatalf("subject %q is %d cells wide, want <= 5", got, w)
@@ -144,21 +163,21 @@ func TestDeriveSubject_CJK_TruncatesOnCellBoundary(t *testing.T) {
 
 func TestDeriveSubject_Emoji_CountsAsWide(t *testing.T) {
 	content := []byte(`"😀😀😀 hello"`)
-	got := DeriveSubject("inbox", content, 5)
+	got := DeriveSubject("message", content, 5)
 	if w := displayWidth(got); w > 5 {
 		t.Fatalf("subject %q is %d cells wide, want <= 5", got, w)
 	}
 }
 
 func TestDeriveSubject_FitsExactlyNoTruncation(t *testing.T) {
-	got := DeriveSubject("inbox", []byte(`"hi"`), 2)
+	got := DeriveSubject("message", []byte(`"hi"`), 2)
 	if got != "hi" {
 		t.Fatalf("got %q, want %q (no ellipsis when it already fits)", got, "hi")
 	}
 }
 
 func TestDeriveSubject_EmptyContent(t *testing.T) {
-	got := DeriveSubject("inbox", []byte(`""`), 10)
+	got := DeriveSubject("message", []byte(`""`), 10)
 	if got != "" {
 		t.Fatalf("got %q, want empty", got)
 	}
