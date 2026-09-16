@@ -99,7 +99,7 @@ let cases = [
         let root = (make-runtime "perm-dir")
         with-runtime $root {
             legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
-            for dir in [(bus-root) (bus-root | path join "run-1") (bus-root | path join "run-1" "impl-a")] {
+            for dir in [(bus-root) (runs-root) (runs-root | path join "run-1") (runs-root | path join "run-1" "impl-a")] {
                 assert-eq (dir-mode-of $dir) "rwx------" $"($dir) must not be readable by other users"
             }
         }
@@ -111,7 +111,7 @@ let cases = [
         with-runtime $root {
             legacy-inbox-send "impl-a" --run "run-1" --content "wk-build t"
             put-result "run-1" "impl-a"
-            let files = (glob ((bus-root) + "/run-1/impl-a/**/*.json"))
+            let files = (glob ((runs-root) + "/run-1/impl-a/**/*.json"))
             assert-true (($files | length) >= 2) "both an inbox and an outbox envelope exist"
             for f in $files { assert-eq (mode-of $f) "rw-------" $"($f) must be private to its owner" }
         }
@@ -126,7 +126,7 @@ let cases = [
         let root = (make-runtime "partial")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
+            let dir = ((runs-root) | path join "run-1" "impl-a" "outbox")
             "{\"protocol\":1,\"seq" | save -f ($dir | path join "2.json.tmp.crash")
 
             let pending = (legacy-bus-pending "run-1")
@@ -313,7 +313,7 @@ let cases = [
         let root = (make-runtime "malformed-read")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
+            let dir = ((runs-root) | path join "run-1" "impl-a" "outbox")
             "not json at all" | save -f ($dir | path join "2.json")
 
             assert-rejects { legacy-bus-pending "run-1" } "2.json" "the reader names the file it could not parse"
@@ -326,7 +326,7 @@ let cases = [
         let root = (make-runtime "schema-read")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
+            let dir = ((runs-root) | path join "run-1" "impl-a" "outbox")
             {
                 protocol: 99, sequence: 2, run: "run-1", uid: "impl-a", kind: "result"
                 created: "2026-09-05T10:00:00Z", from: "impl-a", to: ["run-1"], content: {}, payload: {}
@@ -369,7 +369,7 @@ let cases = [
         let root = (make-runtime "absent")
         with-runtime $root {
             assert-true ((legacy-bus-wait --run "run-1") | is-empty) "no mail before anything is sent"
-            assert-true (not ((bus-root) | path join "run-1" | path exists)) "asking does not create the run"
+            assert-true (not ((runs-root) | path join "run-1" | path exists)) "asking does not create the run"
         }
         rm -rf $root
     })
@@ -469,7 +469,7 @@ let cases = [
             assert-eq $payload.status "protocol_error" "with the protocol_error status"
             assert-true ($payload.detail | str contains "never inferred") "carrying the reason"
 
-            let file = (ls ($env.XDG_RUNTIME_DIR | path join "pi-worker" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
+            let file = (ls ($env.XDG_RUNTIME_DIR | path join "pi-worker" "runs" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
             assert-eq (open $file | get kind) "state" "an outcome is a state, whatever its status"
         }
         rm -rf $root
@@ -648,6 +648,37 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/a-project-bucket-is-never-read-as-a-run" {
+        # dotfiles-3yg4: every reader of the legacy tree used to take ANY
+        # directory under the bus root for a run id. sp029 then placed the
+        # project bucket — a slug directory holding `bus/` — in that same
+        # namespace, so it was walked like a run and its `bus/` subdirectory
+        # listed as a worker named "bus". A roster asserting a worker nobody
+        # spawned is what [[adr0017]] exists to forbid, and each phantom also
+        # costs two lookups that can only fail.
+        #
+        # Written against the real writers on both sides — `ensure-bus-dirs`
+        # plants the bucket and `bus-identity` mints the run — because the bug
+        # was precisely that two real writers shared one namespace; a
+        # hand-built directory would prove nothing about that.
+        let repo = (make-repo "run-namespace")
+        let root = (make-runtime "run-namespace")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            assert-eq (bus-runs) ["r1"] "only the minted run is a run"
+            assert-eq (worker-roster | get uid) ["impl-1"] "the bucket contributes no roster row"
+            assert-eq (run-workers "r1" --repo $repo | get uid) ["impl-1"] "and the run itself is unchanged"
+            # `next-run-id` mints around the runs it can see, so it must see
+            # the same namespace the readers do.
+            assert-eq (next-run-id) "r2" "the next id is minted from the run namespace alone"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "bus/a-main-isolation-worker-cannot-commit-to-the-operators-tree" {
         # Six worker commits reached this repo's own main in one evening, five
         # files of them tracked and pushed, because a stage with
@@ -728,7 +759,7 @@ let cases = [
             # The marker file is written directly because the only writer is
             # inside worker-resume, which needs a live tmux server — and this
             # case is about the derivation, not about tmux.
-            "1" | save -f (bus-root | path join "r1" "w1" "reopened.marker")
+            "1" | save -f (runs-root | path join "r1" "w1" "reopened.marker")
             do $agrees   # running
 
             bus-result "w1" --run "r1" --result {

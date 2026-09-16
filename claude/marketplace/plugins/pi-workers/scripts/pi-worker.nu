@@ -26,7 +26,7 @@
 # sequenced, addressed, or replayed after a crash, and `send-keys` in
 # particular types text into whatever now occupies a stale target — a shell,
 # somebody else's editor. Messages travel as envelopes under
-# $XDG_RUNTIME_DIR/pi-worker/<run-id>/<worker-uid>/ and nowhere else.
+# $XDG_RUNTIME_DIR/pi-worker/runs/<run-id>/<worker-uid>/ and nowhere else.
 # The only legitimate tmux calls are window/process lifecycle: new-window,
 # list-windows, kill-window.
 
@@ -723,7 +723,7 @@ export def settled-without-result [
 #
 # Layout, one directory per addressee:
 #
-#   $XDG_RUNTIME_DIR/pi-worker/<run-id>/<worker-uid>/
+#   $XDG_RUNTIME_DIR/pi-worker/runs/<run-id>/<worker-uid>/
 #       inbox/<sequence>.json     messages to the worker
 #       outbox/<sequence>.json    results from the worker
 #       outbox/<sequence>.ack     delivery receipt, written by the initiator
@@ -755,12 +755,14 @@ const BUS_DIRNAME = "pi-worker"
 const BRANCH_PREFIX = "wk-"
 const MAX_SEQUENCE_ATTEMPTS = 64
 
-# Root of the LEGACY bus tree: one flat $XDG_RUNTIME_DIR/pi-worker directory
-# shared by every project, addressed through a minted `run` id. Every verb
-# still built on `run-dir`/`worker-dir` (send, wait, result, status, ...)
-# reads and writes here until T2-T4 rewrite them onto `project-dir` below —
-# changing what THIS returns would silently break all of them, which sp029 T1
-# is not scoped to do. New code should prefer `project-dir`.
+# Root of the bus tree: one $XDG_RUNTIME_DIR/pi-worker directory shared by
+# every project, holding the project buckets (`<slug>/bus`, see `project-dir`)
+# and the legacy run tree (`runs/<run>/<uid>`, see `runs-root`) as separate
+# namespaces. Every verb still built on `run-dir`/`worker-dir` (send, wait,
+# result, status, ...) reads and writes here until T2-T4 rewrite them onto
+# `project-dir` below — changing what THIS returns would silently break all of
+# them, which sp029 T1 is not scoped to do. New code should prefer
+# `project-dir`.
 export def bus-root []: nothing -> string {
     let base = ($env | get -o XDG_RUNTIME_DIR | default "")
     if ($base | is-empty) {
@@ -769,8 +771,38 @@ export def bus-root []: nothing -> string {
     $base | path join $BUS_DIRNAME
 }
 
-def run-dir [run: string]: nothing -> string { bus-root | path join $run }
+# The legacy run tree's OWN namespace, one level under `bus-root`.
+#
+# dotfiles-3yg4: run ids used to be minted as direct children of `bus-root`,
+# and sp029 then placed the project bucket — a slug directory holding `bus/`
+# — as their sibling. Every reader that enumerated runs by listing `bus-root`
+# therefore walked the bucket as a run and reported its `bus/` subdirectory as
+# a WORKER named "bus": a roster row asserting an agent nobody spawned, which
+# is the class of claim [[adr0017]] forbids, plus two failing lookups per
+# phantom.
+#
+# Separated by a directory level rather than by a name-shape test on `r<n>`.
+# A shape test is a convention every reader has to keep agreeing about, and
+# the last two bugs here (dotfiles-bg65, dotfiles-1d1f) were conventions that
+# drifted; a path cannot drift. A project slug always carries a hash suffix,
+# so no bucket can ever be named `runs`.
+export def runs-root []: nothing -> string { bus-root | path join "runs" }
+
+def run-dir [run: string]: nothing -> string { runs-root | path join $run }
 def worker-dir [run: string, uid: string]: nothing -> string { run-dir $run | path join $uid }
+
+# Every run the legacy tree holds — the ONE place that turns directories into
+# run ids, so `next-run-id` mints around exactly the set `workers` and the
+# roster read back. Three copies of this listing is how dotfiles-3yg4's
+# phantom reached two readers at once.
+#
+# Sorted, because both roster callers sorted their own listing and one of them
+# is now this.
+export def bus-runs []: nothing -> list<string> {
+    let root = (runs-root)
+    if not ($root | path exists) { return [] }
+    ls $root | where type == dir | get name | sort | each {|d| $d | path basename }
+}
 
 # Refuse a bus tree we do not own or that others can read.
 #
@@ -810,6 +842,7 @@ def ensure-dir [dir: string] {
 
 def ensure-worker-dirs [run: string, uid: string] {
     ensure-dir (bus-root)
+    ensure-dir (runs-root)
     ensure-dir (run-dir $run)
     ensure-dir (worker-dir $run $uid)
     for box in ["inbox" "outbox"] {
@@ -2744,10 +2777,7 @@ export def mint-session []: nothing -> string {
 # an operator named `x4` says nothing about which `r<n>` is free, and reading a
 # number out of it would hand back an address already in use.
 export def next-run-id []: nothing -> string {
-    let root = (bus-root)
-    let taken = (if ($root | path exists) {
-        ls $root | where type == dir | get name | each {|d| $d | path basename }
-    } else { [] })
+    let taken = (bus-runs)
     mut n = 1
     while $"r($n)" in $taken { $n = $n + 1 }
     $"r($n)"
@@ -4710,7 +4740,7 @@ export def resume-hint [identity: record, --sessions-dir: string = ""]: nothing 
 # in the orchestrator's memory, so a fresh process can list the workers, their
 # states, their undelivered results and their resume commands.
 export def run-workers [run: string, --repo: string = ""]: nothing -> list<record> {
-    let dir = (bus-root | path join $run)
+    let dir = (run-dir $run)
     if not ($dir | path exists) { return [] }
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
     let slug = (resolve-project-slug $base)
@@ -4756,15 +4786,10 @@ export def run-workers [run: string, --repo: string = ""]: nothing -> list<recor
 # `liveness` needs tmux; when tmux cannot be reached it reports `unknown`
 # rather than guessing, so a roster is still useful without a display host.
 export def worker-roster [--run: string = "", --socket: string = ""]: nothing -> list<record> {
-    let root = (bus-root)
-    if not ($root | path exists) { return [] }
-
-    let runs = (if ($run | is-empty) {
-        ls $root | where type == dir | get name | sort | each {|d| $d | path basename }
-    } else { [$run] })
+    let runs = (if ($run | is-empty) { bus-runs } else { [$run] })
 
     $runs | each {|r|
-        let dir = ($root | path join $r)
+        let dir = (run-dir $r)
         if not ($dir | path exists) { [] } else {
             ls $dir | where type == dir | get name | sort | each {|w|
                 let uid = ($w | path basename)
@@ -5990,11 +6015,7 @@ def "main ps" [--socket: string = ""] {
 # flattened, since the project (derived, never typed) is the only scope a CLI
 # caller has left to ask for.
 def "main workers" [] {
-    let root = (bus-root)
-    let runs = (if ($root | path exists) {
-        ls $root | where type == dir | get name | each {|d| $d | path basename }
-    } else { [] })
-    ($runs | each {|r| run-workers $r } | flatten) | to json | print
+    (bus-runs | each {|r| run-workers $r } | flatten) | to json | print
 }
 
 # A table by default, JSON on request — same split as `timeline` and for the

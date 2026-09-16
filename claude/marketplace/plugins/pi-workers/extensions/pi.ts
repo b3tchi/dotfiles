@@ -3181,7 +3181,12 @@ export function workerInboxDir(env: Record<string, string | undefined>): string 
   const run = env.PI_WORKER_RUN;
   const uid = env.PI_WORKER_UID;
   if (!runtime || !run || !uid) return null;
-  return join(runtime, "pi-worker", run, uid, "inbox");
+  // `runs/` is the run tree's own namespace under the bus root (dotfiles-3yg4,
+  // `runs-root` in pi-worker.nu): run ids sit beside the project buckets
+  // otherwise, and a reader that walks the root cannot tell the two apart.
+  // This is the second copy of that layout, in another language — it has to
+  // move with the first or a worker watches a directory nothing writes to.
+  return join(runtime, "pi-worker", "runs", run, uid, "inbox");
 }
 
 export default function piWorker(pi: ExtensionAPI): void {

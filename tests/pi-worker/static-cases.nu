@@ -12,6 +12,7 @@
 # than as a prohibition.
 
 use harness.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 const FORBIDDEN = [
     ["verb", "why"];
@@ -378,6 +379,49 @@ let cases = [
             | sort
         )
         assert-eq $tool_verbs $expected_tool_verbs "pi_worker's INITIATOR_VERBS must match the CLI's verb set exactly (minus result/settled/reclaim/doctor)"
+    })
+
+    (run-case "static/the-extension-watches-the-inbox-the-bus-writes-to" {
+        # dotfiles-3yg4: `workerInboxDir` in pi.ts is a SECOND copy of the
+        # runtime bus layout, written in another language, and nothing in the
+        # bun suite or here used to compare it with the first. A watcher one
+        # directory off does not fail — it simply never sees a message, which
+        # is the quietest failure this transport has.
+        #
+        # Built from the extension's own `join()` arguments and compared with
+        # what `runs-root` actually answers, so moving the tree on either side
+        # without the other fails here rather than in a worker's silence.
+        let extension_text = (open --raw $extension)
+        let start = ($extension_text | str index-of "export function workerInboxDir")
+        assert-true ($start >= 0) "pi.ts must declare workerInboxDir"
+        let tail = ($extension_text | str substring $start..)
+        let call_start = ($tail | str index-of "return join(")
+        assert-true ($call_start >= 0) "workerInboxDir must build its path with join()"
+        let call_end = ($tail | str index-of --range $call_start.. ");")
+        let arg_start = ($call_start + ("return join(" | str length))
+        let arg_end = ($call_end - 1)
+        let args = (
+            $tail
+            | str substring $arg_start..$arg_end
+            | split row ","
+            | each {|a| $a | str trim }
+            | where {|a| $a | is-not-empty }
+        )
+        let fake = "/nonexistent-runtime-dir"
+        let built = ($args | reduce --fold "" {|a, acc|
+            let piece = (match $a {
+                "runtime" => $fake
+                "run" => "r7"
+                "uid" => "impl-a"
+                _ => ($a | str trim --char '"')
+            })
+            if ($acc | is-empty) { $piece } else { $acc | path join $piece }
+        })
+        let expected = (
+            with-env {XDG_RUNTIME_DIR: $fake} { runs-root }
+            | path join "r7" "impl-a" "inbox"
+        )
+        assert-eq $built $expected "the extension's inbox path must be the bus's own run tree"
     })
 
     # ------------------------------------------- sp030 T5: `messages --json`

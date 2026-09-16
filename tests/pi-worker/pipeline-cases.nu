@@ -893,10 +893,10 @@ let cases = [
         assert-true (not ($err_flat | str contains "mustcontainonlynon-empty")) "not an envelope-internals message"
 
         # The litter this refusal must prevent: `worker-dir "" uid` resolves
-        # to `bus-root/uid` directly (`path join ""` is a no-op), which is
+        # to `runs-root/uid` directly (`path join ""` is a no-op), which is
         # exactly where `ensure-worker-dirs` would have created inbox/outbox
         # directories had `bus-settled` ever been reached.
-        let litter = ($root | path join "pi-worker" "totally-unknown-uid")
+        let litter = ($root | path join "pi-worker" "runs" "totally-unknown-uid")
         assert-true (not ($litter | path exists)) $"no stray directory for the unresolved uid, found: ($litter)"
         rm -rf $root; rm -rf $repo
     })
