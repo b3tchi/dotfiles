@@ -62,6 +62,9 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0028|tmux hosts and displays agent workers; it never carries their messages]]
 - [[adr0029|agent-census --fast reads accounts' internal state files, opt-in and parity-guarded]]
 - [[adr0030|Go for agent-monitor, an interactive terminal UI]]
+- [[adr0031|a consumer may format what it displays; the log's subject column stays underived]]
+- [[adr0032|the bus carries two envelope kinds, and kind names the shape of content]]
+- [[adr0033|while alpha, bus breaking changes are hard cutovers with a protocol bump for diagnosis]]
 
 ### [[cat002|display-platform]]
 
