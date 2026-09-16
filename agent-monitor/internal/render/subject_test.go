@@ -46,10 +46,41 @@ func TestDeriveSubject_State_MissingStatusOrSummary_FallsBackToRawFirstLine(t *t
 // is `protocol_error`, so it now gets the SAME status-derived subject a
 // completion does — the widening this port was for. It used to fall through to
 // the raw JSON blob, because "error" was not the one kind the branch keyed on.
-func TestDeriveSubject_State_ProtocolError_GetsTheStatusDerivation(t *testing.T) {
+//
+// dotfiles-k77t: that port also dropped the only text such an envelope has.
+// A protocol_error carries {status, detail} and no summary, so the column read
+// "protocol_error — " and WHY the worker was reported never reached the
+// operator — strictly less than the raw blob it replaced. The tail is the
+// summary when there is one and the detail otherwise.
+func TestDeriveSubject_State_ProtocolError_CarriesItsDetailAsTheTail(t *testing.T) {
 	content := []byte(`{"status":"protocol_error","detail":"agent settled without calling the typed result tool"}`)
 	got := DeriveSubject("state", content, 200)
-	want := "protocol_error — "
+	want := "protocol_error — agent settled without calling the typed result tool"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// Summary stays the tail when an envelope carries both: `detail` is the
+// fallback for the envelopes that have no summary, not a replacement for the
+// field every reported result writes.
+func TestDeriveSubject_State_SummaryWinsOverDetail(t *testing.T) {
+	content := []byte(`{"status":"failed","summary":"tests red","detail":"exit 1"}`)
+	got := DeriveSubject("state", content, 200)
+	want := "failed — tests red"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// A status with neither is still rendered with its empty tail rather than
+// falling through to the raw blob — the shape dotfiles-oj4c's design note
+// accepted for a blocked worker ("waiting_human — ") and this change does not
+// revisit.
+func TestDeriveSubject_State_NeitherSummaryNorDetail_KeepsTheEmptyTail(t *testing.T) {
+	content := []byte(`{"status":"waiting_human"}`)
+	got := DeriveSubject("state", content, 200)
+	want := "waiting_human — "
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

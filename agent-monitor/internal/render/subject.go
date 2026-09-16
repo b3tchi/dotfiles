@@ -2,7 +2,8 @@
 // envelope's opaque content. No `subject` field is ever read from an
 // envelope — none is written (adr0028) — so this is the one place content is
 // looked at, and only exactly as far as the rule requires: first line of
-// content for an ordinary message; `status — summary` for a result envelope;
+// content for an ordinary message; `status — summary` (or `status — detail`
+// for the envelopes that carry no summary) for a state envelope;
 // the raw first line for anything else. It never parses content structurally
 // beyond that to make the column prettier (the JSON-blob edge case is
 // deliberately ugly-but-correct, not "fixed").
@@ -45,9 +46,21 @@ func rawSubject(kind string, content []byte) string {
 		var r struct {
 			Status  string `json:"status"`
 			Summary string `json:"summary"`
+			Detail  string `json:"detail"`
 		}
-		if err := json.Unmarshal(content, &r); err == nil && (r.Status != "" || r.Summary != "") {
-			return r.Status + " — " + r.Summary
+		if err := json.Unmarshal(content, &r); err == nil && (r.Status != "" || r.Summary != "" || r.Detail != "") {
+			// dotfiles-k77t: `detail` is where a protocol_error puts the only
+			// text it has — it carries no summary — so keying the tail on
+			// summary alone rendered "protocol_error — " and dropped WHY the
+			// worker was reported. Summary first, because every reported
+			// result writes one and that is the sentence an operator means;
+			// detail is the fallback, not an addition, so a result never
+			// grows a second clause.
+			tail := r.Summary
+			if tail == "" {
+				tail = r.Detail
+			}
+			return r.Status + " — " + tail
 		}
 		// Missing/malformed fields: fall back to the same raw first-line
 		// treatment "anything else" gets, rather than blanking the column.
