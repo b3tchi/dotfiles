@@ -2291,6 +2291,39 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "address/an-unresolvable-label-is-refused-naming-it" {
+        # dotfiles-bocf: pre-1d1f the queue was LABEL-keyed, so mail sent to a
+        # not-yet-claimed label would still be delivered once that label was
+        # claimed. Post-1d1f the claimant reads its minted address's queue, so
+        # a message filed under the bare label can never be delivered — the
+        # old "no match -> itself" tolerance became a permanent silent
+        # discard for labels specifically. An address that resolves to
+        # nothing claimable must be refused, naming the label and the project
+        # searched, not handed back verbatim.
+        let repo = (make-repo "unresolvable-label")
+        let root = (make-runtime "unresolvable-label")
+        with-runtime $root {
+            assert-rejects { do { cd $repo; to-address "no-such-worker" --repo $repo } } "no-such-worker" "the unresolvable label is named in the refusal"
+            assert-rejects { do { cd $repo; to-address "no-such-worker" --repo $repo } } $repo "and the project searched is named too"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/an-unclaimed-address-shaped-string-still-passes-through" {
+        # The tolerance `bus-send` documents (pi-worker.nu:2102-2104): an
+        # address nobody has claimed yet is exactly as valid a `to` as one
+        # that is live, since the bus keeps no registry to check against.
+        # This predates dotfiles-1d1f (commit 83a6e27f, sp029 T3) and must
+        # keep working — only the LABEL branch tightens, not this one.
+        let repo = (make-repo "unclaimed-address-shaped")
+        let root = (make-runtime "unclaimed-address-shaped")
+        with-runtime $root {
+            let orphan = "a0123456789ABCDEFGHJKMNPQRS"
+            assert-eq (do { cd $repo; to-address $orphan --repo $repo }) $orphan "an unclaimed address-shaped string passes through unchanged"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "address/an-address-is-never-reused-after-release" {
         # Immutable and never reused: releasing a label and claiming it again
         # must not hand back the address the previous holder's envelopes still

@@ -1421,16 +1421,19 @@ export def address-name [address: string, --repo: string = ""]: nothing -> strin
 # What the CLI does to whatever a caller typed: turn it into the address that
 # goes on the wire.
 #
-# Four answers, in order:
+# Five answers, in order:
 #
 #   a registered address     itself. Addressing by address is always allowed.
-#   a reserved label         the address its reservation names — one read,
-#                            and the ordinary path for anything spawn made.
 #   an address-shaped string itself, registry or not — `bus-send` has always
 #                            permitted sending to an address nobody claimed
 #                            yet ("the bus keeps no registry to check
-#                            against"), and a shape test is what lets that
-#                            keep being expressible.
+#                            against", :2102-2104, predating dotfiles-1d1f —
+#                            commit 83a6e27f, sp029 T3), and a shape test is
+#                            what lets that keep being expressible. This is
+#                            the ONLY fall-through this function still
+#                            grants; every other unresolved name is refused.
+#   a reserved label         the address its reservation names — one read,
+#                            and the ordinary path for anything spawn made.
 #   one label match          that address. This is the ordinary path.
 #   several label matches    REFUSED, naming every candidate. Picking the
 #                            first is exactly what `resolve-run` did in
@@ -1439,13 +1442,17 @@ export def address-name [address: string, --repo: string = ""]: nothing -> strin
 #                            `rm -rf`. An ambiguous label is an observation,
 #                            not a licence to choose ([[adr0017]]).
 #
-# And a name that matches NOTHING passes through as itself. That is not an
-# alias and not a compatibility bridge — nothing is being resolved to a UUID
-# here. It is the same tolerance the bus already documents: an unclaimed
-# address has no party behind it, so no delivery can go to the wrong one, and
-# refusing it would break `send --to` to an address that is about to exist.
-# The moment something DOES claim that label, this function resolves it, and
-# if two things claim it this function refuses.
+# A LABEL that matches NOTHING is REFUSED (dotfiles-bocf), naming the label
+# and the project searched — it is not handed back verbatim. Before
+# dotfiles-1d1f the queue was label-keyed, so mail sent to a not-yet-claimed
+# label would still be delivered once that label was claimed; after 1d1f the
+# claimant reads its minted address's queue, so a message filed under the
+# bare label can never be delivered. What used to be "the moment something
+# DOES claim that label, this function resolves it" is now a permanent
+# silent discard for labels — the address-shaped branch above already covers
+# "an address about to exist" completely, since dotfiles-1d1f mints
+# addresses rather than deriving them from a label a caller could type in
+# advance. Refusing here gives that typo a name instead of a silent grave.
 export def to-address [name: string, --repo: string = ""]: nothing -> string {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
     let slug = (resolve-project-slug $base)
@@ -1460,6 +1467,18 @@ export def to-address [name: string, --repo: string = ""]: nothing -> string {
     if ($candidates | length) == 1 { return ($candidates | first) }
     if ($candidates | length) > 1 {
         error make {msg: $"'($name)' is worn by ($candidates | length) addresses in this project \(($candidates | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
+    }
+    # Worded the same way `resolve-run-or-refuse` names its project (its own
+    # `project-label` is defined later in this file; inlined here rather than
+    # forward-referenced, which nu's parser does not resolve across `def`s in
+    # one module file). The trailing `$name` below is unreachable — `error
+    # make` always throws before it — and exists only so this function's
+    # declared `-> string` output type still checks: nu's parser types a
+    # block by its LAST expression, and `error make` in tail position reads
+    # as type `error`, not `string`, even though it never returns one.
+    if ($candidates | is-empty) {
+        let project = (if ($base | is-empty) { "no project (not inside a git repository)" } else { $base })
+        error make {msg: $"'($name)' resolves to no address in ($project): no claim, reservation, or registry entry answers that label, and a label a caller could type in advance is not an address dotfiles-1d1f lets anyone predict. Spawn or claim it first, or address it by its minted address directly if you already have one"}
     }
     $name
 }
