@@ -65,6 +65,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0031|a consumer may format what it displays; the log's subject column stays underived]]
 - [[adr0032|the bus carries two envelope kinds, and kind names the shape of content]]
 - [[adr0033|while alpha, bus breaking changes are hard cutovers with a protocol bump for diagnosis]]
+- [[adr0034|every bus party is addressed by a minted, never-reused address; names are labels for display]]
 
 ### [[cat002|display-platform]]
 
