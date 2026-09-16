@@ -180,19 +180,26 @@ func spaces(n int) string {
 	return string(b)
 }
 
-// ageString formats how long ago `at` was, relative to `now`. It is the
-// only honest "age" this renderer has: agent-census's payload carries no
-// per-row timestamp (nothing upstream promises one — see census.go's Sample
-// doc), so every row in one frame shares its sample's own capture age
-// rather than a fabricated per-agent value. This age is a truthful bound
-// for pi rows as well as claude's, DESPITE the --if-changed gate being
-// blind to pi state (dotfiles-eee4): source.Sample's doc comment and
+// ageString formats how long ago `at` was, relative to `now`.
+//
+// Two ages exist in this frame and they answer different questions. The
+// header's is the SAMPLE's: how fresh the whole picture is. The AGE column's
+// is the AGENT's: how long this one has been running, which is the question
+// "is that blocked one worth interrupting" actually needs (dotfiles-a1tq).
+//
+// The column used to show the sample age in every row, because the census
+// carried no per-row timestamp — honest, uniform, and unable to distinguish a
+// worker blocked for eight seconds from one blocked for forty minutes. The
+// census stamps each row now (`started`, ISO for both runtimes), so
+// `rowAge` prefers it and falls back to this for a row that has none.
+//
+// The sample age remains a truthful bound for a pi row as well as a claude
+// one, DESPITE the --if-changed gate having been blind to pi state
+// (dotfiles-eee4, since fixed): source.Sample's doc comment and
 // source.RunLoop's bound clock are what make that true — every sample this
 // renderer ever sees was produced by an agent-census invocation that
 // re-probed pi unconditionally, at most RunLoop's bound-clock interval ago
-// (cmd/agent-monitor/main.go's piBoundInterval). A single sample-level age
-// is therefore not an approximation for pi; it is exact, the same way it is
-// for claude.
+// (cmd/agent-monitor/main.go's piBoundInterval).
 func ageString(now, at time.Time) string {
 	d := now.Sub(at)
 	if d < 0 {
@@ -206,6 +213,25 @@ func ageString(now, at time.Time) string {
 	default:
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
+}
+
+// rowAge is how long THIS agent has been running, or `fallback` (the sample's
+// capture age) when the census could not say.
+//
+// An unparseable stamp is treated exactly like an absent one. The census
+// writes these, but a row also arrives from a plugin or a build this one has
+// never met, and a renderer that trusted the string would print a negative
+// duration or 1970 — a wrong answer where "as fresh as this sample" is a
+// right, if less precise, one.
+func rowAge(r source.Row, now time.Time, fallback string) string {
+	if r.Started == "" {
+		return fallback
+	}
+	at, err := time.Parse(time.RFC3339, r.Started)
+	if err != nil {
+		return fallback
+	}
+	return ageString(now, at)
 }
 
 // Render turns one sample into terminal lines, at the given width, as of
@@ -232,7 +258,7 @@ func Render(sample *source.Sample, stale bool, now time.Time, width int) []strin
 	}
 
 	for _, row := range sample.Rows {
-		lines = append(lines, rowLine(cols, row, age, widths))
+		lines = append(lines, rowLine(cols, row, rowAge(row, now, age), widths))
 	}
 	return lines
 }

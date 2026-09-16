@@ -335,3 +335,57 @@ func assertMaxLineCellWidth(t *testing.T, lines []string, width int) {
 		}
 	}
 }
+
+// dotfiles-a1tq: the AGE column is the AGENT's age now, not a copy of the
+// sample's capture age in every row. The census carries a per-row `started`
+// stamp for both runtimes, so the roster can answer "how long has THIS one
+// been blocked" — which is the question the column was added for, and the one
+// a uniform capture age cannot answer. The header keeps reporting sample
+// freshness; the two ages mean different things and are shown in different
+// places.
+func TestRender_AgeColumnIsPerRowWhenTheCensusSaysWhenEachStarted(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	rows := []source.Row{
+		{Project: "dotfiles", Runtime: "pi", Role: "peer", State: "waiting_human", Bucket: "blocked", Name: "peer-3",
+			Started: "2026-09-12T09:00:00.000000Z"}, // 3h before `now`
+		{Project: "dotfiles", Runtime: "claude", State: "", Status: "busy", Bucket: "working", Name: "dotfiles-ad",
+			Started: "2026-09-12T11:58:00.000000Z"}, // 2m30s before `now`
+	}
+	lines := Render(&source.Sample{Rows: rows, At: at}, false, now, 100)
+
+	if !strings.Contains(lines[0], "updated 30s ago") {
+		t.Fatalf("the header must still report the SAMPLE's freshness, got %q", lines[0])
+	}
+	if !strings.HasSuffix(strings.TrimRight(lines[2], " "), "3h") {
+		t.Errorf("row 1 age = %q, want the agent's own 3h", lines[2])
+	}
+	if !strings.HasSuffix(strings.TrimRight(lines[3], " "), "2m") {
+		t.Errorf("row 2 age = %q, want the agent's own 2m", lines[3])
+	}
+}
+
+// A row the census could not stamp falls back to the sample's capture age,
+// which is the honest bound this renderer always had — never blank, and never
+// a fabricated agent age.
+func TestRender_AgeFallsBackToTheSampleAgeWhenARowHasNoStamp(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := at.Add(90 * time.Second)
+	rows := []source.Row{{Project: "dotfiles", Runtime: "pi", Bucket: "other", Name: "peer-9"}}
+	lines := Render(&source.Sample{Rows: rows, At: at}, false, now, 100)
+	if !strings.HasSuffix(strings.TrimRight(lines[2], " "), "1m") {
+		t.Errorf("row age = %q, want the sample's own 1m", lines[2])
+	}
+}
+
+// An unparseable stamp is the same case as an absent one: the sample age, not
+// a guess and not a negative duration.
+func TestRender_AgeIgnoresAnUnparseableStamp(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := at.Add(90 * time.Second)
+	rows := []source.Row{{Project: "dotfiles", Runtime: "pi", Bucket: "other", Name: "peer-9", Started: "yesterday-ish"}}
+	lines := Render(&source.Sample{Rows: rows, At: at}, false, now, 100)
+	if !strings.HasSuffix(strings.TrimRight(lines[2], " "), "1m") {
+		t.Errorf("row age = %q, want the sample's own 1m", lines[2])
+	}
+}

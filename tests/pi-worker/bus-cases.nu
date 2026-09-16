@@ -2100,6 +2100,34 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "presence/main-workers-says-when-each-worker-started" {
+        # dotfiles-a1tq: agent-census (and the roster agent-monitor draws from
+        # it) had no per-row timestamp for any runtime, so every row shared the
+        # sample's capture age -- honest, but it cannot answer "how long has
+        # THIS one been blocked". `ps` already carried the stamp; `workers`,
+        # the only surface a census may read, did not.
+        #
+        # The stamp comes off the identity ENVELOPE, not its payload: it is
+        # written once at spawn and the payload does not carry it. Reading only
+        # the payload, as this row used to, throws it away.
+        let repo = (make-repo "workers-started")
+        let root = (make-runtime "workers-started")
+        with-runtime $root {
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            legacy-inbox-send "impl-2" --run "r1" --content "wk-build t"
+
+            let rows = (run-workers "r1" --repo $repo)
+            let started = (($rows | where uid == "impl-1" | first).started)
+            assert-true ($started | is-not-empty) "a spawned worker reports when it was spawned"
+            assert-true (try { $started | into datetime; true } catch { false }) $"the stamp must parse as a datetime, got ($started)"
+            assert-eq (($rows | where uid == "impl-2" | first).started) "" "never spawned, no start time — not a substitute"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "presence/a-stale-reading-in-workers-renders-unknown-never-a-branch-on-it" {
         let repo = (make-repo "presence-workers-stale")
         let root = (make-runtime "presence-workers-stale")

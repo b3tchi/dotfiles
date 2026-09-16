@@ -278,6 +278,28 @@ export def live-agents [agents: list]: nothing -> list {
     }
 }
 
+# An agent's start time, as the one shape every detail row spells it in.
+#
+# dotfiles-a1tq: a census row carried no per-row timestamp, so a roster built
+# on it (agent-monitor) could only render the sample's own capture age against
+# every row -- honest, uniform, and unable to answer "how long has THIS one
+# been blocked". The two runtimes record the answer in different units: claude
+# writes `startedAt` as epoch MILLISECONDS (in the CLI's JSON and in the
+# session/job state files alike), pi reports the identity envelope's `created`,
+# already an ISO stamp. This turns the former into the latter so one column
+# means one thing whoever produced the row.
+#
+# Anything that is not a usable millisecond count -- absent, null, a string, a
+# negative -- reports EMPTY rather than 1970: a row that says it started at the
+# epoch reads as an agent running since before the machine booted, which is a
+# fabricated answer where the honest one is "this record does not say"
+# (adr0017).
+export def started-iso [ms: any]: nothing -> string {
+    if ($ms | describe) !~ '^int' { return "" }
+    if $ms <= 0 { return "" }
+    try { $ms * 1_000_000 | into datetime | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ" } catch { "" }
+}
+
 # One row per AGENT rather than per project. Same attribution and the same
 # bucketing as shape-rows, so the two views can never disagree about what an
 # agent is -- the count view is this view folded up.
@@ -309,6 +331,10 @@ export def detail-rows [
             uid:     ""
             role:    ""
             branch:  ""
+            # dotfiles-a1tq: the shared per-row stamp. Claude records epoch
+            # millis; `started-iso` renders the same ISO string the pi half
+            # reports directly.
+            started: (started-iso ($a | get -o startedAt))
         }
     }
 }
@@ -415,6 +441,10 @@ export def pi-detail-row [w: record]: nothing -> record {
         uid:     ($w | get -o uid | default "")
         role:    $parsed.role
         branch:  ($w | get -o branch | default "")
+        # dotfiles-a1tq: already ISO on the wire -- the identity envelope's
+        # `created`, which `pi-worker workers` reports. Absent on a row from a
+        # pre-a1tq plugin, and empty for a worker that has no identity at all.
+        started: ($w | get -o started | default "")
     }
 }
 

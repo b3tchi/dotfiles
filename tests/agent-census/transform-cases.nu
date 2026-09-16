@@ -482,6 +482,28 @@ let results = [
         assert-eq $row.branch "wk-fix-the-thing.2"
     })
 
+    (run-case "pi/pi-detail-row carries the worker's start time as an ISO stamp" {
+        # dotfiles-a1tq: without a per-row stamp every roster row shares the
+        # sample's capture age, which cannot answer "how long has THIS one been
+        # blocked". `pi-worker workers` reports the identity envelope's
+        # `created`, already ISO, so the column is a pass-through.
+        let w = {
+            run: "r9", uid: "impl-7", state: "blocked", unacked: 0, task: "", window: "impl-x@myproj",
+            branch: "wk-x.1", resume: "", presence: "", started: "2026-09-16T08:30:00.000000Z",
+        }
+        assert-eq (pi-detail-row $w | get started) "2026-09-16T08:30:00.000000Z"
+    })
+
+    (run-case "pi/pi-detail-row: a worker with no identity reports no start time" {
+        let w = {run: "r1", uid: "impl-1", state: "unknown", unacked: 0, task: "", window: "", resume: "", presence: "", started: ""}
+        assert-eq (pi-detail-row $w | get started) "" "empty, never a substitute — a made-up stamp reads as an ancient worker"
+    })
+
+    (run-case "pi/pi-detail-row: a row from a pre-a1tq pi-worker has no started field and still lists" {
+        let w = {run: "r1", uid: "impl-1", state: "running", unacked: 0, task: "", window: "impl-x@p", resume: "", presence: ""}
+        assert-eq (pi-detail-row $w | get started) ""
+    })
+
     (run-case "pi/pi-detail-row: a row from a pre-ycaz pi-worker has no branch field and still lists" {
         # The `pi-workers.json` capture predates the field, and a machine
         # running an older plugin emits exactly that shape. A missing column
@@ -505,6 +527,28 @@ let results = [
         assert-eq $row.project "unknown"
         assert-eq $row.how "unmatched"
         assert-eq $row.bucket "other"
+    })
+
+    (run-case "claude/detail-rows carries each agent's start time as an ISO stamp" {
+        # dotfiles-a1tq: the claude half's stamp is `startedAt`, epoch
+        # milliseconds, in both the CLI's JSON and the state files the fast
+        # probe reads. It is rendered as the same ISO string the pi half
+        # already emits so one column means one thing across runtimes.
+        let rows = (detail-rows [
+            {sessionId: "s1", kind: "interactive", status: "busy", cwd: "/home/dev/alpha", name: "a", startedAt: 1778836718210}
+            {sessionId: "s2", kind: "background", state: "blocked", cwd: "/home/dev/alpha", name: "b"}
+        ] {} [] {})
+        assert-eq ($rows | get 0 | get started) "2026-05-15T09:18:38.210000Z" "epoch millis become the shared ISO shape"
+        assert-eq ($rows | get 1 | get started) "" "a record with no startedAt reports none"
+    })
+
+    (run-case "claude/detail-rows refuses to invent a stamp from an unusable startedAt" {
+        # A string, a null, a negative: all mean "this record does not say",
+        # and the honest column is empty rather than 1970 (adr0017).
+        for bad in ["not-a-number" null -1] {
+            let rows = (detail-rows [{sessionId: "s1", kind: "interactive", status: "busy", cwd: "/x", name: "a", startedAt: $bad}] {} [] {})
+            assert-eq ($rows | get 0 | get started) "" $"($bad) is not a start time"
+        }
     })
 
     (run-case "pi/detail-rows (claude) now carries the same runtime/uid/role/branch columns, empty" {

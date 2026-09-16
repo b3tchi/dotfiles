@@ -33,6 +33,11 @@ type Row struct {
 	UID     string `json:"uid"`
 	Role    string `json:"role"`
 	Branch  string `json:"branch"`
+	// Started is when THIS agent began, as an ISO-8601 UTC stamp — claude's
+	// session/job start, pi's identity envelope (dotfiles-a1tq). Empty for a
+	// row the census could not stamp; the roster then falls back to the
+	// sample's own capture age rather than inventing one.
+	Started string `json:"started"`
 }
 
 // bucketPriority orders buckets so rows needing attention sort first.

@@ -4769,7 +4769,13 @@ export def run-workers [run: string, --repo: string = ""]: nothing -> list<recor
     ls $dir | where type == dir | get name | sort | each {|w|
         let uid = ($w | path basename)
         let status = (bus-status $uid --run $run)
-        let identity = (bus-identity-of $uid --run $run)
+        # The ENVELOPE, not just its payload: `created` is the only record of
+        # when a worker was spawned and it lives on the wrapper (dotfiles-a1tq,
+        # the same reading `worker-roster` already does). `bus-identity-of` is
+        # exactly this call with the stamp thrown away, so it is not called
+        # twice here.
+        let envelope = (bus-identity-envelope $uid --run $run)
+        let identity = (if $envelope == null { null } else { $envelope.content })
         {
             run: $run
             uid: $uid
@@ -4792,6 +4798,12 @@ export def run-workers [run: string, --repo: string = ""]: nothing -> list<recor
             # answer sat one field away. Absent-tolerant like `task` above: a
             # record written before the field existed must still list.
             branch: (if $identity == null { "" } else { $identity | get -o branch | default "" })
+            # dotfiles-a1tq: when this worker was spawned, so a roster built
+            # from this verb can say how long THIS one has been blocked rather
+            # than how old the whole sample is. Empty rather than a substitute
+            # for a worker that has no identity: a made-up start time reads as
+            # a worker that has been sitting there since the census booted.
+            started: (if $envelope == null { "" } else { $envelope.created })
             resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
             # sp030 T3: the worker's own reported state, `unknown` past its
             # freshness bound (or unparseable), empty when it never published.
