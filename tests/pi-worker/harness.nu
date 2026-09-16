@@ -255,7 +255,9 @@ export def pi-extension [caller_dir: string]: nothing -> string {
 # convergence removed.
 export def sample-envelope [kind: string]: nothing -> record {
     let base = {
-        protocol: 3
+        # dotfiles-1d1f bumped this to 4: `from`/`to` carry a minted address
+        # rather than a name.
+        protocol: 4
         kind: $kind
         id: "01K4ZQ7X8Y0000000000000000"
         from: "impl-dotfiles-963w.1-a1"

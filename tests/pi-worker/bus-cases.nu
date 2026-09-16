@@ -877,17 +877,21 @@ let cases = [
         with-runtime $root {
             let tree = (worker-placement --repo $repo --isolation "worktree" --subject "t1")
             let uid = (mint-uid "impl" $repo)
-            bus-identity $uid --run "r1" --identity {
+            # dotfiles-1d1f: the queue is named by the claimed ADDRESS, so the
+            # fixture has to claim one the way a spawn does.
+            let address = (claim-address $repo $uid --role "impl")
+            bus-identity $uid --run "r1" --address $address --identity {
                 role: "impl", cwd: $tree.path, branch: $tree.branch
                 session: "s", skill: "wk-build", window: $"($uid)@dotfiles"
+                address: $address
             }
             # A queue of its own, planted the way a sender makes one — from
             # inside the project, so it lands under the project's real slug.
             let queue = (do {
                 cd $repo
                 ensure-bus-dirs
-                queue-append $uid (mint-msg-id)
-                project-dir | path join "queue" $uid
+                queue-append $address (mint-msg-id)
+                project-dir | path join "queue" $address
             })
             assert-true ($queue | path exists) "the fixture really planted a queue"
 
@@ -940,12 +944,15 @@ let cases = [
         rm -rf $root
     })
 
-    (run-case "bus/an-occupied-address-is-refused-project-wide" {
-        # The occupied-address guard used to check the SAME fresh, always-empty
-        # run directory `mint-uid` searched, so it could not fire either. It
-        # answers for the project now: a uid already recorded under any run is
-        # refused, by name, rather than silently becoming a second worker on
-        # one queue.
+    (run-case "bus/a-duplicate-label-gets-its-own-address-not-a-refusal" {
+        # This case used to assert the OPPOSITE: that a second claim on one
+        # label was refused project-wide (dotfiles-bg65's fix). dotfiles-1d1f
+        # removes the refusal deliberately — uniqueness moved out of the
+        # minting function and into the identifier, so the check has nothing
+        # left to protect and a duplicate label is no longer a hazard to guard
+        # against. What must hold now is that the two parties get DIFFERENT
+        # addresses, which is asserted here and, end to end, in
+        # `address/two-parties-with-one-label-get-distinct-addresses`.
         let root = (make-runtime "claim-occupied")
         let repo = (make-repo "claim-occupied")
         with-runtime $root {
@@ -953,41 +960,65 @@ let cases = [
                 role: "impl", cwd: $repo, branch: "wk-t.0"
                 session: "s", skill: "wk-build", window: "impl-1@dotfiles"
             }
-            assert-rejects { claim-address $repo "impl-1" } "already" "a recorded address is occupied"
-            # The claim itself is atomic: the winner of a race holds it, and the
-            # loser is refused rather than both proceeding on one address.
-            claim-address $repo "impl-9"
-            assert-rejects { claim-address $repo "impl-9" } "already" "a claimed address is occupied"
-            assert-eq (mint-uid "impl" $repo) "impl-2" "a claim counts as taken before any identity exists"
-            release-address $repo "impl-9"
-            claim-address $repo "impl-9" # freed, so claimable again
+            # A label already carried by a placement record is claimable at the
+            # ADDRESS layer, and the claim is a distinct address rather than a
+            # second party on the first one's queue.
+            let a = (claim-address $repo "impl-1" --role "impl")
+            let b = (claim-address $repo "impl-1" --role "impl")
+            assert-true ($a != $b) "one label, two addresses"
+
+            # The LABEL is still reserved, because `agents/<run>/<uid>` is keyed
+            # by it and `resolve-run` answers every uid-addressed verb from
+            # there. That refusal protects a label-keyed tree, not the bus.
+            assert-rejects { claim-unique-address $repo "impl-1" --role "impl" } "already a label" "a spawned worker's label is still unique"
+
+            claim-unique-address $repo "impl-9" --role "impl"
+            assert-rejects { claim-unique-address $repo "impl-9" --role "impl" } "already a label" "a reserved label is occupied"
+            assert-eq (mint-uid "impl" $repo) "impl-2" "a reservation counts as taken before any identity exists"
+
+            # Release is by ADDRESS, and it frees only that one.
+            release-address $repo $a
+            assert-eq (address-label $a --repo $repo) null "the released address resolves to nothing"
+            assert-eq (address-name $b --repo $repo) "impl-1" "and its namesake is untouched"
+
+            # Freeing a NAME takes both records, which is exactly what
+            # `worker-release` does: the reservation alone is not the name,
+            # because `project-uids` also reads the address registry.
+            let nine = (label-address-for "impl-9" --repo $repo)
+            release-label $repo "impl-9"
+            assert-rejects { claim-unique-address $repo "impl-9" --role "impl" } "already a label" "the address record still holds the name"
+            release-address $repo $nine
+            claim-unique-address $repo "impl-9" --role "impl" # both gone, so claimable again
         }
         rm -rf $repo
         rm -rf $root
     })
 
-    (run-case "bus/racing-claims-cannot-both-win-one-address" {
-        # Two spawns starting at the same instant both see the same lowest-free
-        # uid — checking and then creating would let both proceed onto one
-        # queue, which is the failure this whole guard exists to prevent. The
-        # claim is a single `mkdir` without `-p`, so the kernel picks the
-        # winner and every loser is refused and re-mints (`main spawn`'s retry
-        # loop). Same reasoning as `claim-slot`'s link(2) on a sequence slot.
+    (run-case "bus/racing-claims-each-get-an-address-of-their-own" {
+        # Four processes reaching for one label at the same instant. This case
+        # used to assert that exactly one won and three were refused; that was
+        # the uniqueness check doing the work. Now every racer succeeds and
+        # every racer gets a DIFFERENT address — which is a stronger property
+        # than "one wins", because nothing has to lose and no caller has to
+        # retry to end up correctly addressed.
         let root = (make-runtime "claim-race")
         let repo = (make-repo "claim-race")
         with-runtime $root {
             let script = ([$root "claimer.nu"] | path join)
-            $"use (worker-script $env.FILE_PWD) *\ntry { claim-address \$env.RACE_REPO \"impl-1\"; print \"won\" } catch { print \"lost\" }" | save -f $script
+            $"use (worker-script $env.FILE_PWD) *\nprint \(claim-address \$env.RACE_REPO \"impl-1\")" | save -f $script
 
             let procs = ([1 2 3 4] | par-each {|n|
-                with-env {XDG_RUNTIME_DIR: $root, RACE_REPO: $repo} {
+                with-env {XDG_RUNTIME_DIR: $root, XDG_STATE_HOME: $env.XDG_STATE_HOME, RACE_REPO: $repo} {
                     ^$nu.current-exe $script | complete
                 }
             })
             for p in $procs { assert-eq $p.exit_code 0 $"claimer crashed: ($p.stderr)" }
-            let outcomes = ($procs | each {|p| $p.stdout | str trim })
-            assert-eq ($outcomes | where {|o| $o == "won" } | length) 1 "exactly one racer holds the address"
-            assert-eq ($outcomes | where {|o| $o == "lost" } | length) 3 "and every other one is refused"
+            let claimed = ($procs | each {|p| $p.stdout | str trim })
+            assert-eq ($claimed | length) 4 "every racer claimed"
+            assert-eq ($claimed | uniq | length) 4 "and no two of them got the same address"
+            # All four are in the registry, all four wearing the one label.
+            let registered = (project-addresses $repo | where name == "impl-1" | get address | sort)
+            assert-eq $registered ($claimed | sort) "the registry holds each of them"
         }
         rm -rf $repo
         rm -rf $root
@@ -1971,11 +2002,15 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
 
     (run-case "presence/a-released-uid-loses-its-presence-and-cannot-be-written-again" {
         let repo = (make-repo "presence-released")
-        claim-address $repo "impl-1"
+        # dotfiles-1d1f: `claim-address` hands back the minted address, and
+        # `release-address` takes that rather than the label — presence lives
+        # under `addresses/<address>/`, so the two still go together.
+        let address = (claim-address $repo "impl-1" --role "impl")
         presence-write "impl-1" "running" --repo $repo
         assert-true ((presence-read "impl-1" --repo $repo) != null) "sanity: presence exists before release"
+        assert-true ((presence-file "impl-1" --repo $repo) | str contains $address) "presence is filed under the address"
 
-        release-address $repo "impl-1"
+        release-address $repo $address
         assert-eq (presence-read "impl-1" --repo $repo) null "the address claim and its presence go together"
         assert-rejects { presence-write "impl-1" "running" --repo $repo } "no claimed address" "a released uid stays released"
         rm -rf $repo
@@ -1988,10 +2023,9 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         let root = (make-runtime "presence-workers-col")
         with-runtime $root {
             # Claim BEFORE recording identity, exactly as a real spawn does:
-            # `bus-identity` writes into the durable placement record, and
-            # once a uid is there `claim-address` refuses it as already taken
-            # — same guard `main spawn`'s own ordering relies on.
-            claim-address $repo "impl-1"
+            # `claim-address` is what mints the address presence is filed
+            # under, so a worker with no claim has nowhere to publish.
+            claim-address $repo "impl-1" --role "impl"
             bus-identity "impl-1" --run "r1" --identity {
                 role: "impl", cwd: $repo, branch: "wk-t.0"
                 session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
@@ -2179,6 +2213,117 @@ def main [repo: string, big: string] {
             assert-true ($spawned.detail | str contains "wk-impl-a.0") "and the old record still renders in the timeline"
         }
         rm -rf $root
+    })
+
+    # ------------------------------------- immutable address UUIDs (dotfiles-1d1f)
+    #
+    # An address is MINTED, never derived from a name. Uniqueness stops being
+    # a property some minting function has to maintain and becomes a property
+    # of the identifier itself, which is the whole difference between this and
+    # dotfiles-bg65's project-wide uniqueness check.
+
+    (run-case "address/two-parties-with-one-label-get-distinct-addresses" {
+        # dotfiles-bg65, exactly: `mint-uid` searched one run's directory, so
+        # after sp029 T9 retired `--run` every spawn of a role minted
+        # `<role>-1` forever. Two live workers shared ONE queue and
+        # `resolve-run` reached whichever run sorted first, "leaving the other
+        # addressable by nothing but `rm -rf`". A minted address makes that
+        # impossible rather than merely checked-for.
+        let repo = (make-repo "dup-label")
+        let root = (make-runtime "dup-label")
+        with-runtime $root {
+            let a = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let b = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            assert-true ($a != $b) "one label must not collapse to one address"
+            assert-true ($a | is-not-empty) "an address is minted, not empty"
+
+            # Both still answer to the label they were claimed under.
+            assert-eq (do { cd $repo; address-name $a --repo $repo }) "impl-1" "the first resolves to its label"
+            assert-eq (do { cd $repo; address-name $b --repo $repo }) "impl-1" "so does the second"
+
+            # And their mail does not cross, which is the property that failed.
+            do { cd $repo; bus-send --to [$a] --from "r1" --content "for the first" }
+            assert-eq (do { cd $repo; bus-wait --as $b } | length) 0 "the namesake has no mail"
+            let mail = (do { cd $repo; bus-wait --as $a })
+            assert-eq ($mail | length) 1 "the addressee has exactly its own message"
+            assert-eq ($mail | first | get content) "for the first" "and it is the one that was sent"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/an-ambiguous-label-is-refused-never-guessed" {
+        # The CLI accepts a label and resolves it; two addresses wearing one
+        # label is an observation, not a licence to pick the first
+        # ([[adr0017]]). That first-match pick is precisely what dotfiles-bg65
+        # did.
+        let repo = (make-repo "ambig-label")
+        let root = (make-runtime "ambig-label")
+        with-runtime $root {
+            let a = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let b = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            assert-rejects { do { cd $repo; to-address "impl-1" --repo $repo } } "impl-1" "an ambiguous label names itself in the refusal"
+            # Both candidates are named, so an operator can address the one
+            # they meant.
+            let reason = (try { do { cd $repo; to-address "impl-1" --repo $repo }; "" } catch {|e| $e.msg })
+            assert-true ($reason | str contains $a) "the first candidate address is named"
+            assert-true ($reason | str contains $b) "and so is the second"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/an-unresolvable-address-displays-as-itself" {
+        # [[adr0017]]: unknown is an observation, never a claim. A display that
+        # cannot resolve an address shows the RAW address — not a blank cell,
+        # not the nearest label it could find.
+        let repo = (make-repo "raw-display")
+        let root = (make-runtime "raw-display")
+        with-runtime $root {
+            let known = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let orphan = "a01JQRSTUVWXYZ0123456789AB"
+            assert-eq (do { cd $repo; address-name $orphan --repo $repo }) $orphan "an unregistered address renders as itself"
+
+            do { cd $repo; bus-send --to [$known] --from $orphan --content "who am I" }
+            let rows = (do { cd $repo; bus-messages })
+            assert-eq ($rows | length) 1 "one envelope on the bus"
+            assert-eq ($rows | first | get from) $orphan "the sender shows as the raw address"
+            assert-eq ($rows | first | get to) ["impl-1"] "and what CAN be resolved is resolved"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/an-address-is-never-reused-after-release" {
+        # Immutable and never reused: releasing a label and claiming it again
+        # must not hand back the address the previous holder's envelopes still
+        # name, or a message for the dead worker is consumed by its successor.
+        let repo = (make-repo "no-reuse")
+        let root = (make-runtime "no-reuse")
+        with-runtime $root {
+            let first = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            do { cd $repo; release-address $repo $first }
+            let second = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            assert-true ($first != $second) "a recycled label does not recycle its address"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/a-run-is-an-addressable-party-with-a-record-of-its-own" {
+        # Runs are real queue addresses — `bus/queue/r2` exists on disk and
+        # every result is addressed to it — but `agents/r2/` holds only worker
+        # uids, so a run had no identity record and nothing for a UUID to
+        # resolve back to. It gets an address record alongside workers.
+        let repo = (make-repo "run-address")
+        let root = (make-runtime "run-address")
+        with-runtime $root {
+            let run_addr = (do { cd $repo; ensure-address $repo "r2" --role "run" --kind "run" })
+            assert-eq (do { cd $repo; address-name $run_addr --repo $repo }) "r2" "a run resolves to its label"
+            let label = (do { cd $repo; address-label $run_addr --repo $repo })
+            assert-eq $label.kind "run" "and its record says it is a run, not a worker"
+            # `ensure-address` is resolve-or-claim, so one run label is one
+            # commissioner address however many spawns reach for it.
+            assert-eq (do { cd $repo; ensure-address $repo "r2" --role "run" --kind "run" }) $run_addr "a run's address is stable"
+            assert-eq (do { cd $repo; to-address "r2" --repo $repo }) $run_addr "and `wait --as r2` reaches it"
+        }
+        rm -rf $root; rm -rf $repo
     })
 
 ]

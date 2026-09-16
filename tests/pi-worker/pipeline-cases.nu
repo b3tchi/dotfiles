@@ -303,7 +303,9 @@ let cases = [
             complete-with "impl-b" "sibling done"
 
             let got = (legacy-bus-wait --run "run-1")
-            assert-eq $got.from "impl-b" "the run-wide wait skips the superseded envelope, not the run"
+            # dotfiles-1d1f: `from` is an address, so the LABEL is what this
+            # case is actually about and it is resolved for the assertion.
+            assert-eq (address-name $got.from --repo $repo) "impl-b" "the run-wide wait skips the superseded envelope, not the run"
             assert-eq $got.content.summary "sibling done" ""
         }
     })
@@ -326,7 +328,9 @@ let cases = [
             let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 2 "neither completion masks the other"
             let first = (legacy-bus-wait --run "run-1")
-            legacy-bus-ack --run "run-1" --uid $first.from --sequence $first.sequence
+            # `ack` addresses the legacy run/uid TREE, which is keyed by label,
+            # so the envelope's address is resolved back to one.
+            legacy-bus-ack --run "run-1" --uid (address-name $first.from --repo $repo) --sequence $first.sequence
             let second = (legacy-bus-wait --run "run-1")
             assert-true ($second.from != $first.from) ""
         }
@@ -876,7 +880,10 @@ let cases = [
         with-pipeline "spawn-records-commissioner" {|t, repo|
             launch $t $repo "impl-a" "impl"
             let identity = (bus-identity-of "impl-a" --run "run-1")
-            assert-eq $identity.commissioner "run-1" "spawn records the run as the commissioner"
+            # dotfiles-1d1f: recorded as the run's ADDRESS, which is what goes
+            # on the wire; it still resolves to the run's label.
+            assert-eq (address-name $identity.commissioner --repo $repo) "run-1" "spawn records the run as the commissioner"
+            assert-eq $identity.commissioner $identity.run_address "and it is the run's own claimed address"
 
             let written = (bus-settled "impl-a" --run "run-1")
             assert-true $written.reported "a genuinely spawned worker settling silently is still a protocol error"
@@ -961,10 +968,14 @@ let cases = [
         # commissioner, which is what every existing consumer waits on.
         with-pipeline "spawn-commissioner-default" {|t, repo|
             do { cd $repo
-                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
-                assert-eq ((bus-identity-of "impl-a" --run "run-1") | get -o commissioner) "run-1" "the run is still the default commissioner"
+                let spawned = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+                assert-eq ((bus-identity-of "impl-a" --run "run-1") | get -o commissioner) $spawned.run_address "the run is still the default commissioner"
+                assert-eq (address-name $spawned.run_address --repo $repo) "run-1" "and that address is the run's"
                 complete-with "impl-a" "done"
-                assert-eq ((bus-wait --as "run-1") | length) 1 "and `wait --as <run>` still works unchanged"
+                # `bus-wait` is the ADDRESS layer and resolves nothing; the
+                # label is resolved by the CLI (`main wait --as run-1`), and by
+                # `to-address` for a nu caller like this one.
+                assert-eq ((bus-wait --as (to-address "run-1" --repo $repo)) | length) 1 "and `wait --as <run>` still reaches the run's queue"
             }
         }
     })
@@ -1166,7 +1177,8 @@ let cases = [
             assert-eq $mail.exit_code 0 $"($mail.stderr)"
             let delivered = ($mail.stdout | from json)
             assert-eq ($delivered | length) 1 "exactly the brainstorm's own report, nothing hand-relayed alongside it"
-            assert-eq $delivered.0.from $spawned.uid ""
+            assert-eq (address-name $delivered.0.from --repo $repo) $spawned.uid ""
+            assert-eq $delivered.0.from $spawned.address "the wire carries the worker's address, not its name"
             assert-eq $delivered.0.content.status "complete" "the commissioner reads a typed status"
             assert-eq $delivered.0.content.summary "use format X" "and proceeds on the decision itself, not a paraphrase of it"
             assert-eq $delivered.0.content.validation "the human said yes explicitly" "complete carries the verdict that makes it trustworthy (adr0027)"

@@ -65,7 +65,7 @@ let cases = [
         assert-rejects { validate-envelope (sample-envelope "message" | update protocol 1) } "1" "the refusal must name the version it read"
     })
     (run-case "schema/rejects-an-unknown-future-protocol" {
-        assert-rejects { validate-envelope (sample-envelope "message" | update protocol 4) } "protocol" "unknown version must be rejected"
+        assert-rejects { validate-envelope (sample-envelope "message" | update protocol 5) } "protocol" "unknown version must be rejected"
     })
     (run-case "schema/rejects-unknown-kind" {
         assert-rejects { validate-envelope (sample-envelope "message" | update kind "gossip") } "kind" "unknown kind must be rejected"
@@ -444,7 +444,7 @@ let n = ($env.PIW_MINT_N | into int)
     (run-case "schema/an-envelope-carries-its-content-exactly-once" {
         let e = (make-envelope "message" "hello" --from "a" --to ["b"])
         assert-eq ($e | columns | sort) ([content created from id kind protocol to] | sort) "one shape: no `payload` duplicate of `content`, no kind-derived `run`/`uid`"
-        assert-eq $e.protocol 3 ""
+        assert-eq $e.protocol 4 ""
         assert-eq $e.content "hello" ""
         assert-eq ($e.id | str length) 26 "every envelope is identified the same way, on the bus and in the legacy tree"
         validate-envelope $e
