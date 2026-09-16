@@ -41,6 +41,14 @@ def launch [t: record, repo: string, uid: string, role: string, skill: string = 
 # collide with any other suite's own local of the same name).
 def cli-t9 []: nothing -> string { worker-script $env.FILE_PWD }
 
+# dotfiles-bocf: a stand-in recipient for the JSON-shape cases below, which
+# test SHAPE, not label resolution. Address-shaped so it stays valid as an
+# unclaimed `--to` under `to-address-for-send`'s tightened refusal — the bare
+# label "orchestrator-1" these cases used before dotfiles-bocf is no longer
+# accepted unclaimed, which is exactly what dotfiles-bocf's `address/*` cases
+# in bus-cases.nu pin instead of re-testing here.
+def shape-case-recipient []: nothing -> string { "a0123456789ABCDEFGHJKMNPQRS" }
+
 def complete-with [uid: string, summary: string, status: string = "complete"] {
     let verdict = (if $status == "complete" { "PASS" } else { null })
     bus-result $uid --run "run-1" --result {
@@ -718,16 +726,25 @@ let cases = [
     # Golden JSON shape cases (sp029 T9's `## edge_cases`: "JSON output shape
     # stability for consumers that parse it") for the three verbs a script
     # actually parses: `send`, `wait`, `result`.
+    #
+    # dotfiles-bocf: the recipient here used to be the bare label
+    # "orchestrator-1", tolerated by the OLD lenient `to-address`. These cases
+    # test JSON SHAPE, not label resolution, so what changed is the fixture
+    # (`shape-case-recipient`, defined above), not the intent — an
+    # address-shaped string is still exactly as valid a `--to` unclaimed as
+    # it always was (`to-address-for-send` keeps that tolerance; only an
+    # unresolvable LABEL is now refused, covered separately by the
+    # `address/*` cases in bus-cases.nu).
     (run-case "pipeline/send-output-is-a-stable-envelope-shape" {
         let root = (make-runtime "t9-send-shape")
         let out = (with-env {XDG_RUNTIME_DIR: $root} {
-            ^$nu.current-exe (cli-t9) send --as "impl-a" --to "orchestrator-1" --content "done" | complete
+            ^$nu.current-exe (cli-t9) send --as "impl-a" --to (shape-case-recipient) --content "done" | complete
         })
         assert-eq $out.exit_code 0 $"($out.stderr)"
         let envelope = ($out.stdout | from json)
         assert-eq ($envelope | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "to"] "send's JSON shape is exactly these fields"
         assert-eq $envelope.from "impl-a" ""
-        assert-eq $envelope.to ["orchestrator-1"] ""
+        assert-eq $envelope.to [(shape-case-recipient)] ""
         assert-eq $envelope.content "done" ""
         rm -rf $root
     })
@@ -736,9 +753,9 @@ let cases = [
         let root = (make-runtime "t9-wait-shape")
         let cli = (cli-t9)
         with-env {XDG_RUNTIME_DIR: $root} {
-            ^$nu.current-exe $cli send --as "impl-a" --to "orchestrator-1" --content "done" | complete
+            ^$nu.current-exe $cli send --as "impl-a" --to (shape-case-recipient) --content "done" | complete
         } | ignore
-        let out = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as "orchestrator-1" | complete })
+        let out = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as (shape-case-recipient) | complete })
         assert-eq $out.exit_code 0 $"($out.stderr)"
         let mail = ($out.stdout | from json)
         assert-eq ($mail | length) 1 "one message waiting"
@@ -747,10 +764,24 @@ let cases = [
 
         # `wait` marks what it returns: reading again finds nothing, and
         # prints nothing rather than `[]`, so a shell conditional still works.
-        let again = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as "orchestrator-1" | complete })
+        let again = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as (shape-case-recipient) | complete })
         assert-eq $again.exit_code 0 ""
         assert-eq ($again.stdout | str trim) "" "wait prints nothing once its mail is already marked read"
         rm -rf $root
+    })
+
+    (run-case "pipeline/send-to-refuses-an-unresolvable-label-naming-it" {
+        # dotfiles-bocf: the CLI `send --to` surface this task exists for.
+        # `send --to impl-11` (a typo) used to write `bus/queue/impl-11`
+        # silently and nothing ever read it — the exact silent-loss surface
+        # dotfiles-u4oy/dotfiles-56lh named. It is now refused, by name, at
+        # the CLI boundary rather than filed under the typo.
+        let root = (make-runtime "t9-send-refuses-label")
+        let out = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe (cli-t9) send --as "impl-a" --to "no-such-worker" --content "done" | complete
+        })
+        assert-eq $out.exit_code 1 "an unresolvable label must fail the CLI, not print a queued-looking success"
+        assert-true ($out.stderr | str contains "no-such-worker") "the refusal names the unresolvable label"
     })
 
     (run-case "pipeline/result-output-is-a-stable-envelope-shape" {

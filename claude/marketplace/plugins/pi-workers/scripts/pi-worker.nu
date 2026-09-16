@@ -1421,19 +1421,16 @@ export def address-name [address: string, --repo: string = ""]: nothing -> strin
 # What the CLI does to whatever a caller typed: turn it into the address that
 # goes on the wire.
 #
-# Five answers, in order:
+# Four answers, in order:
 #
 #   a registered address     itself. Addressing by address is always allowed.
+#   a reserved label         the address its reservation names — one read,
+#                            and the ordinary path for anything spawn made.
 #   an address-shaped string itself, registry or not — `bus-send` has always
 #                            permitted sending to an address nobody claimed
 #                            yet ("the bus keeps no registry to check
-#                            against", :2102-2104, predating dotfiles-1d1f —
-#                            commit 83a6e27f, sp029 T3), and a shape test is
-#                            what lets that keep being expressible. This is
-#                            the ONLY fall-through this function still
-#                            grants; every other unresolved name is refused.
-#   a reserved label         the address its reservation names — one read,
-#                            and the ordinary path for anything spawn made.
+#                            against"), and a shape test is what lets that
+#                            keep being expressible.
 #   one label match          that address. This is the ordinary path.
 #   several label matches    REFUSED, naming every candidate. Picking the
 #                            first is exactly what `resolve-run` did in
@@ -1442,17 +1439,22 @@ export def address-name [address: string, --repo: string = ""]: nothing -> strin
 #                            `rm -rf`. An ambiguous label is an observation,
 #                            not a licence to choose ([[adr0017]]).
 #
-# A LABEL that matches NOTHING is REFUSED (dotfiles-bocf), naming the label
-# and the project searched — it is not handed back verbatim. Before
-# dotfiles-1d1f the queue was label-keyed, so mail sent to a not-yet-claimed
-# label would still be delivered once that label was claimed; after 1d1f the
-# claimant reads its minted address's queue, so a message filed under the
-# bare label can never be delivered. What used to be "the moment something
-# DOES claim that label, this function resolves it" is now a permanent
-# silent discard for labels — the address-shaped branch above already covers
-# "an address about to exist" completely, since dotfiles-1d1f mints
-# addresses rather than deriving them from a label a caller could type in
-# advance. Refusing here gives that typo a name instead of a silent grave.
+# And a name that matches NOTHING passes through as itself. That is not an
+# alias and not a compatibility bridge — nothing is being resolved to a UUID
+# here. It is the same tolerance the bus already documents: an unclaimed
+# address has no party behind it, so no delivery can go to the wrong one, and
+# refusing it would break `send --to` to an address that is about to exist.
+# The moment something DOES claim that label, this function resolves it, and
+# if two things claim it this function refuses.
+#
+# LENIENT ON PURPOSE, for every caller: `presence-read`/`presence-write`
+# promise "never raises" for an unspawned or released uid, and
+# `bus-identity`'s own fallback documents resolving straight through for "a
+# fixture, a hand-planted record — where the label is all there is". A
+# generic resolver cannot apply a send-path policy without breaking both
+# (dotfiles-bocf, first pass, reverted: it refused here and broke 103 nu
+# cases plus presence-read's own contract — see `to-address-for-send` below,
+# which is where that policy actually belongs).
 export def to-address [name: string, --repo: string = ""]: nothing -> string {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
     let slug = (resolve-project-slug $base)
@@ -1468,19 +1470,66 @@ export def to-address [name: string, --repo: string = ""]: nothing -> string {
     if ($candidates | length) > 1 {
         error make {msg: $"'($name)' is worn by ($candidates | length) addresses in this project \(($candidates | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
     }
-    # Worded the same way `resolve-run-or-refuse` names its project (its own
-    # `project-label` is defined later in this file; inlined here rather than
-    # forward-referenced, which nu's parser does not resolve across `def`s in
-    # one module file). The trailing `$name` below is unreachable — `error
-    # make` always throws before it — and exists only so this function's
-    # declared `-> string` output type still checks: nu's parser types a
-    # block by its LAST expression, and `error make` in tail position reads
-    # as type `error`, not `string`, even though it never returns one.
-    if ($candidates | is-empty) {
-        let project = (if ($base | is-empty) { "no project (not inside a git repository)" } else { $base })
+    $name
+}
+
+# `to-address`, but for a caller that is about to ADDRESS A MESSAGE FOR
+# DELIVERY on behalf of a HUMAN (or scripted) `--to` at the CLI boundary —
+# `main send`'s only production caller — rather than merely resolving a
+# label for display, bookkeeping, a legacy directory-routed write, or an
+# automatic relay a worker sends about itself.
+#
+# dotfiles-bocf, first pass: put this refusal inside `to-address` itself and
+# broke every OTHER caller (`presence-read`/`presence-write`'s never-raises
+# contract, dozens of `bus-identity` fixtures) — a SEND-PATH policy is not a
+# resolver policy. Re-shaped here as a wrapper instead.
+#
+# dotfiles-bocf, second pass: also tried wrapping `bus-result`'s automatic
+# commissioner relay in this. Reverted — `--commissioner` is resolved by
+# plain `to-address` at spawn (worker-spawn, not `ensure-address`), and
+# dotfiles-uwz6 deliberately lets an orchestrator be named by a label it
+# never formally claims. A worker's OWN completion report must never fail
+# just because its commissioner is unreachable
+# (`pipeline/reporting-still-succeeds-when-the-commissioner-is-gone`) — that
+# is a best-effort relay, not the human-typed surface this wrapper is for.
+#
+# Same answer as `to-address` in every case except one: a LABEL that matches
+# NOTHING is REFUSED, naming the label and the project searched, instead of
+# being handed back verbatim. `bus-send` fans a `to` out to `bus/queue/<address>`
+# — since dotfiles-1d1f an address is MINTED, never derived from a label a
+# caller could type in advance, so a label with no claim, reservation, or
+# registry entry names nobody who could ever claim that exact queue. Before
+# 1d1f the queue was label-keyed and a message under that label WOULD be
+# delivered once the label was claimed; after 1d1f it never can be — the
+# label fall-through preserves no reachable capability for a human's `--to`
+# typo, only a silent grave (dotfiles-u4oy / dotfiles-56lh shape).
+#
+# An ADDRESS-SHAPED string is untouched by this and still passes through
+# unclaimed — `to-address` already grants that (bus-send's documented
+# tolerance, pi-worker.nu:2102-2104, predating dotfiles-1d1f: commit
+# 83a6e27f, sp029 T3), and this wrapper only narrows the one branch that
+# used to swallow a typo.
+export def to-address-for-send [name: string, --repo: string = ""]: nothing -> string {
+    let resolved = (to-address $name --repo $repo)
+    # `to-address` only ever hands back the exact input unchanged for two
+    # reasons: it was ALREADY a registered (and therefore address-shaped)
+    # address, or it fell all the way through as an unresolved label. Every
+    # other branch (reservation, one candidate) returns a DIFFERENT string.
+    # `address-shaped?` is what tells those two apart.
+    if $resolved != $name { return $resolved }
+    if (address-shaped? $name) { return $resolved }
+    # The trailing `$resolved` below is unreachable — `error make` always
+    # throws before it — and exists only so this function's declared `->
+    # string` output type still checks: nu types a block by its LAST
+    # expression, and `error make` in tail position reads as type `error`,
+    # not `string`, even though it never returns one (see `to-address`'s
+    # sibling refusal above, same shape).
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let project = (if ($base | is-empty) { "no project (not inside a git repository)" } else { $base })
+    if not (address-shaped? $name) {
         error make {msg: $"'($name)' resolves to no address in ($project): no claim, reservation, or registry entry answers that label, and a label a caller could type in advance is not an address dotfiles-1d1f lets anyone predict. Spawn or claim it first, or address it by its minted address directly if you already have one"}
     }
-    $name
+    $resolved
 }
 
 # Every LABEL this project can already address — the set `mint-uid` mints
@@ -2439,7 +2488,20 @@ export def bus-result [
         # and `message` no longer share a shape.
         # dotfiles-1d1f: `commissioner` is recorded as an ADDRESS by
         # `worker-place`, so this needs no resolution; `to-address` covers a
-        # record that only ever held a label.
+        # record that only ever held a label. dotfiles-bocf, reverted here
+        # after the re-shape: this looked like a live `bus-send` that should
+        # go through the strict send-path wrapper, but `--commissioner` is
+        # resolved by plain `to-address` at spawn (worker-spawn, not
+        # `ensure-address` — the original task's premise that "a commissioner
+        # uses ensure-address" does not hold), and dotfiles-uwz6 deliberately
+        # supports naming an orchestrator that never formally claims an
+        # address, addressed purely by the label it wrote down for itself.
+        # `pipeline/spawn-takes-a-commissioner-address-and-the-result-is-
+        # delivered-there` and `pipeline/reporting-still-succeeds-when-the-
+        # commissioner-is-gone` both pin this: a worker's OWN completion
+        # report must never fail just because its commissioner is
+        # unreachable — that failure belongs to whoever misnamed the
+        # commissioner, not to the worker finishing its turn. Stays lenient.
         bus-send --to [(to-address $commissioner --repo ($identity | get -o cwd | default ""))] --from $from --kind "state" --content $result
     }
 
@@ -5772,7 +5834,11 @@ def "main send" [--as: string = "", --to: string = "", --content: string = ""] {
     # dotfiles-1d1f: labels in, addresses on the wire. A label that resolves
     # to two addresses is refused by `to-address` rather than delivered to one
     # of them, which is the misdelivery this whole change removes.
-    let recipients = ($typed | each {|a| to-address $a })
+    # dotfiles-bocf: resolved through the send-path wrapper, not the generic
+    # `to-address` — a label that resolves to NOTHING is refused by name here
+    # too, rather than filed under the literal typo where nothing will ever
+    # read it.
+    let recipients = ($typed | each {|a| to-address-for-send $a })
     bus-send --to $recipients --from (acting-address $as) --content $content | to json | print
 }
 
