@@ -212,6 +212,19 @@ describe("trusted configuration stays out of the user message", () => {
     expect(ctx).toContain(identity.cwd);
   });
 
+  // A blocked worker has exactly one outstanding question and the reply carries
+  // no correlation id, so nothing on the wire can tell it "that was not your
+  // answer". Observed live (2026-09-16): a blocked worker sent an unrelated
+  // message consumed it, acted on nothing, and waited again in silence — the
+  // question stayed outstanding and the commissioner's own `wait` returned
+  // nothing, forever. The worker is the only party that knows, so the briefing
+  // has to tell it to say so.
+  test("a blocked worker is told to re-report rather than wait in silence on a non-answer", () => {
+    const ctx = systemContextFor(identity);
+    expect(ctx).toContain("does not answer");
+    expect(ctx).toContain("report blocked again");
+  });
+
   test("system context is never mixed into the user payload", () => {
     const ctx = systemContextFor(identity);
     const text = userPayloadFor(workEnvelope);

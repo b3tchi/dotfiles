@@ -583,6 +583,18 @@ export function systemContextFor(identity: WorkerIdentity, isolation?: string): 
       : []),
     `Report your outcome by calling the result tool. Finishing your turn without`,
     `calling it is recorded as a protocol error, not a success.`,
+    // A blocked worker has exactly one outstanding question, and the reply is
+    // an ordinary message carrying no correlation id (adr0032) — so nothing on
+    // the wire can tell you "that was not your answer". You are the only party
+    // that knows. Observed live: a blocked worker sent an unrelated message
+    // consumed it, acted on nothing and waited again in silence; the question
+    // stayed outstanding and the commissioner's own wait returned nothing,
+    // indefinitely. Waiting quietly looks identical to still thinking.
+    `If you reported blocked and what comes back does not answer your question,`,
+    `report blocked again with the same question, saying what you received`,
+    `instead. Do not proceed on a guess, and do not go back to waiting in`,
+    `silence: whoever is waiting on you cannot tell those apart, and only you`,
+    `know the answer never arrived.`,
   ].join("\n");
 }
 
