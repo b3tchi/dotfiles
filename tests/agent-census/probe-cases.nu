@@ -444,9 +444,77 @@ echo "99003  scratch_3"'
     })
 
     (run-case "gate/state-token is stable when nothing moves" {
+        # Isolated from the live pi trees (dotfiles-eee4 put them in the
+        # token): a real worker writing between the two calls on this machine
+        # would make this case flake for a reason that has nothing to do with
+        # what it asserts.
         let a = (make-account "tokenstable")
         write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
-        assert-eq (state-token [$a]) (state-token [$a])
+        let sandbox = (make-probe-sandbox "tokenstable-pi")
+        with-env {XDG_RUNTIME_DIR: $sandbox, XDG_STATE_HOME: $sandbox} {
+            assert-eq (state-token [$a]) (state-token [$a])
+        }
+    })
+
+    # ---- the gate must see the pi runtime too (dotfiles-eee4) --------------
+    #
+    # The token used to fingerprint the claude state files and nothing else,
+    # while the census has reported pi rows since sp030 T6. So
+    # `--if-changed` printed nothing -- meaning "unchanged" -- through workers
+    # spawning, changing state and dying, until some unrelated claude agent
+    # happened to move. A consumer polling through the gate (agent-monitor's
+    # ticker is exactly that) rendered stale pi rows indefinitely.
+
+    (run-case "gate/state-token registers a pi worker appearing" {
+        let a = (make-account "tokenpinew")
+        let sandbox = (make-probe-sandbox "tokenpinew-pi")
+        with-env {XDG_RUNTIME_DIR: $sandbox, XDG_STATE_HOME: $sandbox} {
+            let before = (state-token [$a])
+            mkdir ($sandbox | path join "pi-worker" "runs" "r1" "w1" "outbox")
+            assert-true ((state-token [$a]) != $before) "a spawned worker must move the token"
+        }
+    })
+
+    (run-case "gate/state-token registers a worker publishing presence" {
+        # The presence column changes with no bus file written at all: it lives
+        # beside the address claim in state home, which the claude-only token
+        # never looked at.
+        let a = (make-account "tokenpipresence")
+        let sandbox = (make-probe-sandbox "tokenpipresence-pi")
+        with-env {XDG_RUNTIME_DIR: $sandbox, XDG_STATE_HOME: $sandbox} {
+            let dir = ($sandbox | path join "pi-worker" "proj-alpha-1234" "addresses" "a1")
+            mkdir $dir
+            let before = (state-token [$a])
+            {state: "streaming", at: "2026-09-16T00:00:00.000000Z"} | to json | save -f ($dir | path join "presence")
+            assert-true ((state-token [$a]) != $before) "a published reading must move the token"
+        }
+    })
+
+    (run-case "gate/state-token registers a pi worker DISAPPEARING" {
+        # Same trap the claude half documents: a removal touches no survivor
+        # and can only lower the newest mtime, so the count is what catches it.
+        let a = (make-account "tokenpigone")
+        let sandbox = (make-probe-sandbox "tokenpigone-pi")
+        with-env {XDG_RUNTIME_DIR: $sandbox, XDG_STATE_HOME: $sandbox} {
+            mkdir ($sandbox | path join "pi-worker" "runs" "r1" "w1")
+            mkdir ($sandbox | path join "pi-worker" "runs" "r1" "w2")
+            let before = (state-token [$a])
+            rm -rf ($sandbox | path join "pi-worker" "runs" "r1" "w2")
+            assert-true ((state-token [$a]) != $before) "a released worker must move the token"
+        }
+    })
+
+    (run-case "gate/state-token survives a machine with no pi bus at all" {
+        # Every pi path absent is the ordinary shape on a box that has never
+        # run a worker. It must degrade to a token that still tracks the claude
+        # half, not to one constant that matches itself forever.
+        let a = (make-account "tokenpinone")
+        let sandbox = (make-probe-sandbox "tokenpinone-pi")
+        with-env {XDG_RUNTIME_DIR: $sandbox, XDG_STATE_HOME: $sandbox} {
+            let before = (state-token [$a])
+            write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
+            assert-true ((state-token [$a]) != $before) "the claude half must still register with no pi tree present"
+        }
     })
 
     (run-case "gate/state-token survives an account with no state dirs" {

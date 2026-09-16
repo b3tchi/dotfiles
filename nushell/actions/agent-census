@@ -868,14 +868,74 @@ export def probe-registry [path?: string]: nothing -> record {
 
 # How long a matching token may suppress a real run.
 #
-# The token covers the claude state files and NOTHING ELSE, but the output also
-# depends on tmux panes and the ft001 registry: move an agent's pane between
-# tmux sessions and its project attribution changes with no state file touched.
+# The token covers the claude state files and the pi trees (dotfiles-eee4) and
+# NOTHING ELSE, but the output also depends on tmux panes and the ft001
+# registry: move an agent's pane between tmux sessions and its project
+# attribution changes with no state file touched.
 # A ceiling bounds how long such a change can stay invisible, so the gate can
 # only ever make the answer late -- never permanently wrong.
 const GATE_MAX_STALE_SEC = 30
 
-# A fingerprint of every state file across the given accounts.
+# The pi runtime's contribution to the gate's fingerprint.
+#
+# dotfiles-eee4: the token watched the claude state files and NOTHING else,
+# while the census has reported pi rows since sp030 T6 -- so `--if-changed`
+# answered "unchanged" through workers spawning, changing state, publishing
+# presence and dying, until some unrelated claude agent happened to move its
+# own file. A consumer polling through the gate (agent-monitor's ticker is
+# exactly one) redrew stale pi rows indefinitely. The gate's own doc comment
+# calls a gate that fails closed worse than no gate; this was that, scoped to
+# one runtime.
+#
+# One pattern per thing a `pi-worker workers` ROW can change with:
+#
+#   runs/<run>/<uid>         a worker appearing or being released (count), and
+#                            its inbox/outbox boxes being created (mtime).
+#   runs/<run>/<uid>/outbox/*  a result landing -- the `state` column.
+#   runs/<run>/<uid>/*.marker  accepted / stopped / waiting_human -- ditto.
+#   <slug>/agents/<run>/<uid>/identity/*  window, branch and task.
+#   <slug>/addresses/<addr>/presence      the `presence` column, which moves
+#                            with no bus file written at all.
+#
+# Paths, not a `pi-worker` call: the gate must cost a stat sweep and nothing
+# else, and shelling out to the verb it is gating would spend most of what
+# being gated saves. That does mean the token knows the bus LAYOUT -- the same
+# internal-layout bet the fast probe already makes, and the parity and roster
+# suites are what catch a move (pi-worker.nu's `runs-root`, dotfiles-3yg4).
+#
+# `XDG_STATE_HOME` unset falls back to `$HOME/.local/state`, which is not an
+# invention here but what the basedir spec says the variable means -- and what
+# `state-root` in pi-worker.nu resolves to, so both name one directory.
+export def pi-state-patterns []: nothing -> list<string> {
+    let runtime = ($env | get -o XDG_RUNTIME_DIR | default "")
+    let state_home = ($env | get -o XDG_STATE_HOME | default "")
+    let state = (if ($state_home | is-not-empty) {
+        $state_home
+    } else {
+        let home = ($env | get -o HOME | default "")
+        if ($home | is-empty) { "" } else { $home | path join ".local" "state" }
+    })
+
+    let bus = (if ($runtime | is-empty) { [] } else {
+        let runs = ($runtime | path join "pi-worker" "runs")
+        [
+            ($runs | path join "*" "*")
+            ($runs | path join "*" "*" "outbox" "*")
+            ($runs | path join "*" "*" "*.marker")
+        ]
+    })
+    let durable = (if ($state | is-empty) { [] } else {
+        let root = ($state | path join "pi-worker")
+        [
+            ($root | path join "*" "agents" "*" "*" "identity" "*")
+            ($root | path join "*" "addresses" "*" "presence")
+        ]
+    })
+    $bus | append $durable
+}
+
+# A fingerprint of every state file across the given accounts, plus the pi
+# runtime's own files (`pi-state-patterns`).
 #
 # Both halves matter. The max mtime catches a rewrite (the common case: a
 # session flipping busy -> idle rewrites its file in place). The COUNT catches
@@ -888,7 +948,7 @@ export def state-token [accounts: list<record>]: nothing -> string {
     let pats = ($accounts | each {|a| [
         ($a.path | path join "sessions" "*.json")
         ($a.path | path join "jobs" "*" "state.json")
-    ]} | flatten)
+    ]} | flatten | append (pi-state-patterns))
     if ($pats | is-empty) { return "none" }
     # Per pattern, NOT one `ls` over all of them: nushell raises when a glob
     # matches nothing, and an account with no jobs/ dir is entirely normal. A
