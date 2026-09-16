@@ -947,12 +947,20 @@ def resolve-project-slug [cwd: string]: nothing -> string {
 # project level would have filed both under one path, where one worker's
 # `stopped` marker silently applied to the other.
 #
-# dotfiles-bg65 removed the premise rather than the nesting: a uid is now
-# unique per PROJECT (`mint-uid`/`claim-address`), so the `<run>` level is
-# vestigial — one uid can only ever appear under one run of it. It stays
-# because every reader and writer here is `(run, uid)`-shaped and flattening
-# them is a migration of stored state, not a rename; `project-uids` and
-# `resolve-run` both simply search across the level rather than within it.
+# dotfiles-bg65 removed the premise rather than the nesting: a uid is unique
+# per PROJECT, so the `<run>` level is vestigial — one uid can only ever appear
+# under one run of it. It stays because every reader and writer here is
+# `(run, uid)`-shaped and flattening them is a migration of stored state, not
+# a rename; `project-uids` and `resolve-run` both simply search across the
+# level rather than within it.
+#
+# dotfiles-1d1f: this tree is the reason a LABEL is still reserved after
+# envelopes stopped being addressed by one. `claim-address` never refuses a
+# duplicate label — an address cannot collide, so it has nothing to protect —
+# but a path is a path, and two workers filed here under one uid means
+# `resolve-run` can reach only one of them. `claim-unique-address` reserves
+# the label atomically for exactly that reason, and `resolve-run` refuses
+# rather than picking a match if one ever gets past it.
 def agent-state-dir [slug: string, run: string, uid: string]: nothing -> string {
     state-root | path join $slug "agents" $run $uid
 }
@@ -3183,9 +3191,10 @@ def bus-claims [repo: string]: nothing -> list<record> {
     let dir = (state-root | path join $slug "agents")
     if not ($dir | path exists) { return [] }
     # `agents/<run>/<uid>/` — see the comment on `agent-state-dir` for why the
-    # `run` level is still there. A uid appears under exactly one of them now
-    # that uniqueness is project-wide (dotfiles-bg65), so this walks the level
-    # rather than meaning anything by it.
+    # `run` level is still there, and for why a label is still reserved
+    # (dotfiles-1d1f) even though an address cannot collide. A uid appears
+    # under exactly one run, so this walks the level rather than meaning
+    # anything by it.
     # Nested `for`, not nested `each`, for the reason the NOTE ON THE LOOP over
     # `read-box` documents: nushell 0.115 does not surface an `error make`
     # raised inside an `each` closure as itself. Here it does not vanish — the
@@ -4141,10 +4150,10 @@ export def worker-spawn [
     # The guard above answers for ONE run, which stopped being an answer at
     # all when sp029 T9 gave every spawn a fresh run of its own: the directory
     # it checks is empty by construction, so it can no longer fire for the
-    # case it was written for (dotfiles-bg65). This one answers for the
-    # project — the scope a uid is actually an address in — and claims it
-    # atomically, so two spawns racing for the same lowest-free uid cannot
-    # both proceed.
+    # case it was written for (dotfiles-bg65). The two claims below answer for
+    # the project: an ADDRESS for the wire, which cannot collide, and a LABEL
+    # reservation for the placement tree, taken atomically so two spawns
+    # racing for the same lowest-free label cannot both proceed.
     # dotfiles-1d1f: the run is an addressable party too. It receives every
     # result (`to: [r2]`) and `wait --as r2` reads its queue, but it has no
     # placement record and no Pi session — which is why the session uuid could
@@ -5407,7 +5416,7 @@ def require-flags [verb: string, wanted: table<flag: string, value: any, what: s
 # worker's project scope from the repository the caller is standing in
 # (`resolve-run`), so there is nothing left for a caller to type or drift
 # across three copies of the wording.
-const UID_IS = "the worker's id in this project, e.g. impl-1. `ps`/`workers` list them"
+const UID_IS = "the worker's label in this project, e.g. impl-1. `ps`/`workers` list them"
 
 def usage []: nothing -> string {
     [
@@ -5452,6 +5461,13 @@ def usage []: nothing -> string {
         "  doctor                               check dependencies"
         ""
         "NOTES"
+        "  ADDRESSES. An address is minted (`a` plus 26 characters) and is what"
+        "  travels in an envelope's from/to; a LABEL (`impl-1`, `r7`) is what a"
+        "  display shows and what every verb here accepts. `send --to impl-1`,"
+        "  `wait --as r7` and `--commissioner impl-2` all resolve the label to"
+        "  its address before anything is written. A label two parties share is"
+        "  refused by name rather than delivered to one of them; `messages`"
+        "  renders the label, or the raw address when nothing resolves it."
         "  spawn --task names the bd ticket the worker serves. It names the"
         "  worker's branch as it always did, AND is now recorded on the identity,"
         "  so `inspect`/`ps`/`workers` answer 'which ticket is this?' after a"
@@ -5463,8 +5479,8 @@ def usage []: nothing -> string {
         "  `wait --as <its own address>` — otherwise the completion is delivered"
         "  correctly to an address it is not listening on, silently."
         "  wait both reads AND marks: there is no separate ack step any more, so"
-        "  --as may only name this session's own address (PI_WORKER_UID, when"
-        "  set) — reading and marking someone else's queue crosses the one"
+        "  --as may only name this session's own address (PI_WORKER_ADDRESS,"
+        "  when set) — reading and marking someone else's queue crosses the one"
         "  ownership line the bus enforces. Observe another agent's mail with"
         "  `status`/`inspect` instead, which take any uid freely."
         "  The work stays in the worktree and the branch; `accept` reclaims"
