@@ -22,6 +22,7 @@ import {
   decideDelivery,
   userPayloadFor,
   systemContextFor,
+  withBlockedReminder,
   workerPromptGuidelines,
   resultEnvelopeFrom,
   settledWithoutResult,
@@ -201,6 +202,65 @@ describe("user payload shaping", () => {
     // the one case an operator is most likely to hit.
     const bad = { ...workEnvelope, content: null };
     expect(() => userPayloadFor(bad as never)).toThrow(/got null/i);
+  });
+});
+
+// dotfiles-7bek follow-up. The standing briefing line added in 12ab9540 was
+// DELIVERED (a probe worker quoted it back verbatim) and still not followed:
+// a blocked worker sent an unrelated message called wait again and stayed
+// silent. Asked why, it said it had fixated on the task's explicit sequence
+// ("report blocked, then wait") and never brought the standing rule into the
+// decision. Its introspection is not evidence of mechanism, but the observable
+// half is: the rule sat in a system context read once at spawn, while the
+// decision happens on every delivered message. So the reminder has to travel
+// WITH the message, and only while a question is actually outstanding.
+describe("a blocked worker is reminded at the moment the message arrives", () => {
+  test("no reminder when nothing is outstanding", () => {
+    expect(withBlockedReminder("the message", null)).toBe("the message");
+  });
+
+  test("the reminder carries the outstanding question and what to do", () => {
+    const out = withBlockedReminder("nightly run passed", "should runs get their own subdir?");
+    expect(out).toContain("nightly run passed");
+    expect(out).toContain("should runs get their own subdir?");
+    expect(out).toContain("status blocked again");
+    expect(out).toContain("what you received instead");
+  });
+
+  // The wiring is the part that silently did not exist in the first attempt:
+  // a correct function nothing called. Pin the reporter half here — the
+  // watcher half is covered by withBlockedReminder above.
+  test("reporting blocked records the question; reporting anything else clears it", async () => {
+    const pending = { question: null as string | null };
+    const tool = createResultTool({
+      run: "r1",
+      uid: "impl-a",
+      identity,
+      exec: async () => ({ code: 0, stdout: "{}", stderr: "" }),
+      pending,
+    });
+    await tool.report({ status: "blocked", summary: "which option, (a) or (b)?" });
+    expect(pending.question).toBe("which option, (a) or (b)?");
+    await tool.report({ status: "complete", summary: "done", validation: "checked" });
+    expect(pending.question).toBeNull();
+  });
+
+  test("waiting_human counts as outstanding too", async () => {
+    const pending = { question: null as string | null };
+    const tool = createResultTool({
+      run: "r1",
+      uid: "impl-a",
+      identity,
+      exec: async () => ({ code: 0, stdout: "{}", stderr: "" }),
+      pending,
+    });
+    await tool.report({ status: "waiting_human", summary: "needs a human" });
+    expect(pending.question).toBe("needs a human");
+  });
+
+  test("the original message is never altered, only appended to", () => {
+    const body = "line one\nline two";
+    expect(withBlockedReminder(body, "Q?").startsWith(body)).toBe(true);
   });
 });
 

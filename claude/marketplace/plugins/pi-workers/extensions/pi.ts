@@ -545,6 +545,46 @@ export function userPayloadFor(envelope: Envelope): string {
  * typed it. Keeping them out of the user message is what makes the work
  * payload's "just the ticket id" rule meaningful.
  */
+/**
+ * The outstanding question a blocked worker is waiting on, or null.
+ *
+ * Shared by the result tool (which sets it) and the watcher (which reads it),
+ * because the two halves of the problem sit in different functions: the worker
+ * declares it is blocked in one place and decides whether an arriving message
+ * answers that in another.
+ */
+export type PendingQuestion = { question: string | null };
+
+/**
+ * Append the outstanding-question reminder to a message about to be delivered.
+ *
+ * dotfiles-7bek follow-up. The same rule already lives in `systemContextFor`,
+ * and that placement did not work: a worker quoted the briefing back verbatim
+ * when asked, and still called `wait` again instead of re-reporting. Its own
+ * account was that it had fixated on the sequence its TASK spelled out — that
+ * introspection is not evidence of mechanism, but the structural half is
+ * plain. The briefing is read once at spawn; the decision "is this my answer?"
+ * happens on every message. A rule that must fire at delivery has to be
+ * present at delivery.
+ *
+ * Appended, never woven in: the message is another party's words and must
+ * reach the worker unaltered, so the reminder is clearly the bridge speaking.
+ * Silent when nothing is outstanding — a reminder on every message is noise,
+ * and noise is how the next real one gets skipped.
+ */
+export function withBlockedReminder(text: string, question: string | null): string {
+  if (!question) return text;
+  return [
+    text,
+    "",
+    `[pi-worker] You reported blocked and are still waiting on: ${question}`,
+    `If the message above does not answer that, call the result tool with`,
+    `status blocked again, saying what you received instead. Do not resume`,
+    `waiting in silence — whoever is waiting on you cannot tell silence from`,
+    `thinking, and only you know the answer never arrived.`,
+  ].join("\n");
+}
+
 export function systemContextFor(identity: WorkerIdentity, isolation?: string): string {
   return [
     `You are a pi-worker.`,
@@ -790,6 +830,7 @@ export function createInboxWatcher(
   identity: WorkerIdentity,
   inboxDir: string,
   io: WatcherIO,
+  pending?: PendingQuestion,
 ): InboxWatcher {
   // The high-water mark lives in the closure and is re-derived on resume from
   // what the host has already been told; see unreadAfter for why a mark rather
@@ -848,7 +889,11 @@ export function createInboxWatcher(
         }
         let text: string;
         try {
-          text = userPayloadFor(envelope);
+          // The reminder rides WITH the message rather than living only in the
+          // spawn briefing — see withBlockedReminder for why that placement
+          // failed. Inside the try so a malformed envelope still takes the
+          // refusal path below rather than being reminded about.
+          text = withBlockedReminder(userPayloadFor(envelope), pending?.question ?? null);
         } catch (err) {
           // dotfiles-7bek: this used to say "the bus reader reports it" — it
           // does not. `read-box` refuses this file to whoever calls
@@ -1195,13 +1240,14 @@ export function createDualWatcher(
   address: string,
   io: WatcherIO,
   busIo: BusWatcherIO,
+  pending?: PendingQuestion,
 ): DualWatcher {
   let frozenState: AgentState = "unknown";
   const shim: WatcherHost = {
     agentState: () => frozenState,
     sendUserMessage: host.sendUserMessage,
   };
-  const inbox = createInboxWatcher(shim, identity, inboxDir, io);
+  const inbox = createInboxWatcher(shim, identity, inboxDir, io, pending);
   const bus = createBusWatcher(shim, address, busIo);
 
   return {
@@ -1423,6 +1469,13 @@ export function createResultTool(opts: {
   uid: string;
   identity: WorkerIdentity;
   exec: ExecFn;
+  /**
+   * Set to the reported summary while the worker is blocked, cleared
+   * otherwise, so the watcher can remind it at delivery time what it is
+   * waiting on. Optional: a caller that does not wire a watcher does not
+   * need one, and every existing test constructs this tool without it.
+   */
+  pending?: PendingQuestion;
 }): ResultTool {
   const run = async (args: string[]): Promise<ReportOutcome> => {
     try {
@@ -1449,6 +1502,16 @@ export function createResultTool(opts: {
       // would present the shape of a verdict without one — precisely what a
       // worker looking compliant without having validated anything would send.
       if (input.validation) args.push("--validation", input.validation);
+      // Recorded BEFORE the call, not after: `run` reports failures rather
+      // than throwing, so awaiting it to decide would leave the reminder off
+      // for exactly the reports that did not land cleanly — and a worker whose
+      // blocked report failed is the one most in need of being reminded it is
+      // still waiting. `waiting_human` counts the same as `blocked`: both mean
+      // a question is outstanding (adr0032).
+      if (opts.pending) {
+        opts.pending.question =
+          input.status === "blocked" || input.status === "waiting_human" ? input.summary : null;
+      }
       return run(args);
     },
     reportSettled: () => run(["settled", "--as", opts.uid]),
@@ -3375,8 +3438,14 @@ export default function piWorker(pi: ExtensionAPI): void {
   // The worker's way back to the initiator (dotfiles-87bt). Registered BEFORE
   // the inbox watcher starts: a message may arrive on the first poll, and a
   // worker asked to work before it can report is the exact silence this fixes.
+  // Shared by the reporter and the watcher: the reporter records what the
+  // worker is blocked on, the watcher reminds it at delivery. Minted here
+  // because this is the one place that constructs both — an unwired tracker
+  // is a fix that passes its tests and does nothing live, which is how the
+  // briefing-only version of this failed.
+  const pending: PendingQuestion = { question: null };
   const reporter = exec
-    ? createResultTool({ run, uid, identity, exec })
+    ? createResultTool({ run, uid, identity, exec, pending })
     : null;
 
   if (!reporter) {
@@ -3479,7 +3548,7 @@ export default function piWorker(pi: ExtensionAPI): void {
     markRead: (a, id) => busIo.markRead(a, id),
     labelFor: (a) => busIo.labelFor(a),
     log: (line) => busIo.log(line),
-  });
+  }, pending);
   startWatcherLoop({
     checkAlive: () => true,
     tick: () => {
