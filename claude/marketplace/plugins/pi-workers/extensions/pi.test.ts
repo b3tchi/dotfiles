@@ -66,6 +66,7 @@ import {
   claimSelfAddressLabel,
   claimSelfAddress,
   workerBusAddress,
+  createInboxReporter,
 } from "./pi.ts";
 
 // dotfiles-oj4c: the shape the nushell writer ACTUALLY produces. These
@@ -2195,10 +2196,27 @@ describe("transcript lines", () => {
 });
 
 describe("inbox watcher against a fake Pi", () => {
-  function fakeIO(files: Record<string, unknown>) {
+  // `report` defaults to a spy that records every call so a test can assert
+  // on it directly (dotfiles-7bek: the refusal path must be checked against
+  // what was REPORTED, not just against the absence of a throw — the old
+  // code did not throw either). A test exercising the "IO exposes no report
+  // route" branch passes `report: undefined` explicitly.
+  function fakeIO(
+    files: Record<string, unknown>,
+    opts?: { report?: false | ((to: string, content: { status: string; detail: string }) => unknown) },
+  ) {
     const logs: string[] = [];
+    const reports: Array<{ to: string; content: { status: string; detail: string } }> = [];
+    const report =
+      opts?.report === false
+        ? undefined
+        : opts?.report ??
+          ((to: string, content: { status: string; detail: string }) => {
+            reports.push({ to, content });
+          });
     return {
       logs,
+      reports,
       io: {
         list: () => Object.keys(files),
         read: (path: string) => {
@@ -2208,6 +2226,7 @@ describe("inbox watcher against a fake Pi", () => {
         },
         join: (...parts: string[]) => parts.join("/"),
         log: (line: string) => logs.push(line),
+        ...(report ? { report } : {}),
       },
     };
   }
@@ -2434,6 +2453,118 @@ describe("inbox watcher against a fake Pi", () => {
     createInboxWatcher(host, identity, "/inbox", io).poll();
     expect(sent.map((s) => s.text)).toEqual(["two"]);
     expect(logs.join(" ")).toMatch(/refusing/i);
+  });
+
+  // dotfiles-7bek: the catch above used to say "mark = envelope.sequence; //
+  // never retried; the bus reader reports it" — but nothing read that mark
+  // for the sender's benefit, so the loss was invisible to whoever sent the
+  // envelope and visible only in a worker's stderr. A green suite sat over
+  // this for the length of dotfiles-oj4c's first iteration.
+  test("a malformed envelope with a usable sender is reported to it as a protocol_error, and delivery continues", () => {
+    const { io, logs, reports } = fakeIO({
+      "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+      "2.json": envelope(2, "two"),
+    });
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    // Envelope 1 is refused-and-marked within the SAME poll, so 2 (the
+    // message behind it) is what the loop delivers this tick — see "does not
+    // reorder" above for why a refusal does not stop the scan.
+    expect(w.poll()).toEqual([2]);
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.to).toBe("run-1");
+    expect(reports[0]!.content.status).toBe("protocol_error");
+    expect(reports[0]!.content.detail).toContain("1");
+    expect(logs.join(" ")).toMatch(/refusing/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    // Never retried: a second poll reports nothing new and redelivers nothing.
+    expect(w.poll()).toEqual([]);
+    expect(reports).toHaveLength(1);
+  });
+
+  test("a malformed envelope with no usable sender logs why nothing was reported, and the mark still advances", () => {
+    // Malformed BY DEFINITION: `from` may be missing, empty, or garbage.
+    // There is nobody to report to, and that has to be said explicitly
+    // rather than silently attempted against an empty address.
+    const { io, logs, reports } = fakeIO({
+      "1.json": { ...envelope(1, ""), from: "", content: { stage: "wk-build", task: "one" } },
+      "2.json": envelope(2, "two"),
+    });
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+
+    expect(reports).toHaveLength(0);
+    expect(logs.join(" ")).toMatch(/no usable sender/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("a synchronous throw inside the reporting path does not stop the loop, and the mark still advances", () => {
+    const { io, logs } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      {
+        report: () => {
+          throw new Error("nu exec exploded");
+        },
+      },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(logs.join(" ")).toMatch(/nu exec exploded/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("a rejected promise inside the reporting path does not stop the loop, and the mark still advances", async () => {
+    const { io, logs } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      {
+        report: () => Promise.reject(new Error("bus-send refused")),
+      },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    // The rejection is caught asynchronously, after poll() already returned —
+    // flush the microtask queue and confirm it reached the log rather than
+    // an unhandled rejection.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logs.join(" ")).toMatch(/bus-send refused/i);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("an IO surface with no report route logs that instead of throwing", () => {
+    const { io, logs, reports } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      { report: false },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(logs.join(" ")).toMatch(/no report route/i);
+    expect(reports).toHaveLength(0);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
   });
 
   test("a host with no sendUserMessage is inert and says so, rather than throwing", () => {
@@ -3076,6 +3207,84 @@ describe("filesystem-backed bus IO", () => {
     await io.markRead("self-a'; rm -rf /", "a".repeat(MSG_ID_CHARS));
 
     expect(called).toBe(false);
+  });
+});
+
+// dotfiles-7bek: createInboxReporter is the first site in this file where
+// attacker-influenceable text (a malformed inbox envelope's own parse error,
+// carried as `detail`) reaches an `nu -c` script this process actually
+// spawns. The catch in createInboxWatcher that calls it is covered above
+// through the WatcherIO.report abstraction, but that coverage stops at the
+// abstraction's boundary — it says nothing about THIS implementation's own
+// defence: the base64 encoding that keeps `detail` out of the generated
+// script text, and the address-shape gate on `to`/`from` before either
+// reaches `bus-send`. Every other call site in this file that builds a
+// shell-bound `nu -c` string already has this exact test (labelFor / markRead
+// above); this closes the one that didn't.
+describe("createInboxReporter", () => {
+  test("refuses to report to an unsafe 'to' address, and never reaches exec", async () => {
+    let called = false;
+    const exec: ExecFn = async () => {
+      called = true;
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const report = createInboxReporter(exec, "/mod.nu", "self-a01");
+    expect(report).toBeTypeOf("function");
+
+    let threw: unknown;
+    try {
+      await report!("impl-a'; rm -rf /", { status: "protocol_error", detail: "x" });
+    } catch (err) {
+      threw = err;
+    }
+    expect(String(threw)).toMatch(/not an address-shaped value/i);
+    expect(called).toBe(false);
+  });
+
+  test("returns no report route at all when this worker's own return address is unsafe", () => {
+    const exec: ExecFn = async () => ({ stdout: "", stderr: "", code: 0, killed: false });
+    // createInboxWatcher's contract is "attempt or say why not" — a worker
+    // with no usable address of its own cannot attempt, so this must be
+    // undefined (logged by the caller as "no report route"), not a function
+    // that throws on first use.
+    expect(createInboxReporter(exec, "/mod.nu", "self-a'; rm -rf /")).toBeUndefined();
+  });
+
+  test("a hostile detail never reaches the generated nu script verbatim, and the base64 payload decodes back losslessly", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const exec: ExecFn = async (command, args) => {
+      calls.push({ command, args });
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const report = createInboxReporter(exec, "/mod.nu", "self-a01");
+    const content = {
+      status: "protocol_error" as const,
+      detail:
+        'it broke: quote \' backtick ` dollar-paren $(id) double-quote " ); rm -rf /tmp/pwn \\escape and\na literal newline',
+    };
+
+    await report!("impl-a", content);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("nu");
+    const script = calls[0]!.args[calls[0]!.args.length - 1]!;
+
+    // Nothing hostile survives verbatim — not the whole string, not the
+    // dangerous fragment a reviewer would actually worry about, and no raw
+    // newline at all (the script is built entirely from template pieces with
+    // no `\n` in them once `detail` is base64-encoded away).
+    expect(script).not.toContain(content.detail);
+    expect(script).not.toContain("rm -rf /tmp/pwn");
+    expect(script).not.toContain("$(id)");
+    expect(script).not.toContain("\n");
+
+    // And the encoding is lossless: decoding the base64 literal the script
+    // actually carries reproduces the exact content record `report` was
+    // called with.
+    const encoded = script.match(/\("([^"]+)"\s*\|\s*decode base64/)?.[1];
+    expect(encoded).toBeTruthy();
+    const decoded = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
+    expect(decoded).toEqual(content);
   });
 });
 

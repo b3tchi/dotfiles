@@ -725,6 +725,26 @@ export interface WatcherIO {
   join(...parts: string[]): string;
   /** Structured log line; never throws. */
   log(line: string): void;
+  /**
+   * Report a `state` envelope to `to` — an address on the project bus, NEVER
+   * this watcher's own legacy `run/<uid>/inbox/*.json` scratch files.
+   * dotfiles-7bek: what a refused inbox envelope calls with `to` set to the
+   * envelope's own (usable) `from`, so the sender learns its message was
+   * destroyed instead of waiting for a round that cannot come.
+   *
+   * Deliberately a DIFFERENT transport than the one this watcher reads: a
+   * report addressed back to this SAME worker therefore lands on the project
+   * bus's queue, never back in this inbox, so it can never recreate the
+   * malformed envelope that produced it — see createInboxWatcher's refusal
+   * path for the reasoning this separation exists to preserve.
+   *
+   * Optional and best-effort: an IO surface with no route to report (most
+   * tests, or a real host whose exec never resolved) supplies none, and its
+   * absence is logged rather than treated as a throw. Whoever calls this
+   * must also assume the returned (or thrown) failure never reaches the poll
+   * loop — the caller wraps it, not the implementation.
+   */
+  report?(to: string, content: { status: "protocol_error"; detail: string }): void | Promise<void>;
 }
 
 export interface WatcherHost {
@@ -818,8 +838,56 @@ export function createInboxWatcher(
         try {
           text = userPayloadFor(envelope);
         } catch (err) {
-          io.log(`pi-worker: refusing malformed inbox envelope ${envelope.sequence}: ${err}`);
-          mark = envelope.sequence; // never retried; the bus reader reports it
+          // dotfiles-7bek: this used to say "the bus reader reports it" — it
+          // does not. `read-box` refuses this file to whoever calls
+          // read-box, which is neither the sender nor the worker, so a
+          // refusal here was logged to a worker's stderr and NOWHERE else:
+          // the sender waited for a round that could never come. The fix is
+          // not to raise (that would block every message behind this one —
+          // see "a corrupt envelope does not block the messages behind it")
+          // and not to leave it unread (the log line would repeat forever,
+          // exactly what the mark advance exists to prevent). It is to make
+          // the loss visible to the SENDER, the same principle
+          // `settledWithoutResult` already applies to a worker that settles
+          // without reporting.
+          const detail = `inbox envelope ${envelope.sequence} refused: ${err}`;
+          // Malformed BY DEFINITION: `from` may be missing, empty, or
+          // garbage, and there may be nobody to report to. That case is
+          // handled explicitly rather than attempted against an empty
+          // address.
+          const sender = typeof envelope.from === "string" ? envelope.from.trim() : "";
+          if (sender.length === 0) {
+            io.log(
+              `pi-worker: refusing malformed inbox envelope ${envelope.sequence}: ${err} — no usable sender on the envelope, so nothing is reported`,
+            );
+          } else if (typeof io.report !== "function") {
+            io.log(
+              `pi-worker: refusing malformed inbox envelope ${envelope.sequence}: ${err} — IO exposes no report route, so ${sender} will not be told`,
+            );
+          } else {
+            io.log(
+              `pi-worker: refusing malformed inbox envelope ${envelope.sequence}: ${err} — reporting protocol_error to ${sender}`,
+            );
+            // A throw here — synchronous, or from a rejected promise — must
+            // never take down the poll loop: a reporting path that can crash
+            // the watcher is worse than the silent discard it replaces. The
+            // mark advances regardless (below), so this is best-effort.
+            try {
+              Promise.resolve(io.report(sender, { status: "protocol_error", detail })).catch((reportErr) => {
+                io.log(
+                  `pi-worker: reporting refused envelope ${envelope.sequence} to ${sender} failed: ${reportErr}`,
+                );
+              });
+            } catch (reportErr) {
+              io.log(
+                `pi-worker: reporting refused envelope ${envelope.sequence} to ${sender} failed: ${reportErr}`,
+              );
+            }
+          }
+          // Reported to the sender when one is addressable (or logged as
+          // unreportable otherwise) — never retried either way, or the log
+          // line above would repeat every poll forever.
+          mark = envelope.sequence;
           continue;
         }
         // `decision.mode` is this bridge's vocabulary; `deliverAs` is Pi's
@@ -2955,8 +3023,14 @@ export const INITIATOR_TOOL_PARAMETERS = {
  *
  * Kept separate from createInboxWatcher so the watcher itself stays testable
  * without touching a disk; this is the only part that node:fs reaches.
+ *
+ * `report` is optional and supplied by the caller (`createInboxReporter`,
+ * below, when exec and a return address are both available) rather than
+ * built in here — a session with no exec, or no bus address of its own, is
+ * exactly the case WatcherIO.report's doc says must degrade to a logged
+ * no-op, not a thrown error.
  */
-export function nodeWatcherIO(): WatcherIO {
+export function nodeWatcherIO(report?: WatcherIO["report"]): WatcherIO {
   return {
     list: (dir) => {
       try {
@@ -2968,6 +3042,58 @@ export function nodeWatcherIO(): WatcherIO {
     read: (path) => readFileSync(path, "utf8"),
     join: (...parts) => join(...parts),
     log: (line) => console.error(line),
+    ...(report ? { report } : {}),
+  };
+}
+
+/**
+ * The address-shape guard every value reaching a shell argument or a bus
+ * queue path must pass — mirrors `createFsIo`'s own `safe` charset. Applied
+ * here to BOTH the refused envelope's `from` (a malformed envelope's `from`
+ * is untrusted by definition) and this worker's own return address, before
+ * either reaches `bus-send`'s `--to`/`--from`: `bus-send` itself only checks
+ * non-emptiness (`validate-addressing`), and a `to` containing `/` or `..`
+ * would be a queue PATH, not just an opaque id.
+ */
+const REPORT_ADDRESS_SHAPE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Build the `report` a refused inbox envelope calls (dotfiles-7bek).
+ *
+ * Shells to the nu module's own `bus-send`, exported and already the write
+ * path every OTHER peer-addressed send in this file goes through — one
+ * implementation of envelope construction and validation, not a second copy
+ * in TypeScript that drifts (the same reasoning `createResultTool` and
+ * `createFsIo` apply to their own nu calls).
+ *
+ * Content travels base64-encoded IN the generated `nu -c` script rather than
+ * interpolated as a quoted string: `detail` is built from a malformed
+ * envelope's own parse error, so it is untrusted text that may contain
+ * quotes, newlines, or anything else — encoding it removes any way for that
+ * text to break out of the script nu parses. The nu side decodes and
+ * re-parses it as JSON before `bus-send` ever sees it.
+ *
+ * Returns undefined (no report route at all) when `from` — this worker's own
+ * return address — is not itself address-shaped: WatcherIO.report's contract
+ * is "attempt or say why not", and a session with no usable address of its
+ * own cannot attempt.
+ */
+export function createInboxReporter(
+  exec: ExecFn,
+  modulePath: string,
+  from: string,
+): WatcherIO["report"] {
+  if (!REPORT_ADDRESS_SHAPE.test(from)) return undefined;
+  return async (to, content) => {
+    if (!REPORT_ADDRESS_SHAPE.test(to)) {
+      throw new Error(`refusing to report to '${to}': not an address-shaped value`);
+    }
+    const encoded = Buffer.from(JSON.stringify(content), "utf8").toString("base64");
+    const script = `use '${modulePath}' *; bus-send --to ['${to}'] --from '${from}' --kind "state" --content ("${encoded}" | decode base64 | decode | from json) | ignore`;
+    const out = await exec("nu", ["-c", script], {});
+    if (out.code !== 0) {
+      throw new Error((out.stderr || out.stdout).trim() || `nu exited ${out.code} reporting to ${to}`);
+    }
   };
 }
 
@@ -3178,7 +3304,7 @@ export default function piWorker(pi: ExtensionAPI): void {
   const inboxDir = workerInboxDir(process.env as Record<string, string | undefined>);
   if (!inboxDir) return;
 
-  const io = nodeWatcherIO();
+  const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
   const run = process.env.PI_WORKER_RUN ?? "";
   const uid = process.env.PI_WORKER_UID ?? "";
   const identity = {
@@ -3190,6 +3316,17 @@ export default function piWorker(pi: ExtensionAPI): void {
     window: process.env.PI_WORKER_WINDOW ?? "",
   };
 
+  // dotfiles-1d1f: presence is filed under the ADDRESS, so the address is what
+  // the publisher passes when the window carries one. `presence-write` resolves
+  // a label too, but the address is exact — it cannot be ambiguous. Resolved
+  // before `io` (below) so a refused inbox envelope can report back to its
+  // sender over the SAME address this worker publishes presence under —
+  // dotfiles-7bek.
+  const busAddress = workerBusAddress(process.env as Record<string, string | undefined>);
+  const io = nodeWatcherIO(
+    exec && busAddress ? createInboxReporter(exec, modulePath, busAddress) : undefined,
+  );
+
   // Pi publishes lifecycle events but exposes no state getter, so the state
   // the watcher needs is derived here and handed in. This is the correction of
   // the ft014 assumption that a `host.agentState()` existed: the watcher's
@@ -3200,17 +3337,13 @@ export default function piWorker(pi: ExtensionAPI): void {
   // uses. A worker reaching this line always carries a non-empty
   // PI_WORKER_UID (workerInboxDir's guard above already returned otherwise),
   // so there is no separate "unset uid" branch needed here.
-  // dotfiles-1d1f: presence is filed under the ADDRESS, so the address is what
-  // the publisher passes when the window carries one. `presence-write` resolves
-  // a label too, but the address is exact — it cannot be ambiguous.
-  const busAddress = workerBusAddress(process.env as Record<string, string | undefined>);
   const tracker = createAgentStateTracker(
     pi as unknown as StateEventSource,
     exec
       ? {
           uid: busAddress ?? uid,
           exec,
-          modulePath: join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu"),
+          modulePath,
           repo: identity.cwd,
         }
       : undefined,
@@ -3324,7 +3457,6 @@ export default function piWorker(pi: ExtensionAPI): void {
     );
   }
   if (exec && busAddress) {
-    const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
     void resolveProjectBusDir(exec, modulePath).then((busDir) => {
       if (busDir) busIo = createFsIo(busDir, exec, modulePath);
     });
