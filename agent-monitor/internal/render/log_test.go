@@ -110,3 +110,76 @@ func TestRenderLog_NeverExceedsWidth(t *testing.T) {
 		}
 	}
 }
+
+// dotfiles-1d1f: `from`/`to` are minted addresses on the wire and
+// `pi-worker messages` resolves them to labels. A cell holding an ADDRESS is
+// therefore one the registry could not resolve, and the raw address is the
+// only honest thing to show — never a blank cell, never a nearest-match name
+// ([[adr0017]]).
+func addressMessages() []source.Message {
+	return []source.Message{
+		// Two addresses minted in the same millisecond: identical for their
+		// first 11 characters, different only in the random tail.
+		{
+			At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+			From: "a01M2M36Y5KJJ0YARD1BAJ6X8AY",
+			To:   []string{"a01M2M36Y5KJJ0YARD1BQQQQQQQ"},
+			Kind: "message", Content: json.RawMessage(`"unresolved"`),
+		},
+	}
+}
+
+func TestRenderLog_AnUnresolvedAddressIsShownNotBlanked(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	sample := &source.MessageSample{Messages: addressMessages(), At: at}
+	lines := RenderLog(sample, false, at, 100)
+	row := lines[len(lines)-1]
+
+	// The distinguishing tail of each address reaches the row.
+	if !strings.Contains(row, "J6X8AY") {
+		t.Errorf("FROM cell lost the sender's address tail: %q", row)
+	}
+	if !strings.Contains(row, "QQQQQQ") {
+		t.Errorf("TO cell lost the recipient's address tail: %q", row)
+	}
+	// And it is not rendered as "no value".
+	if strings.Contains(row, emptyCell+" ") && !strings.Contains(row, "J6X8AY") {
+		t.Errorf("an unresolved address must never render as the empty cell: %q", row)
+	}
+}
+
+func TestShortAddress_ElidesOnlyAddresses(t *testing.T) {
+	if got := shortAddress("impl-1"); got != "impl-1" {
+		t.Errorf("a label must pass through unchanged, got %q", got)
+	}
+	if got := shortAddress("r2"); got != "r2" {
+		t.Errorf("a run label must pass through unchanged, got %q", got)
+	}
+	if got := shortAddress(""); got != "" {
+		t.Errorf("an empty cell must stay empty, got %q", got)
+	}
+	// Two same-millisecond addresses must not render identically — the whole
+	// reason the TAIL is kept rather than the head.
+	a := shortAddress("a01M2M36Y5KJJ0YARD1BAJ6X8AY")
+	b := shortAddress("a01M2M36Y5KJJ0YARD1BQQQQQQQ")
+	if a == b {
+		t.Errorf("two distinct addresses rendered identically as %q", a)
+	}
+	if a != "…J6X8AY" {
+		t.Errorf("shortAddress = %q, want the marked tail", a)
+	}
+}
+
+func TestRenderDetail_KeepsTheFullAddress(t *testing.T) {
+	// The detail pane is the view an operator copies an address out of, so it
+	// must not elide. The log elides; these are deliberately different.
+	msg := addressMessages()[0]
+	lines := RenderDetail(&msg, 200, 10)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "a01M2M36Y5KJJ0YARD1BAJ6X8AY") {
+		t.Errorf("detail pane must carry the full sender address: %q", joined)
+	}
+	if !strings.Contains(joined, "a01M2M36Y5KJJ0YARD1BQQQQQQQ") {
+		t.Errorf("detail pane must carry the full recipient address: %q", joined)
+	}
+}
