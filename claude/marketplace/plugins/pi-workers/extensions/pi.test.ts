@@ -66,6 +66,7 @@ import {
   claimSelfAddressLabel,
   claimSelfAddress,
   workerBusAddress,
+  createInboxReporter,
 } from "./pi.ts";
 
 // dotfiles-oj4c: the shape the nushell writer ACTUALLY produces. These
@@ -3206,6 +3207,84 @@ describe("filesystem-backed bus IO", () => {
     await io.markRead("self-a'; rm -rf /", "a".repeat(MSG_ID_CHARS));
 
     expect(called).toBe(false);
+  });
+});
+
+// dotfiles-7bek: createInboxReporter is the first site in this file where
+// attacker-influenceable text (a malformed inbox envelope's own parse error,
+// carried as `detail`) reaches an `nu -c` script this process actually
+// spawns. The catch in createInboxWatcher that calls it is covered above
+// through the WatcherIO.report abstraction, but that coverage stops at the
+// abstraction's boundary — it says nothing about THIS implementation's own
+// defence: the base64 encoding that keeps `detail` out of the generated
+// script text, and the address-shape gate on `to`/`from` before either
+// reaches `bus-send`. Every other call site in this file that builds a
+// shell-bound `nu -c` string already has this exact test (labelFor / markRead
+// above); this closes the one that didn't.
+describe("createInboxReporter", () => {
+  test("refuses to report to an unsafe 'to' address, and never reaches exec", async () => {
+    let called = false;
+    const exec: ExecFn = async () => {
+      called = true;
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const report = createInboxReporter(exec, "/mod.nu", "self-a01");
+    expect(report).toBeTypeOf("function");
+
+    let threw: unknown;
+    try {
+      await report!("impl-a'; rm -rf /", { status: "protocol_error", detail: "x" });
+    } catch (err) {
+      threw = err;
+    }
+    expect(String(threw)).toMatch(/not an address-shaped value/i);
+    expect(called).toBe(false);
+  });
+
+  test("returns no report route at all when this worker's own return address is unsafe", () => {
+    const exec: ExecFn = async () => ({ stdout: "", stderr: "", code: 0, killed: false });
+    // createInboxWatcher's contract is "attempt or say why not" — a worker
+    // with no usable address of its own cannot attempt, so this must be
+    // undefined (logged by the caller as "no report route"), not a function
+    // that throws on first use.
+    expect(createInboxReporter(exec, "/mod.nu", "self-a'; rm -rf /")).toBeUndefined();
+  });
+
+  test("a hostile detail never reaches the generated nu script verbatim, and the base64 payload decodes back losslessly", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const exec: ExecFn = async (command, args) => {
+      calls.push({ command, args });
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const report = createInboxReporter(exec, "/mod.nu", "self-a01");
+    const content = {
+      status: "protocol_error" as const,
+      detail:
+        'it broke: quote \' backtick ` dollar-paren $(id) double-quote " ); rm -rf /tmp/pwn \\escape and\na literal newline',
+    };
+
+    await report!("impl-a", content);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("nu");
+    const script = calls[0]!.args[calls[0]!.args.length - 1]!;
+
+    // Nothing hostile survives verbatim — not the whole string, not the
+    // dangerous fragment a reviewer would actually worry about, and no raw
+    // newline at all (the script is built entirely from template pieces with
+    // no `\n` in them once `detail` is base64-encoded away).
+    expect(script).not.toContain(content.detail);
+    expect(script).not.toContain("rm -rf /tmp/pwn");
+    expect(script).not.toContain("$(id)");
+    expect(script).not.toContain("\n");
+
+    // And the encoding is lossless: decoding the base64 literal the script
+    // actually carries reproduces the exact content record `report` was
+    // called with.
+    const encoded = script.match(/\("([^"]+)"\s*\|\s*decode base64/)?.[1];
+    expect(encoded).toBeTruthy();
+    const decoded = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
+    expect(decoded).toEqual(content);
   });
 });
 
