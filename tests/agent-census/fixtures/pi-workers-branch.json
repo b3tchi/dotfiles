@@ -1,0 +1,35 @@
+[
+  {
+    "run": "r1",
+    "uid": "impl-1",
+    "state": "created",
+    "unacked": 0,
+    "task": "",
+    "window": "impl-proj-alpha-task@proj-alpha",
+    "branch": "wk-proj-alpha-task.1",
+    "resume": "pi --session 00000000-0000-4000-8000-00000000000a",
+    "presence": ""
+  },
+  {
+    "run": "r1",
+    "uid": "verify-1",
+    "state": "created",
+    "unacked": 0,
+    "task": "",
+    "window": "verify-proj-alpha-task@proj-alpha",
+    "branch": "wk-proj-alpha-task.2",
+    "resume": "pi --session 00000000-0000-4000-8000-00000000000b",
+    "presence": ""
+  },
+  {
+    "run": "r2",
+    "uid": "impl-2",
+    "state": "unknown",
+    "unacked": 0,
+    "task": "",
+    "window": "",
+    "branch": "",
+    "resume": "",
+    "presence": ""
+  }
+]

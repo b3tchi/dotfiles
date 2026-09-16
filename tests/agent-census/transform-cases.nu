@@ -462,6 +462,7 @@ let results = [
         let w = {
             run: "r9", uid: "impl-7", state: "running", unacked: 0, task: "",
             window: "impl-fix-the-thing@myproj", resume: "pi --session x", presence: "streaming",
+            branch: "wk-fix-the-thing.2",
         }
         let row = (pi-detail-row $w)
         assert-eq $row.runtime "pi"
@@ -471,9 +472,19 @@ let results = [
         assert-eq $row.state "running"
         assert-eq $row.status "streaming" "presence is exposed as the status column"
         assert-eq $row.bucket "working"
-        # branch is not obtainable from `pi-worker workers` alone -- see the
-        # comment on pi-detail-row. Empty, not fabricated.
-        assert-eq $row.branch ""
+        # dotfiles-ycaz: `pi-worker workers` now returns the worker's branch,
+        # so the column is read rather than left empty. Read, never derived:
+        # this action still touches no bus path and no worktree.
+        assert-eq $row.branch "wk-fix-the-thing.2"
+    })
+
+    (run-case "pi/pi-detail-row: a row from a pre-ycaz pi-worker has no branch field and still lists" {
+        # The `pi-workers.json` capture predates the field, and a machine
+        # running an older plugin emits exactly that shape. A missing column
+        # must read empty, not raise — an operator's census failing because
+        # one binary is behind is worse than a blank cell (adr0017).
+        let w = {run: "r9", uid: "impl-7", state: "running", unacked: 0, task: "", window: "impl-x@myproj", resume: "", presence: ""}
+        assert-eq (pi-detail-row $w | get branch) ""
     })
 
     (run-case "pi/pi-detail-row: a missing presence file buckets from the job axis alone" {
@@ -567,12 +578,31 @@ let results = [
         assert-eq $m.total 2 "both runtimes counted in one row"
     })
 
+    (run-case "pi/fixture: the post-ycaz capture carries branch and survives the transform" {
+        # The shape a current `pi-worker workers` emits. Kept beside the older
+        # capture rather than replacing it (SOURCES.md): both shapes reach this
+        # action in the field, and only a fixture of each proves both do.
+        let workers = (load-json $env.FILE_PWD "pi-workers-branch.json")
+        assert-true (($workers | length) > 0) "fixture must not be empty"
+        for f in [run uid state unacked task window branch resume presence] {
+            assert-true ($f in ($workers | first | columns)) $"fixture row is missing ($f)"
+        }
+        let rows = (pi-detail-rows $workers)
+        let placed = ($rows | where branch != "")
+        assert-true (($placed | length) > 0) "a worker holding a worktree must report its branch"
+        assert-eq ($placed | first | get branch) ($workers | where branch != "" | first | get branch) "the branch reaches the detail row verbatim"
+        assert-true (($rows | where branch == "" | length) > 0) "and an identity-less worker still reports none"
+    })
+
     (run-case "pi/fixture: the captured pi-worker workers payload carries the documented fields" {
+        # The PRE-ycaz capture: no `branch` column at all. Asserted as such, so
+        # the historical record keeps saying what the verb actually emitted.
         let workers = (load-json $env.FILE_PWD "pi-workers.json")
         assert-true (($workers | length) > 0) "fixture must not be empty"
         for f in [run uid state unacked task window resume presence] {
             assert-true ($f in ($workers | first | columns)) $"fixture row is missing ($f)"
         }
+        assert-true ("branch" not-in ($workers | first | columns)) "this capture predates branch and is not rewritten to add it"
         # Deliberately includes at least one identity-less worker (empty
         # window) and at least one with a parsable window, matching the two
         # shapes pi-detail-row must handle.

@@ -377,13 +377,15 @@ export def parse-pi-window [window: string]: nothing -> record {
 # One `pi-worker workers` row, normalised to the same detail-row shape
 # `detail-rows` emits, so the two kinds concatenate into one table.
 #
-# branch is NOT populated: `pi-worker workers` does not expose a worker's git
-# branch (sp030 T3 added presence only, and this action's contract is to read
-# that one verb and nothing else -- no bus path). Reading it would mean
-# opening the worker's identity file directly, which is exactly the
-# unsupported read this task's success criteria forbid. Empty is the honest
-# answer, not a guess (adr0017): see the deviation note in this task's bd
-# evidence for the follow-up this leaves open.
+# dotfiles-ycaz: branch comes off the row now. `pi-worker workers` used to
+# drop it, and reading it here would have meant opening the worker's identity
+# file directly -- the unsupported read sp030 T6's success criteria forbid --
+# so the column was left empty. The verb was widened instead, which keeps this
+# action reading one supported verb and nothing else.
+#
+# `get -o ... | default ""` and not `$w.branch`: a machine running a pre-ycaz
+# plugin emits a row without the field, and a census that raises because one
+# binary is behind is worse than a blank cell (adr0017).
 export def pi-detail-row [w: record]: nothing -> record {
     let parsed = (parse-pi-window ($w | get -o window | default ""))
     let project = if ($parsed.project | is-empty) { "unknown" } else { $parsed.project }
@@ -402,7 +404,7 @@ export def pi-detail-row [w: record]: nothing -> record {
         runtime: "pi"
         uid:     ($w | get -o uid | default "")
         role:    $parsed.role
-        branch:  ""
+        branch:  ($w | get -o branch | default "")
     }
 }
 

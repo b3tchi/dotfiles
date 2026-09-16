@@ -4762,6 +4762,14 @@ export def run-workers [run: string, --repo: string = ""]: nothing -> list<recor
             # is for.
             task: (if $identity == null { "" } else { $identity | get -o task | default "" })
             window: (if $identity == null { "" } else { $identity.window })
+            # dotfiles-ycaz: the worktree branch the worker holds. `workers` is
+            # the only surface agent-census is allowed to read for a pi agent
+            # (sp030 T6 forbids it the bus paths), so a field the identity
+            # carries and the row drops is a field no consumer can obtain —
+            # census emitted an empty branch column for every pi row while the
+            # answer sat one field away. Absent-tolerant like `task` above: a
+            # record written before the field existed must still list.
+            branch: (if $identity == null { "" } else { $identity | get -o branch | default "" })
             resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
             # sp030 T3: the worker's own reported state, `unknown` past its
             # freshness bound (or unparseable), empty when it never published.

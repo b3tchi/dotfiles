@@ -21,6 +21,22 @@ starts asserting something the tool never emitted.
 
 claude CLI 2.1.x, nushell 0.115.0, tmux on Linux/WSL2.
 
+## Captured 2026-09-16
+
+| file | command |
+|---|---|
+| `pi-workers-branch.json` | `pi-worker workers` |
+
+The `workers` verb after dotfiles-ycaz widened its row with `branch`.
+`pi-workers.json` is the pre-ycaz capture and stays exactly as it was — a row
+without the field is still what a machine running an older plugin emits, and
+`pi-detail-row` is asserted against both shapes.
+
+Captured against a throwaway bus rather than a live one: two identities and
+one identity-less worker were written into a scratch `XDG_RUNTIME_DIR`, so the
+projects, branches and session ids in the file are neutral by construction
+instead of by a sanitisation pass over real work.
+
 ## Sanitisation
 
 The repository is public. The raw captures carried real project names and

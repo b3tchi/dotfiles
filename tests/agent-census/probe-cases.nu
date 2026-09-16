@@ -450,6 +450,18 @@ echo "99003  scratch_3"'
         assert-eq ($rows | get uid | sort) ($fixture | get uid | sort) "rows pass through unchanged, not reshaped"
     })
 
+    (run-case "probe/pi: a branch-carrying row reaches the census unreshaped" {
+        # dotfiles-ycaz end to end: the field the verb now returns has to
+        # survive the probe, which passes rows through and reshapes nothing.
+        let s = (make-probe-sandbox "pibranch")
+        let fixture = (load-json $env.FILE_PWD "pi-workers-branch.json")
+        $fixture | to json | save -f ($s | path join "fixture.json")
+        let body = ('if [ "$1" = "workers" ]; then printf "%s" "$(<' + $s + '/fixture.json)"; fi')
+        write-stub $s "pi-worker" $body
+        let rows = (with-stub-path $s { probe-pi-workers })
+        assert-eq ($rows | get branch) ($fixture | get branch) "every branch arrives exactly as the verb reported it"
+    })
+
     (run-case "probe/pi: missing binary degrades to empty, not a raise" {
         let s = (make-probe-sandbox "pimissing")
         assert-eq (with-stub-path $s { probe-pi-workers }) []

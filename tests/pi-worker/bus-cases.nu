@@ -2076,6 +2076,30 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "presence/main-workers-carries-the-branch-the-identity-records" {
+        # dotfiles-ycaz: `workers` is the ONLY surface agent-census may read
+        # for a pi agent (sp030 T6 forbids it the bus paths), so a field the
+        # identity holds but the row drops is a field no consumer can have.
+        # `branch` was one: census emitted an empty column for every pi row
+        # while the answer sat in the identity envelope the row is built from.
+        let repo = (make-repo "workers-branch")
+        let root = (make-runtime "workers-branch")
+        with-runtime $root {
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-ycaz.3"
+                session: "s1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            # No identity at all — the ordinary shape for a freshly claimed
+            # address. Empty, like `task` and `window` beside it, never a guess.
+            legacy-inbox-send "impl-2" --run "r1" --content "wk-build t"
+
+            let rows = (run-workers "r1" --repo $repo)
+            assert-eq (($rows | where uid == "impl-1" | first).branch) "wk-ycaz.3" "the row carries the worktree branch"
+            assert-eq (($rows | where uid == "impl-2" | first).branch) "" "no identity, no branch — not a guess"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "presence/a-stale-reading-in-workers-renders-unknown-never-a-branch-on-it" {
         let repo = (make-repo "presence-workers-stale")
         let root = (make-runtime "presence-workers-stale")
