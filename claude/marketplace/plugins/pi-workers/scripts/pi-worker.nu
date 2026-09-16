@@ -2587,6 +2587,28 @@ export def bus-settled [uid: string, --run: string]: nothing -> record {
     let envelope = (settled-without-result $run $uid 0 (now-stamp) --from $from --to $to)
     validate-envelope $envelope
     let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
+
+    # dotfiles-u4oy: relayed to the commissioner, exactly as `bus-result` does
+    # with a real outcome. Without this the ONE report whose whole purpose is
+    # to say "no result is coming" reached only the legacy outbox — so from the
+    # commissioner's queue, a worker that went silent and a worker that
+    # reported its own silence were indistinguishable, which is the confusion
+    # SETTLED_WITHOUT_RESULT exists to end.
+    #
+    # dotfiles-oj4c's vocabulary, not the `error` kind this was filed against:
+    # an outcome is a `state` whose status names which outcome it is, and
+    # `error` is gone from ENVELOPE_KINDS.
+    #
+    # Additive and lenient, for the reasons `bus-result`'s relay documents at
+    # length: the legacy write above stands (bus-status/derive-state read only
+    # that), and a worker's own report must not fail because whoever named its
+    # commissioner named someone unreachable.
+    let commissioner = (if $identity == null { "" } else { $identity | get -o commissioner | default "" })
+    if ($commissioner | is-not-empty) {
+        let cwd = (if $identity == null { "" } else { $identity | get -o cwd | default "" })
+        bus-send --to [(to-address $commissioner --repo $cwd)] --from $from --kind "state" --content $envelope.content
+    }
+
     {reported: true, run: $run, uid: $uid, sequence: $written.sequence}
 }
 

@@ -628,6 +628,63 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "pipeline/a-settled-protocol-error-reaches-the-commissioners-queue" {
+        # dotfiles-u4oy: `bus-result` relays a commissioned outcome to the
+        # commissioner; `bus-settled` wrote ONLY the legacy run/uid outbox and
+        # returned. So the one report whose entire purpose is to say "no result
+        # is coming" was invisible to the party that commissioned the work —
+        # `wait --as` returned nothing, and only the legacy readers
+        # (bus-status, derive-state) ever saw it. A silent worker and a worker
+        # that reported its own silence looked identical from the bus.
+        let repo = (make-repo "u4oy-settled-relay")
+        let root = (make-runtime "u4oy-settled-relay")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orchestrator-1"
+                }
+                bus-settled "impl-a" --run "run-1" | ignore
+            }
+            let mail = (do { cd $repo; bus-wait --as "orchestrator-1" })
+            assert-eq ($mail | length) 1 "the absence of a result is itself a report, and it is addressed"
+            assert-eq $mail.0.from "impl-a" ""
+            # dotfiles-oj4c's vocabulary, not the `error` kind the bug was
+            # filed against: an outcome is a `state` whose status says which
+            # outcome it is.
+            assert-eq $mail.0.kind "state" "a relayed protocol error is typed like any other outcome"
+            assert-eq $mail.0.content.status "protocol_error" ""
+            assert-true ($mail.0.content.detail | str contains "never inferred") "the reason travels with it"
+            # Additive, exactly like the result relay: the legacy outbox write
+            # every bus-status/derive-state reader depends on is unchanged.
+            let legacy = (do { cd $repo; read-results "impl-a" --run "run-1" })
+            assert-eq ($legacy | length) 1 "the legacy outbox still carries the same report"
+            assert-eq $legacy.0.status "protocol_error" ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "pipeline/an-uncommissioned-settle-still-puts-nothing-on-the-bus" {
+        # The relay must not become a reason to report: an agent nobody
+        # commissioned still owes nobody anything, and `bus-messages` staying
+        # empty is what proves the new send is inside the commissioner branch
+        # rather than beside it.
+        let repo = (make-repo "u4oy-settled-uncommissioned")
+        let root = (make-runtime "u4oy-settled-uncommissioned")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                }
+                bus-settled "impl-a" --run "run-1" | ignore
+            }
+            assert-eq ((do { cd $repo; bus-messages }) | length) 0 "nothing commissioned it, so nothing is sent"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "pipeline/settled-produces-nothing-for-an-explicitly-uncommissioned-agent" {
         let root = (make-runtime "t5-settled-uncommissioned")
         with-runtime $root {
