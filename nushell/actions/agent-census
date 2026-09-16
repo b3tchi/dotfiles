@@ -694,6 +694,15 @@ export def shape-fast-agents [live: list, jobs: list]: nothing -> list {
         # the COMMON case here -- every finished job is one.
         let s = (if ($hits | is-empty) { null } else { $hits | first })
 
+        # dotfiles-tqvb: the job record carries a LIVE axis beside the durable
+        # one. `state` is what was last written down; `tempo` is what the job
+        # is doing right now, and the CLI reports `blocked` off tempo whatever
+        # state still says -- observed live as {state: working, tempo: blocked,
+        # needs: "send a prompt to start"} printed `blocked`, and confirmed
+        # across every job record on that machine (done/idle, blocked/blocked
+        # and stopped/idle all agreed; working/active is the failed case
+        # below).
+        #
         # A job whose stored state says `working` with NO process behind it did
         # not finish -- it died mid-run, and the CLI reports it as `failed`.
         # The state file cannot record this itself: whatever was going to write
@@ -701,13 +710,23 @@ export def shape-fast-agents [live: list, jobs: list]: nothing -> list {
         # `claude agents --all --json` on this machine (job f3733a98, stored
         # `working`, reported `failed`).
         #
-        # ONLY `working` is remapped. `blocked` with no process stays blocked
-        # (the CLI keeps it, and it is still a job someone must come back to),
-        # and a state we have not seen the CLI remap is passed through
-        # untouched -- adr0017 again, a guess here would be a fabricated
-        # verdict rather than a missing one.
+        # The no-process remap WINS over tempo, deliberately: it is the rule
+        # actually verified against the CLI, and what the CLI prints for a dead
+        # tempo-blocked job was never observed. A blocked job nobody can answer
+        # is dead, not waiting.
+        #
+        # ONLY these two translations happen. A state we have not seen the CLI
+        # remap is passed through untouched -- adr0017 again, a guess here
+        # would be a fabricated verdict rather than a missing one.
         let raw_state = ($j | get -o state | default "")
-        let state = if ($s == null and $raw_state == "working") { "failed" } else { $raw_state }
+        let tempo = ($j | get -o tempo | default "")
+        let state = if ($s == null and $raw_state == "working") {
+            "failed"
+        } else if ($tempo == "blocked") {
+            "blocked"
+        } else {
+            $raw_state
+        }
         {
             id:        $jid
             pid:       (if $s != null { $s | get -o pid } else { null })

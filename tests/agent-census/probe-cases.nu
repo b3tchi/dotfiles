@@ -241,6 +241,42 @@ echo "99003  scratch_3"'
         assert-eq $r.state "working" "the job axis is untouched"
     })
 
+    (run-case "probe/fast reports a tempo-blocked job as blocked, like the CLI" {
+        # dotfiles-tqvb: the job record carries a LIVE axis, `tempo`, beside
+        # the durable `state`, and the CLI reports `blocked` off tempo whatever
+        # state says. Observed live: {state: working, tempo: blocked, needs:
+        # "send a prompt to start"} with a live session, printed `blocked` by
+        # `claude agents --all --json` while the fast probe said `working`.
+        let a = (make-account "fasttempo")
+        write-session $a "s1" {
+            pid: (live-pid), procStart: (live-proc-start), kind: "bg",
+            sessionId: "sid-1", jobId: "j1", cwd: "/home/dev/alpha", name: "alpha-1", status: "idle",
+        }
+        write-job $a "j1" {sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", state: "working", tempo: "blocked", createdAt: 1}
+        assert-eq (probe-agents-fast $a | first | get state) "blocked" "a job waiting on a person is blocked, whatever the durable state still says"
+    })
+
+    (run-case "probe/fast leaves a job whose tempo is active exactly as stored" {
+        let a = (make-account "fasttempoactive")
+        write-session $a "s1" {
+            pid: (live-pid), procStart: (live-proc-start), kind: "bg",
+            sessionId: "sid-1", jobId: "j1", cwd: "/home/dev/alpha", name: "alpha-1", status: "busy",
+        }
+        write-job $a "j1" {sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", state: "working", tempo: "active", createdAt: 1}
+        assert-eq (probe-agents-fast $a | first | get state) "working" "only a blocked tempo overrides the stored state"
+    })
+
+    (run-case "probe/fast keeps calling a dead working job failed even when its tempo says blocked" {
+        # Precedence, stated rather than stumbled into: the no-process remap is
+        # the one verified against the CLI (a stored `working` with nothing
+        # running prints `failed`), and what the CLI prints for a DEAD
+        # tempo-blocked job was never observed. The verified rule wins; a
+        # blocked job nobody can answer is dead, not waiting.
+        let a = (make-account "fasttempodead")
+        write-job $a "j1" {sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", state: "working", tempo: "blocked", createdAt: 1}
+        assert-eq (probe-agents-fast $a | first | get state) "failed" "no process behind it means it died, not that it is waiting"
+    })
+
     (run-case "probe/fast drops a session whose pid was REUSED" {
         # The pid is alive, but it belongs to a different process now. A
         # liveness check on the pid alone would report this stale file as a
