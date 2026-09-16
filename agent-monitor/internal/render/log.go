@@ -7,6 +7,7 @@ package render
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -173,9 +174,9 @@ func msgCellFor(c msgColumn, m source.Message, width int) string {
 	case msgColTime:
 		return timeCell(m.At)
 	case msgColFrom:
-		return orDash(m.From)
+		return orDash(shortAddress(m.From))
 	case msgColTo:
-		return toCell(m.To)
+		return toCellShort(m.To)
 	case msgColSubject:
 		return DeriveSubject(m.Kind, m.Content, width)
 	default:
@@ -203,4 +204,48 @@ func toCell(to []string) string {
 		return emptyCell
 	}
 	return strings.Join(to, ",")
+}
+
+// addressPattern is the shape pi-worker mints an address in (dotfiles-1d1f):
+// `a` plus 26 Crockford base32 characters. Kept here rather than imported
+// because this package renders whatever `pi-worker messages --json` hands it
+// and never parses the bus itself — this is a display heuristic about one
+// string, not a second implementation of the address type.
+var addressPattern = regexp.MustCompile(`^a[0-9A-HJKMNP-TV-Z]{26}$`)
+
+// How much of an unresolved address's tail the log shows. The tail is the
+// RANDOM half of the id; the leading characters are a millisecond timestamp,
+// so two addresses minted in the same second share their first eleven
+// characters. Head-truncating an address the way `pad` truncates any other
+// cell would therefore render two different senders identically — which is
+// worse than unreadable, because it looks like one sender.
+const addressTailChars = 6
+
+// shortAddress renders an address as an elided tail, and anything else
+// unchanged.
+//
+// `pi-worker messages` already resolves an address to its label, so a cell
+// reaching this holding an address is one the registry could not resolve —
+// the [[adr0017]] fallback, where the raw address is the only honest answer.
+// This does not replace it with a guess; it elides it, marked, to the part
+// that distinguishes one from another. The full address is in the detail pane
+// (detail.go), which is the view an operator copies from.
+func shortAddress(s string) string {
+	if !addressPattern.MatchString(s) {
+		return s
+	}
+	return "…" + s[len(s)-addressTailChars:]
+}
+
+// toCellShort is toCell with each recipient elided by shortAddress — the log
+// pane's form. detail.go keeps toCell, and so keeps the full addresses.
+func toCellShort(to []string) string {
+	if len(to) == 0 {
+		return emptyCell
+	}
+	short := make([]string, 0, len(to))
+	for _, a := range to {
+		short = append(short, shortAddress(a))
+	}
+	return strings.Join(short, ",")
 }

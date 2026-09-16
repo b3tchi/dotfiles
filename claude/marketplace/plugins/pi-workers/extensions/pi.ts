@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
  * cross-language check in pi.test.ts, which is what catches the two halves
  * drifting silently (sp029 T2).
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * A bus message addresses work — it never carries it. This bounds the WHOLE
@@ -875,10 +875,15 @@ export interface PeerEnvelope {
  * body visibly scoped to that body; it does not authenticate `from`, which is
  * self-asserted by the sender.
  */
-export function peerMessageText(envelope: PeerEnvelope): string {
+export function peerMessageText(envelope: PeerEnvelope, fromLabel?: string): string {
   const body =
     typeof envelope.content === "string" ? envelope.content : JSON.stringify(envelope.content);
-  return `<peer-message from="${envelope.from}">\n${body}\n</peer-message>`;
+  // dotfiles-1d1f: `from` is a minted address on the wire. `fromLabel` is what
+  // the registry resolved it to, and the raw address is the fallback when
+  // nothing did — never a blank and never a nearest-match name, because
+  // `from=""` would read as "nobody sent this" ([[adr0017]]).
+  const sender = fromLabel && fromLabel.length > 0 ? fromLabel : envelope.from;
+  return `<peer-message from="${sender}">\n${body}\n</peer-message>`;
 }
 
 /** The id and suffix widths T2/T3 fixed the queue row's shape around. */
@@ -913,12 +918,19 @@ export function parseQueueRows(raw: string): QueueRow[] {
 }
 
 export interface BusWatcherIO {
-  /** Raw queue file contents for `uid`, or null if there is no queue yet. */
-  readQueue(uid: string): string | null;
+  /** Raw queue file contents for `address`, or null if there is no queue yet. */
+  readQueue(address: string): string | null;
   /** Raw message contents for `id`, or null — an inert row (pruned, or a crashed fan-out). */
   readMessage(id: string): string | null;
   /** Mark a row read, driving T4's `queue-mark-read` — never a second marking path. */
-  markRead(uid: string, id: string): Promise<void>;
+  markRead(address: string, id: string): Promise<void>;
+  /**
+   * The label an address resolves to, or the raw address (dotfiles-1d1f).
+   *
+   * Display only. Nothing keys delivery on what this returns, which is why an
+   * unresolvable address is answered with itself rather than raised on.
+   */
+  labelFor(address: string): Promise<string>;
   log(line: string): void;
 }
 
@@ -934,14 +946,19 @@ export interface BusWatcherIO {
  * `## conventions` calls out.
  */
 export function createFsIo(busDir: string, exec: ExecFn, modulePath: string): BusWatcherIO {
-  // uid and id are ours to generate or come from the bus's own vocabulary
-  // (crockford characters); refusing anything else keeps a malformed queue
-  // row from ever reaching a shell argument.
+  // Addresses and ids are ours to generate or come from the bus's own
+  // vocabulary (crockford characters); refusing anything else keeps a
+  // malformed queue row from ever reaching a shell argument.
   const safe = /^[A-Za-z0-9._-]+$/;
+  // dotfiles-1d1f: an address is immutable and its label effectively is too
+  // (a label is only reassigned by releasing the address), so one resolution
+  // per address for the life of the process is enough. Without the cache a
+  // poll would fork a nu process per delivered message, once per tick.
+  const labels = new Map<string, string>();
   return {
-    readQueue: (uid) => {
+    readQueue: (address) => {
       try {
-        return readFileSync(join(busDir, "queue", uid), "utf8");
+        return readFileSync(join(busDir, "queue", address), "utf8");
       } catch {
         return null; // no queue yet is not an error — nobody has sent to this address
       }
@@ -953,16 +970,35 @@ export function createFsIo(busDir: string, exec: ExecFn, modulePath: string): Bu
         return null; // inert: pruned, or a crashed fan-out (see bus-wait)
       }
     },
-    markRead: async (uid, id) => {
-      if (!safe.test(uid) || !safe.test(id)) {
-        console.error(`pi-worker: refusing to mark read — unsafe address or id (${uid}, ${id})`);
+    markRead: async (address, id) => {
+      if (!safe.test(address) || !safe.test(id)) {
+        console.error(`pi-worker: refusing to mark read — unsafe address or id (${address}, ${id})`);
         return;
       }
       try {
-        await exec("nu", ["-c", `use '${modulePath}' *; queue-mark-read '${uid}' '${id}'`], {});
+        await exec("nu", ["-c", `use '${modulePath}' *; queue-mark-read '${address}' '${id}'`], {});
       } catch (err) {
-        console.error(`pi-worker: queue-mark-read failed for ${uid}/${id}: ${err}`);
+        console.error(`pi-worker: queue-mark-read failed for ${address}/${id}: ${err}`);
       }
+    },
+    labelFor: async (address) => {
+      const cached = labels.get(address);
+      if (cached !== undefined) return cached;
+      // An address off the wire reaches a shell argument here, so it passes
+      // the same charset guard markRead applies — and an address that fails
+      // it is answered with itself rather than resolved, which is the same
+      // answer an unregistered one gets.
+      if (!safe.test(address)) return address;
+      let label = address;
+      try {
+        const out = await exec("nu", ["-c", `use '${modulePath}' *; address-name '${address}'`], {});
+        const trimmed = out.code === 0 ? out.stdout.trim() : "";
+        if (trimmed.length > 0) label = trimmed;
+      } catch {
+        // Never a guess: the raw address stands (adr0017).
+      }
+      labels.set(address, label);
+      return label;
     },
     log: (line) => console.error(line),
   };
@@ -979,14 +1015,14 @@ export interface BusWatcher {
  * One message per poll, and a deferral stops the scan rather than skipping
  * ahead, for the same reordering reason as `createInboxWatcher`.
  */
-export function createBusWatcher(host: WatcherHost, uid: string, io: BusWatcherIO): BusWatcher {
+export function createBusWatcher(host: WatcherHost, address: string, io: BusWatcherIO): BusWatcher {
   return {
     async poll(): Promise<string[]> {
       if (typeof host.sendUserMessage !== "function") {
         io.log("pi-worker: host exposes no sendUserMessage; bus delivery is inert");
         return [];
       }
-      const raw = io.readQueue(uid);
+      const raw = io.readQueue(address);
       if (raw === null) return []; // no queue yet: zero mail, not an error
 
       const unread = parseQueueRows(raw)
@@ -1002,7 +1038,7 @@ export function createBusWatcher(host: WatcherHost, uid: string, io: BusWatcherI
           envelope = JSON.parse(messageRaw);
         } catch {
           io.log(`pi-worker: unreadable bus message ${row.id}; marking read to stop retrying`);
-          await io.markRead(uid, row.id);
+          await io.markRead(address, row.id);
           continue;
         }
 
@@ -1016,9 +1052,13 @@ export function createBusWatcher(host: WatcherHost, uid: string, io: BusWatcherI
         // Marked BEFORE the delivery attempt: a throw from sendUserMessage
         // must not cost a redelivery (sp029 T7) — the row is already
         // committed read by the time the call is made.
-        await io.markRead(uid, row.id);
+        await io.markRead(address, row.id);
+        // dotfiles-1d1f: resolved AFTER the mark, so a resolver that hangs or
+        // fails cannot cost a redelivery either. The fallback inside
+        // `labelFor` means this never throws and never blanks the sender.
+        const fromLabel = await io.labelFor(envelope.from);
         try {
-          host.sendUserMessage(peerMessageText(envelope), {
+          host.sendUserMessage(peerMessageText(envelope, fromLabel), {
             deliverAs: decision.mode as "steer" | "followUp",
           });
         } catch (err) {
@@ -1069,7 +1109,10 @@ export function createDualWatcher(
   host: WatcherHost,
   identity: WorkerIdentity,
   inboxDir: string,
-  uid: string,
+  // dotfiles-1d1f: the worker's own minted ADDRESS (PI_WORKER_ADDRESS), which
+  // is what `bus/queue/<address>` is named by. Its label names nothing on the
+  // bus, so passing one here would poll an empty queue forever — silently.
+  address: string,
   io: WatcherIO,
   busIo: BusWatcherIO,
 ): DualWatcher {
@@ -1079,7 +1122,7 @@ export function createDualWatcher(
     sendUserMessage: host.sendUserMessage,
   };
   const inbox = createInboxWatcher(shim, identity, inboxDir, io);
-  const bus = createBusWatcher(shim, uid, busIo);
+  const bus = createBusWatcher(shim, address, busIo);
 
   return {
     async poll(): Promise<DualDelivery[]> {
@@ -1101,15 +1144,71 @@ export function createDualWatcher(
 }
 
 /**
- * Mint an address for a session nobody spawned.
+ * The LABEL a session nobody spawned proposes for itself.
  *
- * Not a lock: two sessions claiming at the same instant must not collide,
- * which 48 bits of randomness makes astronomically unlikely without needing
- * to check anything on disk — the same reasoning `mint-msg-id` uses on the nu
- * side for message ids.
+ * dotfiles-1d1f: a label, not an address. It used to be both — `self-<hex>`
+ * was written straight into `to`/`from` and named a queue file — and the
+ * randomness here was what stood in for uniqueness. The address is minted by
+ * the nu module's `claim-address` now and cannot collide by construction, so
+ * this only has to produce a name a display can show; the 48 bits stay
+ * because two rows both reading `self` would be a roster nobody can read.
  */
-export function claimSelfAddress(): string {
+export function claimSelfAddressLabel(): string {
   return `self-${randomBytes(6).toString("hex")}`;
+}
+
+/** What a self-claiming session got: the address on the wire, and its label. */
+export interface SelfAddress {
+  address: string;
+  label: string;
+}
+
+/**
+ * Claim an address for a session nobody spawned.
+ *
+ * Goes through the nu module's own `claim-address` rather than minting
+ * anything here, for the reason `resolveProjectBusDir` shells out too: one
+ * implementation of the registry, in the module that owns it. A session that
+ * minted its own address locally would have a queue nobody could resolve a
+ * label for, and no presence directory to publish into.
+ *
+ * Null covers every way this can fail to answer — no project, the module
+ * missing, a refusal, or an empty answer. A session that could not claim
+ * starts no watcher, silently; an invented address would be worse than none,
+ * because it would name a queue nothing ever writes to.
+ */
+export async function claimSelfAddress(
+  exec: ExecFn,
+  modulePath: string,
+  repo: string,
+): Promise<SelfAddress | null> {
+  const label = claimSelfAddressLabel();
+  try {
+    const out = await exec(
+      "nu",
+      ["-c", `use '${modulePath}' *; claim-address '${repo}' '${label}' --role "self" --kind "self"`],
+      {},
+    );
+    if (out.code !== 0) return null;
+    const address = out.stdout.trim();
+    return address.length > 0 ? { address, label } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A spawned worker's own bus address, from its window environment.
+ *
+ * Null rather than the uid when PI_WORKER_ADDRESS is absent, and deliberately:
+ * PI_WORKER_UID is a LABEL and names nothing under `bus/queue/` since
+ * dotfiles-1d1f, so falling back to it would poll a file nothing writes to and
+ * report zero mail forever — the same silent-consumer failure dotfiles-oj4c
+ * and dotfiles-9oa4 both were. No address means no bus half, said out loud.
+ */
+export function workerBusAddress(env: Record<string, string | undefined>): string | null {
+  const address = env.PI_WORKER_ADDRESS;
+  return address && address.length > 0 ? address : null;
 }
 
 /**
@@ -3036,19 +3135,22 @@ export default function piWorker(pi: ExtensionAPI): void {
   // resolving a project that may not exist.
   if (!process.env.PI_WORKER_UID && exec) {
     const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
-    void resolveProjectBusDir(exec, modulePath).then((busDir) => {
+    void resolveProjectBusDir(exec, modulePath).then(async (busDir) => {
       // Not standing in a project: no address claimed, no watcher started,
       // and nothing thrown — the edge case this branch exists for.
       if (!busDir) return;
 
-      const selfUid = claimSelfAddress();
+      // dotfiles-1d1f: a real claim through the nu module, so this session is
+      // an addressable party like any other — its queue is named by a minted
+      // address, its label resolves for every display, and (unlike before)
+      // presence-write has a directory to publish into, because
+      // `claim-address` created one.
+      const claimed = await claimSelfAddress(exec, modulePath, process.cwd());
+      if (!claimed) return;
+
       const busIo = createFsIo(busDir, exec, modulePath);
-      // A self-claimed session never runs `claim-address` (claimSelfAddress
-      // mints only a name, not a directory), so presence-write refuses every
-      // publish for it — the expected "no claimed address" outcome
-      // createPresencePublisher swallows rather than logs.
       const tracker = createAgentStateTracker(pi as unknown as StateEventSource, {
-        uid: selfUid,
+        uid: claimed.address,
         exec,
         modulePath,
         repo: process.cwd(),
@@ -3058,7 +3160,7 @@ export default function piWorker(pi: ExtensionAPI): void {
         sendUserMessage: api.sendUserMessage?.bind(pi),
         agentState: () => tracker.current(),
       };
-      const watcher = createBusWatcher(host, selfUid, busIo);
+      const watcher = createBusWatcher(host, claimed.address, busIo);
 
       startWatcherLoop({
         checkAlive: () => existsSync(busDir),
@@ -3098,11 +3200,15 @@ export default function piWorker(pi: ExtensionAPI): void {
   // uses. A worker reaching this line always carries a non-empty
   // PI_WORKER_UID (workerInboxDir's guard above already returned otherwise),
   // so there is no separate "unset uid" branch needed here.
+  // dotfiles-1d1f: presence is filed under the ADDRESS, so the address is what
+  // the publisher passes when the window carries one. `presence-write` resolves
+  // a label too, but the address is exact — it cannot be ambiguous.
+  const busAddress = workerBusAddress(process.env as Record<string, string | undefined>);
   const tracker = createAgentStateTracker(
     pi as unknown as StateEventSource,
     exec
       ? {
-          uid,
+          uid: busAddress ?? uid,
           exec,
           modulePath: join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu"),
           repo: identity.cwd,
@@ -3205,18 +3311,29 @@ export default function piWorker(pi: ExtensionAPI): void {
     readQueue: () => null,
     readMessage: () => null,
     markRead: async () => {},
+    labelFor: async (address) => address,
     log: (line) => io.log(line),
   };
-  if (exec) {
+  // dotfiles-1d1f: no PI_WORKER_ADDRESS means no bus half, said out loud
+  // rather than substituted with the uid. `bus/queue/` is named by addresses
+  // now, so polling the label would read a file nothing writes to and report
+  // clean zero mail forever.
+  if (!busAddress) {
+    io.log(
+      "pi-worker: no PI_WORKER_ADDRESS in this window; the project bus is inert for this session (legacy inbox delivery is unaffected)",
+    );
+  }
+  if (exec && busAddress) {
     const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
     void resolveProjectBusDir(exec, modulePath).then((busDir) => {
       if (busDir) busIo = createFsIo(busDir, exec, modulePath);
     });
   }
-  const watcher = createDualWatcher(host, identity, inboxDir, uid, io, {
-    readQueue: (u) => busIo.readQueue(u),
+  const watcher = createDualWatcher(host, identity, inboxDir, busAddress ?? "", io, {
+    readQueue: (a) => busIo.readQueue(a),
     readMessage: (id) => busIo.readMessage(id),
-    markRead: (u, id) => busIo.markRead(u, id),
+    markRead: (a, id) => busIo.markRead(a, id),
+    labelFor: (a) => busIo.labelFor(a),
     log: (line) => busIo.log(line),
   });
   startWatcherLoop({

@@ -58,12 +58,14 @@ import {
   createFsIo,
   parseQueueRows,
   peerMessageText,
-  claimSelfAddress,
   resolveProjectBusDir,
   startWatcherLoop,
   MSG_ID_CHARS,
   QUEUE_SUFFIX_CHARS,
   createDualWatcher,
+  claimSelfAddressLabel,
+  claimSelfAddress,
+  workerBusAddress,
 } from "./pi.ts";
 
 // dotfiles-oj4c: the shape the nushell writer ACTUALLY produces. These
@@ -2459,14 +2461,64 @@ describe("inbox watcher against a fake Pi", () => {
 // reused unchanged — only the gating and the mark-read mechanism are new.
 
 describe("self-claimed address", () => {
-  test("looks like an address, not a run-scoped uid", () => {
-    expect(claimSelfAddress()).toMatch(/^self-[0-9a-f]{12}$/);
+  test("the LABEL it proposes looks like a name, not an address", () => {
+    expect(claimSelfAddressLabel()).toMatch(/^self-[0-9a-f]{12}$/);
   });
 
-  test("two thousand claims in a row do not collide", () => {
-    // Not a lock — see ## solution. 48 bits of randomness is the guarantee.
-    const seen = new Set(Array.from({ length: 2000 }, () => claimSelfAddress()));
+  test("two thousand labels in a row do not collide", () => {
+    const seen = new Set(Array.from({ length: 2000 }, () => claimSelfAddressLabel()));
     expect(seen.size).toBe(2000);
+  });
+
+  // dotfiles-1d1f: the label is not the address. A self-claiming session goes
+  // through the nu module's `claim-address` like every other addressable
+  // party, so its queue is named by a minted address and its label resolves
+  // for display.
+  test("claims through the nu module and reports the minted address", async () => {
+    const calls: string[] = [];
+    const exec = async (_c: string, args: string[]) => {
+      calls.push(args.join(" "));
+      return { stdout: "a01K4ZQ7X8Y0000000000000000\n", stderr: "", code: 0, killed: false };
+    };
+    const claimed = await claimSelfAddress(exec, "/mod.nu", "/repo");
+    expect(claimed).not.toBeNull();
+    expect(claimed!.address).toBe("a01K4ZQ7X8Y0000000000000000");
+    expect(claimed!.label).toMatch(/^self-[0-9a-f]{12}$/);
+    expect(calls.join(" ")).toContain("claim-address");
+  });
+
+  test("a refused or missing claim yields null rather than a made-up address", async () => {
+    const refused = async () => ({ stdout: "", stderr: "not a repo", code: 1, killed: false });
+    expect(await claimSelfAddress(refused, "/mod.nu", "/repo")).toBeNull();
+    const threw = async () => {
+      throw new Error("nu not found");
+    };
+    expect(await claimSelfAddress(threw, "/mod.nu", "/repo")).toBeNull();
+  });
+
+  test("an address the module did not answer with is never invented", async () => {
+    const empty = async () => ({ stdout: "   \n", stderr: "", code: 0, killed: false });
+    expect(await claimSelfAddress(empty, "/mod.nu", "/repo")).toBeNull();
+  });
+});
+
+// dotfiles-1d1f: a spawned worker reads the queue named by PI_WORKER_ADDRESS.
+// PI_WORKER_UID is its LABEL and names nothing on the bus any more, so reading
+// a queue by it would find an empty queue forever — silently, which is the
+// dotfiles-oj4c/dotfiles-9oa4 failure shape repeated.
+describe("a spawned worker's bus address", () => {
+  test("comes from PI_WORKER_ADDRESS", () => {
+    expect(workerBusAddress({ PI_WORKER_ADDRESS: "a01K4ZQ7X8Y0000000000000000", PI_WORKER_UID: "impl-1" })).toBe(
+      "a01K4ZQ7X8Y0000000000000000",
+    );
+  });
+
+  test("is null when the window carries no address, never the label instead", () => {
+    // Falling back to the uid would name a queue nothing writes to, so the
+    // worker would poll an empty file and report nothing wrong.
+    expect(workerBusAddress({ PI_WORKER_UID: "impl-1" })).toBeNull();
+    expect(workerBusAddress({ PI_WORKER_ADDRESS: "", PI_WORKER_UID: "impl-1" })).toBeNull();
+    expect(workerBusAddress({})).toBeNull();
   });
 });
 
@@ -2516,7 +2568,7 @@ describe("parsing queue rows", () => {
 describe("peer message text", () => {
   const message = (content: unknown) =>
     peerMessageText({
-      protocol: 3,
+      protocol: 4,
       kind: "message",
       id: "x",
       from: "peer-b",
@@ -2524,6 +2576,38 @@ describe("peer message text", () => {
       created: "t",
       content,
     });
+
+  // dotfiles-1d1f: `from` is an address on the wire. The worker is shown the
+  // sender's LABEL, because "a01K4ZQ…" is not something it can reason about or
+  // reply to by name.
+  test("shows the sender's resolved label rather than its raw address", () => {
+    const envelope = {
+      protocol: 4 as const,
+      kind: "message",
+      id: "x",
+      from: "a01K4ZQ7X8Y0000000000000000",
+      to: ["a01K4ZQ7X8Y0000000000000001"],
+      created: "t",
+      content: "hello",
+    };
+    expect(peerMessageText(envelope, "impl-2")).toBe(`<peer-message from="impl-2">\nhello\n</peer-message>`);
+  });
+
+  test("an unresolvable sender shows its raw address, never a blank or a guess", () => {
+    // adr0017: unknown is an observation, not a claim. A blank `from=""` would
+    // read as "nobody sent this".
+    const envelope = {
+      protocol: 4 as const,
+      kind: "message",
+      id: "x",
+      from: "a01K4ZQ7X8Y0000000000000000",
+      to: [],
+      created: "t",
+      content: "hello",
+    };
+    expect(peerMessageText(envelope)).toContain(`from="a01K4ZQ7X8Y0000000000000000"`);
+    expect(peerMessageText(envelope, "")).toContain(`from="a01K4ZQ7X8Y0000000000000000"`);
+  });
 
   test("preserves a multi-line body byte-for-byte inside an explicit boundary", () => {
     const body = "first line\n  indented\ttext\n\nlast line";
@@ -2593,6 +2677,10 @@ describe("bus watcher against a fake Pi", () => {
           state.set(msgId, true);
           marks.push({ uid, msgId });
         },
+        // dotfiles-1d1f: display resolution. The fake answers with the raw
+        // address, which is exactly the real fallback for one the registry
+        // does not resolve.
+        labelFor: async (address: string) => address,
         log: (line: string) => logs.push(line),
       },
     };
@@ -2773,6 +2861,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
           state.set(msgId, true);
           marks.push({ uid, msgId });
         },
+        labelFor: async (address: string) => address,
         log: (_line: string) => {},
       },
     };
@@ -2876,7 +2965,13 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
 
   test("an empty queue and an empty inbox deliver nothing, and the bus is read but not marked", async () => {
     const io = fakeInboxIO({});
-    const busIo = { readQueue: () => null, readMessage: () => null, markRead: async () => {}, log: (_l: string) => {} };
+    const busIo = {
+      readQueue: () => null,
+      readMessage: () => null,
+      markRead: async () => {},
+      labelFor: async (a: string) => a,
+      log: (_l: string) => {},
+    };
     const { host, sent } = fakeHost("idle");
 
     expect(await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll()).toEqual([]);
@@ -2927,6 +3022,47 @@ describe("filesystem-backed bus IO", () => {
     expect(calls[0].command).toBe("nu");
     expect(calls[0].args.join(" ")).toContain("queue-mark-read");
     expect(calls[0].args.join(" ")).toContain("self-a");
+  });
+
+  // dotfiles-1d1f: the display resolver. One nu call per address, cached,
+  // because a poll that resolved every sender again on every tick would fork
+  // a process per message.
+  test("labelFor resolves an address through the nu module and caches it", async () => {
+    const calls: string[] = [];
+    const exec = async (_c: string, args: string[]) => {
+      calls.push(args.join(" "));
+      return { stdout: "impl-2\n", stderr: "", code: 0, killed: false };
+    };
+    const io = createFsIo("/bus", exec, "/mod.nu");
+
+    expect(await io.labelFor("a01K4ZQ7X8Y0000000000000000")).toBe("impl-2");
+    expect(await io.labelFor("a01K4ZQ7X8Y0000000000000000")).toBe("impl-2");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("address-name");
+  });
+
+  test("labelFor falls back to the raw address on any failure, never to a guess", async () => {
+    const refused = async () => ({ stdout: "", stderr: "boom", code: 1, killed: false });
+    expect(await createFsIo("/bus", refused, "/mod.nu").labelFor("a01K4ZQ7X8Y0000000000000000")).toBe(
+      "a01K4ZQ7X8Y0000000000000000",
+    );
+    const threw = async () => {
+      throw new Error("nu missing");
+    };
+    expect(await createFsIo("/bus", threw, "/mod.nu").labelFor("a01K4ZQ7X8Y0000000000000000")).toBe(
+      "a01K4ZQ7X8Y0000000000000000",
+    );
+  });
+
+  test("labelFor never shells out for an unsafe address", async () => {
+    let called = false;
+    const exec = async () => {
+      called = true;
+      return { stdout: "x", stderr: "", code: 0, killed: false };
+    };
+    const io = createFsIo("/bus", exec, "/mod.nu");
+    expect(await io.labelFor("a01K'; rm -rf /")).toBe("a01K'; rm -rf /");
+    expect(called).toBe(false);
   });
 
   test("refuses to mark read with an unsafe address or id, never reaching exec", async () => {

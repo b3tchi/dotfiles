@@ -363,8 +363,19 @@ let cases = [
             assert-eq (bus-status "impl-a" --run "run-1" | get state) "accepted" "the old worker is left as it was"
             assert-eq (bus-status $back.uid --run "run-1" | get state) "created" "the new one has said nothing yet"
 
+            # dotfiles-1d1f: a FRESH address, and this is the finding that
+            # ruled out addressing by Pi session uuid. The session is shared
+            # with the predecessor by design (asserted above), so addressing by
+            # it would give attempt 1 and attempt 2 ONE address — and a message
+            # meant for the successor could be consumed against the
+            # predecessor's backlog.
+            assert-true ($back.address != $w.address) "the successor gets an address of its own"
+            let before = (bus-identity-of "impl-a" --run "run-1")
+            assert-eq $before.address $w.address "and the predecessor keeps its own"
+
             let identity = (bus-identity-of $back.uid --run "run-1")
             assert-eq $identity.session "sid-1" ""
+            assert-eq $identity.address $back.address "the address is on the record the envelopes are addressed from"
             assert-eq ($identity | get -o respawned_from) "impl-a" "the lineage is on the bus, not only in the report"
             assert-eq (worker-liveness $back.window_id --socket $t.socket | get verdict) "live" "and it is actually running"
 

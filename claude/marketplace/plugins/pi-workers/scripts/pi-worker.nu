@@ -79,7 +79,38 @@ export const ISOLATIONS = ["worktree" "main"]
 # The stale records under `state-root` are deliberately NOT rewritten. They
 # belong to stopped/accepted/gone workers, nothing resumable is lost, and
 # deleting durable state is an operator's decision rather than a migration's.
-export const PROTOCOL_VERSION = 3
+#
+# 3 -> 4 (dotfiles-1d1f): `from`/`to` carry an immutable ADDRESS, minted at
+# `claim-address` time, rather than the minted NAME (`<role>-<n>` for a
+# worker, `r<n>` for a run) they used to. A v3 record's addresses are names,
+# and a name is no longer something this build will resolve as an address.
+#
+# Bumped for the FAILURE MESSAGE again, per [[adr0033]] — a hard cutover with
+# zero live workers, so nothing is being bridged and no dual-accept exists.
+# Without the bump, a v3 identity record would survive every gate and then
+# resolve `impl-1` as though it were an address, which is the silent
+# misdelivery this change exists to make impossible. With it, the version
+# check fires first: "unknown protocol version 3: this build speaks version 4
+# only".
+#
+# WHY A SEPARATELY MINTED ADDRESS, and not the Pi session uuid (proposed, and
+# rejected on two findings):
+#
+#   1. A commissioner has no session. `bus/queue/r2` is a real queue and
+#      every result is addressed `to: ["r2"]`, but `agents/r2/` holds only
+#      worker uids — a run has no identity record and no Pi session, so
+#      session-addressing would leave `to: ["r2"]` with nothing to resolve.
+#      A run therefore gets an address record of its own, in the same
+#      registry a worker's lives in (see `claim-address`).
+#   2. One session spans several uids. A respawn continues the accepted
+#      worker's session under a NEW uid, so addressing by session would give
+#      predecessor and successor one address — attempt 1 and attempt 2
+#      indistinguishable, and a message for the new worker consumable
+#      against the old one's backlog.
+#
+# As before, the stale records under `state-root` are NOT rewritten or
+# deleted: that is an operator's decision, not a migration's.
+export const PROTOCOL_VERSION = 4
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
 # record. Anything approaching this size means prose is being copied that
@@ -153,20 +184,20 @@ export const OBSERVATIONAL_VERDICTS = ["unknown" "gone"]
 # that `impl-<subject>@<project>` still reads in a window list.
 export const MAX_SUBJECT_CHARS = 40
 
-# An ADDRESS is worn as a file name, not merely read: the queue `bus-send`
-# appends to is `queue/<address>` and nothing else (`queue-path`), and a
-# claimed address is also a directory of its own under the project
-# (`claim-address`, `worker-dir`). The hard boundary is therefore the
-# filesystem's NAME_MAX, measured at 255 bytes here — 255 creates, 256 fails
-# ENAMETOOLONG.
+# A LABEL is worn as a file name, not merely read: the placement record is a
+# directory named by it (`agent-state-dir`, `worker-dir`), and it is also a
+# tmux window name and a git branch component. The hard boundary is therefore
+# the filesystem's NAME_MAX, measured at 255 bytes here — 255 creates, 256
+# fails ENAMETOOLONG.
 #
-# The cap is set well below that boundary rather than at it. Every address
+# dotfiles-1d1f: the QUEUE file name is a minted address now (`queue-path`),
+# which is a fixed 27 characters and cannot come near this. What the cap still
+# governs is the label a party is claimed under (`claim-address`) — every one
 # this system mints is `<role>-<n>` or `r<n>` (`mint-uid`, `next-run-id`), so
 # 64 is already far more than anything real ever needs, and the ~190 bytes of
-# headroom mean a future name that composes an address with a suffix — the
-# `<name>.marker` and `<sequence>.json` shapes already used beside it — cannot
-# reach NAME_MAX either. A cap AT 255 would have to be revisited the first
-# time anything is appended to an address.
+# headroom mean a future label composed with a suffix — the `<name>.marker`
+# and `<sequence>.json` shapes already used beside it — cannot reach NAME_MAX
+# either.
 #
 # Characters, not bytes, and the two are the same count on purpose: the guard
 # beside this one admits only `[A-Za-z0-9._-]`, all single-byte.
@@ -659,7 +690,17 @@ export def validate-envelope [envelope: record, --stored] {
 # prompt. Inferring success from an idle pane or an exited process is the
 # failure this envelope exists to prevent, so the absence of a result is itself
 # reported, as a protocol error.
-export def settled-without-result [run: string, uid: string, sequence: int, created: string]: nothing -> record {
+# dotfiles-1d1f: `--from`/`--to` carry the addresses when the caller has them
+# (`bus-settled` reads them off the identity), and fall back to the labels
+# when it does not — the same reasoning as `bus-identity`'s own pair.
+export def settled-without-result [
+    run: string
+    uid: string
+    sequence: int
+    created: string
+    --from: string = ""
+    --to: string = ""
+]: nothing -> record {
     # dotfiles-oj4c: `code` became `status`. The value did not change, because
     # it never needed to — `protocol_error` was already a WORKER_STATE. That
     # the rename was the whole content of the old `error` kind is why there is
@@ -672,7 +713,9 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
     # travels — declared, not read off the kind. `sequence` and `created` are
     # the caller's to supply: this is also the shape `bus-settled` writes into
     # the legacy tree, where `claim-slot` stamps the real slot number.
-    make-envelope "state" $payload --from $uid --to [$run]
+    let from_ = (if ($from | is-not-empty) { $from } else { $uid })
+    let to_ = (if ($to | is-not-empty) { $to } else { $run })
+    make-envelope "state" $payload --from $from_ --to [$to_]
     | merge {sequence: $sequence, created: $created}
 }
 
@@ -904,12 +947,20 @@ def resolve-project-slug [cwd: string]: nothing -> string {
 # project level would have filed both under one path, where one worker's
 # `stopped` marker silently applied to the other.
 #
-# dotfiles-bg65 removed the premise rather than the nesting: a uid is now
-# unique per PROJECT (`mint-uid`/`claim-address`), so the `<run>` level is
-# vestigial — one uid can only ever appear under one run of it. It stays
-# because every reader and writer here is `(run, uid)`-shaped and flattening
-# them is a migration of stored state, not a rename; `project-uids` and
-# `resolve-run` both simply search across the level rather than within it.
+# dotfiles-bg65 removed the premise rather than the nesting: a uid is unique
+# per PROJECT, so the `<run>` level is vestigial — one uid can only ever appear
+# under one run of it. It stays because every reader and writer here is
+# `(run, uid)`-shaped and flattening them is a migration of stored state, not
+# a rename; `project-uids` and `resolve-run` both simply search across the
+# level rather than within it.
+#
+# dotfiles-1d1f: this tree is the reason a LABEL is still reserved after
+# envelopes stopped being addressed by one. `claim-address` never refuses a
+# duplicate label — an address cannot collide, so it has nothing to protect —
+# but a path is a path, and two workers filed here under one uid means
+# `resolve-run` can reach only one of them. `claim-unique-address` reserves
+# the label atomically for exactly that reason, and `resolve-run` refuses
+# rather than picking a match if one ever gets past it.
 def agent-state-dir [slug: string, run: string, uid: string]: nothing -> string {
     state-root | path join $slug "agents" $run $uid
 }
@@ -968,33 +1019,15 @@ def identity-log-dir [run: string, uid: string]: nothing -> any {
     agent-state-dir $slug $run $uid | path join "identity"
 }
 
-# ------------------------------------------ project-wide addresses (dotfiles-bg65)
-#
-# A uid is an address on the PROJECT's bus: `bus/queue/<uid>` is one file per
-# agent for the whole project, a message's `to` list names bare uids, and
-# `resolve-run` answers a uid by searching one project's whole agents tree.
-# Uniqueness therefore has to hold across the project — every run of it — and
-# for a while it did not: `mint-uid` searched a single run's directory, which
-# was a real namespace only while `--run` was a caller-supplied grouping that
-# several workers shared. sp029 T9 retired `--run`, so every spawn now mints
-# its own run and that directory is empty BY CONSTRUCTION — every ordinary
-# spawn of a role minted `<role>-1`, forever. Two live workers then shared one
-# queue, and `resolve-run` reached whichever run sorted first, leaving the
-# other addressable by nothing but `rm -rf` (observed in the sp029 T11 smoke).
-#
-# The project's queue directory, for a path standing inside it.
+# The project's queue directory, for a caller that already holds the slug and
+# must NOT re-derive it from a path.
 #
 # The tolerant sibling of `project-dir`: same slug, same directory, but it
-# answers "" instead of raising when there is no runtime dir, because this is
-# only ever consulted to widen a taken-address set. A project with no bus
-# tree yet has no queues, which is the same answer an error would have to be
-# turned into at every call site.
-def project-queue-dir [base: string]: nothing -> string {
-    queue-dir-of (resolve-project-slug $base)
-}
-
-# The same directory, for a caller that already holds the slug and must NOT
-# re-derive it from a path. `worker-release` is that caller: `accept` deletes
+# answers "" instead of raising when there is no runtime dir, because a
+# project with no bus tree yet has no queues — the same answer an error would
+# have to be turned into at every call site.
+#
+# `worker-release` is why the slug is passed rather than derived: `accept` deletes
 # the worktree an identity names, and slugging a path that no longer exists
 # answers with `resolve-project-slug`'s fallback bucket instead of the project
 # the worker was actually filed under.
@@ -1004,35 +1037,456 @@ def queue-dir-of [slug: string]: nothing -> string {
     $root | path join $BUS_DIRNAME $slug "bus" "queue"
 }
 
-# Where this project's claimed addresses live: one directory per uid.
+# ------------------------------------ the address registry (dotfiles-1d1f)
 #
-# Under `state-root`, beside the placement record and for the same reason
-# (sp029 T6): the runtime tree is wiped at logout while a worker's identity —
-# and so its address — outlives the login session that spawned it. A claim
-# whose only record was on the runtime bus would be forgotten by the next
-# login, which is exactly when re-minting an address that still resolves does
-# the most damage.
+# An address is MINTED, not derived from a name. That is the whole change.
+#
+# Every address this system used to mint was `<role>-<n>` or `r<n>`, and
+# uniqueness was a property the minting function MAINTAINED rather than one
+# the identifier guaranteed. It had already failed once: `mint-uid` searched a
+# single run's directory, so after sp029 T9 retired `--run` every spawn of a
+# role minted `<role>-1` forever. Two live workers shared one queue and
+# `resolve-run` reached whichever run sorted first, "leaving the other
+# addressable by nothing but `rm -rf`" (dotfiles-bg65, observed in the sp029
+# T11 smoke). Widening the check to the whole project fixed that instance and
+# left the shape intact — still a check, still maintained, still one bug away.
+#
+# So `from`/`to` carry an address that cannot collide by construction, and a
+# NAME becomes a label: what a display renders and what the CLI accepts, never
+# what delivery keys on. Name duplication is then structurally incapable of
+# causing misdelivery, which is a different kind of guarantee from "the minter
+# checks first".
+#
+# The registry, under `state-root` beside the placement record and for the
+# same reason (sp029 T6) — the runtime tree is wiped at logout while a
+# worker's identity, and therefore its address, outlives the login session:
+#
+#   <state-root>/<slug>/addresses/<address>/label      {name, role, project, kind}
+#   <state-root>/<slug>/addresses/<address>/presence   the worker's own report
+#
+# Both addressable parties live here. A WORKER also has a placement record at
+# `agents/<run>/<uid>/`, keyed by its label, and that tree is deliberately
+# untouched: every reader and writer of it is `(run, uid)`-shaped, `resolve-run`
+# and `project-uids` search it by label, and re-keying it would be a migration
+# of stored state rather than this change. A RUN has no placement record — it
+# places nothing — and it never had one, which is exactly why the Pi session
+# uuid could not serve as its address. `addresses/<address>` is where it gets
+# an identity record of its own, alongside workers, in the one directory
+# `claim-address` already minted into.
+#
+# THE COST, stated rather than hidden: an address is not usable by hand. The
+# answer is `to-address`, which every CLI verb applies to what a caller typed,
+# and `address-name`, which every display applies to what it read.
+
+# `mint-msg-id` already produces ULIDs in this module and there is no reason
+# for a second id scheme, so an address IS a ULID with one distinguishing
+# character in front: `a` plus 26 Crockford base32 characters.
+#
+# The prefix is not decoration. A message `id` and an envelope's `from`/`to`
+# appear in the same log line now, and `to: ["a01K…"]` beside `id: "01K…"`
+# tells an operator which is which without counting characters. It also gives
+# `to-address` a shape test, so a raw address typed at the CLI is recognised
+# as one rather than looked up as a label that will never resolve.
+export const ADDRESS_PREFIX = "a"
+const ADDRESS_PATTERN = '^a[0-9A-HJKMNP-TV-Z]{26}$'
+
+# Mint an address: collision-free BY CONSTRUCTION, which is the entire point.
+# 16 Crockford characters of randomness (80 bits) behind a monotonic
+# millisecond timestamp — exactly what `mint-msg-id` gives a message id, and
+# the reasoning there applies unchanged here.
+#
+# NOT `--env`, for the same reason `make-envelope` is not: the per-process
+# monotonic counter would have to be propagated by every caller in the chain
+# to survive, and it is not what makes an id unique — the random tail is. Two
+# mints inside one millisecond differ in that tail.
+export def mint-address []: nothing -> string {
+    $"($ADDRESS_PREFIX)(mint-msg-id)"
+}
+
+# Whether a string is shaped like an address. Shape only: a well-formed
+# address nothing ever claimed is still shaped like one, and saying otherwise
+# would make `bus-send`'s documented "sending never requires a recipient to
+# exist" impossible to express.
+export def address-shaped? [value: string]: nothing -> bool {
+    $value =~ $ADDRESS_PATTERN
+}
+
+# Where this project's addresses live: one directory per ADDRESS.
 def address-dir [slug: string]: nothing -> string {
     state-root | path join $slug "addresses"
 }
 
-# Every uid this project can already address.
+def address-record-path [slug: string, address: string]: nothing -> string {
+    address-dir $slug | path join $address "label"
+}
+
+# Scratch-then-rename at mode 0600 before the link is visible — the same
+# discipline `write-marker`/`record-agent-slug`/`presence-write` use for a
+# single file with one writer, not `claim-slot`'s exclusive `link(2)`: the
+# directory above it was already claimed atomically, so there is nothing here
+# to arbitrate between.
+def write-address-record [slug: string, address: string, record: record] {
+    let path = (address-record-path $slug $address)
+    let scratch = ($path + $".tmp.(random chars --length 10)")
+    $record | to json | save -f $scratch
+    chmod 600 $scratch
+    mv -f $scratch $path
+}
+
+# One address's label record, or null when nothing resolves it.
 #
-# The union of three sources, because each one holds addresses the others do
-# not:
+# Null for every way this can fail to answer — no such directory, no label
+# file, unparseable, or parsed to something that is not a record carrying a
+# `name`. `from json` is lenient on bare text (it returns a string rather
+# than raising), so the shape is checked explicitly for the reason `read-box`
+# and `presence-read-at` already document.
+def read-address-record [slug: string, address: string]: nothing -> any {
+    let path = (address-record-path $slug $address)
+    if not ($path | path exists) { return null }
+    let parsed = (try { open --raw $path | from json } catch { null })
+    if $parsed == null { return null }
+    if not (($parsed | describe) | str starts-with "record") { return null }
+    if "name" not-in ($parsed | columns) { return null }
+    {
+        name: $parsed.name
+        role: ($parsed | get -o role | default "")
+        project: ($parsed | get -o project | default "")
+        kind: ($parsed | get -o kind | default "worker")
+    }
+}
+
+def project-addresses-at [slug: string]: nothing -> list<record> {
+    let dir = (address-dir $slug)
+    if not ($dir | path exists) { return [] }
+    ls $dir
+    | where type == dir
+    | get name
+    | each {|d|
+        let address = ($d | path basename)
+        let record = (read-address-record $slug $address)
+        if $record == null { null } else { $record | merge {address: $address} }
+    }
+    | compact
+    | sort-by address
+}
+
+# Every address record this project holds: `{address, name, role, project, kind}`.
+export def project-addresses [repo: string = ""]: nothing -> list<record> {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    project-addresses-at (resolve-project-slug $base)
+}
+
+# Which addresses wear `name`. Plural deliberately: a label is not unique and
+# nothing here pretends it is.
+def addresses-named [slug: string, name: string]: nothing -> list<string> {
+    project-addresses-at $slug | where name == $name | get address
+}
+
+# The address->label lookup, read once. `bus-messages` resolves two fields per
+# envelope for a whole project's log on every agent-monitor tick, and doing
+# that with one `open` per field would be a file read per recipient per row.
+def address-labels [slug: string]: nothing -> record {
+    project-addresses-at $slug
+    | reduce --fold {} {|row, acc| $acc | upsert $row.address $row.name }
+}
+
+# Mint an address for `name` and record it. Returns the address.
 #
-#   agents/<run>/<uid>   the durable placement record — what `resolve-run`
-#                        answers a uid from, and so the authoritative set of
-#                        addresses a CLI verb can reach.
-#   addresses/<uid>      claims taken but not yet recorded: the window between
-#                        minting an address and writing its identity, which is
-#                        where two racing spawns used to both win.
-#   bus/queue/<uid>      addresses live on the project bus with no placement
-#                        record of their own — a session that claimed its own
-#                        address (sp029 T7) is exactly that shape. Those ids
-#                        are `self-<hex>` today and so cannot collide with a
-#                        `<role>-<n>`, but minting around them costs one `ls`
-#                        and does not depend on that staying true.
+# Issued to EVERY addressable party — a worker at spawn, a run when the spawn
+# that minted it needs a commissioner (`ensure-address`), a self-claiming
+# session that nobody spawned. Immutable and never reused: `release-address`
+# deletes the record, and a later claim under the same label mints a fresh
+# address, so a message naming the dead holder can never be consumed by its
+# successor.
+#
+# A DUPLICATE LABEL IS NOT REFUSED, and that is the change rather than an
+# oversight. The refusal this replaces ("`impl-1` is already an address in
+# this project") was the uniqueness check standing in for a guarantee the
+# identifier did not provide; the guarantee is now in the identifier, so the
+# check has nothing left to protect. Two parties may wear one label, their
+# queues cannot meet, and `to-address` reports the ambiguity honestly when
+# somebody types that label at the CLI.
+#
+# The `mkdir` is still deliberately NOT `ensure-dir`: without `-p` it fails
+# when the directory exists, so a mint collision — astronomically unlikely,
+# and the one thing that would put two parties on one queue again — is LOUD
+# instead of silently shared.
+export def claim-address [
+    repo: string
+    name: string
+    --role: string = ""
+    # `worker` or `run`. A display asks this to say what it is looking at,
+    # and it is the only thing distinguishing a run's record from a worker's,
+    # since a run has no placement record to be absent from.
+    --kind: string = "worker"
+]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+
+    # A label is worn as a tmux window name and appears in refusals, so it is
+    # held to the character set and the cap an address used to be held to for
+    # being a FILE NAME. The file name is the minted address now, but the
+    # label still travels into places that cannot take arbitrary text.
+    if ($name | is-empty) {
+        error make {msg: "claim-address needs a label: an address is minted, but the party claiming it still has to be nameable"}
+    }
+    if not ($name =~ '^[A-Za-z0-9._-]+$') or ($name in [".", ".."]) {
+        error make {msg: $"'($name)' is not a usable label: it must match [A-Za-z0-9._-]+ and cannot be '.' or '..'. It is worn as a window name and rendered in every display"}
+    }
+    if ($name | str length) > $MAX_ADDRESS_CHARS {
+        error make {msg: $"'($name | str substring 0..31)…' is ($name | str length) characters, over the ($MAX_ADDRESS_CHARS)-character label cap. A label is a short name like `impl-2` or `r7`, not a description"}
+    }
+
+    let dir = (address-dir $slug)
+    ensure-dir (state-root)
+    ensure-dir (state-root | path join $slug)
+    ensure-dir $dir
+
+    let address = (mint-address)
+    let home = ($dir | path join $address)
+    let made = (do { ^mkdir -m 700 $home } | complete)
+    if $made.exit_code != 0 {
+        error make {msg: $"refusing to claim ($address) for '($name)': that address already exists, so minting collided. Nothing was claimed — retry, and if this repeats the mint is broken rather than unlucky"}
+    }
+    write-address-record $slug $address {name: $name, role: $role, project: $base, kind: $kind}
+    $address
+}
+
+# ------------------------------------------------ the label reservation
+#
+# An address cannot collide; a LABEL still can, and two things depend on it
+# not doing so by accident:
+#
+#   - the placement record is `agents/<run>/<uid>`, keyed by label, and
+#     `resolve-run` answers every uid-addressed verb (`status`, `stop`,
+#     `accept`, `rm`) from it. Two workers under one label there means one of
+#     them is unreachable by name.
+#   - a display shows the label. Two rows reading `impl-1` is not a
+#     misdelivery, but it is not a roster anyone can act on either.
+#
+# So a label is RESERVED, atomically, separately from the address it names —
+# and this is deliberately not the uniqueness check dotfiles-1d1f removed.
+# That check was standing in for a guarantee the IDENTIFIER did not provide,
+# and the identifier provides it now. This one protects a label-keyed tree and
+# a human-readable display, which is all it claims to protect: `claim-address`
+# itself never refuses, so two parties CAN wear one label when something
+# deliberately puts them there, and their mail still cannot cross.
+#
+#   <state-root>/<slug>/labels/<name>   a file holding the address reserved
+#
+# The file's CONTENT is the address, which makes the reservation a name->address
+# index as well as a lock — so the ordinary `to-address` lookup is one read
+# rather than a scan of the whole registry.
+#
+# Scratch-then-`ln`, not `mkdir`: `ln` fails when the target exists, so the
+# reservation is one atomic create rather than a check followed by a create,
+# AND the winner's address is already inside the file the loser just failed to
+# make. That is what lets `ensure-address` below turn a lost race into "use
+# what the winner reserved" instead of a refusal. Same reasoning as
+# `queue-append`'s first-writer race.
+def label-dir [slug: string]: nothing -> string {
+    state-root | path join $slug "labels"
+}
+
+def label-path [slug: string, name: string]: nothing -> string {
+    label-dir $slug | path join $name
+}
+
+# The address `name` is reserved for, or null when nothing reserved it.
+def label-address [slug: string, name: string]: nothing -> any {
+    let path = (label-path $slug $name)
+    if not ($path | path exists) { return null }
+    let value = (try { open --raw $path | str trim } catch { "" })
+    if ($value | is-empty) { null } else { $value }
+}
+
+# Try to reserve `name` for `address`. True when this caller won it.
+def reserve-label [slug: string, name: string, address: string]: nothing -> bool {
+    let dir = (label-dir $slug)
+    ensure-dir (state-root)
+    ensure-dir (state-root | path join $slug)
+    ensure-dir $dir
+    let path = ($dir | path join $name)
+    let scratch = ($dir | path join $".tmp.(random chars --length 10)")
+    $address | save -f $scratch
+    chmod 600 $scratch
+    let linked = (do { ^ln $scratch $path } | complete)
+    rm -f $scratch
+    $linked.exit_code == 0
+}
+
+def release-label-at [slug: string, name: string]: nothing -> nothing {
+    let path = (label-path $slug $name)
+    if ($path | path exists) { rm -f $path }
+}
+
+# Every reserved label in this project.
+def project-labels-at [slug: string]: nothing -> list<string> {
+    let dir = (label-dir $slug)
+    if not ($dir | path exists) { return [] }
+    ls $dir | where type == file | get name | each {|f| $f | path basename } | where {|n| not ($n | str starts-with ".tmp.") }
+}
+
+# Mint an address AND reserve its label, or refuse because the label is taken.
+#
+# What a WORKER spawn uses. The refusal is about the label-keyed placement
+# tree, not about the address: the address was already minted and is released
+# again here, because holding one for a spawn that is not going to happen
+# burns nothing useful.
+export def claim-unique-address [
+    repo: string
+    name: string
+    --role: string = ""
+    --kind: string = "worker"
+]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    if $name in (project-uids $base) {
+        error make {msg: $"($name) is already a label in this project: spawning onto it would put two workers under one placement record, where only one of them could ever be reached by name. Use a different uid, or release this one with `rm --uid ($name)` once it is finished with"}
+    }
+    let address = (claim-address $base $name --role $role --kind $kind)
+    if not (reserve-label $slug $name $address) {
+        release-address-at $slug $address
+        error make {msg: $"($name) is already a label in this project: another spawn reserved it first. Use a different uid, or release this one with `rm --uid ($name)`"}
+    }
+    $address
+}
+
+# The address a label is reserved for, or null. Exported for the same reason
+# `presence-file` is: a case has to be able to look the binding up directly,
+# and no production caller goes through it (`to-address` reads the reservation
+# itself).
+export def label-address-for [name: string, --repo: string = ""]: nothing -> any {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    label-address (resolve-project-slug $base) $name
+}
+
+# Let go of a reserved label.
+export def release-label [repo: string, name: string]: nothing -> nothing {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    release-label-at (resolve-project-slug $base) $name
+}
+
+# Resolve-or-claim, for a party whose LABEL has to keep meaning one address.
+#
+# A run is that party. `wait --as r2` has to reach the queue every result
+# addressed to `r2` landed in, so two spawns naming one run must not end up
+# with two commissioner addresses. A WORKER is deliberately not that party:
+# it always takes a fresh claim, because a respawn is a different worker
+# wearing a recycled role.
+export def ensure-address [
+    repo: string
+    name: string
+    --role: string = ""
+    --kind: string = "worker"
+]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    let reserved = (label-address $slug $name)
+    if $reserved != null { return $reserved }
+    # Not reserved yet, so mint and try to reserve. Losing the race is not a
+    # failure here: the winner's reservation already names the address this
+    # caller should use, so the mint is released and the winner's is returned.
+    # That is the whole reason the reservation holds the address rather than
+    # being an empty lock file.
+    let address = (claim-address $base $name --role $role --kind $kind)
+    if (reserve-label $slug $name $address) { return $address }
+    release-address-at $slug $address
+    let winner = (label-address $slug $name)
+    if $winner == null {
+        error make {msg: $"could not reserve the label '($name)' and nothing holds it either: the reservation directory under ($slug) is not writable or was removed mid-call"}
+    }
+    $winner
+}
+
+# One address's label record, or null.
+export def address-label [address: string, --repo: string = ""]: nothing -> any {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    read-address-record (resolve-project-slug $base) $address
+}
+
+# What a DISPLAY renders for an address: its label, or the raw address when
+# nothing resolves it.
+#
+# Never a guess. [[adr0017]] applied to a rendering — an unresolvable address
+# is an observation about the registry, and substituting a plausible label, a
+# blank cell, or the word "unknown" would state something the evidence does
+# not support. The raw address is always the honest answer, and it is also the
+# one an operator can copy back into a command.
+export def address-name [address: string, --repo: string = ""]: nothing -> string {
+    let record = (try { address-label $address --repo $repo } catch { null })
+    if $record == null { $address } else { $record.name }
+}
+
+# What the CLI does to whatever a caller typed: turn it into the address that
+# goes on the wire.
+#
+# Four answers, in order:
+#
+#   a registered address     itself. Addressing by address is always allowed.
+#   a reserved label         the address its reservation names — one read,
+#                            and the ordinary path for anything spawn made.
+#   an address-shaped string itself, registry or not — `bus-send` has always
+#                            permitted sending to an address nobody claimed
+#                            yet ("the bus keeps no registry to check
+#                            against"), and a shape test is what lets that
+#                            keep being expressible.
+#   one label match          that address. This is the ordinary path.
+#   several label matches    REFUSED, naming every candidate. Picking the
+#                            first is exactly what `resolve-run` did in
+#                            dotfiles-bg65, and it is what left one of two
+#                            live workers addressable by nothing but
+#                            `rm -rf`. An ambiguous label is an observation,
+#                            not a licence to choose ([[adr0017]]).
+#
+# And a name that matches NOTHING passes through as itself. That is not an
+# alias and not a compatibility bridge — nothing is being resolved to a UUID
+# here. It is the same tolerance the bus already documents: an unclaimed
+# address has no party behind it, so no delivery can go to the wrong one, and
+# refusing it would break `send --to` to an address that is about to exist.
+# The moment something DOES claim that label, this function resolves it, and
+# if two things claim it this function refuses.
+export def to-address [name: string, --repo: string = ""]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    if (read-address-record $slug $name) != null { return $name }
+    if (address-shaped? $name) { return $name }
+    # A RESERVED label is authoritative and answers in one read. An
+    # unreserved duplicate never steals a reserved name — whatever claimed
+    # the label without reserving it did not take the name.
+    let reserved = (label-address $slug $name)
+    if $reserved != null { return $reserved }
+    let candidates = (addresses-named $slug $name)
+    if ($candidates | length) == 1 { return ($candidates | first) }
+    if ($candidates | length) > 1 {
+        error make {msg: $"'($name)' is worn by ($candidates | length) addresses in this project \(($candidates | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
+    }
+    $name
+}
+
+# Every LABEL this project can already address — the set `mint-uid` mints
+# around so a fresh worker gets a name no live party is already showing.
+#
+# The union of two sources, because each holds labels the other does not:
+#
+#   agents/<run>/<uid>      the durable placement record — what `resolve-run`
+#                           answers a uid from, and so the set of labels a
+#                           uid-addressed CLI verb can reach.
+#   addresses/<a>/label     every claimed address's label, including parties
+#                           with no placement record of their own: a run, and
+#                           a session that claimed its own address.
+#   labels/<name>           reservations taken but whose address record has
+#                           not landed yet — the window in which two racing
+#                           spawns used to both win a name.
+#
+# `bus/queue/<uid>` was a third source while a queue file was NAMED by a uid.
+# It is named by an address now, so a queue file name is not a label and
+# contributes nothing to this set; every address that has a queue also has a
+# registry record, which is the source that replaced it.
+#
+# Note what this is NOT: a uniqueness guarantee. Two parties may share a
+# label without anything breaking (see `claim-address`); this only keeps that
+# from happening by accident, so labels stay legible.
 export def project-uids [repo: string = ""]: nothing -> list<string> {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
     let slug = (resolve-project-slug $base)
@@ -1044,57 +1498,23 @@ export def project-uids [repo: string = ""]: nothing -> list<string> {
         } | flatten
     } else { [] })
 
-    let claims = (address-dir $slug)
-    let claimed = (if ($claims | path exists) {
-        ls $claims | get name | each {|d| $d | path basename }
-    } else { [] })
+    let claimed = (project-addresses-at $slug | get name)
+    let reserved = (project-labels-at $slug)
 
-    let queues = (project-queue-dir $base)
-    let queued = (if ($queues | is-not-empty) and ($queues | path exists) {
-        ls $queues | get name | each {|f| $f | path basename }
-    } else { [] })
-
-    $placed | append $claimed | append $queued | uniq
+    $placed | append $claimed | append $reserved | uniq
 }
 
-# Take `uid` as this project's address, or refuse because someone else has it.
-#
-# Two steps, and the order matters. The `project-uids` check is what produces
-# a refusal an operator can act on — it names the address and says where it is
-# already known. The `mkdir` is what makes the claim SAFE: without `-p` it
-# fails when the directory exists, so it is one atomic create rather than a
-# check followed by a create, and two spawns racing for the same lowest-free
-# uid cannot both win it. That is the same reasoning `claim-slot` applies to a
-# sequence slot with link(2); `ensure-dir`'s `mkdir -p` is deliberately the
-# opposite (losing a create race there is a no-op, not an answer).
-export def claim-address [repo: string, uid: string]: nothing -> nothing {
+# Let go of a claimed ADDRESS. Idempotent: releasing one nobody holds is not
+# an error, because every caller (a spawn that failed after claiming, and
+# `rm`) is cleaning up rather than asserting.
+export def release-address [repo: string, address: string]: nothing -> nothing {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
-    let slug = (resolve-project-slug $base)
-    if $uid in (project-uids $base) {
-        error make {msg: $"($uid) is already an address in this project: spawning onto it would put two workers on one queue, where only one of them could ever be reached by uid. Use a different uid, or release this one with `rm --uid ($uid)` once it is finished with"}
-    }
-    let dir = (address-dir $slug)
-    ensure-dir (state-root)
-    ensure-dir (state-root | path join $slug)
-    ensure-dir $dir
-    # NOT `ensure-dir`: `-p` would make an occupied address look free.
-    let made = (do { ^mkdir -m 700 ($dir | path join $uid) } | complete)
-    if $made.exit_code != 0 {
-        error make {msg: $"($uid) is already an address in this project: another spawn claimed it first. Use a different uid, or release this one with `rm --uid ($uid)`"}
-    }
-}
-
-# Let go of a claimed address. Idempotent: releasing one nobody holds is not
-# an error, because both callers (a spawn that failed after claiming, and
-# `rm`) are cleaning up rather than asserting.
-export def release-address [repo: string, uid: string]: nothing -> nothing {
-    let base = (if ($repo | is-empty) { current-repo } else { $repo })
-    release-address-at (resolve-project-slug $base) $uid
+    release-address-at (resolve-project-slug $base) $address
 }
 
 # By slug, for the caller that already has one — see `queue-dir-of`.
-def release-address-at [slug: string, uid: string]: nothing -> nothing {
-    let dir = (address-dir $slug | path join $uid)
+def release-address-at [slug: string, address: string]: nothing -> nothing {
+    let dir = (address-dir $slug | path join $address)
     if ($dir | path exists) { rm -rf $dir }
 }
 
@@ -1113,12 +1533,16 @@ def release-address-at [slug: string, uid: string]: nothing -> nothing {
 # uid conjure the very claim it is supposed to find already made, resurrecting
 # an address nothing else has taken. It refuses instead, the same way any
 # other verb here refuses to act on an address it does not recognise.
-def presence-dir [slug: string, uid: string]: nothing -> string {
-    address-dir $slug | path join $uid
+# dotfiles-1d1f: the directory is named by the ADDRESS, so every caller below
+# resolves whatever it was handed through `to-address` first. A label with no
+# address resolves to itself, finds no directory, and is refused exactly as an
+# unclaimed one always was.
+def presence-dir [slug: string, address: string]: nothing -> string {
+    address-dir $slug | path join $address
 }
 
-def presence-path [slug: string, uid: string]: nothing -> string {
-    presence-dir $slug $uid | path join "presence"
+def presence-path [slug: string, address: string]: nothing -> string {
+    presence-dir $slug $address | path join "presence"
 }
 
 # How stale a reported state may be before `main workers` stops trusting it
@@ -1147,8 +1571,8 @@ const PRESENCE_FRESH_SECS = 90
 # both to `null` would make `main workers` unable to tell "empty" from
 # "unknown" apart, which is exactly the distinction its `presence` column
 # has to draw.
-def presence-read-at [slug: string, uid: string]: nothing -> any {
-    let path = (presence-path $slug $uid)
+def presence-read-at [slug: string, address: string]: nothing -> any {
+    let path = (presence-path $slug $address)
     if not ($path | path exists) { return null }
     let raw = (open --raw $path)
     let parsed = (try { $raw | from json } catch { null })
@@ -1180,14 +1604,15 @@ def presence-read-at [slug: string, uid: string]: nothing -> any {
 export def presence-write [uid: string, state: string, --repo: string = ""]: nothing -> nothing {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
     let slug = (resolve-project-slug $base)
-    let dir = (presence-dir $slug $uid)
+    let address = (to-address $uid --repo $base)
+    let dir = (presence-dir $slug $address)
     if not ($dir | path exists) {
         error make {msg: $"($uid) has no claimed address in this project: presence cannot be written for a worker that was never spawned, or one already released. Nothing was written"}
     }
     let scratch = ($dir | path join $".tmp.(random chars --length 10)")
     {state: $state, at: (now-stamp)} | to json | save -f $scratch
     chmod 600 $scratch
-    mv -f $scratch (presence-path $slug $uid)
+    mv -f $scratch (presence-path $slug $address)
 }
 
 # `presence-read <uid>` — the record `{state, at}`, or `null` when the worker
@@ -1195,7 +1620,7 @@ export def presence-write [uid: string, state: string, --repo: string = ""]: not
 # unspawned or already-released uid is the ordinary case, not a failure.
 export def presence-read [uid: string, --repo: string = ""]: nothing -> any {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
-    presence-read-at (resolve-project-slug $base) $uid
+    presence-read-at (resolve-project-slug $base) (to-address $uid --repo $base)
 }
 
 # Where a worker's presence record lives on disk. Exported the same way
@@ -1204,7 +1629,7 @@ export def presence-read [uid: string, --repo: string = ""]: nothing -> any {
 # `presence-read` find their own path, which stays internal to this section.
 export def presence-file [uid: string, --repo: string = ""]: nothing -> string {
     let base = (if ($repo | is-empty) { current-repo } else { $repo })
-    presence-path (resolve-project-slug $base) $uid
+    presence-path (resolve-project-slug $base) (to-address $uid --repo $base)
 }
 
 # The value `main workers` renders in its `presence` column: the reported
@@ -1214,8 +1639,8 @@ export def presence-file [uid: string, --repo: string = ""]: nothing -> string {
 # all. `unknown` is returned as plain observational data; nothing here or in
 # any verb branches on it to decide a worker is alive, stopped or reapable
 # ([[adr0017]]).
-def presence-column [slug: string, uid: string]: nothing -> string {
-    let raw = (presence-read-at $slug $uid)
+def presence-column [slug: string, address: string]: nothing -> string {
+    let raw = (presence-read-at $slug $address)
     if $raw == null {
         ""
     } else if ($raw | describe) == "string" {
@@ -1432,7 +1857,11 @@ export def legacy-inbox-send [
 ]: nothing -> record {
     # Addressed initiator-to-worker, said here rather than inferred from the
     # kind: this function knows the direction, the envelope builder does not.
-    let envelope = (make-envelope "message" $content --from $run --to [$uid])
+    # dotfiles-1d1f: by ADDRESS. Delivery here is the directory path, not the
+    # `to` field, so this is about the envelope saying the true thing when a
+    # reader picks it up — an unclaimed label resolves to itself, which is the
+    # only thing it can honestly be.
+    let envelope = (make-envelope "message" $content --from (to-address $run) --to [(to-address $uid)])
     # Validate before creating anything: a rejected message must leave no trace
     # in the runtime directory, not even an empty worker tree.
     validate-envelope $envelope
@@ -1822,9 +2251,24 @@ export def bus-prune []: nothing -> record {
 # and one bad envelope blanking that answer is worse than one line missing
 # from it — so a file that will not parse is skipped with its id logged to
 # stderr instead.
+# dotfiles-1d1f: `from`/`to` come off the wire as addresses and leave here as
+# LABELS. This is the single place that resolution happens for every display
+# built on this verb — `main messages`'s table and agent-monitor's FROM/TO
+# columns both read what this returns, so neither needs a registry reader of
+# its own, and there is exactly one implementation of the fallback rule.
+#
+# The fallback is the raw address, never a guess ([[adr0017]]): an address
+# nothing resolves is an observation about the registry, and a blank cell or a
+# nearest-match label would state something the evidence does not. The raw
+# address is also the one thing an operator can copy back into a command.
+#
+# The registry is read ONCE per call rather than per field. agent-monitor
+# polls this every tick for a whole project's log, and `open`ing a label file
+# per recipient per row is a file read per recipient per row.
 export def bus-messages []: nothing -> list<record> {
     let dir = (project-dir | path join "messages")
     if not ($dir | path exists) { return [] }
+    let labels = (address-labels (resolve-project-slug (current-repo)))
 
     let files = (
         ls $dir
@@ -1851,17 +2295,41 @@ export def bus-messages []: nothing -> list<record> {
             print --stderr $"pi-worker messages: skipping unreadable envelope ($id) in ($dir)"
             null
         } else {
+            let from = ($parsed | get -o from | default "")
+            let to = ($parsed | get -o to | default [])
             {
                 at: ($parsed | get -o created | default "")
                 id: ($parsed | get -o id | default $id)
-                from: ($parsed | get -o from | default "")
-                to: ($parsed | get -o to | default [])
+                from: (if ($from | is-empty) { "" } else { $labels | get -o $from | default $from })
+                to: ($to | each {|a| $labels | get -o $a | default $a })
                 kind: ($parsed | get -o kind | default "")
                 content: ($parsed | get -o content)
             }
         }
     }
     | compact
+}
+
+# The address a worker was spawned onto, off its own placement record.
+#
+# `worker-place` writes `address` onto every identity it creates, so this is
+# exact in production and never a lookup. The label fallback covers an identity
+# built directly by a caller that claimed no address (a fixture, a hand-planted
+# record): there the label IS all there is, and `to-address` hands it back
+# unchanged. Not a compatibility bridge — no vintage of this record carried a
+# different value here.
+def identity-address [identity: record, uid: string]: nothing -> string {
+    let recorded = ($identity | get -o address | default "")
+    if ($recorded | is-not-empty) { return $recorded }
+    to-address $uid --repo ($identity | get -o cwd | default "")
+}
+
+# The address of the run that placed the worker — the default commissioner,
+# and what `wait --as r<n>` reaches. Same reasoning as `identity-address`.
+def identity-run-address [identity: record, run: string]: nothing -> string {
+    let recorded = ($identity | get -o run_address | default "")
+    if ($recorded | is-not-empty) { return $recorded }
+    to-address $run --repo ($identity | get -o cwd | default "")
 }
 
 # Write a worker's outcome to its outbox.
@@ -1921,7 +2389,15 @@ export def bus-result [
     }
 
     # Addressed worker-to-initiator by this call site, not by its kind.
-    let envelope = (make-envelope "state" $result --from $uid --to [$run])
+    #
+    # dotfiles-1d1f: by ADDRESS, read off the identity `worker-spawn` recorded
+    # rather than resolved from the label. A worker sharing a label with a live
+    # namesake must still be able to report, and resolving `impl-1` in that
+    # situation is (correctly) a refusal — so the address is looked up where it
+    # is unambiguous, on the record that binds this worker to it.
+    let from = (identity-address $identity $uid)
+    let to = (identity-run-address $identity $run)
+    let envelope = (make-envelope "state" $result --from $from --to [$to])
     validate-envelope $envelope
     ensure-worker-dirs $run $uid
     let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
@@ -1942,7 +2418,10 @@ export def bus-result [
         # from prose by reading `kind` rather than by guessing at the shape of
         # `content`. dotfiles-oj4c made that guess impossible to need: `state`
         # and `message` no longer share a shape.
-        bus-send --to [$commissioner] --from $uid --kind "state" --content $result
+        # dotfiles-1d1f: `commissioner` is recorded as an ADDRESS by
+        # `worker-place`, so this needs no resolution; `to-address` covers a
+        # record that only ever held a label.
+        bus-send --to [(to-address $commissioner --repo ($identity | get -o cwd | default ""))] --from $from --kind "state" --content $result
     }
 
     $written
@@ -1989,7 +2468,9 @@ export def bus-settled [uid: string, --run: string]: nothing -> record {
     # The report's shape lives with `settled-without-result`, which is the
     # function that documents WHY the absence of a result is itself reported.
     # Sequence 0 is a placeholder: `claim-slot` stamps the real slot.
-    let envelope = (settled-without-result $run $uid 0 (now-stamp))
+    let from = (if $identity == null { $uid } else { identity-address $identity $uid })
+    let to = (if $identity == null { $run } else { identity-run-address $identity $run })
+    let envelope = (settled-without-result $run $uid 0 (now-stamp) --from $from --to $to)
     validate-envelope $envelope
     let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
     {reported: true, run: $run, uid: $uid, sequence: $written.sequence}
@@ -2086,6 +2567,12 @@ export def legacy-bus-pending [run: string]: nothing -> list<record> {
 # It took a `run` before, and the run is gone rather than ignored: a per-run
 # search stopped being a namespace the moment sp029 T9 gave every spawn its
 # own run (see `project-uids` for the whole failure).
+# dotfiles-1d1f: this mints a LABEL, not an address. The address comes from
+# `claim-address` and cannot collide; this only keeps labels legible, so a
+# fresh worker shows a name no live party is already showing. A collision here
+# is no longer a correctness failure — it costs an operator the convenience of
+# addressing that worker by name (`to-address` refuses an ambiguous label
+# rather than guessing), and nothing else.
 export def mint-uid [role: string, repo: string = ""]: nothing -> string {
     let prefix = (if ($role | is-empty) { "w" } else { $role })
     let taken = (project-uids $repo)
@@ -2704,9 +3191,10 @@ def bus-claims [repo: string]: nothing -> list<record> {
     let dir = (state-root | path join $slug "agents")
     if not ($dir | path exists) { return [] }
     # `agents/<run>/<uid>/` — see the comment on `agent-state-dir` for why the
-    # `run` level is still there. A uid appears under exactly one of them now
-    # that uniqueness is project-wide (dotfiles-bg65), so this walks the level
-    # rather than meaning anything by it.
+    # `run` level is still there, and for why a label is still reserved
+    # (dotfiles-1d1f) even though an address cannot collide. A uid appears
+    # under exactly one run, so this walks the level rather than meaning
+    # anything by it.
     # Nested `for`, not nested `each`, for the reason the NOTE ON THE LOOP over
     # `read-box` documents: nushell 0.115 does not surface an `error make`
     # raised inside an `each` closure as itself. Here it does not vanish — the
@@ -3126,7 +3614,24 @@ export def worktrees-reclaim [
 # whose directory is gone, in a session that has long since ended, must still
 # be resumable from its session id.
 
-export def bus-identity [uid: string, --run: string, --identity: record]: nothing -> record {
+# dotfiles-1d1f: `--address`/`--run-address` are the addresses this record is
+# addressed BETWEEN, passed in by `worker-place` because it has just minted
+# them and must never have to look one up — a spawn whose label is shared
+# with a live namesake would otherwise fail at its own identity write.
+#
+# Omitted, they are resolved from the labels through `to-address`. That is not
+# a version bridge (there is no vintage of this record in which the fields
+# were populated and different): it is the path for an identity built directly
+# by a caller that never claimed an address at all — a fixture, a hand-planted
+# record — where the label is all there is, and `to-address` hands it straight
+# back.
+export def bus-identity [
+    uid: string
+    --run: string
+    --identity: record
+    --address: string = ""
+    --run-address: string = ""
+]: nothing -> record {
     validate-identity $identity
     # Still claims the runtime worker directory, unchanged: that is the
     # occupied-address guard `worker-spawn` checks BEFORE ever calling this,
@@ -3141,9 +3646,11 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
     # durable state (sp029 T6) rather than on the tmpfs bus, so an accepted
     # worker stays resumable across a logout — dotfiles-v1zt converged the
     # SHAPE of this envelope and deliberately left its LOCATION alone.
+    let from = (if ($address | is-not-empty) { $address } else { to-address $uid --repo $identity.cwd })
+    let to = (if ($run_address | is-not-empty) { $run_address } else { to-address $run --repo $identity.cwd })
     let sealed = (
         claim-slot $dir
-            (make-envelope $IDENTITY_KIND $identity --from $uid --to [$run])
+            (make-envelope $IDENTITY_KIND $identity --from $from --to [$to])
             --validate {|r| validate-identity-record $r }
     )
     # Recorded AFTER the write succeeds: a caller resolving `(run, uid)` back
@@ -3643,11 +4150,43 @@ export def worker-spawn [
     # The guard above answers for ONE run, which stopped being an answer at
     # all when sp029 T9 gave every spawn a fresh run of its own: the directory
     # it checks is empty by construction, so it can no longer fire for the
-    # case it was written for (dotfiles-bg65). This one answers for the
-    # project — the scope a uid is actually an address in — and claims it
-    # atomically, so two spawns racing for the same lowest-free uid cannot
-    # both proceed.
-    claim-address $repo $uid
+    # case it was written for (dotfiles-bg65). The two claims below answer for
+    # the project: an ADDRESS for the wire, which cannot collide, and a LABEL
+    # reservation for the placement tree, taken atomically so two spawns
+    # racing for the same lowest-free label cannot both proceed.
+    # dotfiles-1d1f: the run is an addressable party too. It receives every
+    # result (`to: [r2]`) and `wait --as r2` reads its queue, but it has no
+    # placement record and no Pi session — which is why the session uuid could
+    # not be the address and why a run gets a registry record of its own.
+    #
+    # Resolve-or-claim rather than a fresh claim: a run LABEL has to keep
+    # meaning one queue, or two spawns naming one run would split the mail an
+    # initiator is waiting on. Claimed before the worker's address so a failure
+    # here leaks nothing.
+    let run_address = (ensure-address $repo $run --role "run" --kind "run")
+
+    # A fresh address, always. A respawn is a different worker wearing a
+    # recycled role, and giving it the predecessor's address would make attempt
+    # 1 and attempt 2 indistinguishable — a message meant for the new worker
+    # consumable against the old one's backlog.
+    #
+    # `claim-unique-address`, not a bare `claim-address`: a worker's LABEL is
+    # what keys its placement record and what `resolve-run` answers every
+    # uid-addressed verb from, so two workers under one label there is still
+    # refused. The refusal is about that tree, not about the address — see the
+    # label reservation's own note on why the two are separate now.
+    let address = (claim-unique-address $repo $uid --role $role --kind "worker")
+
+    # The commissioner is an address on the wire like any other, so a label a
+    # caller typed is resolved here, once, and the identity records the result.
+    # Defaults to the run, which is exactly what every caller got before
+    # `--commissioner` existed (dotfiles-uwz6).
+    let commissioner_address = (if ($commissioner | is-empty) {
+        $run_address
+    } else {
+        to-address $commissioner --repo $repo
+    })
+
     # Everything downstream allocates: a worktree, a branch, a tmux window. If
     # any of it fails, nothing was spawned onto this address and holding it
     # would burn the name for no one's benefit — so the claim is released and
@@ -3655,11 +4194,16 @@ export def worker-spawn [
     # write keeps the address anyway, and deliberately: that record is the
     # resume handle for a worker whose window never came up, and an address
     # something can still be resumed from is not free.
+    #
+    # The RUN's address is deliberately not released here. It is shared with
+    # every other worker this run placed and with the initiator waiting on it;
+    # a failed worker is no reason to take an initiator's queue away.
     let outcome = (try {
-        {ok: true, value: (worker-place --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --commissioner $commissioner --socket $socket)}
+        {ok: true, value: (worker-place --run $run --uid $uid --address $address --run-address $run_address --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --commissioner $commissioner_address --socket $socket)}
     } catch {|e| {ok: false, error: $e} })
     if not $outcome.ok {
-        release-address $repo $uid
+        release-address $repo $address
+        release-label $repo $uid
         error make $outcome.error.raw
     }
     $outcome.value
@@ -3672,6 +4216,11 @@ export def worker-spawn [
 def worker-place [
     --run: string
     --uid: string
+    # dotfiles-1d1f: minted by `worker-spawn`, never re-derived here. The
+    # worker's own address and the run's, both already recorded in the
+    # registry by the time this is called.
+    --address: string
+    --run-address: string
     --role: string
     --subject: string
     --project: string
@@ -3740,7 +4289,12 @@ def worker-place [
     # the recovery hole ft014's "rebuild a worker's state from its durable
     # identity record" claim did not cover. Empty when no ticket was named:
     # absent, never substituted.
-    bus-identity $uid --run $run --identity {
+    # dotfiles-1d1f: `address` and `run_address` are RECORDED on the identity,
+    # not resolvable from it. This record is the binding between a worker and
+    # the address its envelopes carry, and a writer that had to look one up by
+    # label would refuse exactly when a label is shared — the situation an
+    # address exists to survive.
+    bus-identity $uid --run $run --address $address --run-address $run_address --identity {
         role: $role
         cwd: $tree.path
         branch: $tree.branch
@@ -3749,6 +4303,8 @@ def worker-place [
         isolation: $isolation
         window: $window
         task: $task
+        address: $address
+        run_address: $run_address
         commissioner: $commissioner
     }
 
@@ -3777,9 +4333,15 @@ def worker-place [
     # "nobody set this".
     let task_env = (if ($task | is-empty) { [] } else { ["-e" $"PI_WORKER_TASK=($task)"] })
 
+    # dotfiles-1d1f: PI_WORKER_ADDRESS is what the worker reads its own queue
+    # by, and what its `send`/`wait` use as `from`/`--as` without resolving
+    # anything. PI_WORKER_UID stays beside it because a worker still needs to
+    # know what it is CALLED — for its window name, its branch, and every
+    # uid-addressed verb an operator points at it.
     let worker_env = ([
         "-e" $"PI_WORKER_RUN=($run)"
         "-e" $"PI_WORKER_UID=($uid)"
+        "-e" $"PI_WORKER_ADDRESS=($address)"
         "-e" $"PI_WORKER_ROLE=($role)"
         "-e" $"PI_WORKER_BRANCH=($tree.branch)"
         "-e" $"PI_WORKER_SESSION=($session)"
@@ -3797,7 +4359,7 @@ def worker-place [
     # Re-record the identity now that the id exists. Written twice rather than
     # deferred: the first write is what leaves a resume handle behind when the
     # window never gets created at all.
-    bus-identity $uid --run $run --identity {
+    bus-identity $uid --run $run --address $address --run-address $run_address --identity {
         role: $role
         cwd: $tree.path
         branch: $tree.branch
@@ -3807,14 +4369,20 @@ def worker-place [
         window: $window
         window_id: $window_id
         task: $task
+        address: $address
+        run_address: $run_address
         commissioner: $commissioner
     }
 
     {
         run: $run
         uid: $uid
+        # dotfiles-1d1f: the address on the wire, named back so a dispatcher
+        # can address this worker without a registry lookup of its own.
+        address: $address
+        run_address: $run_address
         role: $role
-        # What the address became. A caller that passed prose gets to see the
+        # What the label became. A caller that passed prose gets to see the
         # name it actually got rather than diffing it out of the window.
         subject: $subject
         window: $window
@@ -4086,7 +4654,12 @@ export def run-workers [run: string, --repo: string = ""]: nothing -> list<recor
             resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
             # sp030 T3: the worker's own reported state, `unknown` past its
             # freshness bound (or unparseable), empty when it never published.
-            presence: (presence-column $slug $uid)
+            # dotfiles-1d1f: presence lives under the ADDRESS. Resolved from
+            # the label rather than read off the identity so a row with no
+            # identity record at all still gets an honest answer, and an
+            # ambiguous label reads as empty (nothing published) rather than
+            # as somebody else's state.
+            presence: (presence-column $slug (try { to-address $uid --repo $base } catch { $uid }))
         }
     }
 }
@@ -4383,7 +4956,14 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
     # exists for precisely this lookup: `(run, uid)` is all a caller has.
     let slug = (resolve-agent-slug $run $uid)
     let placement = (if $slug == null { "" } else { agent-state-dir $slug $run $uid })
-    let claim = (if $slug == null { "" } else { address-dir $slug | path join $uid })
+    # dotfiles-1d1f: the claim directory is named by the ADDRESS, so the label
+    # has to be looked up in the registry. Plural, because a label is not
+    # unique any more: `rm --uid impl-1` is the documented way to recycle a
+    # NAME, so it frees every address wearing it. The state gate below still
+    # answers for the one `(run, uid)` worker, and the addresses it releases
+    # are reported back so nothing is freed silently.
+    let claims = (if $slug == null { [] } else { addresses-named $slug $uid })
+    let claim_dirs = ($claims | each {|a| address-dir $slug | path join $a })
 
     # Known by ANY of its records, not by the runtime tree alone. That tree is
     # wiped at logout by design (sp029 T6), and a worker whose durable record
@@ -4393,7 +4973,7 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
     let known = (
         ($dir | path exists)
         or (($placement | is-not-empty) and ($placement | path exists))
-        or (($claim | is-not-empty) and ($claim | path exists))
+        or ($claim_dirs | any {|d| $d | path exists })
     )
     if not $known {
         return {run: $run, uid: $uid, removed: false, reason: "no such worker"}
@@ -4409,12 +4989,18 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
     if ($run_dir | path exists) and ((ls $run_dir | length) == 0) { rm -rf $run_dir }
 
     if $slug != null {
-        release-address-at $slug $uid
         let queues = (queue-dir-of $slug)
-        if ($queues | is-not-empty) {
-            let queue = ($queues | path join $uid)
-            if ($queue | path exists) { rm -rf $queue }
+        for address in $claims {
+            release-address-at $slug $address
+            if ($queues | is-not-empty) {
+                let queue = ($queues | path join $address)
+                if ($queue | path exists) { rm -rf $queue }
+            }
         }
+        # The label reservation goes with them: `rm --uid` is the documented
+        # way to recycle a NAME, and leaving the reservation standing would
+        # make a later spawn of that name refuse forever.
+        release-label-at $slug $uid
         if ($placement | path exists) { rm -rf $placement }
         # The run level is per-run bookkeeping, not a record of its own.
         let runs = (state-root | path join $slug "agents" $run)
@@ -4423,7 +5009,7 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
     let pointer = (agent-index-path $run $uid)
     if ($pointer | path exists) { rm -rf $pointer }
 
-    {run: $run, uid: $uid, removed: true, state: $state}
+    {run: $run, uid: $uid, removed: true, state: $state, addresses: $claims}
 }
 
 # Send a worker back with reviewer feedback, resuming its ORIGINAL session.
@@ -4606,9 +5192,17 @@ export def worker-respawn [
     # gone session group must not leave a worktree behind to prune by hand.
     let target = (resolve-project-session $project --socket $socket)
 
-    # Project-scoped, like every other mint: a respawn's new uid is an
-    # address on the same bus its predecessor was on (dotfiles-bg65).
+    # Project-scoped, like every other mint: a respawn's new label is on the
+    # same bus its predecessor was on (dotfiles-bg65).
     let new_uid = (mint-uid $old.role $repo)
+    # dotfiles-1d1f: a FRESH address, and this is the case that made a
+    # separately minted one necessary rather than the Pi session uuid. A
+    # respawn continues the predecessor's SESSION under a new uid, so
+    # addressing by session would give both one address — attempt 1 and
+    # attempt 2 indistinguishable, and a message meant for the successor
+    # consumable against the predecessor's backlog.
+    let new_address = (claim-unique-address $repo $new_uid --role $old.role --kind "worker")
+    let run_address = (ensure-address $repo $run --role "run" --kind "run")
     let main = (main-worktree $repo)
     # The branch is what a respawn wants to land on, and its directory too when
     # one is still registered: a released-but-unaccepted worker leaves both
@@ -4648,14 +5242,14 @@ export def worker-respawn [
     # sp029 T5: carries the prior identity's commissioner forward — a
     # respawn continues the same worker under a new uid, so it still owes
     # its result to whoever the original spawn commissioned it for.
-    let commissioner = ($old | get -o commissioner | default $run)
+    let commissioner = ($old | get -o commissioner | default $run_address)
     # dotfiles-v13r: and the ticket, for the same reason — a respawn continues
     # the same worker under a new address, so it still serves the same bd
     # issue. Without this the association would survive exactly one respawn.
     # Absent on an identity written before the field existed, which reads as
     # "no ticket" rather than raising.
     let task = ($old | get -o task | default "")
-    bus-identity $new_uid --run $run --identity {
+    bus-identity $new_uid --run $run --address $new_address --run-address $run_address --identity {
         role: $old.role
         cwd: $tree.path
         branch: $tree.branch
@@ -4664,6 +5258,8 @@ export def worker-respawn [
         isolation: $isolation
         window: $window
         task: $task
+        address: $new_address
+        run_address: $run_address
         respawned_from: $uid
         commissioner: $commissioner
     }
@@ -4680,6 +5276,7 @@ export def worker-respawn [
     let worker_env = ([
         "-e" $"PI_WORKER_RUN=($run)"
         "-e" $"PI_WORKER_UID=($new_uid)"
+        "-e" $"PI_WORKER_ADDRESS=($new_address)"
         "-e" $"PI_WORKER_ROLE=($old.role)"
         "-e" $"PI_WORKER_BRANCH=($tree.branch)"
         "-e" $"PI_WORKER_SESSION=($old.session)"
@@ -4694,7 +5291,7 @@ export def worker-respawn [
         open-worker-window --target $target --name $window --cwd $tree.path
             --session $old.session --window-env $worker_env --socket $socket --resume
     )
-    bus-identity $new_uid --run $run --identity {
+    bus-identity $new_uid --run $run --address $new_address --run-address $run_address --identity {
         role: $old.role
         cwd: $tree.path
         branch: $tree.branch
@@ -4704,6 +5301,8 @@ export def worker-respawn [
         window: $window
         window_id: $window_id
         task: $task
+        address: $new_address
+        run_address: $run_address
         respawned_from: $uid
         commissioner: $commissioner
     }
@@ -4711,6 +5310,10 @@ export def worker-respawn [
     {
         run: $run
         uid: $new_uid
+        # dotfiles-1d1f: the successor's own address, named back so the caller
+        # can see it is NOT the predecessor's.
+        address: $new_address
+        run_address: $run_address
         from: $uid
         role: $old.role
         session: $old.session
@@ -4813,7 +5416,7 @@ def require-flags [verb: string, wanted: table<flag: string, value: any, what: s
 # worker's project scope from the repository the caller is standing in
 # (`resolve-run`), so there is nothing left for a caller to type or drift
 # across three copies of the wording.
-const UID_IS = "the worker's id in this project, e.g. impl-1. `ps`/`workers` list them"
+const UID_IS = "the worker's label in this project, e.g. impl-1. `ps`/`workers` list them"
 
 def usage []: nothing -> string {
     [
@@ -4858,6 +5461,13 @@ def usage []: nothing -> string {
         "  doctor                               check dependencies"
         ""
         "NOTES"
+        "  ADDRESSES. An address is minted (`a` plus 26 characters) and is what"
+        "  travels in an envelope's from/to; a LABEL (`impl-1`, `r7`) is what a"
+        "  display shows and what every verb here accepts. `send --to impl-1`,"
+        "  `wait --as r7` and `--commissioner impl-2` all resolve the label to"
+        "  its address before anything is written. A label two parties share is"
+        "  refused by name rather than delivered to one of them; `messages`"
+        "  renders the label, or the raw address when nothing resolves it."
         "  spawn --task names the bd ticket the worker serves. It names the"
         "  worker's branch as it always did, AND is now recorded on the identity,"
         "  so `inspect`/`ps`/`workers` answer 'which ticket is this?' after a"
@@ -4869,8 +5479,8 @@ def usage []: nothing -> string {
         "  `wait --as <its own address>` — otherwise the completion is delivered"
         "  correctly to an address it is not listening on, silently."
         "  wait both reads AND marks: there is no separate ack step any more, so"
-        "  --as may only name this session's own address (PI_WORKER_UID, when"
-        "  set) — reading and marking someone else's queue crosses the one"
+        "  --as may only name this session's own address (PI_WORKER_ADDRESS,"
+        "  when set) — reading and marking someone else's queue crosses the one"
         "  ownership line the bus enforces. Observe another agent's mail with"
         "  `status`/`inspect` instead, which take any uid freely."
         "  The work stays in the worktree and the branch; `accept` reclaims"
@@ -4977,12 +5587,13 @@ def "main spawn" [
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
 
-    # Retried only when the address was MINTED. Two spawns racing can each mint
-    # the same lowest-free uid for the project, and `claim-address`'s atomic
-    # create is what notices — the loser is refused, re-mints, and takes the
-    # next free address. An explicitly passed uid gets no retry: its refusal is
-    # the answer the caller asked for, and quietly spawning somewhere else
-    # would be worse than failing.
+    # Retried only when the LABEL was minted. Two spawns racing can each mint
+    # the same lowest-free label, and each then gets an address of its own —
+    # dotfiles-1d1f made that safe rather than refused, so the retry no longer
+    # fires for a contested label. It stays because it still covers every
+    # other way `worker-place` can fail transiently, and because an explicitly
+    # passed uid must get NO retry: a caller that named the worker wants the
+    # refusal, not a worker quietly spawned somewhere else.
     mut attempt = 0
     loop {
         let uid = (if $minted { mint-uid $role $repo } else { $uid })
@@ -5041,12 +5652,18 @@ def resolve-run [uid: string, repo: string = ""]: nothing -> string {
         | each {|d| $d | path basename }
         | where {|run| (($agents_dir | path join $run $uid) | path exists) }
     )
-    # `first` is not a tie-break: `mint-uid`/`claim-address` keep a uid unique
-    # across the whole project, so at most one run can hold it. It used to be
-    # one — two same-role spawns both minted `<role>-1`, and whichever run
-    # sorted first got every uid-addressed verb while the other worker stayed
-    # live with no address at all (dotfiles-bg65).
-    if ($matches | is-empty) { "" } else { $matches | first }
+    # dotfiles-1d1f: NEVER a tie-break. `claim-unique-address` keeps a spawned
+    # worker's label unique across the project, so more than one match means
+    # something planted a record directly — and answering with whichever run
+    # sorted first is precisely the misdelivery dotfiles-bg65 produced, where
+    # one of two live workers stayed running with no way to address it. An
+    # ambiguous label is an observation, not a licence to choose ([[adr0017]]),
+    # so it is refused by name here rather than resolved.
+    if ($matches | is-empty) { return "" }
+    if ($matches | length) > 1 {
+        error make {msg: $"($uid) names ($matches | length) workers in this project \(runs ($matches | sort | str join ', ')): there is no one worker to address by that name. Absent an unambiguous label this verb cannot act \(adr0017)"}
+    }
+    $matches | first
 }
 
 # The project a lookup searched, worded for a refusal — the exact same
@@ -5079,6 +5696,39 @@ def resolve-run-or-refuse [verb: string, uid: string, repo: string = ""]: nothin
 # PI_WORKER_UID, already set on every spawned worker's window (`worker-spawn`).
 def self-uid []: nothing -> string { $env | get -o PI_WORKER_UID | default "" }
 
+# This session's own ADDRESS, set on every spawned worker's window by
+# `worker-place`/`worker-respawn` (dotfiles-1d1f).
+#
+# Preferred over resolving PI_WORKER_UID wherever a worker acts as itself: the
+# address is what was minted for this worker, so it is exact even when the
+# label is shared with a live namesake — which is the one situation label
+# resolution correctly refuses to answer.
+def self-address []: nothing -> string { $env | get -o PI_WORKER_ADDRESS | default "" }
+
+# This session's own address, however it can be established.
+#
+# PI_WORKER_ADDRESS when the window has one — exact, and immune to a label
+# shared with a live namesake. Otherwise the label is resolved, which is what
+# a session started before its window carried an address has, and what a test
+# fixture that only sets PI_WORKER_UID has. Empty when the session claimed
+# nothing at all, which is not an error: an orchestrating session addresses
+# itself explicitly with `--as`.
+def session-address []: nothing -> string {
+    let addr = (self-address)
+    if ($addr | is-not-empty) { return $addr }
+    let uid = (self-uid)
+    if ($uid | is-empty) { return "" }
+    to-address $uid
+}
+
+# The address a verb should act AS, given what the caller typed.
+#
+# Empty `--as` inside a worker window means "me". An explicit `--as` is
+# resolved through `to-address` like any other label a caller typed.
+def acting-address [as: string]: nothing -> string {
+    if ($as | is-empty) { session-address } else { to-address $as }
+}
+
 # Peer-addressed send (sp029 T3/T9): a message to one or more agents' queues,
 # opaque content, no run, no sequence. The legacy ticket/instructions work
 # payload this verb used to carry retired with the stage registry (T8) — that
@@ -5093,14 +5743,18 @@ def "main send" [--as: string = "", --to: string = "", --content: string = ""] {
     if ($as_ | is-empty) {
         error make {msg: "send needs --as: who is sending; pass it explicitly, or run inside a worker window where PI_WORKER_UID is already set"}
     }
-    let recipients = ($to | split row "," | each {|a| $a | str trim } | where {|a| $a | is-not-empty })
-    if ($recipients | is-empty) {
-        error make {msg: "send needs --to: one or more recipient addresses, comma-separated, e.g. --to orchestrator-1"}
+    let typed = ($to | split row "," | each {|a| $a | str trim } | where {|a| $a | is-not-empty })
+    if ($typed | is-empty) {
+        error make {msg: "send needs --to: one or more recipient labels or addresses, comma-separated, e.g. --to orchestrator-1"}
     }
     if ($content | is-empty) {
         error make {msg: "send needs --content: the message body; the bus interprets none of it"}
     }
-    bus-send --to $recipients --from $as_ --content $content | to json | print
+    # dotfiles-1d1f: labels in, addresses on the wire. A label that resolves
+    # to two addresses is refused by `to-address` rather than delivered to one
+    # of them, which is the misdelivery this whole change removes.
+    let recipients = ($typed | each {|a| to-address $a })
+    bus-send --to $recipients --from (acting-address $as) --content $content | to json | print
 }
 
 # Prints nothing when there is no mail, so `if (pi-worker wait --as me |
@@ -5122,13 +5776,18 @@ def "main wait" [--as: string = "", --block, --timeout: int = 60] {
     if ($as_ | is-empty) {
         error make {msg: "wait needs --as: whose queue to read; pass it explicitly, or run inside a worker window where PI_WORKER_UID is already set"}
     }
-    let self = (self-uid)
-    if ($self | is-not-empty) and ($self != $as_) {
-        error make {msg: $"wait refused: --as ($as_) is not this session's own address \(($self)); reading and marking another agent's mail crosses an ownership line. Use `status`/`inspect` to observe it instead"}
+    # dotfiles-1d1f: the ownership line is drawn between ADDRESSES, not
+    # labels. Two parties may wear one label, so comparing labels would let a
+    # namesake consume mail that was never addressed to it — the same class of
+    # failure as delivering to the first match.
+    let acting = (acting-address $as)
+    let self = (session-address)
+    if ($self | is-not-empty) and ($self != $acting) {
+        error make {msg: $"wait refused: --as ($as_) resolves to ($acting), which is not this session's own address \(($self)); reading and marking another agent's mail crosses an ownership line. Use `status`/`inspect` to observe it instead"}
     }
-    let mail = (bus-wait --as $as_ --block=$block --timeout ($timeout * 1sec))
+    let mail = (bus-wait --as $acting --block=$block --timeout ($timeout * 1sec))
     if ($mail | is-not-empty) {
-        for m in $mail { queue-mark-read $as_ $m.id }
+        for m in $mail { queue-mark-read $acting $m.id }
         print ($mail | to json)
     }
 }
