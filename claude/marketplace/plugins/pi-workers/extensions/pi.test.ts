@@ -2195,10 +2195,27 @@ describe("transcript lines", () => {
 });
 
 describe("inbox watcher against a fake Pi", () => {
-  function fakeIO(files: Record<string, unknown>) {
+  // `report` defaults to a spy that records every call so a test can assert
+  // on it directly (dotfiles-7bek: the refusal path must be checked against
+  // what was REPORTED, not just against the absence of a throw — the old
+  // code did not throw either). A test exercising the "IO exposes no report
+  // route" branch passes `report: undefined` explicitly.
+  function fakeIO(
+    files: Record<string, unknown>,
+    opts?: { report?: false | ((to: string, content: { status: string; detail: string }) => unknown) },
+  ) {
     const logs: string[] = [];
+    const reports: Array<{ to: string; content: { status: string; detail: string } }> = [];
+    const report =
+      opts?.report === false
+        ? undefined
+        : opts?.report ??
+          ((to: string, content: { status: string; detail: string }) => {
+            reports.push({ to, content });
+          });
     return {
       logs,
+      reports,
       io: {
         list: () => Object.keys(files),
         read: (path: string) => {
@@ -2208,6 +2225,7 @@ describe("inbox watcher against a fake Pi", () => {
         },
         join: (...parts: string[]) => parts.join("/"),
         log: (line: string) => logs.push(line),
+        ...(report ? { report } : {}),
       },
     };
   }
@@ -2434,6 +2452,118 @@ describe("inbox watcher against a fake Pi", () => {
     createInboxWatcher(host, identity, "/inbox", io).poll();
     expect(sent.map((s) => s.text)).toEqual(["two"]);
     expect(logs.join(" ")).toMatch(/refusing/i);
+  });
+
+  // dotfiles-7bek: the catch above used to say "mark = envelope.sequence; //
+  // never retried; the bus reader reports it" — but nothing read that mark
+  // for the sender's benefit, so the loss was invisible to whoever sent the
+  // envelope and visible only in a worker's stderr. A green suite sat over
+  // this for the length of dotfiles-oj4c's first iteration.
+  test("a malformed envelope with a usable sender is reported to it as a protocol_error, and delivery continues", () => {
+    const { io, logs, reports } = fakeIO({
+      "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+      "2.json": envelope(2, "two"),
+    });
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    // Envelope 1 is refused-and-marked within the SAME poll, so 2 (the
+    // message behind it) is what the loop delivers this tick — see "does not
+    // reorder" above for why a refusal does not stop the scan.
+    expect(w.poll()).toEqual([2]);
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.to).toBe("run-1");
+    expect(reports[0]!.content.status).toBe("protocol_error");
+    expect(reports[0]!.content.detail).toContain("1");
+    expect(logs.join(" ")).toMatch(/refusing/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    // Never retried: a second poll reports nothing new and redelivers nothing.
+    expect(w.poll()).toEqual([]);
+    expect(reports).toHaveLength(1);
+  });
+
+  test("a malformed envelope with no usable sender logs why nothing was reported, and the mark still advances", () => {
+    // Malformed BY DEFINITION: `from` may be missing, empty, or garbage.
+    // There is nobody to report to, and that has to be said explicitly
+    // rather than silently attempted against an empty address.
+    const { io, logs, reports } = fakeIO({
+      "1.json": { ...envelope(1, ""), from: "", content: { stage: "wk-build", task: "one" } },
+      "2.json": envelope(2, "two"),
+    });
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+
+    expect(reports).toHaveLength(0);
+    expect(logs.join(" ")).toMatch(/no usable sender/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("a synchronous throw inside the reporting path does not stop the loop, and the mark still advances", () => {
+    const { io, logs } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      {
+        report: () => {
+          throw new Error("nu exec exploded");
+        },
+      },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(logs.join(" ")).toMatch(/nu exec exploded/i);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("a rejected promise inside the reporting path does not stop the loop, and the mark still advances", async () => {
+    const { io, logs } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      {
+        report: () => Promise.reject(new Error("bus-send refused")),
+      },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    // The rejection is caught asynchronously, after poll() already returned —
+    // flush the microtask queue and confirm it reached the log rather than
+    // an unhandled rejection.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logs.join(" ")).toMatch(/bus-send refused/i);
+
+    expect(w.poll()).toEqual([]);
+  });
+
+  test("an IO surface with no report route logs that instead of throwing", () => {
+    const { io, logs, reports } = fakeIO(
+      {
+        "1.json": { ...envelope(1, ""), from: "run-1", content: { stage: "wk-build", task: "one" } },
+        "2.json": envelope(2, "two"),
+      },
+      { report: false },
+    );
+    const { host, sent } = fakeHost("idle");
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+    expect(w.poll()).toEqual([2]);
+    expect(logs.join(" ")).toMatch(/no report route/i);
+    expect(reports).toHaveLength(0);
+    expect(sent.map((s) => s.text)).toEqual(["two"]);
+
+    expect(w.poll()).toEqual([]);
   });
 
   test("a host with no sendUserMessage is inert and says so, rather than throwing", () => {
