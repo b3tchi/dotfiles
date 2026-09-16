@@ -140,7 +140,11 @@ let results = [
         assert-eq (bucket-state {kind: "interactive", status: "busy"})    "working"
         assert-eq (bucket-state {kind: "background",  state:  "working"}) "working"
         assert-eq (bucket-state {kind: "interactive", status: "idle"})    "idle"
-        assert-eq (bucket-state {kind: "interactive", status: "shell"})   "idle"
+        # dotfiles-v1in: `shell` is a session occupied by a shell command --
+        # the CLI reports it `busy` and prints it "working". The fast probe
+        # translates it before this point (`cli-status`), so a `shell` reaching
+        # here came from somewhere else; it must still not read as at-rest.
+        assert-eq (bucket-state {kind: "interactive", status: "shell"})   "working"
         assert-eq (bucket-state {kind: "interactive", status: "waiting"}) "blocked"
         assert-eq (bucket-state {kind: "background",  state:  "blocked"}) "blocked"
         assert-eq (bucket-state {kind: "background",  state:  "failed"})  "blocked"

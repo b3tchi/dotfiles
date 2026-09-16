@@ -25,7 +25,9 @@
 #   state   the JOB's lifecycle -- working / blocked / done / failed. Durable,
 #           survives the process. Background records only.
 #   status  the PROCESS's activity -- busy / idle. Present ONLY while a
-#           process exists. Both kinds carry it.
+#           process exists. Both kinds carry it. The state file behind the
+#           fast probe stores a WIDER vocabulary than the CLI prints
+#           (busy | shell | idle | waiting); see `cli-status`.
 #
 # The pairs that matter, and what the census does with each:
 #
@@ -35,6 +37,7 @@
 #   idle     blocked   alive, WAITING ON YOU                blocked
 #   idle     done      alive, finished, parked              (dropped: terminal)
 #   busy     --        interactive session, running         working
+#   shell    --        session running a shell command      working
 #   idle     --        interactive session, at a prompt     idle
 #   absent   any       historical record, process gone      (dropped: not live)
 #
@@ -47,7 +50,14 @@
 # under-count (adr0017: absence of evidence is not evidence of absence).
 const BUCKETS = {
     busy: "working", working: "working",
-    idle: "idle", shell: "idle",
+    # dotfiles-v1in: `shell` is a session occupied by a shell command -- the
+    # CLI reports it as `busy` and its display prints it as "working". It used
+    # to bucket `idle` here, which was the same misreading the fast probe made
+    # one layer down. `cli-status` now translates it before bucketing, so this
+    # entry is the belt to that braces: a value arriving from somewhere else
+    # must not be filed as at-rest work.
+    shell: "working",
+    idle: "idle",
     waiting: "blocked", blocked: "blocked", failed: "blocked",
     done: "done",
 }
@@ -601,6 +611,27 @@ export def live-sessions [sessions: list, starts: record]: nothing -> list {
     }
 }
 
+# The CLI's `status` for a value the state file stores.
+#
+# dotfiles-v1in: the two vocabularies are not the same one. A session file
+# validates its `status` against busy | shell | idle | waiting (the CLI's own
+# validator, read out of the 2.1.273 bundle), while `claude agents --all
+# --json` answered `busy` for a session whose file said `shell` -- observed
+# live, the only row of six that disagreed, and reproducibly so across runs.
+# The CLI's display collapses the pair the same way: busy and shell both print
+# as "working". A session shelling out is a session that is occupied, so
+# `shell` is a spelling of busy and not a third thing.
+#
+# ONLY that pair is translated. `waiting` is left alone deliberately: no live
+# session carried it while the CLI was queried, so what `--json` prints for one
+# is unverified, and a mapping invented to look complete would be exactly the
+# fabricated verdict adr0017 forbids. The parity case in probe-cases.nu is what
+# will catch it if `waiting` (or a status a later build invents) turns out to
+# be translated too.
+export def cli-status [status: any]: nothing -> any {
+    if $status == "shell" { "busy" } else { $status }
+}
+
 # Assemble CLI-shaped agent records from the two state-file sources.
 #
 # The shapes must match `probe-agents` exactly, because everything downstream
@@ -656,7 +687,7 @@ export def shape-fast-agents [live: list, jobs: list]: nothing -> list {
             sessionId: $sid
             name:      ($j | get -o name | default "")
             state:     $state
-            status:    (if $s != null { $s | get -o status } else { null })
+            status:    (if $s != null { cli-status ($s | get -o status) } else { null })
         }
     })
 
@@ -668,7 +699,7 @@ export def shape-fast-agents [live: list, jobs: list]: nothing -> list {
             startedAt: ($s | get -o startedAt)
             sessionId: ($s | get -o sessionId)
             name:      ($s | get -o name | default "")
-            status:    ($s | get -o status)
+            status:    (cli-status ($s | get -o status))
         }
     })
 

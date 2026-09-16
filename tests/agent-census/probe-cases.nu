@@ -194,6 +194,53 @@ echo "99003  scratch_3"'
         assert-eq $r.account "fixture" "the account label must be attached, as probe-agents does"
     })
 
+    (run-case "probe/fast reports a session running a shell command as busy, like the CLI" {
+        # dotfiles-v1in, reproduced live on this box: a session whose
+        # `sessions/<pid>.json` says `shell` is reported `busy` by
+        # `claude agents --all --json` at the same moment. The state file's
+        # vocabulary is WIDER than the CLI's output vocabulary -- the CLI
+        # validates the stored value against ["busy","shell","idle","waiting"]
+        # and its own display collapses busy and shell into one "working" word
+        # -- so passing the stored value through verbatim is not parity, it is
+        # a different answer with the same field name.
+        let a = (make-account "fastshell")
+        write-session $a "s1" {
+            pid: (live-pid), procStart: (live-proc-start), kind: "interactive",
+            sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", status: "shell",
+        }
+        assert-eq (probe-agents-fast $a | first | get status) "busy" "a shell command is the session being occupied, not idle"
+    })
+
+    (run-case "probe/fast leaves every other stored status exactly as it found it" {
+        # Only the one divergence actually observed is normalised. `waiting` in
+        # particular is NOT mapped: no live session carried it while the CLI
+        # was queried, so what the CLI prints for one is unverified, and
+        # inventing a mapping would be the fabricated verdict adr0017 forbids.
+        for status in ["busy" "idle" "waiting"] {
+            let a = (make-account $"fastkeep-($status)")
+            write-session $a "s1" {
+                pid: (live-pid), procStart: (live-proc-start), kind: "interactive",
+                sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", status: $status,
+            }
+            assert-eq (probe-agents-fast $a | first | get status) $status $"($status) must pass through untouched"
+        }
+    })
+
+    (run-case "probe/fast normalises a background session's status too" {
+        # The bg row takes its status from the live session record exactly as
+        # the interactive row does, so it needs the same normalisation -- a
+        # bg agent shelling out is working, not idle.
+        let a = (make-account "fastshellbg")
+        write-session $a "s1" {
+            pid: (live-pid), procStart: (live-proc-start), kind: "bg",
+            sessionId: "sid-1", jobId: "j1", cwd: "/home/dev/alpha", name: "alpha-1", status: "shell",
+        }
+        write-job $a "j1" {sessionId: "sid-1", cwd: "/home/dev/alpha", name: "alpha-1", state: "working", createdAt: 1}
+        let r = (probe-agents-fast $a | first)
+        assert-eq $r.status "busy"
+        assert-eq $r.state "working" "the job axis is untouched"
+    })
+
     (run-case "probe/fast drops a session whose pid was REUSED" {
         # The pid is alive, but it belongs to a different process now. A
         # liveness check on the pid alone would report this stale file as a
