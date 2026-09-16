@@ -2291,6 +2291,60 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "address/an-unresolvable-label-is-refused-naming-it" {
+        # dotfiles-bocf: pre-1d1f the queue was LABEL-keyed, so mail sent to a
+        # not-yet-claimed label would still be delivered once that label was
+        # claimed. Post-1d1f the claimant reads its minted address's queue, so
+        # a message filed under the bare label can never be delivered — the
+        # old "no match -> itself" tolerance became a permanent silent
+        # discard for labels specifically.
+        #
+        # This is a SEND-PATH policy, not a resolver policy (re-shape after
+        # the first pass put it in `to-address` itself and broke
+        # `presence-read`'s never-raises contract plus ~100 `bus-identity`
+        # fixtures — see dotfiles-aszp/dotfiles-sevp). `to-address` stays
+        # exactly as lenient as it is on `main`; only `to-address-for-send`,
+        # the wrapper the actual send path (`bus-send`/CLI `send --to`) goes
+        # through, refuses — naming the label and the project searched, not
+        # handing it back verbatim.
+        let repo = (make-repo "unresolvable-label")
+        let root = (make-runtime "unresolvable-label")
+        with-runtime $root {
+            assert-eq (do { cd $repo; to-address "no-such-worker" --repo $repo }) "no-such-worker" "the plain resolver stays lenient: presence-read/bus-identity fixtures still get the label back"
+            assert-rejects { do { cd $repo; to-address-for-send "no-such-worker" --repo $repo } } "no-such-worker" "the send-path wrapper names the unresolvable label in its refusal"
+            assert-rejects { do { cd $repo; to-address-for-send "no-such-worker" --repo $repo } } $repo "and the project searched is named too"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "address/an-unclaimed-address-shaped-string-still-passes-through" {
+        # The tolerance `bus-send` documents (pi-worker.nu:2102-2104): an
+        # address nobody has claimed yet is exactly as valid a `to` as one
+        # that is live, since the bus keeps no registry to check against.
+        # This predates dotfiles-1d1f (commit 83a6e27f, sp029 T3) and must
+        # keep working through BOTH `to-address` and `to-address-for-send` —
+        # only the unresolvable-LABEL branch tightens at the send-path layer,
+        # not this one. Pinned on both functions on purpose: the two now live
+        # in different definitions and could otherwise drift apart under a
+        # later edit to just one of them.
+        #
+        # Built with `alphabet | str substring`, not typed out by hand: a
+        # hand-typed ULID look-alike is an easy way to smuggle an I/L/O/U into
+        # the string, all illegal in the Crockford-32 `ADDRESS_PATTERN` this
+        # depends on matching — the first draft of this fixture did exactly
+        # that and failed for the wrong reason (looked like a refusal
+        # regression; was actually an invalid fixture).
+        let repo = (make-repo "unclaimed-address-shaped")
+        let root = (make-runtime "unclaimed-address-shaped")
+        with-runtime $root {
+            let alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+            let orphan = $"a(($alphabet + $alphabet) | str substring 0..25)"
+            assert-eq (do { cd $repo; to-address $orphan --repo $repo }) $orphan "an unclaimed address-shaped string passes through to-address unchanged"
+            assert-eq (do { cd $repo; to-address-for-send $orphan --repo $repo }) $orphan "and through the send-path wrapper too"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "address/an-address-is-never-reused-after-release" {
         # Immutable and never reused: releasing a label and claiming it again
         # must not hand back the address the previous holder's envelopes still
