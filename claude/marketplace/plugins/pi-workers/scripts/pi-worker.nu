@@ -1614,9 +1614,147 @@ export def release-address [repo: string, address: string]: nothing -> nothing {
 }
 
 # By slug, for the caller that already has one — see `queue-dir-of`.
+#
+# The label record is TOMBSTONED before the directory goes (see below): the
+# envelopes this party sent outlive its registry entry, and a log that cannot
+# name its own history is the cost of deleting the only record of what an
+# address was called.
 def release-address-at [slug: string, address: string]: nothing -> nothing {
     let dir = (address-dir $slug | path join $address)
-    if ($dir | path exists) { rm -rf $dir }
+    if not ($dir | path exists) { return }
+    let record = (read-address-record $slug $address)
+    if $record != null { append-retired $slug $address $record }
+    rm -rf $dir
+}
+
+# ------------------------------------- the retired-label tombstone (dotfiles-mqse)
+#
+# `release-address-at` destroys the {name, role, project, kind} record, and
+# the MESSAGES that party sent do not go with it — they sit on the bus until
+# logout. So every display resolving them afterwards fell through to the raw
+# address: measured on this repo's own bus, 17 of the addresses referenced by
+# 39 envelopes were unresolvable, which is most of a log reading `…XV3QA8`.
+#
+# A tombstone is one appended line:
+#
+#   <state-root>/<slug>/retired.jsonl
+#   {"address":"a01M…","name":"impl-2","role":"implementer",
+#    "project":"/home/jan/.dotfiles","kind":"worker","retired_at":"…Z"}
+#
+# A FLAT FILE, not the `addresses/<address>/` shape it mirrors, because the
+# read side is `bus-messages` — one file read per agent-monitor tick instead
+# of an `ls` plus an `open` per dead party, which is the same cost
+# `address-labels` was written to avoid for live ones.
+#
+# APPENDED, not scratch-then-renamed: the line is the whole write, and one
+# ~150-byte O_APPEND write is atomic on a local filesystem, so two concurrent
+# releases interleave as whole lines rather than a torn one. That is a
+# different discipline from `write-address-record`'s, and for a different
+# reason: that record is REWRITTEN in place, this one never is.
+#
+# DISPLAY ONLY, which is the invariant worth protecting. `to-address`,
+# `label-address`, `addresses-named` and `presence-dir` never consult this
+# file, so a tombstoned label can neither route mail nor resurrect a claim —
+# it answers "what was this called", a question about something already said,
+# and nothing else. Reading it as liveness is what the mark below exists to
+# prevent.
+#
+# UNPRUNED, deliberately: a tombstone is one short line per dead party, and
+# the cost of never pruning is a file that grows by a line per `rm`. Pruning
+# is a filter-and-rewrite if that ever stops being true.
+
+# What a display appends to a name it resolved from a tombstone. Without it a
+# dead `impl-1` and a live `impl-1` render identically, and [[adr0017]] is
+# exactly the rule against a display stating more than its evidence supports:
+# the evidence here is "this address WAS called impl-1", not "impl-1 is
+# there". One cell wide, so a column width means the same thing either way.
+const RETIRED_MARK = "†"
+
+def retired-path [slug: string]: nothing -> string {
+    state-root | path join $slug "retired.jsonl"
+}
+
+# Record one released address. Called only from `release-address-at`, only
+# when there was a record to keep — so releasing an address twice (the
+# idempotent contract every caller relies on) appends once, and releasing one
+# nobody ever claimed appends nothing.
+def append-retired [slug: string, address: string, record: record] {
+    ensure-dir (state-root)
+    ensure-dir (state-root | path join $slug)
+    let path = (retired-path $slug)
+    let existed = ($path | path exists)
+    let line = ({
+        address: $address
+        name: $record.name
+        role: $record.role
+        project: $record.project
+        kind: $record.kind
+        retired_at: (now-stamp)
+    } | to json --raw)
+    $"($line)\n" | save --append $path
+    # 0600 on creation only: re-chmod'ing on every append would race a
+    # concurrent writer's fd for no gain, and the mode cannot drift on a file
+    # nothing else writes.
+    if not $existed { chmod 600 $path }
+}
+
+# Every tombstone this project holds, oldest first.
+#
+# Lenient line by line, for the reason `bus-messages` is lenient envelope by
+# envelope: a file that is appended to by concurrent writers can in principle
+# hold a partial line, and one unreadable line must cost one name — not the
+# whole history of every other party.
+def retired-records-at [slug: string]: nothing -> list<record> {
+    let path = (retired-path $slug)
+    if not ($path | path exists) { return [] }
+    let raw = (try { open --raw $path } catch { "" })
+    $raw
+    | lines
+    | where {|l| ($l | str trim | is-not-empty) }
+    | each {|l|
+        let parsed = (try { $l | from json } catch { null })
+        if $parsed == null { return null }
+        if not (($parsed | describe) | str starts-with "record") { return null }
+        let cols = ($parsed | columns)
+        if ("address" not-in $cols) or ("name" not-in $cols) { return null }
+        {
+            address: $parsed.address
+            name: $parsed.name
+            role: ($parsed | get -o role | default "")
+            project: ($parsed | get -o project | default "")
+            kind: ($parsed | get -o kind | default "worker")
+            retired_at: ($parsed | get -o retired_at | default "")
+        }
+    }
+    | compact
+}
+
+# The retired address->label lookup, read once per call — the same shape and
+# the same reason as `address-labels`. LAST WINS: an address appended twice
+# resolves to its most recent tombstone rather than raising on the duplicate.
+def retired-labels [slug: string]: nothing -> record {
+    retired-records-at $slug
+    | reduce --fold {} {|row, acc| $acc | upsert $row.address $row.name }
+}
+
+# Every tombstone this project holds: `{address, name, role, project, kind,
+# retired_at}`. The retired counterpart of `project-addresses`.
+export def project-retired [repo: string = ""]: nothing -> list<record> {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    retired-records-at (resolve-project-slug $base)
+}
+
+# What a display renders for one address: its live label, else its tombstoned
+# label marked as gone, else the raw address ([[adr0017]] — an address nothing
+# resolves is an observation about the registry, and the raw form is the one
+# an operator can copy back into a command).
+def render-address [address: string, labels: record, retired: record]: nothing -> string {
+    if ($address | is-empty) { return "" }
+    let live = ($labels | get -o $address)
+    if $live != null { return $live }
+    let gone = ($retired | get -o $address)
+    if $gone != null { return $"($gone)($RETIRED_MARK)" }
+    $address
 }
 
 # ------------------------------------------------------ presence (sp030 T3)
@@ -2369,7 +2507,12 @@ export def bus-prune []: nothing -> record {
 export def bus-messages []: nothing -> list<record> {
     let dir = (project-dir | path join "messages")
     if not ($dir | path exists) { return [] }
-    let labels = (address-labels (resolve-project-slug (current-repo)))
+    let slug = (resolve-project-slug (current-repo))
+    let labels = (address-labels $slug)
+    # dotfiles-mqse: a released party's envelopes outlive its registry record,
+    # so the log resolves through the tombstones too — marked, never silently
+    # as though the sender were still there.
+    let retired = (retired-labels $slug)
 
     let files = (
         ls $dir
@@ -2401,8 +2544,8 @@ export def bus-messages []: nothing -> list<record> {
             {
                 at: ($parsed | get -o created | default "")
                 id: ($parsed | get -o id | default $id)
-                from: (if ($from | is-empty) { "" } else { $labels | get -o $from | default $from })
-                to: ($to | each {|a| $labels | get -o $a | default $a })
+                from: (render-address $from $labels $retired)
+                to: ($to | each {|a| render-address $a $labels $retired })
                 kind: ($parsed | get -o kind | default "")
                 content: ($parsed | get -o content)
             }

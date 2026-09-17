@@ -2463,6 +2463,124 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo
     })
 
+    # --------------------------------- the retired-label tombstone (dotfiles-mqse)
+    #
+    # `release-address-at` deletes the address directory, and the label record
+    # {name, role, project, kind} lives inside it. The ENVELOPES that party
+    # sent do not go with it — they sit on the bus until logout — so every
+    # display resolving them afterwards fell through to the raw address. On
+    # this repo's own bus that was 17 of the addresses referenced by 39
+    # messages: a log where most of the history says `…XV3QA8`.
+    #
+    # The label is tombstoned to `<state-root>/<slug>/retired.jsonl` before the
+    # directory goes. DISPLAY ONLY: a tombstone resolves a name for something
+    # already said, and is never consulted by `to-address`, `label-address` or
+    # `presence-dir`, so a dead label still cannot route mail or resurrect a
+    # claim.
+
+    (run-case "retired/a-released-address-still-names-its-holder-in-history" {
+        let repo = (make-repo "retired-history")
+        let root = (make-runtime "retired-history")
+        with-runtime $root {
+            let dead = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let live = (do { cd $repo; claim-address $repo "r1" --role "run" --kind "run" })
+            do { cd $repo; bus-send --to [$live] --from $dead --content "before I go" }
+            do { cd $repo; release-address $repo $dead }
+
+            let rows = (do { cd $repo; bus-messages })
+            assert-eq ($rows | length) 1 "the envelope outlives its sender"
+            assert-eq ($rows | first | get from) "impl-1†" "and history still says who sent it, marked as gone"
+            assert-eq ($rows | first | get to) ["r1"] "the live recipient is unmarked"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "retired/a-live-label-wins-over-its-retired-namesake" {
+        # `rm --uid` is the documented way to recycle a NAME, so the same label
+        # over a released one is the ordinary case rather than an edge. The
+        # live holder owns the plain rendering; the dead one is still legible,
+        # and the two never collapse into one row.
+        let repo = (make-repo "retired-namesake")
+        let root = (make-runtime "retired-namesake")
+        with-runtime $root {
+            let dead = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            do { cd $repo; bus-send --to [$dead] --from $dead --content "first life" }
+            do { cd $repo; release-address $repo $dead }
+            let live = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            do { cd $repo; bus-send --to [$live] --from $live --content "second life" }
+
+            let rows = (do { cd $repo; bus-messages })
+            assert-eq ($rows | length) 2 "both envelopes are on the bus"
+            assert-eq ($rows | first | get from) "impl-1†" "the dead namesake keeps its own name, marked"
+            assert-eq ($rows | last | get from) "impl-1" "and the live one is not marked by its predecessor"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "retired/a-tombstone-is-not-addressable" {
+        # The whole risk of remembering a dead name: that something starts
+        # resolving it again. A tombstone answers a display and nothing else —
+        # the label reservation and the address record are both gone, so the
+        # resolver must behave exactly as it did before the tombstone existed.
+        let repo = (make-repo "retired-unaddressable")
+        let root = (make-runtime "retired-unaddressable")
+        with-runtime $root {
+            let dead = (do { cd $repo; ensure-address $repo "impl-9" --role "impl" })
+            do { cd $repo; release-address $repo $dead }
+            do { cd $repo; release-label $repo "impl-9" }
+
+            assert-eq (do { cd $repo; to-address "impl-9" --repo $repo }) "impl-9" "a retired label resolves to nothing but itself"
+            assert-eq (do { cd $repo; address-label $dead --repo $repo }) null "and its address record is gone, not merely hidden"
+            assert-eq (do { cd $repo; address-name $dead --repo $repo }) $dead "`address-name` still reports the raw address: a tombstone is a log's answer, not the registry's"
+            # The refusal names the ADDRESS, which is what `presence-dir` was
+            # asked for and the only thing it looked for.
+            assert-rejects { do { cd $repo; presence-write $dead "working" --repo $repo } } $dead "and nothing can publish presence back onto it"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "retired/a-tombstone-keeps-the-whole-label-record" {
+        # name AND project AND role AND kind, plus when it went: the record
+        # that was deleted, not a name scraped out of it. `project` is what
+        # tells an operator reading one project's log which repo a party
+        # belonged to.
+        let repo = (make-repo "retired-record")
+        let root = (make-runtime "retired-record")
+        with-runtime $root {
+            let dead = (do { cd $repo; claim-address $repo "impl-2" --role "implementer" })
+            do { cd $repo; release-address $repo $dead }
+
+            let stones = (do { cd $repo; project-retired $repo })
+            assert-eq ($stones | length) 1 "one release, one tombstone"
+            let stone = ($stones | first)
+            assert-eq $stone.address $dead "keyed by the address the envelopes name"
+            assert-eq $stone.name "impl-2" "the label it wore"
+            assert-eq $stone.role "implementer" "the role it was claimed with"
+            assert-eq $stone.kind "worker" "and what kind of party it was"
+            assert-eq $stone.project $repo "the project it belonged to"
+            assert-true ($stone.retired_at =~ '^\d{4}-\d{2}-\d{2}T') "stamped when it was released"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "retired/releasing-an-address-twice-leaves-one-answer" {
+        # `release-address` is idempotent by contract — every caller is
+        # cleaning up rather than asserting — and a spawn that fails after
+        # claiming releases an address `rm` may release again. Appending is
+        # how a tombstone is written, so the reader has to be last-wins rather
+        # than assume one line per address.
+        let repo = (make-repo "retired-twice")
+        let root = (make-runtime "retired-twice")
+        with-runtime $root {
+            let dead = (do { cd $repo; claim-address $repo "impl-3" --role "impl" })
+            do { cd $repo; release-address $repo $dead }
+            do { cd $repo; release-address $repo $dead }
+            let stones = (do { cd $repo; project-retired $repo })
+            assert-eq ($stones | where address == $dead | length) 1 "a second release of a released address records nothing new"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
 ]
 
 $cases | to json
