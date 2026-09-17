@@ -37,6 +37,7 @@ import (
 	"agent-monitor/internal/source"
 	"agent-monitor/internal/tui"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 )
@@ -262,9 +263,12 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 			s.model.ClickPane(tui.PaneRoster, isData, offset)
 		case hitMessages:
 			s.model.ClickPane(tui.PaneMessages, isData, offset)
-			// hitDetail and hitNone: sp032 T3 gives the detail pane no
-			// cursor and no focus stop (T4's job) and a separator/off-frame
-			// press changes nothing at all.
+		case hitDetail:
+			// sp032 T4: the pane is a focus stop now. isData is always
+			// false for it (hitTest says so — a message body has no
+			// selectable rows), so this focuses and selects nothing.
+			s.model.ClickPane(tui.PaneDetail, false, 0)
+			// hitNone: a separator/off-frame press changes nothing at all.
 		}
 	case tea.MouseButtonWheelUp:
 		switch target {
@@ -272,6 +276,8 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 			s.model.ScrollPane(tui.PaneRoster, -3)
 		case hitMessages:
 			s.model.ScrollPane(tui.PaneMessages, -3)
+		case hitDetail:
+			s.model.ScrollPane(tui.PaneDetail, -3)
 		}
 	case tea.MouseButtonWheelDown:
 		switch target {
@@ -279,6 +285,8 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 			s.model.ScrollPane(tui.PaneRoster, 3)
 		case hitMessages:
 			s.model.ScrollPane(tui.PaneMessages, 3)
+		case hitDetail:
+			s.model.ScrollPane(tui.PaneDetail, 3)
 		}
 	}
 }
@@ -335,6 +343,12 @@ func translateKey(k tea.KeyMsg) []tui.Key {
 		return []tui.Key{{Special: tui.KeyBackspace}}
 	case tea.KeyTab:
 		return []tui.Key{{Special: tui.KeyTab}}
+	case tea.KeyEsc:
+		return []tui.Key{{Special: tui.KeyEsc}}
+	case tea.KeyPgUp:
+		return []tui.Key{{Special: tui.KeyPgUp}}
+	case tea.KeyPgDown:
+		return []tui.Key{{Special: tui.KeyPgDn}}
 	}
 	return nil
 }
@@ -467,8 +481,24 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	rosterLines := paneLines(censusSample != nil, len(rosterRows))
 	logLines := paneLines(msgSample != nil, len(msgRows))
 
+	// sp032 T4's zoom: the detail pane alone, at full height. It returns
+	// EARLY, before the roster and the log are rendered or their viewports
+	// re-reported — deliberately, on both counts. Rendering panes that are
+	// not on screen would be waste; reporting them a viewport of 0 would be
+	// worse, because SetRosterViewport's legacy viewport<=0 regime pins
+	// scroll to the cursor, which would silently discard a wheel offset
+	// (sp032 T1's whole point) for the duration of the zoom.
+	if height > 0 && model.DetailVisible && model.DetailZoom {
+		_, _, detailBudget, _ := paneBudgets(rosterLines, logLines, height, true, true)
+		detailLines := renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, true)
+		return detailLines, frameLayout{
+			detail:      detailRegion(0, len(detailLines)),
+			detailShown: true,
+		}
+	}
+
 	if height > 0 {
-		rosterBudget, logBudget, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible)
+		rosterBudget, logBudget, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible, false)
 		model.SetRosterViewport(viewportRows(min(rosterLines, rosterBudget)))
 		model.SetMessagesViewport(viewportRows(min(logLines, logBudget)))
 	}
@@ -485,15 +515,14 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
 
 	// detailLines is rendered HERE, before the layout is built, because its
-	// ACTUAL length is not detailBudget: RenderDetail's clampToHeight only
-	// ever trims DOWN to the budget, exactly like roster/log's own clamp()
-	// (fitPanes above) — a short message renders fewer lines than its
-	// budget, with no padding to fill it. The layout must describe the
-	// frame that is actually returned, so it reads this slice's real
+	// ACTUAL length is not detailBudget: a short message occupies fewer
+	// rows than its budget, with no padding to fill it, exactly like
+	// roster/log's own clamp() (fitPanes above). The layout must describe
+	// the frame that is actually returned, so it reads this slice's real
 	// length rather than the budget that merely bounds it.
 	var detailLines []string
 	if detailShown {
-		detailLines = render.RenderDetail(selectedMessage(model, msgSample), width, detailBudget)
+		detailLines = renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, false)
 	}
 
 	layout := buildLayout(censusSample != nil, len(rosterRows), len(roster), msgSample != nil, len(msgRows), len(log), len(detailLines), detailShown)
@@ -513,6 +542,12 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	if height > 0 {
 		roster = markPane(roster, model.Focus == tui.PaneRoster, model.RosterCursor, model.RosterScroll, len(rosterRows))
 		log = markPane(log, model.Focus == tui.PaneMessages, model.MessagesCursor, model.MessagesScroll, len(msgRows))
+		// The detail pane is a focus stop since sp032 T4, so its header
+		// earns the same marking. rows is 0: the pane has no selectable
+		// row, so markPane marks the header and stops. (The ZOOM layout
+		// does not mark anything — it is the only pane on screen, so there
+		// is nothing for a focus mark to distinguish it from.)
+		detailLines = markPane(detailLines, model.Focus == tui.PaneDetail, 0, 0, 0)
 	}
 
 	var lines []string
@@ -532,6 +567,12 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 // they cost zero display cells, so a marked line occupies exactly the width
 // its text did, and they restore only the attribute they set (27 turns off
 // reverse, unlike a blanket 0 reset) so no other styling is clobbered.
+// zoomIndicator is the text the detail pane's header carries while the pane
+// is zoomed to the full frame (sp032 T4 criterion 4). It is plain text, not
+// an escape: the zoom is a MODE, and a mode the operator cannot name is one
+// they cannot leave.
+const zoomIndicator = "[zoom]"
+
 const (
 	styleOn  = "\x1b[7m"
 	styleOff = "\x1b[27m"
@@ -605,8 +646,13 @@ func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Mes
 	return &msgs[model.MessagesCursor]
 }
 
-// fitPanes trims three stacked panes so the whole frame fits in height rows:
-// roster, messages, and — when there is room and the toggle allows it — the
+// fitPanes trims the two stacked scrolling panes (and reports the detail
+// pane's budget) so the whole frame fits in height rows. It is the
+// THREE-PANE layout's trimmer only: the zoom layout renders neither roster
+// nor log, so renderFrame returns before reaching it and passes detailZoom
+// false here.
+//
+// Roster, messages, and — when there is room and the toggle allows it — the
 // detail pane.
 //
 // dotfiles-9x2m / dotfiles-m0km: without this the frame is however many
@@ -633,7 +679,7 @@ func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Mes
 // each pane's header line — a pane whose header scrolled away is
 // unreadable, and the header is what carries the staleness indicator.
 func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, logOut []string, detailBudget int, detailShown bool) {
-	rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(len(roster), len(log), height, detailVisible)
+	rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(len(roster), len(log), height, detailVisible, false)
 	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown
 }
 
@@ -642,9 +688,20 @@ func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, 
 // anything is rendered — the ordering sp031 T1's criterion needs (see
 // renderFrame). A budget of -1 means "do not clamp" (the height<=0 --once
 // contract); clamp treats any negative n that way.
-func paneBudgets(rosterLines, logLines, height int, detailVisible bool) (rosterBudget, logBudget, detailBudget int, detailShown bool) {
+func paneBudgets(rosterLines, logLines, height int, detailVisible, detailZoom bool) (rosterBudget, logBudget, detailBudget int, detailShown bool) {
 	if height <= 0 {
 		return -1, -1, 0, false
+	}
+
+	// sp032 T4's zoom is a THIRD case of the same arithmetic rather than a
+	// second arithmetic somewhere else: the detail pane takes every row,
+	// the other two get none, and there is no separator because there is
+	// nothing to separate. detailBudget is the pane's TOTAL line budget in
+	// both layouts (its header plus its viewport), so the "viewport takes
+	// height-1 rows" of the criterion falls out of renderDetailPane's one
+	// header line, not out of a second subtraction here.
+	if detailVisible && detailZoom {
+		return 0, 0, height, true
 	}
 
 	detailBudget, detailShown = detailCap(height)
@@ -729,20 +786,125 @@ func buildLayout(haveRoster bool, rosterRows, rosterRenderedLen int, haveMessage
 	layout := frameLayout{roster: roster, messages: messages, detailShown: detailShown}
 	if detailShown {
 		detailFirst := msgFirst + logRenderedLen + 1 // +1: the blank separator line
-		// RenderDetail has no column-header row and no placeholder-vs-data
-		// distinction that matters here (T3 gives the pane no cursor and no
-		// scroll — see frameLayout's doc): its first line is a header
-		// ("from → to", or the "(no message selected)" placeholder) and
-		// everything after is body, when there is a second line at all.
-		headerRows := min(1, detailRenderedLen)
-		layout.detail = paneLayout{
-			firstRow:   detailFirst,
-			headerRows: headerRows,
-			dataRows:   detailRenderedLen - headerRows,
-			totalRows:  detailRenderedLen,
-		}
+		layout.detail = detailRegion(detailFirst, detailRenderedLen)
 	}
 	return layout
+}
+
+// detailRegion is the detail pane's geometry, shared by the three-pane
+// layout and the zoom layout so the two never disagree about where the
+// header ends and the scrolled body begins.
+//
+// The pane has no column-header row and no placeholder-vs-data distinction:
+// its first line is the header ("from → to", or the "(no message selected)"
+// placeholder) and everything after it is the viewport's body, when there is
+// a second line at all. dataRows is therefore the viewport's on-screen row
+// count — which is what makes "the viewport takes height-1 rows" (criterion
+// 4) a checkable property of the layout rather than of the renderer.
+func detailRegion(firstRow, renderedLen int) paneLayout {
+	headerRows := min(1, renderedLen)
+	return paneLayout{
+		firstRow:   firstRow,
+		headerRows: headerRows,
+		dataRows:   renderedLen - headerRows,
+		totalRows:  renderedLen,
+	}
+}
+
+// renderDetailPane is sp032 T4's detail pane: the selected envelope's header
+// line, then as much of its body as the budget shows, through a
+// bubbles/viewport.
+//
+// The render it feeds the viewport is UNCLAMPED (height 0 — render/'s "do
+// not clamp" convention): a body pre-trimmed to the pane budget could not be
+// scrolled, because the rows past the budget would never have been produced.
+// The truncation indicator sp031 showed instead is gone from this path for
+// the same reason — the content below is reachable now, so marking it
+// "not shown" would be a lie.
+//
+// The viewport does the windowing; tui.Model owns the OFFSET. That split is
+// the spec's one-scroll-authority rule applied to this pane: the content is
+// re-rendered on every sampler tick, so a viewport that owned its own
+// YOffset across those rebuilds would be a second authority over the same
+// number, and the one that lost would lose intermittently. Here the offset
+// is read out of the model on every frame and never read back, so the
+// viewport is a pure formatting device and there is nothing in it to
+// preserve between frames.
+//
+// zoom appends the indicator criterion 4 asks for, in cmd/ and after
+// rendering — the same place and for the same reason markPane applies
+// reverse video, so render/ keeps emitting nothing but text.
+func renderDetailPane(model *tui.Model, msg *source.Message, width, budget int, zoom bool) []string {
+	// Which message this is, before anything reads the scroll: a changed
+	// selection resets the offset to the top, an unchanged one keeps it.
+	model.SetDetailSelection(detailSelectionKey(msg))
+
+	full := render.RenderDetail(msg, width, 0)
+	if len(full) == 0 {
+		return nil
+	}
+	header, body := full[0], full[1:]
+
+	bodyRows := budget - 1 // the header line is chrome above the scrolled region
+	if bodyRows < 0 {
+		bodyRows = 0
+	}
+	model.SetDetailViewport(bodyRows)
+	model.SetDetailLen(len(body))
+
+	if zoom {
+		header = withZoomIndicator(header, width)
+	}
+	out := []string{header}
+	if bodyRows == 0 || len(body) == 0 {
+		return out
+	}
+
+	// Height is the SMALLER of the budget and the body, so a short message
+	// occupies only the rows it needs: viewport.View() pads to its Height,
+	// and padding here would give the pane phantom rows the frame would
+	// then have to carry. The model still hears the real budget above, so
+	// the two clamps agree (both give a max offset of 0 when the body fits).
+	vp := viewport.New(width, min(bodyRows, len(body)))
+	vp.SetContent(strings.Join(body, "\n"))
+	vp.SetYOffset(model.DetailScroll)
+	for _, line := range strings.Split(vp.View(), "\n") {
+		// viewport.View() pads every line out to its Width with spaces.
+		// Trimming that back off keeps the frame's lines the same shape
+		// render/ produced them in — which is what the "no line exceeds the
+		// width" reasoning and every byte-comparing frame test assume.
+		out = append(out, strings.TrimRight(line, " "))
+	}
+	return out
+}
+
+// detailSelectionKey is cmd/'s answer to "is the detail pane showing the
+// same message as last frame?" — the question tui.Model's
+// SetDetailSelection asks to decide whether the scroll offset survives.
+//
+// The ID alone would do in production (ft014's ids are ULIDs), but the
+// other fields cost nothing and make the key correct for any envelope whose
+// id is absent or reused, which is a cheaper guarantee than trusting a
+// producer. It is NOT a content parse: adr0031 forbids deriving display
+// meaning from a body outside RenderDetail, and nothing here reads Content.
+func detailSelectionKey(msg *source.Message) string {
+	if msg == nil {
+		return ""
+	}
+	return strings.Join([]string{msg.ID, msg.At, msg.From, strings.Join(msg.To, ","), msg.Kind}, "\x00")
+}
+
+// withZoomIndicator appends criterion 4's zoom marker to the detail pane's
+// header, shortening the header itself by the cells the marker needs so the
+// line still fits the width. render.TruncateCells is used rather than a
+// local rune count because a header can carry wide runes, and the cell
+// accounting is a load-bearing rule this file must not fork.
+func withZoomIndicator(header string, width int) string {
+	const room = len(zoomIndicator) + 1 // the marker plus its separating space
+	if width <= room {
+		return render.TruncateCells(zoomIndicator, width)
+	}
+	return render.TruncateCells(header, width-room) + " " + zoomIndicator
 }
 
 // paneRegion is buildLayout's per-pane case split: no sample yet (the

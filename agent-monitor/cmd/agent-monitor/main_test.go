@@ -1335,7 +1335,7 @@ func TestLayout_MatchesPaneBudgets(t *testing.T) {
 
 				rosterLines := paneLines(true, 100)
 				logLines := paneLines(true, 100)
-				rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(rosterLines, logLines, height, detailVisible)
+				rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(rosterLines, logLines, height, detailVisible, false)
 
 				wantRosterLen := min(rosterLines, rosterBudget)
 				wantLogLen := min(logLines, logBudget)
@@ -1652,6 +1652,11 @@ func TestMouse_WheelScrollsPaneUnderPointerWithoutChangingFocus(t *testing.T) {
 func TestMouse_PressOnSeparatorChangesNothing(t *testing.T) {
 	s := newWiredShell(t, 20, 20, 100, 30)
 	s.model.DetailVisible = true
+	// dotfiles-zgdi: Focus must be set to something OTHER than the
+	// PaneRoster zero value, or "nothing changed" is indistinguishable from
+	// "a separator press focused the roster" — the struct compare below
+	// would pass either way.
+	s.model.Focus = tui.PaneMessages
 
 	layout := settleLayout(s)
 	if !layout.detailShown {
@@ -1707,9 +1712,12 @@ func TestMouse_WheelOverDetailAndEmptyPaneIsSafe(t *testing.T) {
 	if target, _, _ := hitTest(layout, layout.detail.firstRow); target != hitDetail {
 		t.Fatalf("test setup: hitTest(detail) = %v, want hitDetail", target)
 	}
-	// hitDetail has no case in shell.handleMouse's switch — nothing to call.
-	// Asserting the target alone is the safety property here: T3 must never
-	// map a detail-pane coordinate onto PaneRoster/PaneMessages.
+	// Asserting the target alone is the safety property here: a detail-pane
+	// coordinate must never be mapped onto PaneRoster/PaneMessages. sp032
+	// T4 gave hitDetail its own handleMouse cases (focus on a press, scroll
+	// on a wheel); what they do is asserted by
+	// TestDetail_WheelScrollsTheDetailPane and
+	// TestDetail_LeftClickFocusesTheDetailPane.
 
 	my := layout.messages.firstRow + layout.messages.headerRows
 	target, isData, _ := hitTest(layout, my)
@@ -1982,5 +1990,418 @@ func TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame(t *testing.
 	}
 	if strings.Contains(view, "alice →") {
 		t.Fatalf("expected alice's message no longer selected, got:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T4: the detail pane becomes a peer.
+// ---------------------------------------------------------------------------
+
+// newDetailShell is newWiredShell with message bodies long enough that the
+// detail pane actually has somewhere to scroll: each envelope's content is a
+// JSON object of bodyKeys keys, which json.Indent renders as one line per
+// key plus the braces. Senders differ per message so a selection change is
+// observable in the detail header, and the ids are distinct so the
+// scroll-reset rule has something real to key on.
+func newDetailShell(t *testing.T, msgCount, bodyKeys, width, height int) *shell {
+	t.Helper()
+	dir := t.TempDir()
+
+	rows := make([]source.Row, 8)
+	for i := range rows {
+		rows[i] = source.Row{UID: fmt.Sprintf("agent%02d", i), Name: fmt.Sprintf("agent%02d", i), Bucket: "idle"}
+	}
+	rosterJSON, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatalf("marshal roster: %v", err)
+	}
+
+	var msgs strings.Builder
+	msgs.WriteString("[")
+	for i := 0; i < msgCount; i++ {
+		if i > 0 {
+			msgs.WriteString(",")
+		}
+		fmt.Fprintf(&msgs, `{"at":"2026-09-17T10:%02d:00Z","id":"msg%02d","from":"sender%02d","to":["bob"],"kind":"message","content":{`, i%60, i, i)
+		for k := 0; k < bodyKeys; k++ {
+			if k > 0 {
+				msgs.WriteString(",")
+			}
+			fmt.Fprintf(&msgs, `"k%03d":"m%02d-v%03d"`, k, i, k)
+		}
+		msgs.WriteString("}}")
+	}
+	msgs.WriteString("]")
+
+	writeStub(t, dir, "agent-census", "#!/bin/sh\ncat <<'JSON'\n"+string(rosterJSON)+"\nJSON\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\ncat <<'JSON'\n"+msgs.String()+"\nJSON\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	mm := source.NewMessagesMonitor(source.NewMessagesSampler())
+	mm.Tick(ctx)
+
+	s := newShell(ctx, tui.NewModel(), census, mm)
+	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	// A real session always draws once before bubbletea delivers a key
+	// (runInteractive's forced first reads, then View), and that first draw
+	// is what establishes MessagesLen — which the zoom refusal reads. Draw
+	// here too, so a key test is not accidentally testing a pre-first-frame
+	// model no operator can ever be looking at.
+	settleLayout(s)
+	return s
+}
+
+// detailPaneLines renders one frame off s's current state and returns the
+// detail pane's own rows, split into its header line and its body rows, as
+// they actually appear on screen. Reading the FRAME (rather than the model's
+// scroll field) is what makes the scroll assertions below about what the
+// operator sees.
+func detailPaneLines(t *testing.T, s *shell) (header string, body []string) {
+	t.Helper()
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	if !layout.detailShown {
+		t.Fatalf("detail pane is not shown in this frame: %q", lines)
+	}
+	d := layout.detail
+	if d.totalRows == 0 {
+		t.Fatalf("detail pane occupies no rows: %q", lines)
+	}
+	return lines[d.firstRow], lines[d.firstRow+d.headerRows : d.firstRow+d.totalRows]
+}
+
+func focusDetail(t *testing.T, s *shell) {
+	t.Helper()
+	for i := 0; i < 2; i++ {
+		s.Update(key(tea.KeyTab))
+	}
+	if s.model.Focus != tui.PaneDetail {
+		t.Fatalf("setup: Focus = %v after two tabs, want PaneDetail", s.model.Focus)
+	}
+}
+
+// TestUpdate_TabCyclesThreePanes is criterion 1 driven through the REAL
+// path: a tea.KeyMsg into shell.Update, not a Model method call. The detail
+// pane is a focus stop only if the key actually reaches it.
+func TestUpdate_TabCyclesThreePanes(t *testing.T) {
+	s := newDetailShell(t, 3, 30, 100, 40)
+	want := []tui.Pane{tui.PaneMessages, tui.PaneDetail, tui.PaneRoster, tui.PaneMessages, tui.PaneDetail, tui.PaneRoster}
+	for i, w := range want {
+		s.Update(key(tea.KeyTab))
+		if s.model.Focus != w {
+			t.Fatalf("tab #%d: Focus = %v, want %v", i+1, s.model.Focus, w)
+		}
+	}
+}
+
+// TestDetail_ScrollSurvivesRerenderOfSameMessage is criterion 3's 2-second
+// tick case, asserted on the RENDERED FRAME. A naive pane that rebuilt its
+// scroll state on each render would snap back to the top here, and the
+// message pane's own sample ticks every two seconds, so "each render" is
+// "every two seconds" in a real session.
+func TestDetail_ScrollSurvivesRerenderOfSameMessage(t *testing.T) {
+	s := newDetailShell(t, 3, 60, 100, 40)
+	focusDetail(t, s)
+
+	_, top := detailPaneLines(t, s)
+	for i := 0; i < 5; i++ {
+		s.Update(runeKey('j'))
+	}
+	_, scrolled := detailPaneLines(t, s)
+	if scrolled[0] == top[0] {
+		t.Fatalf("setup: five `j` presses did not move the detail body off %q", top[0])
+	}
+
+	for i := 0; i < 5; i++ {
+		s.Update(messagesTickMsg{})
+		s.Update(rosterTickMsg{})
+		_, again := detailPaneLines(t, s)
+		if again[0] != scrolled[0] {
+			t.Fatalf("tick #%d: detail body starts at %q, want the scrolled %q", i+1, again[0], scrolled[0])
+		}
+	}
+}
+
+// TestDetail_SelectionChangeResetsScrollToTop is criterion 3's other half:
+// moving the message selection must put the reader at the TOP of the new
+// message, never 5 lines into a body they have not seen the start of.
+func TestDetail_SelectionChangeResetsScrollToTop(t *testing.T) {
+	s := newDetailShell(t, 3, 60, 100, 40)
+	focusDetail(t, s)
+
+	_, top := detailPaneLines(t, s)
+	for i := 0; i < 5; i++ {
+		s.Update(runeKey('j'))
+	}
+	if _, scrolled := detailPaneLines(t, s); scrolled[0] == top[0] {
+		t.Fatalf("setup: the detail body did not scroll")
+	}
+
+	// tab → roster → messages, then `j` to select the next message.
+	s.Update(key(tea.KeyTab))
+	s.Update(key(tea.KeyTab))
+	if s.model.Focus != tui.PaneMessages {
+		t.Fatalf("setup: Focus = %v, want PaneMessages", s.model.Focus)
+	}
+	s.Update(runeKey('j'))
+
+	header, body := detailPaneLines(t, s)
+	if !strings.Contains(header, "sender01") {
+		t.Fatalf("detail header %q, want the newly selected sender01", header)
+	}
+	if body[0] != top[0] {
+		t.Errorf("detail body starts at %q after a selection change, want the top line %q", body[0], top[0])
+	}
+}
+
+// TestZoom_HidesOtherPanesAndRestoresScrollOnExit is criterion 4, end to
+// end: `enter` gives the detail pane the whole frame (one header row plus
+// height-1 viewport rows) with a zoom indicator on the header and neither
+// other pane rendered, and `esc` puts the three-pane layout back WITH the
+// scroll position the reader had.
+func TestZoom_HidesOtherPanesAndRestoresScrollOnExit(t *testing.T) {
+	s := newDetailShell(t, 3, 80, 100, 40)
+	focusDetail(t, s)
+	for i := 0; i < 5; i++ {
+		s.Update(runeKey('j'))
+	}
+	_, scrolled := detailPaneLines(t, s)
+
+	s.Update(key(tea.KeyEnter))
+	if !s.model.DetailZoom {
+		t.Fatalf("enter did not zoom")
+	}
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+
+	for _, l := range lines {
+		if strings.Contains(l, "agent0") {
+			t.Fatalf("zoomed frame still renders a roster row: %q", l)
+		}
+		if strings.Contains(l, "sender01") || strings.Contains(l, "sender02") {
+			t.Fatalf("zoomed frame still renders the message log: %q", l)
+		}
+	}
+	if len(lines) != s.height {
+		t.Errorf("zoomed frame is %d lines, want the full height %d", len(lines), s.height)
+	}
+	if layout.detail.firstRow != 0 {
+		t.Errorf("zoomed detail pane starts at row %d, want 0", layout.detail.firstRow)
+	}
+	if layout.detail.dataRows != s.height-1 {
+		t.Errorf("zoomed viewport is %d rows, want height-1 = %d", layout.detail.dataRows, s.height-1)
+	}
+	if !strings.Contains(lines[0], zoomIndicator) {
+		t.Errorf("zoomed header %q, want a %q indicator", lines[0], zoomIndicator)
+	}
+	if lines[1] != scrolled[0] {
+		t.Errorf("zoomed body starts at %q, want the scroll carried in at %q", lines[1], scrolled[0])
+	}
+
+	s.Update(key(tea.KeyEsc))
+	if s.model.DetailZoom {
+		t.Fatalf("esc did not leave zoom")
+	}
+	back, backLayout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	if !containsSubstring(back, "agent00") {
+		t.Errorf("esc did not restore the roster pane: %q", back)
+	}
+	if !backLayout.detailShown {
+		t.Fatalf("esc left the detail pane hidden")
+	}
+	_, body := detailPaneLines(t, s)
+	if body[0] != scrolled[0] {
+		t.Errorf("after esc the detail body starts at %q, want the previous scroll %q", body[0], scrolled[0])
+	}
+	if strings.Contains(back[backLayout.detail.firstRow], zoomIndicator) {
+		t.Errorf("the zoom indicator survived esc: %q", back[backLayout.detail.firstRow])
+	}
+}
+
+// TestZoom_RefusedWithNoSelection is criterion 5's last clause through the
+// real key path: an empty log has no message to zoom, so the three-pane
+// frame must survive both zoom keys untouched.
+func TestZoom_RefusedWithNoSelection(t *testing.T) {
+	s := newDetailShell(t, 0, 0, 100, 40)
+	before, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+
+	for _, k := range []tea.KeyMsg{key(tea.KeyEnter), runeKey('o'), runeKey('O')} {
+		s.Update(k)
+		if s.model.DetailZoom {
+			t.Fatalf("key %v zoomed with an empty log", k)
+		}
+		after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("key %v changed the frame on a refused zoom:\n got %q\nwant %q", k, after, before)
+		}
+	}
+}
+
+// TestDetail_HidingWhileFocusedMovesFocus is criterion 5 through the real
+// key path, including the `d`-while-zoomed edge case: the pane goes away,
+// the zoom goes with it, and focus lands on the message pane rather than on
+// something that is no longer drawn.
+func TestDetail_HidingWhileFocusedMovesFocus(t *testing.T) {
+	s := newDetailShell(t, 3, 40, 100, 40)
+	focusDetail(t, s)
+	s.Update(key(tea.KeyEnter)) // zoom, so `d` has both states to undo
+	if !s.model.DetailZoom {
+		t.Fatalf("setup: not zoomed")
+	}
+
+	s.Update(runeKey('d'))
+	if s.model.DetailVisible {
+		t.Errorf("DetailVisible = true after `d`, want false")
+	}
+	if s.model.DetailZoom {
+		t.Errorf("DetailZoom = true after `d`, want false (hidden-but-zoomed is not a state)")
+	}
+	if s.model.Focus != tui.PaneMessages {
+		t.Errorf("Focus = %v after hiding the focused detail pane, want PaneMessages", s.model.Focus)
+	}
+
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	if layout.detailShown {
+		t.Errorf("layout still reports the detail pane shown after `d`")
+	}
+	if containsSubstring(lines, "→") {
+		t.Errorf("the detail pane is still rendered after `d`: %q", lines)
+	}
+	if !containsSubstring(lines, "agent00") {
+		t.Errorf("hiding the detail pane also lost the roster: %q", lines)
+	}
+}
+
+// TestEsc_CancelsFilterDraft is the deliberate addition in the edge_cases,
+// driven through shell.Update because "esc is decoded at all" is exactly the
+// dispatch question: translateKey had no case for it before this task.
+func TestEsc_CancelsFilterDraft(t *testing.T) {
+	s := newDetailShell(t, 3, 20, 100, 40)
+
+	s.Update(runeKey('/'))
+	s.Update(runeKey('s'))
+	s.Update(runeKey('0'))
+	s.Update(runeKey('1'))
+	s.Update(key(tea.KeyEnter))
+	if got := s.model.Filter; got != (tui.Filter{Set: true, Query: "s01"}) {
+		t.Fatalf("setup: Filter = %+v, want the committed s01", got)
+	}
+	committed, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+
+	s.Update(runeKey('/'))
+	s.Update(runeKey('z'))
+	s.Update(key(tea.KeyEsc))
+	if s.model.Editing {
+		t.Errorf("Editing = true after esc, want the draft closed")
+	}
+	if got := s.model.Filter; got != (tui.Filter{Set: true, Query: "s01"}) {
+		t.Errorf("Filter = %+v after esc, want the committed s01 untouched", got)
+	}
+	after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	if !reflect.DeepEqual(committed, after) {
+		t.Errorf("esc on a draft changed the frame:\n got %q\nwant %q", after, committed)
+	}
+}
+
+// TestDetail_WheelScrollsTheDetailPane is criterion 3's wheel clause through
+// a real tea.MouseMsg: T3 routed a wheel over the detail pane to nothing at
+// all, and this is the event that must now reach it.
+func TestDetail_WheelScrollsTheDetailPane(t *testing.T) {
+	s := newDetailShell(t, 3, 60, 100, 40)
+	layout := settleLayout(s)
+	if !layout.detailShown {
+		t.Fatalf("setup: detail pane not shown")
+	}
+	_, top := detailPaneLines(t, s)
+
+	y := layout.detail.firstRow + layout.detail.headerRows
+	if target, _, _ := hitTest(layout, y); target != hitDetail {
+		t.Fatalf("setup: hitTest(y=%d) = %v, want hitDetail", y, target)
+	}
+
+	s.Update(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	_, down := detailPaneLines(t, s)
+	if down[0] == top[0] {
+		t.Fatalf("wheel-down over the detail pane did not scroll it (still %q)", top[0])
+	}
+	if s.model.Focus != tui.PaneRoster {
+		t.Errorf("the wheel changed focus to %v, want it left on PaneRoster", s.model.Focus)
+	}
+	if s.model.RosterScroll != 0 || s.model.MessagesScroll != 0 {
+		t.Errorf("a wheel over the detail pane moved another pane: roster=%d messages=%d",
+			s.model.RosterScroll, s.model.MessagesScroll)
+	}
+
+	s.Update(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if _, up := detailPaneLines(t, s); up[0] != top[0] {
+		t.Errorf("wheel-up did not return to %q, got %q", top[0], up[0])
+	}
+}
+
+// TestDetail_LeftClickFocusesTheDetailPane: the pane is a focus stop now, so
+// a press on it must focus it — T3 deliberately left this inert.
+func TestDetail_LeftClickFocusesTheDetailPane(t *testing.T) {
+	s := newDetailShell(t, 3, 60, 100, 40)
+	layout := settleLayout(s)
+	y := layout.detail.firstRow + layout.detail.headerRows
+	beforeCursor := s.model.MessagesCursor
+
+	s.Update(tea.MouseMsg{X: 2, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if s.model.Focus != tui.PaneDetail {
+		t.Errorf("Focus = %v after a press on the detail pane, want PaneDetail", s.model.Focus)
+	}
+	if s.model.MessagesCursor != beforeCursor {
+		t.Errorf("a press on the detail pane moved the message cursor to %d, want %d",
+			s.model.MessagesCursor, beforeCursor)
+	}
+}
+
+// TestZoom_TerminalTooShortStillFits is the edge case: a terminal with no
+// room for the zoom layout must still produce a frame that fits, and must
+// not panic.
+func TestZoom_TerminalTooShortStillFits(t *testing.T) {
+	for _, h := range []int{1, 2, 3, 4} {
+		s := newDetailShell(t, 3, 40, 40, 40)
+		s.Update(tea.WindowSizeMsg{Width: 40, Height: h})
+		s.model.Focus = tui.PaneDetail
+		s.Update(key(tea.KeyEnter))
+		if !s.model.DetailZoom {
+			t.Fatalf("height %d: enter did not zoom", h)
+		}
+		lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+		if len(lines) > h {
+			t.Errorf("height %d: zoomed frame is %d lines, want at most %d", h, len(lines), h)
+		}
+	}
+}
+
+// TestDetail_WideSingleLinePayloadWrapsAndScrolls is the edge case: a
+// payload that is one physical line thousands of cells wide must wrap to the
+// pane width (wrapCells) and be reachable by scrolling, not run off the
+// right edge.
+func TestDetail_WideSingleLinePayloadWrapsAndScrolls(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneDetail
+	wide := strings.Repeat("abcdefghij", 400) // 4000 cells on one physical line
+	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"`+wide+`"`)}}
+
+	const width = 40
+	lines, layout := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40)
+	if !layout.detailShown {
+		t.Fatalf("setup: detail pane not shown")
+	}
+	for _, l := range lines {
+		if len([]rune(strings.ReplaceAll(strings.ReplaceAll(l, styleOn, ""), styleOff, ""))) > width {
+			t.Fatalf("line %q exceeds width %d", l, width)
+		}
+	}
+	first := lines[layout.detail.firstRow+layout.detail.headerRows]
+
+	model.ScrollDetail(3)
+	lines2, layout2 := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40)
+	if got := lines2[layout2.detail.firstRow+layout2.detail.headerRows]; got == first {
+		t.Fatalf("scrolling a 4000-cell single-line payload showed the same first row %q", got)
 	}
 }

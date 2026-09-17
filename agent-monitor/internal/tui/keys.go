@@ -26,13 +26,19 @@ import (
 	"agent-monitor/internal/source"
 )
 
-// Pane identifies which of the two panes has focus — the one `tab` moves
-// between and arrows/jk scroll.
+// Pane identifies which pane has focus — the one `tab` moves between and
+// arrows/jk scroll.
+//
+// sp032 T4 added the third stop. The detail pane had geometry (T3's
+// frameLayout) but was inert: no focus, no scroll, so a message longer than
+// the pane's cap was unreadable inside the tool that exists to show it. It
+// is a peer now, with its own scroll offset and a zoom.
 type Pane int
 
 const (
 	PaneRoster Pane = iota
 	PaneMessages
+	PaneDetail
 )
 
 // Filter is the committed (Enter-confirmed) filter query. Set distinguishes
@@ -106,11 +112,45 @@ type Model struct {
 	MessagesLen      int
 	MessagesViewport int
 
+	// DetailScroll, DetailLen and DetailViewport are the detail pane's
+	// scroll state (sp032 T4), the same shape the other two panes use — and
+	// deliberately so: the pane's body is displayed through a
+	// bubbles/viewport, but the OFFSET AUTHORITY is here, exactly as
+	// sp032's ## solution requires of every pane. A viewport that owned its
+	// own YOffset would be a second authority over a pane whose content is
+	// re-rendered on every two-second sampler tick, which is the failure
+	// the spec's anti-pattern names.
+	//
+	// The detail pane has no cursor: nothing inside a message body is
+	// selectable, so there is nothing for the scroll to "keep visible" and
+	// no deriveScroll/legacy-viewport regime to honour. DetailLen is the
+	// BODY's line count (the header line is chrome above the scrolled
+	// region, always on screen), and DetailViewport is how many body rows
+	// the pane shows this frame.
+	DetailScroll   int
+	DetailLen      int
+	DetailViewport int
+
 	// DetailVisible is the detail pane's on/off state (sp031 T5): present by
 	// default, toggled by `d`. It is independent of MessagesCursor — hiding
 	// the pane never touches selection, so toggling it off and back on shows
 	// the same message (see TestDetailVisible_ToggleDoesNotAffectSelection).
 	DetailVisible bool
+
+	// DetailZoom is sp032 T4's full-screen mode: `enter`/`o` sets it, `esc`
+	// clears it, and while it is set cmd/ renders the detail pane ALONE.
+	// Two illegal states are excluded by construction rather than by
+	// convention: a zoom is refused when no message is selected (there is
+	// nothing to zoom), and `d` clears it on the way to hiding the pane, so
+	// "hidden but zoomed" never exists.
+	DetailZoom bool
+
+	// detailSelection identifies the message the detail pane is currently
+	// showing, as cmd/ describes it (see SetDetailSelection). It exists only
+	// to answer "is this the same message as last frame?", which is what
+	// separates a scroll that must SURVIVE a re-render from one that must
+	// RESET.
+	detailSelection string
 }
 
 // NewModel builds a Model with no filter set, roster focused, both panes
@@ -174,6 +214,59 @@ func (m *Model) ScrollRoster(delta int) {
 // ScrollMessages is ScrollRoster's twin for the message pane.
 func (m *Model) ScrollMessages(delta int) {
 	m.MessagesScroll = clamp(m.MessagesScroll+delta, 0, maxTop(m.MessagesLen, m.MessagesViewport))
+}
+
+// SetDetailLen records how many BODY lines the currently selected message
+// renders to (sp032 T4), clamping the scroll into the new range in the same
+// pass so a shorter message can never leave the offset past its end — the
+// slice-index guarantee the viewport's SetYOffset relies on.
+func (m *Model) SetDetailLen(n int) {
+	m.DetailLen = n
+	m.DetailScroll = clamp(m.DetailScroll, 0, detailMaxTop(m.DetailLen, m.DetailViewport))
+}
+
+// SetDetailViewport records how many body rows the detail pane shows this
+// frame and re-clamps the scroll, so a shrunk terminal (or a zoom exit)
+// cannot leave the offset past the last full page.
+func (m *Model) SetDetailViewport(n int) {
+	m.DetailViewport = n
+	m.DetailScroll = clamp(m.DetailScroll, 0, detailMaxTop(m.DetailLen, n))
+}
+
+// ScrollDetail moves the detail body's scroll offset by delta, clamped so a
+// body shorter than the window never scrolls at all (no phantom scroll) and
+// a long one stops on its last full page.
+func (m *Model) ScrollDetail(delta int) {
+	m.DetailScroll = clamp(m.DetailScroll+delta, 0, detailMaxTop(m.DetailLen, m.DetailViewport))
+}
+
+// SetDetailSelection tells the model WHICH message the detail pane is
+// showing, as an opaque identity string cmd/ derives from the envelope. The
+// scroll offset is kept when the identity is unchanged — which is what makes
+// a position survive the two-second re-render of the same message — and
+// reset to the top when it changes, so moving the selection never drops the
+// reader into the middle of a message they have not seen the start of.
+//
+// An identity rather than the cursor INDEX, because the message list grows:
+// a new arrival can leave the cursor on index 0 while index 0 is still the
+// same envelope, and a filter can leave the index alone while the message
+// under it changes.
+func (m *Model) SetDetailSelection(key string) {
+	if key == m.detailSelection {
+		return
+	}
+	m.detailSelection = key
+	m.DetailScroll = 0
+}
+
+// detailMaxTop is maxTop without the legacy viewport<=0 cursor-tracking
+// regime: the detail pane has no cursor, so "no window reported" simply
+// means nothing is scrollable yet.
+func detailMaxTop(length, viewport int) int {
+	if viewport <= 0 || length <= viewport {
+		return 0
+	}
+	return length - viewport
 }
 
 // maxTop is the largest valid scroll offset: the top row of the last page.
@@ -298,6 +391,10 @@ func scrollAfterViewport(prevScroll, cursor, length, oldViewport, newViewport in
 // cursor to 0 and is a valid no-op, never a negative index.
 func (m *Model) moveCursor(delta int) {
 	switch m.Focus {
+	case PaneDetail:
+		// The detail pane has no cursor — jk/arrows scroll its body
+		// directly (sp032 T4 criterion 3).
+		m.ScrollDetail(delta)
 	case PaneRoster:
 		m.RosterCursor = clamp(m.RosterCursor+delta, 0, maxIndex(m.RosterLen))
 		m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
@@ -345,15 +442,77 @@ func (m *Model) ScrollPane(pane Pane, delta int) {
 		m.ScrollRoster(delta)
 	case PaneMessages:
 		m.ScrollMessages(delta)
+	case PaneDetail:
+		m.ScrollDetail(delta)
 	}
 }
 
-func (m *Model) toggleFocus() {
-	if m.Focus == PaneRoster {
+// cycleFocus is `tab`: roster → messages → detail → roster (sp032 T4
+// criterion 1). Two stops are skipped rather than visited, both for the same
+// reason — focus must never land on something that is not on screen:
+//
+//   - a HIDDEN detail pane (`d` off) is not a stop, so the cycle degrades to
+//     the two-stop one sp031 shipped;
+//   - while ZOOMED the other two panes are not rendered at all, so tab has
+//     nowhere to go and does nothing. (`esc` is how one leaves zoom.)
+func (m *Model) cycleFocus() {
+	if m.DetailZoom {
+		return
+	}
+	switch m.Focus {
+	case PaneRoster:
 		m.Focus = PaneMessages
-	} else {
+	case PaneMessages:
+		if m.DetailVisible {
+			m.Focus = PaneDetail
+		} else {
+			m.Focus = PaneRoster
+		}
+	default:
 		m.Focus = PaneRoster
 	}
+}
+
+// zoomDetail is `enter`/`o`: the detail pane takes the whole frame so a
+// two-hundred-line result envelope can actually be read.
+//
+// It is REFUSED when no message is selected (criterion 5). MessagesLen is
+// the post-filter row count cmd/ reports every frame and the cursor is
+// clamped into it in the same pass, so "there is a message under the cursor"
+// and "MessagesLen > 0" are the same statement — an empty bus and a filter
+// that matched nothing both land here, and neither gets a full screen of
+// "(no message selected)".
+func (m *Model) zoomDetail() {
+	if m.MessagesLen <= 0 {
+		return
+	}
+	m.DetailVisible = true
+	m.DetailZoom = true
+	m.Focus = PaneDetail
+}
+
+// hideDetail is `d`'s off direction. It clears the zoom and moves focus off
+// the pane, which is what keeps "hidden but focused" and "hidden but zoomed"
+// from being representable (criterion 5 + its edge case). Focus goes to
+// messages specifically: the detail pane shows the message pane's selection,
+// so that is where the operator was looking.
+func (m *Model) hideDetail() {
+	m.DetailVisible = false
+	m.DetailZoom = false
+	if m.Focus == PaneDetail {
+		m.Focus = PaneMessages
+	}
+}
+
+// detailPage is how far PgUp/PgDn move the detail body: one full window, or
+// a single line before any viewport has been reported. Task 5 generalises
+// paging to the other two panes; this task decodes it for the detail pane
+// alone.
+func (m *Model) detailPage() int {
+	if m.DetailViewport > 0 {
+		return m.DetailViewport
+	}
+	return 1
 }
 
 // FilterRoster applies --project (m.Project) and the committed interactive
@@ -432,6 +591,13 @@ const (
 	KeyEnter
 	KeyBackspace
 	KeyTab
+	// KeyEsc and KeyPgUp/KeyPgDn arrive with sp032 T4. Esc was previously
+	// not decoded AT ALL (a bare ESC byte reached sp031's byte-stream escape
+	// decoder and was swallowed); it now leaves the detail zoom and abandons an open filter
+	// draft.
+	KeyEsc
+	KeyPgUp
+	KeyPgDn
 )
 
 // Key is one keypress: either a printable Rune, or a Special key. The zero
@@ -470,9 +636,25 @@ func (m *Model) HandleKey(k Key) Outcome {
 	case k.Rune == 'r' || k.Rune == 'R':
 		return Outcome{ForceRefresh: true}
 	case k.Rune == 'd' || k.Rune == 'D':
-		m.DetailVisible = !m.DetailVisible
+		if m.DetailVisible {
+			m.hideDetail()
+		} else {
+			m.DetailVisible = true
+		}
 	case k.Special == KeyTab:
-		m.toggleFocus()
+		m.cycleFocus()
+	case k.Special == KeyEnter || k.Rune == 'o' || k.Rune == 'O':
+		m.zoomDetail()
+	case k.Special == KeyEsc:
+		m.DetailZoom = false
+	case k.Special == KeyPgUp:
+		if m.Focus == PaneDetail {
+			m.ScrollDetail(-m.detailPage())
+		}
+	case k.Special == KeyPgDn:
+		if m.Focus == PaneDetail {
+			m.ScrollDetail(m.detailPage())
+		}
 	case k.Rune == '/':
 		m.Editing = true
 		m.draft = ""
@@ -484,8 +666,17 @@ func (m *Model) HandleKey(k Key) Outcome {
 	return Outcome{}
 }
 
+// handleEditingKey is the filter draft's key surface. sp032 T4 adds KeyEsc:
+// it ABANDONS the draft — Editing closes, the draft text is dropped, and the
+// previously committed Filter is left exactly as it was, which is what makes
+// esc different from Enter on an empty draft (that COMMITS an empty query, a
+// distinct state — see the Filter doc). It deliberately does not also leave
+// the detail zoom in the same keystroke.
 func (m *Model) handleEditingKey(k Key) Outcome {
 	switch k.Special {
+	case KeyEsc:
+		m.Editing = false
+		m.draft = ""
 	case KeyEnter:
 		m.Filter = Filter{Set: true, Query: m.draft}
 		m.Editing = false

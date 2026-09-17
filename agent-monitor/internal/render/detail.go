@@ -29,16 +29,23 @@ const detailPlaceholder = "(no message selected)"
 const truncationIndicatorFmt = "… (%d more line(s) not shown)"
 
 // RenderDetail turns one selected envelope into terminal lines: a header
-// (`from → to`, time, kind) followed by its body, bounded to `height` lines
-// and `width` display cells. It is pure — no clock, no terminal, no exec —
-// matching Render and RenderLog's contract (cmd/ owns composition, render/
-// owns bytes: cmd/ picks the selected message, RenderDetail draws it).
+// (`from → to`, time, kind) followed by its body, bounded to `width` display
+// cells and — only when height > 0 — to `height` lines. It is pure — no
+// clock, no terminal, no exec — matching Render and RenderLog's contract
+// (cmd/ owns composition, render/ owns bytes: cmd/ picks the selected
+// message, RenderDetail draws it).
+//
+// height <= 0 means DO NOT CLAMP (sp032 T4): the caller gets every line the
+// body produced and no truncation indicator. That is the same spelling
+// paneBudgets and buildFrame already use for "no height budget", extended
+// here rather than a second convention being invented — and it is what the
+// detail viewport is fed, because a body pre-clamped to the pane budget
+// cannot be scrolled: the rows past the budget would never have been
+// rendered at all. Every positive height keeps sp031's behaviour to the
+// byte, indicator included (TestRenderDetail_HeightPositive_TruncationUnchanged).
 func RenderDetail(msg *source.Message, width, height int) []string {
 	if width < 1 {
 		width = 1
-	}
-	if height < 1 {
-		height = 1
 	}
 
 	if msg == nil {
@@ -151,11 +158,13 @@ func wrapCells(s string, width int) []string {
 // clampToHeight bounds lines to at most height entries, replacing the last
 // slot with a visible truncation indicator (rather than a silent cut) when
 // there was more content than the budget allows.
+//
+// height <= 0 is "no budget at all" and returns lines untouched — see
+// RenderDetail's doc. It used to return nil, which was reachable only from
+// RenderDetail's own `if height < 1 { height = 1 }` floor (i.e. never), so
+// no caller loses a behaviour it relied on.
 func clampToHeight(lines []string, width, height int) []string {
-	if len(lines) <= height || height <= 0 {
-		if height <= 0 {
-			return nil
-		}
+	if height <= 0 || len(lines) <= height {
 		return lines
 	}
 	kept := lines[:height-1]
@@ -166,3 +175,13 @@ func clampToHeight(lines []string, width, height int) []string {
 	out = append(out, indicator)
 	return out
 }
+
+// TruncateCells is truncateCells exported for cmd/. cmd/ owns the frame's
+// affordances (markPane's reverse video, sp032 T4's zoom indicator) and
+// applies them to lines this package already rendered — which means it
+// sometimes has to shorten one of those lines to make room. Re-deriving
+// display-cell widths over there would fork a load-bearing rule (ft016's
+// data_model: this UI displays bytes other agents wrote, and every width is
+// counted in cells, never bytes or runes), so the one implementation is
+// shared instead of copied.
+func TruncateCells(s string, width int) string { return truncateCells(s, width) }

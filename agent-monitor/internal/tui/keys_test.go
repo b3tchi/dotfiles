@@ -7,7 +7,13 @@ import (
 	"agent-monitor/internal/source"
 )
 
-func TestToggleFocus_TabSwitchesBetweenPanes(t *testing.T) {
+// TestToggleFocus_DefaultFocusAndFirstTab keeps the two clauses of sp031's
+// TestToggleFocus_TabSwitchesBetweenPanes that sp032 T4 does NOT change: the
+// model starts on the roster, and the first tab reaches the message pane.
+// Its third clause — "a second tab returns to the roster" — asserted the
+// two-stop cycle criterion 1 deliberately replaces, and now lives, extended,
+// in TestTab_CyclesThreePanes.
+func TestToggleFocus_DefaultFocusAndFirstTab(t *testing.T) {
 	m := NewModel()
 	if m.Focus != PaneRoster {
 		t.Fatalf("expected default focus PaneRoster, got %v", m.Focus)
@@ -15,10 +21,6 @@ func TestToggleFocus_TabSwitchesBetweenPanes(t *testing.T) {
 	m.HandleKey(Key{Special: KeyTab})
 	if m.Focus != PaneMessages {
 		t.Fatalf("expected focus PaneMessages after tab, got %v", m.Focus)
-	}
-	m.HandleKey(Key{Special: KeyTab})
-	if m.Focus != PaneRoster {
-		t.Fatalf("expected focus back to PaneRoster after second tab, got %v", m.Focus)
 	}
 }
 
@@ -1010,5 +1012,363 @@ func TestScrollPane_MovesOnlyThatPanesScroll(t *testing.T) {
 				t.Errorf("ScrollPane(%v, 4) changed more than that pane's scroll:\n got %+v\nwant %+v", tc.pane, *m, want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T4: the detail pane becomes a peer.
+// ---------------------------------------------------------------------------
+
+// TestTab_CyclesThreePanes is criterion 1 at the model level (the dispatch
+// half — that a real tea.KeyMsg reaches this — is
+// TestUpdate_TabCyclesThreePanes in cmd/). It REPLACES the two-stop
+// assertion TestToggleFocus_TabSwitchesBetweenPanes used to make: the detail
+// pane is a focus stop now, so "tab twice returns to roster" is exactly the
+// behaviour this task changes.
+func TestTab_CyclesThreePanes(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(3)
+	want := []Pane{PaneMessages, PaneDetail, PaneRoster, PaneMessages, PaneDetail, PaneRoster}
+	for i, w := range want {
+		m.HandleKey(Key{Special: KeyTab})
+		if m.Focus != w {
+			t.Fatalf("tab #%d: Focus = %v, want %v", i+1, m.Focus, w)
+		}
+	}
+}
+
+// TestTab_SkipsTheDetailPaneWhileItIsHidden is criterion 5's other half:
+// `d` hides the pane, and a hidden pane is not a focus stop — tab must not
+// park focus somewhere the operator cannot see.
+func TestTab_SkipsTheDetailPaneWhileItIsHidden(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(3)
+	m.DetailVisible = false
+	for i, w := range []Pane{PaneMessages, PaneRoster, PaneMessages, PaneRoster} {
+		m.HandleKey(Key{Special: KeyTab})
+		if m.Focus != w {
+			t.Fatalf("tab #%d with detail hidden: Focus = %v, want %v", i+1, m.Focus, w)
+		}
+	}
+}
+
+// TestDetail_HidingWhileFocusedMovesFocus is criterion 5: hiding the pane
+// while it holds focus must move focus to messages, never leave focus on a
+// pane that is not on screen. The `d`-while-zoomed edge case rides the same
+// branch: unzoom AND hide, never a hidden-but-zoomed state.
+func TestDetail_HidingWhileFocusedMovesFocus(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(3)
+	m.Focus = PaneDetail
+	m.DetailZoom = true
+
+	m.HandleKey(Key{Rune: 'd'})
+	if m.DetailVisible {
+		t.Errorf("DetailVisible = true after `d`, want false")
+	}
+	if m.Focus != PaneMessages {
+		t.Errorf("Focus = %v after hiding the focused detail pane, want PaneMessages", m.Focus)
+	}
+	if m.DetailZoom {
+		t.Errorf("DetailZoom = true after hiding the pane, want false (hidden-but-zoomed is not a state)")
+	}
+
+	// Showing it again must not steal focus back — `d` is a visibility
+	// toggle, not a focus command.
+	m.HandleKey(Key{Rune: 'd'})
+	if !m.DetailVisible {
+		t.Errorf("DetailVisible = false after the second `d`, want true")
+	}
+	if m.Focus != PaneMessages {
+		t.Errorf("Focus = %v after re-showing the pane, want it left on PaneMessages", m.Focus)
+	}
+}
+
+// TestDetail_HidingWhileRosterFocusedLeavesFocusAlone is the negative half
+// of the criterion: the focus move is conditional on the detail pane HOLDING
+// focus, not something `d` does unconditionally.
+func TestDetail_HidingWhileRosterFocusedLeavesFocusAlone(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneRoster
+	m.HandleKey(Key{Rune: 'd'})
+	if m.Focus != PaneRoster {
+		t.Fatalf("Focus = %v after `d` with the roster focused, want PaneRoster", m.Focus)
+	}
+}
+
+// TestZoom_RefusedWithNoSelection is criterion 5's last clause: `enter` and
+// `o` zoom a MESSAGE, and with an empty (or fully filtered) log there is no
+// message to zoom — the keys must be refused rather than producing a
+// full-screen "(no message selected)".
+func TestZoom_RefusedWithNoSelection(t *testing.T) {
+	for _, k := range []Key{{Special: KeyEnter}, {Rune: 'o'}, {Rune: 'O'}} {
+		m := NewModel()
+		m.SetMessagesLen(0)
+		m.HandleKey(k)
+		if m.DetailZoom {
+			t.Errorf("key %+v zoomed with an empty log, want the zoom refused", k)
+		}
+		if m.Focus != PaneRoster {
+			t.Errorf("key %+v moved focus to %v on a refused zoom, want PaneRoster", k, m.Focus)
+		}
+	}
+}
+
+// TestZoom_EnterAndOZoomAndEscRestores is criterion 4's model half: both
+// keys zoom (and take focus, since the zoomed pane is the only one on
+// screen) and `esc` restores.
+func TestZoom_EnterAndOZoomAndEscRestores(t *testing.T) {
+	for _, k := range []Key{{Special: KeyEnter}, {Rune: 'o'}, {Rune: 'O'}} {
+		m := NewModel()
+		m.SetMessagesLen(5)
+		m.HandleKey(k)
+		if !m.DetailZoom {
+			t.Fatalf("key %+v did not zoom", k)
+		}
+		if m.Focus != PaneDetail {
+			t.Errorf("key %+v zoomed but left focus on %v, want PaneDetail", k, m.Focus)
+		}
+		if !m.DetailVisible {
+			t.Errorf("key %+v zoomed a hidden pane, want the zoom to show it", k)
+		}
+		m.HandleKey(Key{Special: KeyEsc})
+		if m.DetailZoom {
+			t.Errorf("esc did not leave zoom after %+v", k)
+		}
+	}
+}
+
+// TestEsc_CancelsFilterDraft is the deliberate addition the edge_cases call
+// out: `esc` was not decoded at all before this task, and it now abandons an
+// open `/` draft WITHOUT committing it — the previously committed filter
+// (if any) survives untouched, and esc does not also unzoom in the same
+// keystroke.
+func TestEsc_CancelsFilterDraft(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(5)
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Rune: 'a'})
+	m.HandleKey(Key{Special: KeyEnter}) // commit "a"
+	if m.Filter != (Filter{Set: true, Query: "a"}) {
+		t.Fatalf("setup: Filter = %+v, want the committed \"a\"", m.Filter)
+	}
+
+	m.DetailZoom = true
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Rune: 'z'})
+	m.HandleKey(Key{Special: KeyEsc})
+
+	if m.Editing {
+		t.Errorf("Editing = true after esc, want the draft closed")
+	}
+	if m.Filter != (Filter{Set: true, Query: "a"}) {
+		t.Errorf("Filter = %+v after esc, want the previously committed \"a\" untouched", m.Filter)
+	}
+	if !m.DetailZoom {
+		t.Errorf("esc cancelling a draft also left zoom; one keystroke must do one thing")
+	}
+
+	// The abandoned draft must not resurface: reopening and committing an
+	// empty draft yields an empty query, not "z".
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Special: KeyEnter})
+	if m.Filter != (Filter{Set: true, Query: ""}) {
+		t.Errorf("Filter = %+v, want the abandoned draft gone", m.Filter)
+	}
+}
+
+// TestDetail_ScrollKeysMoveOnlyTheDetailPane is criterion 3's key surface at
+// the model level: with the detail pane focused, jk/arrows and PgUp/PgDn
+// move DetailScroll and touch neither of the other two panes' cursors or
+// scrolls. Paging on roster and messages is Task 5's, deliberately not here.
+func TestDetail_ScrollKeysMoveOnlyTheDetailPane(t *testing.T) {
+	newFocused := func() *Model {
+		m := NewModel()
+		m.SetRosterLen(100)
+		m.SetRosterViewport(10)
+		m.SetMessagesLen(100)
+		m.SetMessagesViewport(10)
+		m.SetDetailLen(100)
+		m.SetDetailViewport(10)
+		m.Focus = PaneDetail
+		return m
+	}
+
+	cases := []struct {
+		name string
+		key  Key
+		want int
+	}{
+		{"j", Key{Rune: 'j'}, 1},
+		{"down", Key{Special: KeyDown}, 1},
+		{"pgdn", Key{Special: KeyPgDn}, 10},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := newFocused()
+			m.HandleKey(c.key)
+			if m.DetailScroll != c.want {
+				t.Errorf("DetailScroll = %d, want %d", m.DetailScroll, c.want)
+			}
+			if m.RosterCursor != 0 || m.RosterScroll != 0 {
+				t.Errorf("roster moved: cursor=%d scroll=%d, want 0/0", m.RosterCursor, m.RosterScroll)
+			}
+			if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+				t.Errorf("messages moved: cursor=%d scroll=%d, want 0/0", m.MessagesCursor, m.MessagesScroll)
+			}
+		})
+	}
+
+	// And back up from a scrolled position.
+	for _, c := range []struct {
+		name string
+		key  Key
+		want int
+	}{
+		{"k", Key{Rune: 'k'}, 49},
+		{"up", Key{Special: KeyUp}, 49},
+		{"pgup", Key{Special: KeyPgUp}, 40},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := newFocused()
+			m.ScrollDetail(50)
+			m.HandleKey(c.key)
+			if m.DetailScroll != c.want {
+				t.Errorf("DetailScroll = %d, want %d", m.DetailScroll, c.want)
+			}
+		})
+	}
+}
+
+// TestPaging_DoesNotReachRosterOrMessages is the Task 5 boundary stated as a
+// test: PgUp/PgDn are decoded here for the DETAIL pane only. If a later task
+// widens them it will delete this test on purpose; until then a paging key
+// that quietly moved the roster would be scope creep nobody asked for.
+func TestPaging_DoesNotReachRosterOrMessages(t *testing.T) {
+	for _, focus := range []Pane{PaneRoster, PaneMessages} {
+		for _, k := range []Key{{Special: KeyPgDn}, {Special: KeyPgUp}} {
+			m := NewModel()
+			m.SetRosterLen(100)
+			m.SetRosterViewport(10)
+			m.SetMessagesLen(100)
+			m.SetMessagesViewport(10)
+			// Park both panes mid-list so BOTH directions have room to
+			// move. Asserting from scroll 0 would make the PgUp case
+			// vacuous — a clamp at 0 is indistinguishable from a key that
+			// was never decoded.
+			m.ScrollRoster(30)
+			m.ScrollMessages(30)
+			m.Focus = focus
+
+			// One key at a time: a PgDn/PgUp PAIR round-trips, so a model
+			// that paged both panes would end up back where it started and
+			// a before/after compare across the pair would see nothing.
+			before := *m
+			m.HandleKey(k)
+			if *m != before {
+				t.Errorf("focus %v, key %+v: paging changed model state\n got %+v\nwant %+v", focus, k, *m, before)
+			}
+		}
+	}
+}
+
+// TestDetail_ScrollNeverLeavesTheBody is the "body shorter than the
+// viewport: no phantom scroll" edge case plus its mirror at the bottom.
+func TestDetail_ScrollNeverLeavesTheBody(t *testing.T) {
+	m := NewModel()
+	m.SetDetailViewport(20)
+	m.SetDetailLen(5) // shorter than the window
+	m.ScrollDetail(10)
+	if m.DetailScroll != 0 {
+		t.Errorf("DetailScroll = %d for a 5-line body in a 20-row window, want 0", m.DetailScroll)
+	}
+
+	m.SetDetailLen(50)
+	m.ScrollDetail(1000)
+	if want := 30; m.DetailScroll != want {
+		t.Errorf("DetailScroll = %d, want the last full page %d", m.DetailScroll, want)
+	}
+	m.ScrollDetail(-1000)
+	if m.DetailScroll != 0 {
+		t.Errorf("DetailScroll = %d after scrolling far up, want 0", m.DetailScroll)
+	}
+
+	// A body that shrinks under a scrolled view clamps in the same pass, so
+	// a caller slicing body[DetailScroll:] cannot panic.
+	m.ScrollDetail(30)
+	m.SetDetailLen(10)
+	if m.DetailScroll > 10 {
+		t.Errorf("DetailScroll = %d past a 10-line body, want it clamped", m.DetailScroll)
+	}
+}
+
+// TestDetail_SelectionChangeResetsScrollToTop is criterion 3's second half
+// at the model level: the same selection key across any number of re-renders
+// keeps the scroll, and a different one puts the reader at the top of the
+// new message rather than 40 lines into it.
+func TestDetail_SelectionChangeResetsScrollToTop(t *testing.T) {
+	m := NewModel()
+	m.SetDetailViewport(10)
+	m.SetDetailLen(100)
+	m.SetDetailSelection("msg-a")
+	m.ScrollDetail(40)
+
+	for i := 0; i < 5; i++ { // five sampler ticks over the same message
+		m.SetDetailSelection("msg-a")
+		m.SetDetailLen(100)
+	}
+	if m.DetailScroll != 40 {
+		t.Fatalf("DetailScroll = %d after re-renders of the same message, want 40", m.DetailScroll)
+	}
+
+	m.SetDetailSelection("msg-b")
+	if m.DetailScroll != 0 {
+		t.Fatalf("DetailScroll = %d after the selection changed, want 0", m.DetailScroll)
+	}
+}
+
+// TestScrollPane_DetailIsAScrollTarget is the wheel's model-level entry:
+// T3's ScrollPane gained a third case, and it must move the detail pane's
+// scroll and nothing else.
+func TestScrollPane_DetailIsAScrollTarget(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(100)
+	m.SetRosterViewport(10)
+	m.SetMessagesLen(100)
+	m.SetMessagesViewport(10)
+	m.SetDetailLen(100)
+	m.SetDetailViewport(10)
+
+	m.ScrollPane(PaneDetail, 3)
+	if m.DetailScroll != 3 {
+		t.Errorf("DetailScroll = %d, want 3", m.DetailScroll)
+	}
+	if m.RosterScroll != 0 || m.MessagesScroll != 0 {
+		t.Errorf("ScrollPane(PaneDetail) moved another pane: roster=%d messages=%d", m.RosterScroll, m.MessagesScroll)
+	}
+	if m.Focus != PaneRoster {
+		t.Errorf("ScrollPane(PaneDetail) changed focus to %v, want it untouched", m.Focus)
+	}
+}
+
+// TestTab_WhileZoomedIsANoOp is the other half of cycleFocus' guard: the
+// zoom layout renders the detail pane ALONE, so a tab that moved focus to
+// the roster would focus a pane that is not on screen — the same illegal
+// state criterion 5 forbids for a hidden pane.
+func TestTab_WhileZoomedIsANoOp(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(3)
+	m.HandleKey(Key{Special: KeyEnter}) // zoom
+	if !m.DetailZoom || m.Focus != PaneDetail {
+		t.Fatalf("setup: DetailZoom=%v Focus=%v, want zoomed on PaneDetail", m.DetailZoom, m.Focus)
+	}
+	m.HandleKey(Key{Special: KeyTab})
+	if m.Focus != PaneDetail {
+		t.Errorf("Focus = %v after tab while zoomed, want PaneDetail", m.Focus)
+	}
+	m.HandleKey(Key{Special: KeyEsc})
+	m.HandleKey(Key{Special: KeyTab})
+	if m.Focus != PaneRoster {
+		t.Errorf("Focus = %v after tab once un-zoomed, want the cycle to resume at PaneRoster", m.Focus)
 	}
 }

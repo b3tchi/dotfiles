@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -195,6 +196,84 @@ func TestRenderDetail_Bounded_NoLineExceedsWidth_AnyBody(t *testing.T) {
 	for _, l := range lines {
 		if w := displayWidth(l); w > width {
 			t.Fatalf("line %q is %d cells wide, want <= %d", l, w, width)
+		}
+	}
+}
+
+// TestRenderDetail_HeightZero_NoClampNoIndicator is sp032 T4 criterion 2's
+// first half: height <= 0 means "do not clamp" — the same spelling
+// paneBudgets/buildFrame already use — so the caller gets the WHOLE body and
+// no truncation indicator. This is what feeds the detail viewport: a body
+// pre-clamped to the pane budget could not be scrolled, because the rows
+// past the budget would never have been rendered at all.
+func TestRenderDetail_HeightZero_NoClampNoIndicator(t *testing.T) {
+	// 40 physical body lines: one per object key, produced by json.Indent,
+	// plus the opening and closing braces.
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < 40; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"k%02d":"v%02d"`, i, i)
+	}
+	b.WriteString("}")
+	msg := detailMsg("message", "peer-1", []string{"peer-2"}, b.String())
+
+	for _, height := range []int{0, -1, -7} {
+		lines := RenderDetail(msg, 80, height)
+		if len(lines) != 43 { // header + "{" + 40 keys + "}"
+			t.Fatalf("height=%d: got %d lines, want the unclamped 43", height, len(lines))
+		}
+		if !strings.Contains(lines[len(lines)-1], "}") {
+			t.Errorf("height=%d: last line %q, want the body's real last line", height, lines[len(lines)-1])
+		}
+		for _, l := range lines {
+			if strings.Contains(l, "…") || strings.Contains(l, "not shown") {
+				t.Fatalf("height=%d: line %q carries a truncation indicator, want none", height, l)
+			}
+		}
+	}
+
+	// The nil-message placeholder takes the same path: one line, no
+	// indicator, never the nil slice clampToHeight used to return here.
+	if got := RenderDetail(nil, 80, 0); len(got) != 1 || strings.Contains(got[0], "…") {
+		t.Fatalf("RenderDetail(nil, 80, 0) = %q, want exactly the placeholder line", got)
+	}
+}
+
+// TestRenderDetail_HeightPositive_TruncationUnchanged is criterion 2's
+// second half, pinned BYTE-FOR-BYTE rather than by "contains an ellipsis":
+// extending the height <= 0 convention must not move the positive-height
+// clamp by a single character. The expectation is written out literally so a
+// change to the indicator's wording, its count, or the number of body lines
+// kept fails here instead of being absorbed by a Contains check.
+func TestRenderDetail_HeightPositive_TruncationUnchanged(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < 40; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"k%02d":"v%02d"`, i, i)
+	}
+	b.WriteString("}")
+	msg := detailMsg("message", "peer-1", []string{"peer-2"}, b.String())
+
+	full := RenderDetail(msg, 80, 0)
+	if len(full) != 43 {
+		t.Fatalf("setup: unclamped render is %d lines, want 43", len(full))
+	}
+
+	const height = 5
+	got := RenderDetail(msg, 80, height)
+	want := []string{full[0], full[1], full[2], full[3], "… (39 more line(s) not shown)"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines, want %d: %q", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
