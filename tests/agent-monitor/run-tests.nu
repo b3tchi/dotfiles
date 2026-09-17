@@ -48,4 +48,75 @@ if $out.exit_code != 0 {
 
 print ""
 print $"(ansi green)all agent-monitor go tests passed(ansi reset)"
+
+# --- the --once pipe contract, re-checked one altitude up (sp032 T7) -------
+#
+# TestRunOnce_NoRawModeNoAltScreen_ExitsCleanly already pins this inside the
+# Go suite above: runOnce writes into a bytes.Buffer and the test rejects a
+# 0x1b byte. This case asserts the same contract against the artifact that
+# actually ships -- it builds the real binary, runs `agent-monitor --once`
+# with stdout attached to a PIPE rather than a terminal, and searches the raw
+# bytes for 0x1b. dotfiles-r9ty is the precedent for why once is not enough:
+# a unit test stayed green while the real terminal path was broken. ft016's
+# `--once` contract is "composes in a pipe", and a pipe is a property of the
+# process, not of the seam, so it is worth checking on the process.
+print ""
+print $"(ansi cyan)--once pipe contract(ansi reset)"
+
+let scratch = (mktemp -d -t "agent-monitor-pipe-XXXXXX")
+let bin = ($scratch | path join "agent-monitor")
+let stubs = ($scratch | path join "stubs")
+mkdir $stubs
+
+# agent-census / pi-worker stand-ins. An empty roster and an empty message
+# list still render a full frame, and keep this case off the real samplers
+# (and off whatever agents happen to be running on the machine).
+for stub in ["agent-census" "pi-worker"] {
+    let p = ($stubs | path join $stub)
+    "#!/bin/sh\necho '[]'\n" | save -f $p
+    ^chmod +x $p
+}
+
+mut pipe_failures = []
+
+let build = (with-env {CGO_ENABLED: "0"} {
+    do { ^go build "-C" $root "-o" $bin "./cmd/agent-monitor" } | complete
+})
+
+if $build.exit_code != 0 {
+    $pipe_failures = ($pipe_failures | append $"go build exit ($build.exit_code): ($build.stderr)")
+} else {
+    # `complete` gives the child a pipe for stdout, which is exactly the
+    # non-tty this contract is about.
+    let run = (with-env {PATH: ($env.PATH | prepend $stubs)} {
+        do { ^$bin --once } | complete
+    })
+    let esc = ($run.stdout | into binary | bytes index-of 0x[1b])
+
+    if $run.exit_code != 0 {
+        $pipe_failures = ($pipe_failures | append $"--once exit ($run.exit_code): ($run.stderr)")
+    }
+    if ($run.stdout | is-empty) {
+        $pipe_failures = ($pipe_failures | append "--once wrote nothing to the pipe")
+    }
+    if $esc >= 0 {
+        $pipe_failures = ($pipe_failures | append $"--once emitted an ESC byte at offset ($esc)")
+    }
+}
+
+rm -rf $scratch
+
+if ($pipe_failures | is-not-empty) {
+    for why in $pipe_failures {
+        print $"(ansi red)FAIL  (ansi reset)--once pipe contract — ($why)"
+    }
+    print ""
+    print $"(ansi red)SUITE FAILED(ansi reset) — the --once pipe contract"
+    exit 1
+}
+
+print $"(ansi green)  ok  (ansi reset)--once piped to a non-tty contains no 0x1b byte"
+
+print ""
+print $"(ansi green)all agent-monitor cases passed(ansi reset)"
 exit 0

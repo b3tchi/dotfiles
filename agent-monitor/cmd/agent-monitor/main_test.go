@@ -39,6 +39,16 @@ func writeStub(t *testing.T, dir, name, script string) {
 // emitting no terminal-mode escape sequence at all — no alternate-screen
 // enter/exit, no raw-mode setup, no cursor-home/clear — so the output
 // composes cleanly in a pipe.
+//
+// sp032 T7 pairs this with a SUITE-level counterpart in
+// tests/agent-monitor/run-tests.nu, which builds the real binary and greps
+// the bytes `agent-monitor --once` writes into an actual pipe for 0x1b.
+// The two altitudes are deliberate and neither replaces the other: this one
+// covers the runOnce seam every frame-shaping test already drives, while the
+// suite case covers everything main() does AROUND that seam. dotfiles-r9ty is
+// the precedent — a unit assertion stayed green while the shipped terminal
+// path was broken — so an ESC written to os.Stdout outside runOnce is exactly
+// the class of defect only the suite case can see.
 func TestRunOnce_NoRawModeNoAltScreen_ExitsCleanly(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
