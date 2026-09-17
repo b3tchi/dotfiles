@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -883,6 +884,79 @@ func newTestShell(t *testing.T) *shell {
 	return s
 }
 
+// newWiredShell builds a shell over REAL monitors fed by stub agent-census /
+// pi-worker binaries and sized by a WindowSizeMsg — the same harness
+// TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame stands up,
+// parameterised so a test can ask for enough rows that a pane can actually
+// scroll. It is what lets a mouse test send a real tea.MouseMsg through
+// shell.Update instead of calling a Model method directly: the dispatch in
+// handleMouse (which button reaches which pane, with which delta) is only
+// under test when the event itself is the input.
+func newWiredShell(t *testing.T, rosterRows, msgRows, width, height int) *shell {
+	t.Helper()
+	dir := t.TempDir()
+
+	rows := make([]source.Row, rosterRows)
+	for i := range rows {
+		rows[i] = source.Row{
+			UID:    fmt.Sprintf("agent%02d", i),
+			Name:   fmt.Sprintf("agent%02d", i),
+			Bucket: "idle",
+		}
+	}
+	rosterJSON, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatalf("marshal roster: %v", err)
+	}
+
+	type wireMessage struct {
+		At      string   `json:"at"`
+		From    string   `json:"from"`
+		To      []string `json:"to"`
+		Content string   `json:"content"`
+	}
+	wire := make([]wireMessage, msgRows)
+	for i := range wire {
+		wire[i] = wireMessage{
+			At:      fmt.Sprintf("2026-09-17T10:%02d:00Z", i%60),
+			From:    fmt.Sprintf("sender%02d", i),
+			To:      []string{"bob"},
+			Content: fmt.Sprintf("message %02d", i),
+		}
+	}
+	msgJSON, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+
+	writeStub(t, dir, "agent-census", "#!/bin/sh\ncat <<'JSON'\n"+string(rosterJSON)+"\nJSON\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\ncat <<'JSON'\n"+string(msgJSON)+"\nJSON\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	s := newShell(ctx, model, census, msgs)
+	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return s
+}
+
+// settleLayout renders one frame off s's current state and returns the
+// layout for it. Rendering also settles the panes' viewports on the model,
+// so a snapshot taken AFTER this call is comparable field-for-field against
+// the model handleMouse leaves behind (handleMouse re-derives the same
+// geometry from the same width/height/now before dispatching).
+func settleLayout(s *shell) frameLayout {
+	_, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(),
+		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height)
+	return layout
+}
+
 // quits reports whether the command Update returned is bubbletea's quit.
 func quits(cmd tea.Cmd) bool {
 	if cmd == nil {
@@ -1476,42 +1550,141 @@ func TestMouse_ClickOnPlaceholderDoesNotSelect(t *testing.T) {
 // criterion 3: the wheel moves the scroll of the pane UNDER THE POINTER,
 // even when that pane does not have focus, and touches nothing else — not
 // focus, not either pane's cursor, not the other pane's scroll.
+// TestMouse_WheelScrollsPaneUnderPointerWithoutChangingFocus is success
+// criterion 3, driven as a REAL tea.MouseMsg through shell.Update rather
+// than by calling Model.ScrollPane directly. That distinction is the whole
+// test: ScrollPane(PaneMessages, 3) asserted against MessagesScroll == 3
+// asserts back the literal it was handed, and would still pass if
+// handleMouse scrolled the wrong pane, used the wrong delta, or dropped the
+// wheel entirely. Sending the wheel event is what puts handleMouse's
+// button -> pane -> delta dispatch under test.
+//
+// Both panes are covered, and in each case FOCUS IS ON THE OTHER ONE, so a
+// dispatch that scrolled "the focused pane" instead of "the pane under the
+// pointer" fails here.
 func TestMouse_WheelScrollsPaneUnderPointerWithoutChangingFocus(t *testing.T) {
-	model := tui.NewModel()
-	model.DetailVisible = false
-	model.Focus = tui.PaneRoster // focus differs from the pane under the pointer
-	roster := wideRoster(50)
-	msgs := wideMessages(50)
-
-	renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24) // settle the viewport
-	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
-
-	y := layout.messages.firstRow + layout.messages.headerRows + 2
-	target, _, _ := hitTest(layout, y)
-	if target != hitMessages {
-		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
+	cases := []struct {
+		name       string
+		focus      tui.Pane
+		wantTarget hitTarget
+		rowIn      func(frameLayout) paneLayout
+		scrollOf   func(*tui.Model) int
+		otherName  string
+	}{
+		{
+			name:       "messages pane under pointer, roster focused",
+			focus:      tui.PaneRoster,
+			wantTarget: hitMessages,
+			rowIn:      func(l frameLayout) paneLayout { return l.messages },
+			scrollOf:   func(m *tui.Model) int { return m.MessagesScroll },
+			otherName:  "RosterScroll",
+		},
+		{
+			name:       "roster pane under pointer, messages focused",
+			focus:      tui.PaneMessages,
+			wantTarget: hitRoster,
+			rowIn:      func(l frameLayout) paneLayout { return l.roster },
+			scrollOf:   func(m *tui.Model) int { return m.RosterScroll },
+			otherName:  "MessagesScroll",
+		},
 	}
 
-	wantFocus := model.Focus
-	wantRosterCursor, wantMessagesCursor := model.RosterCursor, model.MessagesCursor
-	wantRosterScroll := model.RosterScroll
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newWiredShell(t, 60, 60, 100, 30)
+			s.model.DetailVisible = false
+			s.model.Focus = tc.focus
 
-	model.ScrollPane(tui.PaneMessages, 3)
+			layout := settleLayout(s)
+			pane := tc.rowIn(layout)
+			y := pane.firstRow + pane.headerRows + 2
+			if target, isData, _ := hitTest(layout, y); target != tc.wantTarget || !isData {
+				t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (%v, true)", y, target, isData, tc.wantTarget)
+			}
 
-	if model.Focus != wantFocus {
-		t.Errorf("Focus changed: got %v, want %v", model.Focus, wantFocus)
+			// want is every field the wheel must leave alone. Only the pane
+			// under the pointer's scroll is allowed to differ, and only by
+			// exactly 3 — so a swapped dispatch, a changed delta, a moved
+			// cursor, a moved focus or a dropped event all fail.
+			before := *s.model
+			want := before
+			switch tc.wantTarget {
+			case hitMessages:
+				want.MessagesScroll = before.MessagesScroll + 3
+			case hitRoster:
+				want.RosterScroll = before.RosterScroll + 3
+			}
+
+			s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+
+			if got := tc.scrollOf(s.model); got != tc.scrollOf(&want) {
+				t.Errorf("scroll of the pane under the pointer = %d, want %d (a wheel notch is exactly 3 lines)", got, tc.scrollOf(&want))
+			}
+			if s.model.Focus != before.Focus {
+				t.Errorf("Focus changed: got %v, want %v", s.model.Focus, before.Focus)
+			}
+			if s.model.RosterCursor != before.RosterCursor {
+				t.Errorf("RosterCursor changed: got %d, want %d", s.model.RosterCursor, before.RosterCursor)
+			}
+			if s.model.MessagesCursor != before.MessagesCursor {
+				t.Errorf("MessagesCursor changed: got %d, want %d", s.model.MessagesCursor, before.MessagesCursor)
+			}
+			if *s.model != want {
+				t.Fatalf("WheelDown changed more (or less) than %s by 3:\n got %+v\nwant %+v\n(the pane NOT under the pointer must not move; %s in particular)",
+					tc.otherName, *s.model, want, tc.otherName)
+			}
+
+			// And back: a WheelUp at the same coordinate returns the same
+			// pane to where it started, leaving everything else as it was.
+			s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+			if *s.model != before {
+				t.Fatalf("WheelUp did not undo WheelDown:\n got %+v\nwant %+v", *s.model, before)
+			}
+		})
 	}
-	if model.RosterCursor != wantRosterCursor {
-		t.Errorf("RosterCursor changed: got %d, want %d", model.RosterCursor, wantRosterCursor)
+}
+
+// TestMouse_PressOnSeparatorChangesNothing is criterion 2's third clause and
+// the "click on the blank separator" edge case: the rows BETWEEN panes
+// belong to no pane (hitTest reports hitNone), and no button pressed there
+// may move focus, a cursor or a scroll. Every button is tried, because
+// hitNone reaches a different arm of handleMouse's switch for each one.
+func TestMouse_PressOnSeparatorChangesNothing(t *testing.T) {
+	s := newWiredShell(t, 20, 20, 100, 30)
+	s.model.DetailVisible = true
+
+	layout := settleLayout(s)
+	if !layout.detailShown {
+		t.Fatalf("test setup: expected the detail pane shown at height 30")
 	}
-	if model.MessagesCursor != wantMessagesCursor {
-		t.Errorf("MessagesCursor changed: got %d, want %d", model.MessagesCursor, wantMessagesCursor)
+
+	seps := map[string]int{
+		"roster/messages": layout.roster.firstRow + layout.roster.totalRows,
+		"messages/detail": layout.messages.firstRow + layout.messages.totalRows,
 	}
-	if model.RosterScroll != wantRosterScroll {
-		t.Errorf("the pane NOT under the pointer scrolled: RosterScroll %d -> %d", wantRosterScroll, model.RosterScroll)
+	for name, y := range seps {
+		if target, _, _ := hitTest(layout, y); target != hitNone {
+			t.Fatalf("test setup: hitTest(%s separator, y=%d) = %v, want hitNone", name, y, target)
+		}
 	}
-	if model.MessagesScroll != 3 {
-		t.Errorf("MessagesScroll = %d, want 3 (the wheel delta)", model.MessagesScroll)
+
+	want := *s.model
+	buttons := []struct {
+		name string
+		btn  tea.MouseButton
+	}{
+		{"left", tea.MouseButtonLeft},
+		{"wheel-down", tea.MouseButtonWheelDown},
+		{"wheel-up", tea.MouseButtonWheelUp},
+	}
+	for name, y := range seps {
+		for _, b := range buttons {
+			s.Update(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: b.btn})
+			if *s.model != want {
+				t.Fatalf("%s press on the %s separator (y=%d) changed model state:\n got %+v\nwant %+v",
+					b.name, name, y, *s.model, want)
+			}
+		}
 	}
 }
 
@@ -1629,19 +1802,39 @@ func TestMouse_ClickAtTopRowAndBeyondWidthIsSafe(t *testing.T) {
 
 // TestMouse_MotionEventsIgnored is the edge case that cell-motion reporting
 // sends during a drag: shell.handleMouse must return before doing anything
-// else, so a motion "press" over a pane's header must not even focus it.
+// else, so a motion event over a pane's DATA rows must neither focus it nor
+// select a row nor scroll it.
+//
+// The button table matters. A motion carrying Left is also rejected by the
+// inner `Action != MouseActionPress` check inside the left-button arm, so a
+// Left-only test passes even with the outer motion guard deleted. The WHEEL
+// arms check no Action at all — the outer guard is the only thing between a
+// drag report and a scroll — so the wheel rows are what actually hold that
+// guard in place.
 func TestMouse_MotionEventsIgnored(t *testing.T) {
-	s := newTestShell(t)
-	s.model.SetRosterLen(5)
-	s.model.SetMessagesLen(5)
-	s.model.Focus = tui.PaneMessages
-	s.width, s.height = 80, 24
+	s := newWiredShell(t, 40, 40, 100, 30)
+	s.model.Focus = tui.PaneRoster
+
+	layout := settleLayout(s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 2
+	if target, isData, _ := hitTest(layout, y); target != hitMessages || !isData {
+		t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (hitMessages, true)", y, target, isData)
+	}
 
 	want := *s.model
-	s.Update(tea.MouseMsg{X: 0, Y: 0, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
-
-	if *s.model != want {
-		t.Errorf("a motion event changed model state:\n got %+v\nwant %+v", *s.model, want)
+	for _, b := range []struct {
+		name string
+		btn  tea.MouseButton
+	}{
+		{"left", tea.MouseButtonLeft},
+		{"wheel-down", tea.MouseButtonWheelDown},
+		{"wheel-up", tea.MouseButtonWheelUp},
+	} {
+		s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionMotion, Button: b.btn})
+		if *s.model != want {
+			t.Errorf("a %s motion event over a data row changed model state:\n got %+v\nwant %+v",
+				b.name, *s.model, want)
+		}
 	}
 }
 
@@ -1682,15 +1875,24 @@ func TestMouse_NeverProducesOutOfRangeCursorOrScroll(t *testing.T) {
 
 		_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
 
-		_ = rng.Intn(200) - 20 // x: generated for fidelity to the property, unused by hitTest
 		y := rng.Intn(height+20) - 10
 
 		target, isData, offset := hitTest(layout, y)
+		// hitNone (a separator row, or a y off the frame entirely) and
+		// hitDetail are not "nothing to do" — they are an assertion that
+		// nothing happens. Without this the switch below would fall through
+		// silently and the property would be vacuously true for them.
+		beforeClick := *model
 		switch target {
 		case hitRoster:
 			model.ClickPane(tui.PaneRoster, isData, offset)
 		case hitMessages:
 			model.ClickPane(tui.PaneMessages, isData, offset)
+		default:
+			if *model != beforeClick {
+				t.Fatalf("iter %d: a %v press at y=%d changed model state:\n got %+v\nwant %+v",
+					i, target, y, *model, beforeClick)
+			}
 		}
 
 		if model.RosterCursor < 0 || model.RosterCursor > maxIndexFor(model.RosterLen) {
@@ -1701,11 +1903,17 @@ func TestMouse_NeverProducesOutOfRangeCursorOrScroll(t *testing.T) {
 		}
 
 		delta := rng.Intn(7) - 3
+		beforeScroll := *model
 		switch target {
 		case hitRoster:
 			model.ScrollPane(tui.PaneRoster, delta)
 		case hitMessages:
 			model.ScrollPane(tui.PaneMessages, delta)
+		default:
+			if *model != beforeScroll {
+				t.Fatalf("iter %d: a %v wheel at y=%d changed model state:\n got %+v\nwant %+v",
+					i, target, y, *model, beforeScroll)
+			}
 		}
 
 		if model.RosterScroll < 0 || model.RosterScroll > wantMaxTop(model.RosterLen, model.RosterViewport) {

@@ -869,3 +869,146 @@ func TestScroll_NeverExceedsMaxForViewport(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// sp032 T3's mouse entry points, at the tui level.
+//
+// These are deliberately package-`tui` tests rather than more package-`main`
+// ones, because the two levels catch different mutations. main's tests own
+// the DISPATCH (which screen row is which pane, which button reaches which
+// entry point, with which delta) — nothing here can see a swapped
+// hitRoster/hitMessages arm or a wheel notch of 1 instead of 3. These own the
+// CONTRACT of the entry points themselves (cursor = scroll + offset, clamped;
+// focus moves on every press; scroll moves without a cursor or focus) — and
+// they pin it against any caller, so the contract survives T4/T5/T6 growing
+// new callers that main's mouse tests never exercise.
+// ---------------------------------------------------------------------------
+
+// TestClickPane_DataRowSelectsScrollPlusOffset pins the arithmetic: the
+// offset a hit test reports is relative to what is ON SCREEN, so the row
+// selected is the pane's current scroll plus that offset — never the offset
+// alone (which would select the wrong row in any scrolled pane) and never
+// scroll+offset+1 (an off-by-one against the first visible row).
+func TestClickPane_DataRowSelectsScrollPlusOffset(t *testing.T) {
+	cases := []struct {
+		name   string
+		pane   Pane
+		scroll int
+		offset int
+		want   int
+	}{
+		{"roster unscrolled, first visible row", PaneRoster, 0, 0, 0},
+		{"roster unscrolled, fourth visible row", PaneRoster, 0, 3, 3},
+		{"roster scrolled, first visible row", PaneRoster, 7, 0, 7},
+		{"roster scrolled, fourth visible row", PaneRoster, 7, 3, 10},
+		{"messages unscrolled, first visible row", PaneMessages, 0, 0, 0},
+		{"messages scrolled, second visible row", PaneMessages, 12, 1, 13},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel()
+			m.SetRosterViewport(5)
+			m.SetMessagesViewport(5)
+			m.SetRosterLen(40)
+			m.SetMessagesLen(40)
+			m.ScrollRoster(tc.scroll)
+			m.ScrollMessages(tc.scroll)
+
+			m.ClickPane(tc.pane, true, tc.offset)
+
+			got := m.RosterCursor
+			if tc.pane == PaneMessages {
+				got = m.MessagesCursor
+			}
+			if got != tc.want {
+				t.Errorf("cursor = %d, want %d (scroll %d + offset %d)", got, tc.want, tc.scroll, tc.offset)
+			}
+			if m.Focus != tc.pane {
+				t.Errorf("Focus = %v, want %v — a press always focuses the pane it landed in", m.Focus, tc.pane)
+			}
+		})
+	}
+}
+
+// TestClickPane_NonDataPressFocusesWithoutMovingTheCursor is the header /
+// column-header / placeholder case: isData false means "this row is not a
+// selection", so focus moves and nothing else does.
+func TestClickPane_NonDataPressFocusesWithoutMovingTheCursor(t *testing.T) {
+	m := NewModel()
+	m.SetRosterViewport(5)
+	m.SetMessagesViewport(5)
+	m.SetRosterLen(40)
+	m.SetMessagesLen(40)
+	m.ScrollMessages(9)
+	m.MessagesCursor = 4
+	m.RosterCursor = 2
+	m.Focus = PaneRoster
+
+	before := *m
+	m.ClickPane(PaneMessages, false, 3)
+
+	want := before
+	want.Focus = PaneMessages
+	if *m != want {
+		t.Errorf("a non-data press moved more than focus:\n got %+v\nwant %+v", *m, want)
+	}
+}
+
+// TestClickPane_OffsetPastTheListClampsIntoRange is criterion 5 at this
+// level: an offset that names a row beyond the list (a stale layout, a pane
+// whose data shrank between the draw and the event) can never escape
+// [0, len-1].
+func TestClickPane_OffsetPastTheListClampsIntoRange(t *testing.T) {
+	m := NewModel()
+	m.SetRosterViewport(5)
+	m.SetRosterLen(4)
+	m.ClickPane(PaneRoster, true, 99)
+	if m.RosterCursor != 3 {
+		t.Errorf("RosterCursor = %d, want 3 (last row of a 4-row list)", m.RosterCursor)
+	}
+
+	empty := NewModel()
+	empty.SetMessagesViewport(5)
+	empty.SetMessagesLen(0)
+	empty.ClickPane(PaneMessages, true, 2)
+	if empty.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 for an empty list", empty.MessagesCursor)
+	}
+}
+
+// TestScrollPane_MovesOnlyThatPanesScroll pins the wheel entry point's
+// contract: it routes to the named pane's T1 scroll and touches nothing else
+// — not the other pane, not either cursor, not focus.
+func TestScrollPane_MovesOnlyThatPanesScroll(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pane Pane
+	}{{"roster", PaneRoster}, {"messages", PaneMessages}} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel()
+			m.SetRosterViewport(5)
+			m.SetMessagesViewport(5)
+			m.SetRosterLen(40)
+			m.SetMessagesLen(40)
+			m.RosterCursor = 6
+			m.MessagesCursor = 8
+			m.Focus = PaneRoster
+
+			before := *m
+			want := before
+			switch tc.pane {
+			case PaneRoster:
+				want.RosterScroll = before.RosterScroll + 4
+			case PaneMessages:
+				want.MessagesScroll = before.MessagesScroll + 4
+			}
+
+			m.ScrollPane(tc.pane, 4)
+
+			if *m != want {
+				t.Errorf("ScrollPane(%v, 4) changed more than that pane's scroll:\n got %+v\nwant %+v", tc.pane, *m, want)
+			}
+		})
+	}
+}
