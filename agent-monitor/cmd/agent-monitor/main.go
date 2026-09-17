@@ -7,31 +7,37 @@
 // a forced refresh on `r`, and a plain render loop. sp030 T9 added the
 // second pane — messages, sampled on their own fast, ungated ticker — and
 // `--once`, a non-interactive single-frame mode that composes in a pipe (no
-// raw mode, no alternate screen). sp030 T10 (this file) extracts the
-// PROVISIONAL inline key handling those left behind into internal/tui:
-// focus, filter and scroll now live in a tui.Model driven by a tui.Decoder,
-// and terminal restore is wired through a tui.Restorer so it fires exactly
-// once regardless of which of several goroutines gets there first — see
-// enterInteractiveMode's and runInteractive's comments for why that matters
-// specifically for a panic in a background sampler's render callback.
+// raw mode, no alternate screen). sp030 T10 moved focus, filter and scroll
+// into a tui.Model.
+//
+// sp032 T2 (this file) hands the EVENT LOOP to bubbletea. The shell type
+// below is the tea.Model: bubbletea owns raw mode and its restore (including
+// on panic), the alternate screen, escape decoding, SIGWINCH and mouse
+// reports, so the hand-rolled byte pump, the escape state machine and the
+// restore-exactly-once guard are all gone. What did NOT move is everything
+// that decides what a frame SAYS: internal/render still produces every byte
+// of every pane, tui.Model still owns focus, filter and scroll, and the two
+// samplers in internal/source keep their own goroutines and adr0014's
+// guards — a tick simply becomes a message now instead of a draw callback.
+// --once never constructs a program at all (see runOnce).
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"agent-monitor/internal/render"
 	"agent-monitor/internal/source"
 	"agent-monitor/internal/tui"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 )
 
@@ -93,7 +99,22 @@ func main() {
 		return
 	}
 
-	runInteractive(*project)
+	if err := interactiveExitError(runInteractive(*project)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// interactiveExitError maps a finished program's error onto an exit status.
+// bubbletea reports a SIGINT as tea.ErrInterrupted, but the pre-sp032 loop
+// returned on a signal and the process exited 0 — a ctrl+c or a `kill` is a
+// clean way to leave a monitor, not a failure. SIGTERM already arrives as an
+// ordinary quit (nil), so only the interrupt needs unwrapping.
+func interactiveExitError(err error) error {
+	if errors.Is(err, tea.ErrInterrupted) {
+		return nil
+	}
+	return err
 }
 
 // runOnce renders exactly one frame — a forced roster refresh plus one
@@ -135,12 +156,158 @@ func runOnce(w io.Writer, project string) error {
 	return nil
 }
 
-// runInteractive drives two samplers (roster + messages), a tui.Model for
-// key-driven state, and draws their combined, filtered, scrolled frame.
-// project is --project's value (sp031 T3), set on the model once here and
-// never touched again — no key mutates it, unlike the interactive `/`
-// filter.
-func runInteractive(project string) {
+// rosterTickMsg and messagesTickMsg are what a sampler goroutine delivers
+// into the loop: "this pane's data changed, redraw". They carry NOTHING —
+// the monitors hold the sample and the model holds the view state, so a tick
+// that carried data would be a second copy of both and a second place for
+// them to disagree. Crucially, a tick moves no cursor and no scroll offset
+// (TestUpdate_TickMsgRedrawsWithoutMovingAnyCursor): sp032 T1 made the
+// scroll first-class precisely so a two-second sample cannot drag it.
+type rosterTickMsg struct{}
+
+type messagesTickMsg struct{}
+
+// shell is agent-monitor's tea.Model — the event loop's whole state. It owns
+// nothing that decides what a frame SAYS: render/ produces every byte, and
+// tui.Model holds focus, filter, cursor and scroll exactly as it did under
+// the hand-rolled loop. What lives here is only what the loop itself needs:
+// the two monitors a forced refresh re-reads, the geometry the last
+// tea.WindowSizeMsg reported, and the clock the frame stamps ages against.
+type shell struct {
+	ctx    context.Context
+	model  *tui.Model
+	census *source.Monitor
+	msgs   *source.MessagesMonitor
+
+	// width and height come from tea.WindowSizeMsg — term.GetSize is gone
+	// from the interactive path. width starts at the same 80-column fallback
+	// terminalWidth() uses, so a frame rendered before the first size message
+	// is laid out rather than collapsed; height starts at 0, which renderFrame
+	// already reads as "do not clamp, no detail pane" (the --once contract),
+	// so the pre-size frame is a plain stack rather than a mis-clamped one.
+	width, height int
+
+	// now is the clock renderFrame stamps staleness and message ages
+	// against, injectable so a test can compare a frame byte-for-byte.
+	now func() time.Time
+}
+
+func newShell(ctx context.Context, model *tui.Model, census *source.Monitor, msgs *source.MessagesMonitor) *shell {
+	return &shell{ctx: ctx, model: model, census: census, msgs: msgs, width: 80, now: time.Now}
+}
+
+// Init has nothing to start: both samplers are ordinary goroutines started in
+// runInteractive (adr0014's guards live in source.RunLoop and
+// source.RunMessagesLoop and are deliberately NOT re-expressed as tea.Cmd
+// tickers — see sp032 ## solution), and the first frame's forced reads have
+// already happened by the time the program runs.
+func (s *shell) Init() tea.Cmd { return nil }
+
+// Update maps one event onto tui.Model and does nothing else — the rule that
+// keeps the whole key surface unit-testable without ever constructing a
+// tea.Program. No key logic lives here; translateKey converts the event and
+// tui.Model decides what it means.
+func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		s.width, s.height = msg.Width, msg.Height
+
+	case rosterTickMsg, messagesTickMsg:
+		// A sampler saw new data. The monitors already hold it and View
+		// reads them, so there is nothing to do but let bubbletea redraw.
+
+	case tea.KeyMsg:
+		for _, k := range translateKey(msg) {
+			outcome := s.model.HandleKey(k)
+			if outcome.Quit {
+				return s, tea.Quit
+			}
+			if outcome.ForceRefresh {
+				s.census.Refresh(s.ctx)
+				s.msgs.Tick(s.ctx)
+			}
+		}
+	}
+	return s, nil
+}
+
+// View is renderFrame's lines joined with "\n", and nothing else. It is NOT
+// \r\n: dotfiles-r9ty's CRLF workaround existed because the hand-rolled loop
+// wrote frames itself while the tty was in raw mode, with ONLCR disabled, so
+// a bare \n moved down a row without returning the carriage. bubbletea owns
+// the output mapping now, so the cause is gone and the workaround goes with
+// it rather than being carried forward as a superstition.
+func (s *shell) View() string {
+	return strings.Join(buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height), "\n")
+}
+
+// translateKey converts one bubbletea key event into the tui.Key values the
+// model already understands. It returns a SLICE because bubbletea coalesces a
+// burst of printable input (a paste, a fast typist) into one KeyRunes event,
+// where the byte-at-a-time decoder it replaces produced one Key per rune —
+// feeding them individually is what keeps a pasted filter query arriving
+// whole. An unmapped key returns nothing, which is exactly what the old
+// decoder did with a bare ESC and with any CSI sequence ft016 has no action
+// for.
+//
+// ctrl+c maps to the 0x03 RUNE rather than to a quit here, deliberately:
+// HandleKey is what decides that 0x03 quits, and it decides so only when a
+// filter draft is NOT open — while editing, 0x03 has always been swallowed
+// into the draft. Translating it to a quit in this function would silently
+// change that (TestUpdate_CtrlCWhileEditingIsDraftTextNotQuit).
+func translateKey(k tea.KeyMsg) []tui.Key {
+	switch k.Type {
+	case tea.KeyRunes, tea.KeySpace:
+		// KeySpace is bubbletea's one printable key reported under its own
+		// type; its rune still arrives in Runes, so both cases read the same
+		// field and a space typed into a filter query is not dropped.
+		keys := make([]tui.Key, 0, len(k.Runes))
+		for _, r := range k.Runes {
+			keys = append(keys, tui.Key{Rune: r})
+		}
+		return keys
+	case tea.KeyCtrlC:
+		return []tui.Key{{Rune: 0x03}}
+	case tea.KeyUp:
+		return []tui.Key{{Special: tui.KeyUp}}
+	case tea.KeyDown:
+		return []tui.Key{{Special: tui.KeyDown}}
+	case tea.KeyLeft:
+		return []tui.Key{{Special: tui.KeyLeft}}
+	case tea.KeyRight:
+		return []tui.Key{{Special: tui.KeyRight}}
+	case tea.KeyEnter:
+		return []tui.Key{{Special: tui.KeyEnter}}
+	case tea.KeyBackspace:
+		return []tui.Key{{Special: tui.KeyBackspace}}
+	case tea.KeyTab:
+		return []tui.Key{{Special: tui.KeyTab}}
+	}
+	return nil
+}
+
+// programOptions is the option set every agent-monitor program is built
+// with, named so a test can assert it without running a program.
+//
+// The alternate screen is what the hand-rolled path used to write by hand.
+// Cell-motion mouse reporting has no consumer yet — sp032 T3 adds the hit
+// test — and is enabled here because a shell that does not ask for mouse
+// reports receives none, so T3 would otherwise have nothing to consume.
+//
+// What is NOT here matters as much: bubbletea's panic catcher and its signal
+// handler are both left ON, and they are what replaced tui's hand-rolled
+// restore-exactly-once guard, deleted in this task. Opting
+// out of either would put the terminal back in the state that guard existed
+// to prevent (TestShell_PanicAndSignalRestoreLeftToBubbletea).
+func programOptions() []tea.ProgramOption {
+	return []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+}
+
+// runInteractive drives two samplers (roster + messages) and a bubbletea
+// program over a tui.Model, returning the program's error. project is
+// --project's value (sp031 T3), set on the model once here and never touched
+// again — no key mutates it, unlike the interactive `/` filter.
+func runInteractive(project string) error {
 	// adr0014 guard 1, fail fast on unrecoverable setup: checked once, here,
 	// before any loop starts. A missing dependency is not something a retry
 	// fixes, so agent-monitor says so once and exits — never an empty UI
@@ -168,75 +335,34 @@ func runInteractive(project string) {
 	censusMonitor.Refresh(ctx)
 	msgMonitor.Tick(ctx)
 
-	restoreTerminal := enterInteractiveMode()
+	p := tea.NewProgram(newShell(ctx, model, censusMonitor, msgMonitor), programOptions()...)
 
-	// restorer makes "restore the terminal exactly once" true regardless of
-	// WHICH exit path gets there first: this defer covers a normal quit
-	// (`q`), a signal, or a panic on THIS (the main) goroutine. It does not
-	// by itself cover a panic in a render path running on a background
-	// sampler goroutine — draw, invoked from source.RunLoop's and
-	// source.RunMessagesLoop's onTick below, runs on ITS OWN goroutine, and
-	// Go never runs one goroutine's deferred calls to save another's panic.
-	// Those two goroutines get their own restorer.Guard below instead, and
-	// sync.Once (inside tui.Restorer) is what makes exactly one of these
-	// several defers actually do the restoring, whichever fires first. See
-	// tui.Restorer's doc comment for the full reasoning.
-	restorer := tui.NewRestorer(restoreTerminal)
-	defer restorer.Restore()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	keys := make(chan byte)
-	go readKeys(keys)
-
-	draw := func() {
-		lines := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), terminalHeight())
-		writeFrame(lines)
-	}
-	draw()
-
-	go restorer.Guard(func() {
-		source.RunLoop(ctx, censusMonitor, pollInterval, piBoundInterval, func(changed bool) {
-			if changed {
-				draw()
-			}
-		})
-	})
-	go restorer.Guard(func() {
-		source.RunMessagesLoop(ctx, msgMonitor, messagesInterval, func(changed bool) {
-			if changed {
-				draw()
-			}
-		})
-	})
-
-	dec := &tui.Decoder{}
-	for {
-		select {
-		case <-sigCh: // SIGINT/SIGTERM take the same restore path as `q`: return
-			return
-		case <-ctx.Done():
-			return
-		case b, ok := <-keys:
-			if !ok {
-				return
-			}
-			key, ready := dec.Feed(b)
-			if !ready {
-				continue // mid-escape-sequence; wait for the rest
-			}
-			outcome := model.HandleKey(key)
-			if outcome.Quit {
-				return
-			}
-			if outcome.ForceRefresh {
-				censusMonitor.Refresh(ctx)
-				msgMonitor.Tick(ctx)
-			}
-			draw()
+	// The samplers keep their own goroutines and source.RunLoop /
+	// source.RunMessagesLoop keep adr0014's three guards verbatim — they are
+	// NOT rewritten as tea.Cmd tickers (sp032 ## solution). Only the callback
+	// changed: what used to render on THIS goroutine now only posts a
+	// message, which is also why tui's cross-goroutine restore guard could
+	// be deleted rather than merely retired — nothing on these goroutines
+	// touches the terminal any more.
+	//
+	// The `changed` gate is kept from the pre-port callback on purpose: an
+	// unchanged sample redrew nothing before this task and redraws nothing
+	// after it. This task is a port with no behavior change, and a tick that
+	// always sent would quietly turn a two-second no-op into a two-second
+	// repaint.
+	go source.RunLoop(ctx, censusMonitor, pollInterval, piBoundInterval, func(changed bool) {
+		if changed {
+			p.Send(rosterTickMsg{})
 		}
-	}
+	})
+	go source.RunMessagesLoop(ctx, msgMonitor, messagesInterval, func(changed bool) {
+		if changed {
+			p.Send(messagesTickMsg{})
+		}
+	})
+
+	_, err := p.Run()
+	return err
 }
 
 // buildFrame is runInteractive's and runOnce's entry point: it resolves the
@@ -411,7 +537,7 @@ func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Mes
 // detail pane.
 //
 // dotfiles-9x2m / dotfiles-m0km: without this the frame is however many
-// lines the data happens to produce, writeFrame prints all of them, and a
+// lines the data happens to produce, the frame writer prints all of them, and a
 // frame taller than the terminal makes the TERMINAL scroll — carrying the
 // roster off the top where no amount of in-pane scrolling can bring it
 // back. The pane scroll offsets were being applied correctly and were
@@ -561,60 +687,6 @@ func scrolledMessageSample(sample *source.MessageSample, msgs []source.Message, 
 	return &source.MessageSample{Messages: msgs[scroll:], At: sample.At}
 }
 
-// readKeys feeds raw stdin bytes to ch, closing it on EOF/error (stdin
-// closed, e.g. under a non-interactive harness). Byte-at-a-time is
-// deliberate: tui.Decoder is what assembles multi-byte sequences (arrow
-// keys) back into whole Key events, so this loop stays a dumb byte pump.
-func readKeys(ch chan<- byte) {
-	defer close(ch)
-	buf := make([]byte, 1)
-	for {
-		n, err := os.Stdin.Read(buf)
-		if n > 0 {
-			ch <- buf[0]
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-const (
-	altScreenEnter = "\x1b[?1049h"
-	altScreenExit  = "\x1b[?1049l"
-)
-
-// enterInteractiveMode swaps to the alternate screen and puts the terminal
-// into raw mode when stdin is a real terminal, returning a restore function
-// that undoes both. Off a real terminal (piped input, a test harness) it is
-// a no-op both ways, so the scaffold never corrupts a caller's pipe. --once
-// never calls this at all (see runOnce) — it is not merely a no-op there,
-// it is simply not in that code path.
-func enterInteractiveMode() (restore func()) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return func() {}
-	}
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return func() {}
-	}
-	fmt.Print(altScreenEnter)
-	return func() {
-		fmt.Print(altScreenExit)
-		_ = term.Restore(fd, oldState)
-	}
-}
-
-// terminalHeight reports the row count, or 0 when stdout is not a terminal —
-// 0 meaning "do not clamp", the same contract buildFrame's height takes.
-func terminalHeight() int {
-	if _, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && h > 0 {
-		return h
-	}
-	return 0
-}
-
 func terminalWidth() int {
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		return w
@@ -624,30 +696,4 @@ func terminalWidth() int {
 
 func stampPath() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("agent-monitor-census-stamp-%d", os.Getuid()))
-}
-
-func writeFrame(lines []string) {
-	io.WriteString(os.Stdout, frameBytes(lines))
-}
-
-// frameBytes is the exact text writeFrame puts on the terminal, split out so a
-// test can assert on it without a pty.
-//
-// CRLF, not LF (dotfiles-r9ty). The interactive path runs in RAW mode, which
-// disables the ONLCR output mapping that normally turns a bare \n into \r\n.
-// Without that mapping \n moves down one row and KEEPS THE COLUMN, so every
-// line starts where the previous one ended and the frame staircases off the
-// right edge, wrapping rows into each other. `--once` never enters raw mode,
-// so the tty still maps LF for it — which is why one-shot output looked
-// perfect, every unit test passed, and only running the real TUI showed it.
-func frameBytes(lines []string) string {
-	// Home cursor and clear below, rather than a full clear-and-redraw --
-	// cheaper and avoids a visible flash on every tick.
-	var b strings.Builder
-	b.WriteString("\x1b[H\x1b[J")
-	for _, l := range lines {
-		b.WriteString(l)
-		b.WriteString("\r\n")
-	}
-	return b.String()
 }

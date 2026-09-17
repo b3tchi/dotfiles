@@ -2,7 +2,6 @@ package tui
 
 import (
 	"math/rand"
-	"sync"
 	"testing"
 
 	"agent-monitor/internal/source"
@@ -621,132 +620,15 @@ func TestCursor_MessagesPaneIndependentOfRoster(t *testing.T) {
 	}
 }
 
-func TestDecoder_ArrowsAndControls(t *testing.T) {
-	cases := []struct {
-		name  string
-		bytes []byte
-		want  Key
-	}{
-		{"up", []byte{0x1b, '[', 'A'}, Key{Special: KeyUp}},
-		{"down", []byte{0x1b, '[', 'B'}, Key{Special: KeyDown}},
-		{"right", []byte{0x1b, '[', 'C'}, Key{Special: KeyRight}},
-		{"left", []byte{0x1b, '[', 'D'}, Key{Special: KeyLeft}},
-		{"enter-cr", []byte{'\r'}, Key{Special: KeyEnter}},
-		{"enter-lf", []byte{'\n'}, Key{Special: KeyEnter}},
-		{"backspace-del", []byte{0x7f}, Key{Special: KeyBackspace}},
-		{"tab", []byte{'\t'}, Key{Special: KeyTab}},
-		{"rune", []byte{'q'}, Key{Rune: 'q'}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			d := &Decoder{}
-			var got Key
-			var ok bool
-			for _, b := range c.bytes {
-				got, ok = d.Feed(b)
-			}
-			if !ok {
-				t.Fatalf("expected a decoded key after feeding %v", c.bytes)
-			}
-			if got != c.want {
-				t.Fatalf("got %+v, want %+v", got, c.want)
-			}
-		})
-	}
-}
-
-func TestDecoder_BareEscThenRuneDropsEscAndDecodesTheRune(t *testing.T) {
-	d := &Decoder{}
-	if _, ok := d.Feed(0x1b); ok {
-		t.Fatalf("a lone ESC byte must not resolve to a key until the next byte disambiguates it")
-	}
-	got, ok := d.Feed('q')
-	if !ok {
-		t.Fatalf("expected the follow-up byte to decode")
-	}
-	if got != (Key{Rune: 'q'}) {
-		t.Fatalf("expected the buffered ESC dropped and 'q' decoded plainly, got %+v", got)
-	}
-}
-
-func TestRestorer_RunsExactlyOnceAcrossMultipleDirectCalls(t *testing.T) {
-	calls := 0
-	r := NewRestorer(func() { calls++ })
-	r.Restore()
-	r.Restore()
-	r.Restore()
-	if calls != 1 {
-		t.Fatalf("expected restore to run exactly once, ran %d times", calls)
-	}
-}
-
-func TestRestorer_GuardRestoresOnNormalReturn(t *testing.T) {
-	calls := 0
-	r := NewRestorer(func() { calls++ })
-	r.Guard(func() {})
-	if calls != 1 {
-		t.Fatalf("expected 1 restore after a normal return, got %d", calls)
-	}
-}
-
-// TestRestorer_GuardRestoresExactlyOnceOnPanic is the pinned proof for "a
-// panic in a render path must still restore the terminal": Guard's deferred
-// Restore must fire during the panicking goroutine's own unwind, exactly
-// once, before the recover below lets the test continue.
-func TestRestorer_GuardRestoresExactlyOnceOnPanic(t *testing.T) {
-	calls := 0
-	r := NewRestorer(func() { calls++ })
-	func() {
-		defer func() { _ = recover() }()
-		r.Guard(func() { panic("simulated render panic") })
-	}()
-	if calls != 1 {
-		t.Fatalf("expected restore to run exactly once after a panic, got %d", calls)
-	}
-}
-
-// TestRestorer_ConcurrentNormalAndPanickingGoroutines_RestoresExactlyOnce
-// simulates agent-monitor's actual shape: a normal exit path (e.g. `q` on
-// the main goroutine) racing a panic in a background sampler's render
-// callback. Whichever gets there first, the underlying restore callback
-// must run exactly once — never zero, never twice.
-func TestRestorer_ConcurrentNormalAndPanickingGoroutines_RestoresExactlyOnce(t *testing.T) {
-	var mu sync.Mutex
-	calls := 0
-	r := NewRestorer(func() {
-		mu.Lock()
-		calls++
-		mu.Unlock()
-	})
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		r.Guard(func() {})
-	}()
-	go func() {
-		defer wg.Done()
-		defer func() { _ = recover() }()
-		r.Guard(func() { panic("boom") })
-	}()
-	wg.Wait()
-
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 1 {
-		t.Fatalf("expected exactly one restore across both goroutines, got %d", calls)
-	}
-}
-
-// --- sp032 T1: scroll is first-class state, the cursor only ensures visibility ---
-//
-// sp031 made scroll a pure function of the cursor: every SetLen — i.e. every
-// two-second sample — re-derived it. That is exactly what these tests
-// replace. Scroll is now its own state that ScrollRoster/ScrollMessages move
-// directly (the wheel in T3, the frozen tail in T6), that SetLen and
-// SetViewport only CLAMP, and that cursor motion nudges by the minimum
-// needed to bring the cursor back on screen.
+// sp032 T2 deleted six cases here along with the symbols they covered:
+// TestDecoder_ArrowsAndControls and
+// TestDecoder_BareEscThenRuneDropsEscAndDecodesTheRune tested the
+// byte-stream escape decoder bubbletea replaced, and the four restore-guard
+// cases tested the restore-exactly-once wrapper whose cross-goroutine hazard
+// stopped existing when rendering left the sampler goroutines. The behavior
+// they pinned is now asserted where it lives: key translation in
+// cmd/agent-monitor's TestUpdate_KeyMsgMapping_MatchesHandleKey, and the
+// panic/signal restore in TestShell_PanicAndSignalRestoreLeftToBubbletea.
 
 // TestScroll_WheelScrollSurvivesASampleTick is the behaviour change itself:
 // a scroll set independently of the cursor must survive an arbitrary number

@@ -2,15 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-monitor/internal/source"
 	"agent-monitor/internal/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // writeStub drops an executable shell script named `name` into dir, so a
@@ -173,46 +178,16 @@ func TestRunOnce_UnmatchedProject_EmptyRosterExitZero(t *testing.T) {
 	}
 }
 
-// dotfiles-r9ty: the interactive frame must use CRLF line endings.
-//
-// The bug this pins was invisible to every other test in this module. The
-// render packages are tested on the []string they return, and --once is
-// asserted on bytes — both correct, and both blind to how those lines reach a
-// terminal that is in RAW mode, where ONLCR is off and a bare \n drops a row
-// without returning the carriage. The result was a frame that staircased off
-// the right edge. Only running the real TUI showed it.
-func TestFrameBytes_UsesCRLF(t *testing.T) {
-	got := frameBytes([]string{"alpha", "beta"})
+// sp032 T2 deleted TestFrameBytes_UsesCRLF and
+// TestFrameBytes_EmptyFrameStillClears along with the frame writer they
+// covered. dotfiles-r9ty's CRLF rule was a workaround for the hand-rolled
+// loop writing frames onto a tty IT had put in raw mode, with ONLCR off; the
+// home+clear prefix was that same loop's repaint. bubbletea owns both now, so
+// the workaround disappears WITH its cause rather than being carried forward
+// as a superstition — and TestView_EqualsRenderFrameOutput asserts the
+// replacement property directly: View() is renderFrame's lines joined with
+// "\n" and contains no CR at all.
 
-	if want := "\x1b[H\x1b[J"; !strings.HasPrefix(got, want) {
-		t.Fatalf("frame does not start with home+clear: %q", got)
-	}
-	if want := "\x1b[H\x1b[Jalpha\r\nbeta\r\n"; got != want {
-		t.Errorf("frame = %q, want %q", got, want)
-	}
-
-	// The property that actually matters, stated independently of the exact
-	// frame above: no LF may appear without a CR immediately before it, or
-	// the row below starts at the wrong column.
-	for i, r := range got {
-		if r == '\n' && (i == 0 || got[i-1] != '\r') {
-			t.Errorf("bare LF at byte %d in %q — raw mode will not return the carriage", i, got)
-		}
-	}
-}
-
-func TestFrameBytes_EmptyFrameStillClears(t *testing.T) {
-	// A frame with no lines must still home and clear, otherwise a transition
-	// to an empty roster leaves the previous frame on screen.
-	if got, want := frameBytes(nil), "\x1b[H\x1b[J"; got != want {
-		t.Errorf("frameBytes(nil) = %q, want %q", got, want)
-	}
-}
-
-// dotfiles-9x2m / sp031 T5: the frame must fit the terminal, or the terminal
-// scrolls and carries the roster off the top where in-pane scrolling cannot
-// reach it. detailVisible=false isolates the original two-way behaviour
-// fitPanes has always had, now that a third region exists.
 func TestFitPanes_TotalNeverExceedsHeight_TwoWay(t *testing.T) {
 	long := func(n int) []string {
 		out := make([]string, n)
@@ -751,4 +726,471 @@ func anyContains(lines []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T2: the bubbletea shell.
+//
+// altScreenEnter/altScreenExit used to be constants in main.go, written by
+// the hand-rolled enterInteractiveMode. Since bubbletea owns the alternate
+// screen, main.go must not contain that literal at all (asserted by
+// TestShell_NoRawModeOrAltScreenSymbolsRemain), so the two sequences live
+// here — as what the --once contract forbids in its output, which is the
+// only reason this module ever needed to spell them. The TestRunOnce body
+// above is unchanged and still reads them by these names.
+// ---------------------------------------------------------------------------
+
+const (
+	altScreenEnter = "\x1b[?1049h"
+	altScreenExit  = "\x1b[?1049l"
+)
+
+// startupBits applies opts to a bare tea.Program and reads back the private
+// bitfield bubbletea records its startup options in. Reading an unexported
+// int field through reflect is legal (only Interface()/Set() are barred), and
+// comparing two BITFIELDS built the same way — rather than hardcoding 1<<0
+// and 1<<1 — is what keeps this test honest if bubbletea ever renumbers them.
+func startupBits(t *testing.T, opts ...tea.ProgramOption) int64 {
+	t.Helper()
+	p := &tea.Program{}
+	for _, o := range opts {
+		o(p)
+	}
+	f := reflect.ValueOf(p).Elem().FieldByName("startupOptions")
+	if !f.IsValid() {
+		t.Fatalf("bubbletea's Program no longer has a startupOptions field; this test needs rewriting")
+	}
+	return f.Int()
+}
+
+// TestShell_ProgramOptionsIncludeAltScreenAndMouseCellMotion is success
+// criterion 1's option half: the program agent-monitor builds must ask for
+// the alternate screen (what enterInteractiveMode used to write by hand) and
+// for cell-motion mouse reporting (which nothing consumes yet — T3 does —
+// but which must be on from this task so the events exist to consume).
+func TestShell_ProgramOptionsIncludeAltScreenAndMouseCellMotion(t *testing.T) {
+	got := startupBits(t, programOptions()...)
+
+	alt := startupBits(t, tea.WithAltScreen())
+	if got&alt != alt {
+		t.Errorf("programOptions() does not enable the alternate screen (bits %b, want %b set)", got, alt)
+	}
+	mouse := startupBits(t, tea.WithMouseCellMotion())
+	if got&mouse != mouse {
+		t.Errorf("programOptions() does not enable cell-motion mouse reporting (bits %b, want %b set)", got, mouse)
+	}
+}
+
+// TestShell_PanicAndSignalRestoreLeftToBubbletea is the edge case tui.Restorer
+// used to cover. Its Guard existed because a panic on a SAMPLER goroutine —
+// which used to render — would take the process down without running main()'s
+// deferred restore. Nothing renders on those goroutines any more (they only
+// p.Send), so the remaining case is a panic anywhere under the program, and
+// bubbletea restores the terminal for it only while its panic catcher and its
+// signal handler are left ON. Opting out of either would silently reintroduce
+// the exact hazard Restorer was deleted for, so it is asserted rather than
+// assumed.
+func TestShell_PanicAndSignalRestoreLeftToBubbletea(t *testing.T) {
+	got := startupBits(t, programOptions()...)
+
+	if off := startupBits(t, tea.WithoutCatchPanics()); got&off != 0 {
+		t.Errorf("programOptions() disables bubbletea's panic catcher; the terminal would stay in raw mode on a panic")
+	}
+	if off := startupBits(t, tea.WithoutSignalHandler()); got&off != 0 {
+		t.Errorf("programOptions() disables bubbletea's signal handler; SIGINT/SIGTERM would not restore the terminal")
+	}
+}
+
+// TestShell_NoRawModeOrAltScreenSymbolsRemain is success criteria 1 and 2's
+// deletion half, using the same walk-every-non-test-.go-file technique as
+// source's TestSourceScan_NoForbiddenPathAccess. Each listed symbol is one
+// the hand-rolled loop owned and bubbletea now owns; a dead raw-mode path
+// left behind is the single most likely thing a later "restore this" commit
+// resurrects, so the scan fails on the IDENTIFIER, not merely on its use.
+func TestShell_NoRawModeOrAltScreenSymbolsRemain(t *testing.T) {
+	root := agentMonitorRoot(t)
+	forbidden := []string{
+		"Decoder",
+		"Restorer",
+		"readKeys",
+		"enterInteractiveMode",
+		"writeFrame",
+		"frameBytes",
+		"term.MakeRaw",
+		"term.Restore",
+		altScreenEnter,
+		altScreenExit,
+	}
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, f := range forbidden {
+			if strings.Contains(string(data), f) {
+				t.Errorf("%s still mentions %q; bubbletea owns raw mode and the alternate screen since sp032 T2", path, f)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+}
+
+// agentMonitorRoot walks up from the test's working directory to the
+// directory holding go.mod — the module root, i.e. everything the scan above
+// must cover.
+func agentMonitorRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod found above %s", dir)
+		}
+		dir = parent
+	}
+}
+
+// newTestShell builds a shell over two monitors that have never sampled —
+// enough for every key-mapping assertion, none of which renders.
+func newTestShell(t *testing.T) *shell {
+	t.Helper()
+	model := tui.NewModel()
+	s := newShell(context.Background(), model,
+		source.NewMonitor(source.NewSampler(filepath.Join(t.TempDir(), "stamp"))),
+		source.NewMessagesMonitor(source.NewMessagesSampler()))
+	s.now = func() time.Time { return time.Unix(0, 0) }
+	return s
+}
+
+// quits reports whether the command Update returned is bubbletea's quit.
+func quits(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+func key(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
+
+func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+
+// TestUpdate_KeyMsgMapping_MatchesHandleKey is success criterion 5: every key
+// ft016 documents reaches the SAME tui.Model method it reached through
+// tui.Decoder, and the table asserts the resulting model state rather than
+// that some branch was taken. A mapping that silently dropped a key would
+// leave the state assertion unsatisfied, not merely untested.
+func TestUpdate_KeyMsgMapping_MatchesHandleKey(t *testing.T) {
+	cases := []struct {
+		name     string
+		msg      tea.KeyMsg
+		wantQuit bool
+		check    func(t *testing.T, m *tui.Model)
+	}{
+		{name: "q quits", msg: runeKey('q'), wantQuit: true},
+		{name: "Q quits", msg: runeKey('Q'), wantQuit: true},
+		{name: "ctrl+c quits", msg: key(tea.KeyCtrlC), wantQuit: true},
+		{name: "tab moves focus", msg: key(tea.KeyTab), check: func(t *testing.T, m *tui.Model) {
+			if m.Focus != tui.PaneMessages {
+				t.Errorf("Focus = %v, want PaneMessages", m.Focus)
+			}
+		}},
+		{name: "slash opens the filter draft", msg: runeKey('/'), check: func(t *testing.T, m *tui.Model) {
+			if !m.Editing {
+				t.Errorf("Editing = false, want true after `/`")
+			}
+		}},
+		{name: "d hides the detail pane", msg: runeKey('d'), check: func(t *testing.T, m *tui.Model) {
+			if m.DetailVisible {
+				t.Errorf("DetailVisible = true, want false after `d`")
+			}
+		}},
+		{name: "D hides the detail pane", msg: runeKey('D'), check: func(t *testing.T, m *tui.Model) {
+			if m.DetailVisible {
+				t.Errorf("DetailVisible = true, want false after `D`")
+			}
+		}},
+		{name: "j moves the cursor down", msg: runeKey('j'), check: func(t *testing.T, m *tui.Model) {
+			if m.RosterCursor != 1 {
+				t.Errorf("RosterCursor = %d, want 1", m.RosterCursor)
+			}
+		}},
+		{name: "down arrow moves the cursor down", msg: key(tea.KeyDown), check: func(t *testing.T, m *tui.Model) {
+			if m.RosterCursor != 1 {
+				t.Errorf("RosterCursor = %d, want 1", m.RosterCursor)
+			}
+		}},
+		{name: "k at the top is a no-op", msg: runeKey('k'), check: func(t *testing.T, m *tui.Model) {
+			if m.RosterCursor != 0 {
+				t.Errorf("RosterCursor = %d, want 0", m.RosterCursor)
+			}
+		}},
+		{name: "up arrow at the top is a no-op", msg: key(tea.KeyUp), check: func(t *testing.T, m *tui.Model) {
+			if m.RosterCursor != 0 {
+				t.Errorf("RosterCursor = %d, want 0", m.RosterCursor)
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestShell(t)
+			s.model.SetRosterLen(5)
+			s.model.SetMessagesLen(5)
+
+			_, cmd := s.Update(tc.msg)
+
+			if got := quits(cmd); got != tc.wantQuit {
+				t.Fatalf("quit = %v, want %v", got, tc.wantQuit)
+			}
+			if tc.check != nil {
+				tc.check(t, s.model)
+			}
+		})
+	}
+}
+
+// TestUpdate_RunesWhileEditingBelongToTheDraft is the edge case that the key
+// surface's own letters must not fire while a `/` draft is open: `q` must not
+// quit, `r` must not refresh, `d` must not toggle. The committed filter is
+// the observable — the draft itself is unexported, exactly as tui intends.
+func TestUpdate_RunesWhileEditingBelongToTheDraft(t *testing.T) {
+	s := newTestShell(t)
+
+	if _, cmd := s.Update(runeKey('/')); quits(cmd) {
+		t.Fatalf("`/` must not quit")
+	}
+	for _, r := range []rune{'q', 'r', 'd'} {
+		if _, cmd := s.Update(runeKey(r)); quits(cmd) {
+			t.Fatalf("%q quit the program while a filter draft was open", r)
+		}
+	}
+	if !s.model.DetailVisible {
+		t.Errorf("`d` toggled the detail pane while editing; it belongs to the draft")
+	}
+	s.Update(key(tea.KeyEnter))
+
+	if !s.model.Filter.Set || s.model.Filter.Query != "qrd" {
+		t.Errorf("committed filter = %+v, want Set=true Query=%q", s.model.Filter, "qrd")
+	}
+}
+
+// TestUpdate_CtrlCWhileEditingIsDraftTextNotQuit pins today's behavior
+// deliberately rather than letting the port decide it: the byte-stream model
+// fed 0x03 to HandleKey, which while Editing appended it to the draft instead
+// of quitting. It is a strange affordance, and it is not this task's to
+// change — a port that silently turned it into a quit would be a behavior
+// change dressed as a refactor.
+func TestUpdate_CtrlCWhileEditingIsDraftTextNotQuit(t *testing.T) {
+	s := newTestShell(t)
+	s.Update(runeKey('/'))
+
+	_, cmd := s.Update(key(tea.KeyCtrlC))
+	if quits(cmd) {
+		t.Fatalf("ctrl+c quit while a filter draft was open; it used to be swallowed into the draft")
+	}
+	if !s.model.Editing {
+		t.Fatalf("ctrl+c closed the filter draft")
+	}
+
+	s.Update(key(tea.KeyEnter))
+	if !s.model.Filter.Set || s.model.Filter.Query != "\x03" {
+		t.Errorf("committed filter = %+v, want Set=true Query=%q", s.model.Filter, "\x03")
+	}
+}
+
+// TestUpdate_SpaceWhileEditingIsDraftText covers bubbletea's one key that
+// carries its rune under a non-KeyRunes type: a space arrives as KeySpace,
+// and a mapping that only looked at KeyRunes would drop every space out of a
+// typed filter query.
+func TestUpdate_SpaceWhileEditingIsDraftText(t *testing.T) {
+	s := newTestShell(t)
+	s.Update(runeKey('/'))
+	s.Update(runeKey('a'))
+	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	s.Update(runeKey('b'))
+	s.Update(key(tea.KeyEnter))
+
+	if s.model.Filter.Query != "a b" {
+		t.Errorf("committed filter query = %q, want %q", s.model.Filter.Query, "a b")
+	}
+}
+
+// TestUpdate_BackspaceEditsTheDraft pins the remaining editing key through
+// the mapping.
+func TestUpdate_BackspaceEditsTheDraft(t *testing.T) {
+	s := newTestShell(t)
+	s.Update(runeKey('/'))
+	s.Update(runeKey('a'))
+	s.Update(runeKey('b'))
+	s.Update(key(tea.KeyBackspace))
+	s.Update(key(tea.KeyEnter))
+
+	if s.model.Filter.Query != "a" {
+		t.Errorf("committed filter query = %q, want %q", s.model.Filter.Query, "a")
+	}
+}
+
+// TestUpdate_RKeyForcesARefresh is success criterion 5's `r`: the key still
+// reaches the monitors, not just the model. The stub counts its own
+// invocations on disk, so the assertion is "the census was actually re-read",
+// not "some branch was taken".
+func TestUpdate_RKeyForcesARefresh(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "calls")
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho x >> "+counter+"\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
+	}
+	defer os.Setenv("PATH", oldPath)
+
+	s := newTestShell(t)
+	before := countLines(t, counter)
+
+	if _, cmd := s.Update(runeKey('r')); quits(cmd) {
+		t.Fatalf("`r` must not quit")
+	}
+
+	if after := countLines(t, counter); after <= before {
+		t.Errorf("agent-census invocations: %d before, %d after `r`; want a forced refresh", before, after)
+	}
+}
+
+func countLines(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(data), "\n")
+}
+
+// TestUpdate_TickMsgRedrawsWithoutMovingAnyCursor is success criterion 3's
+// observable consequence: a sampler tick is now a message, and a message that
+// says "new data arrived" must not move a cursor, a scroll offset or the
+// focus. sp032 T1 made the scroll first-class precisely so a tick cannot drag
+// it; this asserts the shell does not undo that at the message layer.
+func TestUpdate_TickMsgRedrawsWithoutMovingAnyCursor(t *testing.T) {
+	for _, msg := range []tea.Msg{rosterTickMsg{}, messagesTickMsg{}} {
+		s := newTestShell(t)
+		s.model.SetRosterViewport(3)
+		s.model.SetMessagesViewport(3)
+		s.model.SetRosterLen(20)
+		s.model.SetMessagesLen(20)
+		s.model.ScrollRoster(5)
+		s.model.ScrollMessages(7)
+		s.model.Focus = tui.PaneMessages
+
+		want := *s.model
+		_, cmd := s.Update(msg)
+
+		if quits(cmd) {
+			t.Fatalf("%T quit the program", msg)
+		}
+		if *s.model != want {
+			t.Errorf("%T changed model state:\n got %+v\nwant %+v", msg, *s.model, want)
+		}
+	}
+}
+
+// TestUpdate_WindowSizeMsgSuppliesWidthAndHeight is success criterion 4's
+// input half: term.GetSize is gone from the interactive path, so the frame's
+// geometry can only come from the message. The edge case of it arriving
+// BEFORE the first sample is covered here too — View must render the
+// "waiting" panes rather than panic on a nil sample.
+func TestUpdate_WindowSizeMsgSuppliesWidthAndHeight(t *testing.T) {
+	s := newTestShell(t)
+
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	if s.width != 100 || s.height != 40 {
+		t.Fatalf("shell geometry = %dx%d, want 100x40", s.width, s.height)
+	}
+	if got := s.View(); got == "" {
+		t.Fatalf("View() is empty before the first sample; want the waiting panes")
+	}
+}
+
+// TestView_EqualsRenderFrameOutput is success criterion 4's output half: the
+// shell's View is renderFrame's lines joined with "\n" and nothing else — no
+// CRLF workaround (bubbletea owns the output mapping now, so the cause of
+// dotfiles-r9ty is gone with it), no cursor-home/clear prefix, no styling the
+// renderers did not produce. A lipgloss byte leaking into the frame would
+// fail here.
+func TestView_EqualsRenderFrameOutput(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '"+mixedProjectStub+"'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[{\"from\":\"peer-dotfiles\",\"to\":[\"lead\"],\"content\":\"hello\",\"at\":\"2026-09-17T10:00:00Z\"}]'\n")
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
+	}
+	defer os.Setenv("PATH", oldPath)
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	now := time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC)
+
+	s := newShell(ctx, tui.NewModel(), census, msgs)
+	s.now = func() time.Time { return now }
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	got := s.View()
+
+	// An independent model at the same starting state, so the comparison is
+	// "same model, same samples, same string" rather than a second pass over
+	// state the first render already mutated.
+	want := strings.Join(renderFrame(tui.NewModel(), census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), now, 100, 30), "\n")
+
+	if got != want {
+		t.Errorf("View() differs from renderFrame's joined lines:\n got %q\nwant %q", got, want)
+	}
+	if strings.Contains(got, "\r") {
+		t.Errorf("View() contains a CR; bubbletea owns the output mapping, so the CRLF workaround must be gone: %q", got)
+	}
+}
+
+// TestInteractiveExitError_InterruptIsACleanExit is the SIGINT/SIGTERM edge
+// case. bubbletea reports a SIGINT as tea.ErrInterrupted, but the pre-port
+// loop simply returned on a signal and the process exited 0; a port that let
+// that error reach os.Exit(1) would turn every ctrl+c into a failure exit
+// code. SIGTERM already arrives as a plain quit (nil error) and is pinned
+// here as the other half of the contract.
+func TestInteractiveExitError_InterruptIsACleanExit(t *testing.T) {
+	if err := interactiveExitError(tea.ErrInterrupted); err != nil {
+		t.Errorf("interactiveExitError(ErrInterrupted) = %v, want nil (exit 0)", err)
+	}
+	if err := interactiveExitError(nil); err != nil {
+		t.Errorf("interactiveExitError(nil) = %v, want nil", err)
+	}
+	real := errors.New("tty exploded")
+	if err := interactiveExitError(real); !errors.Is(err, real) {
+		t.Errorf("interactiveExitError(%v) = %v, want it passed through", real, err)
+	}
 }
