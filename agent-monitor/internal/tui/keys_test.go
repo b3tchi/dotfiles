@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math/rand"
 	"sync"
 	"testing"
 
@@ -735,5 +736,254 @@ func TestRestorer_ConcurrentNormalAndPanickingGoroutines_RestoresExactlyOnce(t *
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("expected exactly one restore across both goroutines, got %d", calls)
+	}
+}
+
+// --- sp032 T1: scroll is first-class state, the cursor only ensures visibility ---
+//
+// sp031 made scroll a pure function of the cursor: every SetLen — i.e. every
+// two-second sample — re-derived it. That is exactly what these tests
+// replace. Scroll is now its own state that ScrollRoster/ScrollMessages move
+// directly (the wheel in T3, the frozen tail in T6), that SetLen and
+// SetViewport only CLAMP, and that cursor motion nudges by the minimum
+// needed to bring the cursor back on screen.
+
+// TestScroll_WheelScrollSurvivesASampleTick is the behaviour change itself:
+// a scroll set independently of the cursor must survive an arbitrary number
+// of SetLen calls at an unchanged length. Against sp031's derive-on-SetLen
+// model this fails on the first tick — the cursor at 0 dragged scroll back
+// to 0.
+func TestScroll_WheelScrollSurvivesASampleTick(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(20)
+	m.SetMessagesViewport(5)
+
+	m.ScrollMessages(3)
+	if m.MessagesScroll != 3 {
+		t.Fatalf("expected scroll 3 after ScrollMessages(3), got %d", m.MessagesScroll)
+	}
+	if m.MessagesCursor != 0 {
+		t.Fatalf("ScrollMessages must not move the cursor, got %d", m.MessagesCursor)
+	}
+
+	for i := 0; i < 5; i++ {
+		m.SetMessagesLen(20) // five sampler ticks, same row count
+		if m.MessagesScroll != 3 {
+			t.Fatalf("tick %d: expected scroll to survive at 3, got %d", i+1, m.MessagesScroll)
+		}
+	}
+	if m.MessagesCursor != 0 {
+		t.Fatalf("a sample tick must not move the cursor either, got %d", m.MessagesCursor)
+	}
+}
+
+// TestScroll_CursorOffScreenIsAllowed pins the state sp031's model forbade
+// by construction: the operator scrolled away from their selection, and
+// nothing drags either one back.
+func TestScroll_CursorOffScreenIsAllowed(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(20)
+	m.SetRosterViewport(4)
+
+	m.ScrollRoster(10)
+	if m.RosterScroll != 10 || m.RosterCursor != 0 {
+		t.Fatalf("expected scroll 10 cursor 0, got scroll %d cursor %d", m.RosterScroll, m.RosterCursor)
+	}
+	// cursor 0 is above the window [10,13] — deliberately off-screen.
+	if m.RosterCursor >= m.RosterScroll {
+		t.Fatalf("setup: cursor %d was expected above the window top %d", m.RosterCursor, m.RosterScroll)
+	}
+
+	m.SetRosterLen(20)     // a sample tick
+	m.SetRosterViewport(4) // and the frame re-reporting the same viewport
+	if m.RosterScroll != 10 || m.RosterCursor != 0 {
+		t.Fatalf("an off-screen cursor must stay off-screen, got scroll %d cursor %d", m.RosterScroll, m.RosterCursor)
+	}
+}
+
+// TestCursor_MoveOnlyScrollsWhenItMustEnsureVisibility asserts the exact
+// shape of criterion 3: a cursor that is already inside [scroll,
+// scroll+viewport-1] leaves scroll BYTE-IDENTICAL, and one that leaves the
+// window moves scroll by the minimum needed — never re-centres, never jumps
+// to the cursor when a one-row nudge suffices.
+func TestCursor_MoveOnlyScrollsWhenItMustEnsureVisibility(t *testing.T) {
+	const length, viewport = 20, 5 // window is [scroll, scroll+4]
+	cases := []struct {
+		name                   string
+		cursor, scroll, delta  int
+		wantCursor, wantScroll int
+	}{
+		{"down inside the window", 5, 5, 1, 6, 5},
+		{"up inside the window", 7, 5, -1, 6, 5},
+		{"two rows down, still inside", 7, 5, 2, 9, 5},
+		{"at the top, up leaves the window", 5, 5, -1, 4, 4},
+		{"at the bottom, down leaves the window", 9, 5, 1, 10, 6},
+		{"cursor above a wheel-scrolled window", 0, 10, 1, 1, 1},
+		{"cursor below a wheel-scrolled window", 19, 10, -1, 18, 14},
+		{"cursor below, but the move lands it inside", 15, 12, -1, 14, 12},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := NewModel()
+			m.SetRosterLen(length)
+			m.SetRosterViewport(viewport)
+			m.RosterCursor = c.cursor
+			m.RosterScroll = c.scroll
+
+			m.moveCursor(c.delta)
+
+			if m.RosterCursor != c.wantCursor {
+				t.Fatalf("cursor: want %d, got %d", c.wantCursor, m.RosterCursor)
+			}
+			if m.RosterScroll != c.wantScroll {
+				t.Fatalf("scroll: want %d, got %d", c.wantScroll, m.RosterScroll)
+			}
+		})
+	}
+}
+
+// TestScroll_ClampsWhenFilterShrinksTheList pins the slice-index hazard the
+// spec names explicitly: a committed filter shrinks the list under a deeply
+// scrolled view, and cmd/'s scrolledMessageSample then does msgs[scroll:].
+// The clamp has to land in the same pass as the length change, so the slice
+// below cannot panic.
+func TestScroll_ClampsWhenFilterShrinksTheList(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(50)
+	m.SetMessagesViewport(5)
+	m.ScrollMessages(40)
+	if m.MessagesScroll != 40 {
+		t.Fatalf("setup: expected scroll 40, got %d", m.MessagesScroll)
+	}
+
+	m.SetMessagesLen(6) // the filter committed
+
+	if m.MessagesScroll != 1 {
+		t.Fatalf("expected scroll clamped to len-viewport=1, got %d", m.MessagesScroll)
+	}
+	if m.MessagesCursor != 0 {
+		t.Fatalf("expected cursor still 0, got %d", m.MessagesCursor)
+	}
+
+	// The use site: the same slice cmd/agent-monitor's scrolledMessageSample
+	// takes. A scroll left at 40 here is a panic, not a cosmetic bug.
+	msgs := make([]source.Message, 6)
+	view := msgs[m.MessagesScroll:]
+	if len(view) != 5 {
+		t.Fatalf("expected 5 rows in view after the clamp, got %d", len(view))
+	}
+}
+
+// TestScroll_ViewportZeroKeepsLegacyOneToOneTracking pins the compatibility
+// contract for every caller that sets *Len and never *Viewport — --once,
+// and every pre-existing test above this block.
+func TestScroll_ViewportZeroKeepsLegacyOneToOneTracking(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(5)
+	m.HandleKey(Key{Rune: 'j'})
+	m.HandleKey(Key{Rune: 'j'})
+	if m.RosterCursor != 2 || m.RosterScroll != 2 {
+		t.Fatalf("expected cursor 2 scroll 2, got cursor %d scroll %d", m.RosterCursor, m.RosterScroll)
+	}
+	m.SetRosterLen(5) // a tick must not disturb the 1:1 tracking
+	if m.RosterScroll != 2 {
+		t.Fatalf("expected scroll to stay pinned to the cursor at 2, got %d", m.RosterScroll)
+	}
+	m.SetRosterLen(2) // and a shrink re-pins it to the clamped cursor
+	if m.RosterCursor != 1 || m.RosterScroll != 1 {
+		t.Fatalf("expected cursor 1 scroll 1 after the shrink, got cursor %d scroll %d", m.RosterCursor, m.RosterScroll)
+	}
+}
+
+// TestScroll_ViewportAtLeastAsLongAsTheListNeverScrolls pins the edge case
+// that a wheel cannot scroll a pane whose content already fits.
+func TestScroll_ViewportAtLeastAsLongAsTheListNeverScrolls(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(4)
+	m.SetRosterViewport(10)
+	m.ScrollRoster(7)
+	if m.RosterScroll != 0 {
+		t.Fatalf("a list that fits must never scroll, got %d", m.RosterScroll)
+	}
+	m.SetRosterViewport(4) // exactly as tall as the list
+	m.ScrollRoster(3)
+	if m.RosterScroll != 0 {
+		t.Fatalf("viewport == len must never scroll, got %d", m.RosterScroll)
+	}
+}
+
+// TestScroll_EmptyListNeverScrollsNegative pins the empty-list edge case for
+// the scroll entry points (the cursor's own empty-list case is
+// TestCursor_EmptyListNeverPanics).
+func TestScroll_EmptyListNeverScrollsNegative(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(0)
+	m.SetMessagesViewport(5)
+	m.ScrollMessages(-3)
+	m.ScrollMessages(9)
+	if m.MessagesScroll != 0 {
+		t.Fatalf("an empty pane must stay pinned at scroll 0, got %d", m.MessagesScroll)
+	}
+}
+
+// TestScroll_ViewportChangeClampsToTheLastFullPage pins criterion 4: a
+// viewport change can only ever leave scroll inside [0, len-viewport].
+func TestScroll_ViewportChangeClampsToTheLastFullPage(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(20)
+	m.SetRosterViewport(5)
+	m.ScrollRoster(15)
+	if m.RosterScroll != 15 {
+		t.Fatalf("setup: expected scroll at the last page, got %d", m.RosterScroll)
+	}
+
+	m.SetRosterViewport(8) // the pane got taller: the last page starts earlier
+	if m.RosterScroll != 12 {
+		t.Fatalf("expected scroll clamped to len-viewport=12, got %d", m.RosterScroll)
+	}
+
+	m.SetRosterViewport(25) // taller than the whole list
+	if m.RosterScroll != 0 {
+		t.Fatalf("expected scroll 0 once the list fits, got %d", m.RosterScroll)
+	}
+}
+
+// TestScroll_NeverExceedsMaxForViewport throws randomised deltas at both
+// panes and asserts the invariant after every single one: scroll is always
+// inside [0, max(0, len-viewport)], whatever the sequence.
+func TestScroll_NeverExceedsMaxForViewport(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260917))
+	for trial := 0; trial < 200; trial++ {
+		length := rng.Intn(40)
+		viewport := rng.Intn(12)
+		m := NewModel()
+		m.SetMessagesLen(length)
+		m.SetMessagesViewport(viewport)
+
+		for step := 0; step < 20; step++ {
+			switch rng.Intn(4) {
+			case 0:
+				m.ScrollMessages(rng.Intn(21) - 10)
+			case 1:
+				m.SetMessagesLen(rng.Intn(40))
+			case 2:
+				m.SetMessagesViewport(rng.Intn(12))
+			default:
+				m.Focus = PaneMessages
+				m.HandleKey(Key{Rune: []rune{'j', 'k'}[rng.Intn(2)]})
+			}
+
+			max := m.MessagesLen - m.MessagesViewport
+			if max < 0 {
+				max = 0
+			}
+			if m.MessagesScroll < 0 || m.MessagesScroll > max {
+				t.Fatalf("trial %d step %d: scroll %d outside [0,%d] (len %d viewport %d)",
+					trial, step, m.MessagesScroll, max, m.MessagesLen, m.MessagesViewport)
+			}
+			if m.MessagesLen > 0 && m.MessagesCursor >= m.MessagesLen {
+				t.Fatalf("trial %d step %d: cursor %d past len %d", trial, step, m.MessagesCursor, m.MessagesLen)
+			}
+		}
 	}
 }

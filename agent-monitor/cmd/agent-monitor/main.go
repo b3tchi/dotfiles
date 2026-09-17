@@ -266,7 +266,9 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// Order matters, and is the whole point of this arrangement (sp031 T1's
 	// binding criterion: a resized terminal cannot leave the cursor
 	// off-screen). Filter FIRST — that fixes each pane's row count and, via
-	// SetRosterLen/SetMessagesLen, clamps the cursor. Derive THIS frame's
+	// SetRosterLen/SetMessagesLen, clamps the cursor AND the scroll (sp032
+	// T1: the scroll is clamped into range, never re-derived from the
+	// cursor, so a wheel offset survives a sampler tick). Derive THIS frame's
 	// pane budgets from those counts and THIS frame's height, and report the
 	// resulting viewports to the model. Only THEN slice by scroll and
 	// render: the scroll the slice uses is now the one this height implies,
@@ -346,6 +348,12 @@ const (
 // list's length: zero means there is nothing to select, and the
 // "(no agents)"/"(no messages)" placeholder occupying the first data line
 // must NOT be marked as though it were a row.
+//
+// Since sp032 T1 the cursor may legally sit OUTSIDE the scrolled window (the
+// operator scrolled away from their selection), above it or below it. The
+// bounds test below already covers both: an offset before the first data
+// line or past the last rendered line simply marks nothing, which is the
+// correct frame for a selection that is not on screen.
 func markPane(lines []string, focused bool, cursor, scroll, rows int) []string {
 	if len(lines) == 0 {
 		return lines

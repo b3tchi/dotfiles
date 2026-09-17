@@ -614,6 +614,46 @@ func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
 	}
 }
 
+// TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt is sp032 T1's
+// clamp seen at the use site: scrolledMessageSample does msgs[scroll:], so a
+// scroll offset left pointing past a list a committed filter just shrank is
+// a panic, not a cosmetic bug. The model clamps scroll in the same pass as
+// the length (filterMessageRows -> SetMessagesLen), so the frame that
+// observes the filter already slices in range.
+func TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	var msgs []source.Message
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, sampleMessage(fmt.Sprintf("sender%02d", i), `"x"`))
+	}
+	sample := &source.MessageSample{Messages: msgs}
+
+	// Settle a frame so the pane reports a real viewport, then scroll deep
+	// with the cursor left behind at row 0 — the post-wheel state T3 and T6
+	// produce, which sp031's model could not represent at all.
+	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	model.ScrollMessages(30)
+	if model.MessagesScroll == 0 {
+		t.Fatalf("setup: expected a non-zero scroll, got %d", model.MessagesScroll)
+	}
+	if model.MessagesCursor != 0 {
+		t.Fatalf("setup: the wheel must not have moved the cursor, got %d", model.MessagesCursor)
+	}
+
+	// A committed filter cuts the list to a single row. This frame must not
+	// panic slicing it.
+	model.Filter = tui.Filter{Set: true, Query: "sender07"}
+	lines := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+
+	if model.MessagesScroll != 0 {
+		t.Fatalf("expected scroll clamped to 0 for a 1-row list, got %d", model.MessagesScroll)
+	}
+	if !logRowHasSender(lines, "sender07") {
+		t.Fatalf("expected the surviving row to render, got %v", lines)
+	}
+}
+
 // --- dotfiles-uyih: the cursor and the focused pane must be VISIBLE -------
 //
 // sp031 shipped a cursor that moves, a scroll that follows it and a detail

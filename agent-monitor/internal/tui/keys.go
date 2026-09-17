@@ -48,18 +48,30 @@ type Filter struct {
 
 // Model is agent-monitor's key-driven state: which pane has focus, the
 // committed filter (if any), an in-progress filter draft while `/` editing
-// is open, and each pane's own cursor plus the scroll offset DERIVED from
-// it.
+// is open, and each pane's own cursor and scroll offset.
 //
-// Selection lives in the *Cursor fields — the row j/k and the arrows
-// actually move. *Scroll is no longer moved directly; it is recomputed
-// every time the cursor, the list length or the viewport changes, so it
-// always keeps the cursor inside [scroll, scroll+viewport-1]. *Viewport is
-// how many rows of the pane are visible on screen this frame, reported by
-// the caller via SetRosterViewport/SetMessagesViewport — without it (the
-// zero value) there is no window to keep the cursor inside, so scroll
-// simply tracks the cursor 1:1, which is what keeps every caller that only
-// ever set *Len (never *Viewport) working exactly as before this refactor.
+// Selection lives in the *Cursor fields — the row j/k and the arrows move.
+// *Scroll is FIRST-CLASS STATE alongside it (sp032 T1), not a function of
+// it: ScrollRoster/ScrollMessages move it on their own (the wheel in T3, the
+// frozen tail in T6), SetRosterLen/SetMessagesLen and
+// SetRosterViewport/SetMessagesViewport only CLAMP it into range, and cursor
+// motion nudges it by the MINIMUM needed to bring the cursor back inside
+// [scroll, scroll+viewport-1]. A cursor already on screen leaves scroll
+// untouched, and a cursor deliberately scrolled off screen STAYS off screen
+// — that state is legal now, where sp031's derive-from-cursor model made it
+// unrepresentable.
+//
+// sp031 re-derived scroll from the cursor on every SetLen, i.e. every
+// two-second sampler tick. That is what T1 replaces: any scroll a wheel sets
+// would otherwise be undone within two seconds by a tick that changed
+// nothing.
+//
+// *Viewport is how many rows of the pane are visible on screen this frame,
+// reported by the caller via SetRosterViewport/SetMessagesViewport —
+// without it (the zero value) there is no window to keep the cursor inside,
+// so scroll simply tracks the cursor 1:1, which is what keeps every caller
+// that only ever set *Len (never *Viewport) — --once above all — working
+// exactly as before this refactor.
 type Model struct {
 	Focus  Pane
 	Filter Filter
@@ -109,39 +121,80 @@ func NewModel() *Model {
 }
 
 // SetRosterLen records the roster's current row count (after filtering,
-// before scrolling — see main.go's filteredCensusSample), clamps
-// RosterCursor into [0, len-1] (or 0 when len is 0) IN THE SAME PASS, and
-// recomputes RosterScroll from the clamped cursor — so a filter that
-// shrinks the row count can never leave the cursor (or its derived scroll)
-// pointing past the new end, even before the next keystroke.
+// before scrolling — see main.go's filterRosterRows), clamps RosterCursor
+// into [0, len-1] (or 0 when len is 0) and RosterScroll into [0, maxTop] IN
+// THE SAME PASS — so a filter that shrinks the row count can never leave
+// either one pointing past the new end, even before the next keystroke.
+//
+// sp032 T1: the scroll is CLAMPED here, not re-derived from the cursor. It
+// has to be, because main.go calls this on every sampler tick (every two
+// seconds): a re-derive would drag the scroll back onto the cursor within
+// two seconds of any wheel event, which is the whole premise T3's wheel and
+// T6's frozen tail rest on. The one exception is the legacy viewport <= 0
+// regime, where scroll IS the cursor by definition — see scrollAfterClamp.
 func (m *Model) SetRosterLen(n int) {
 	m.RosterLen = n
-	m.RosterCursor = clamp(m.RosterCursor, 0, maxScroll(n))
-	m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
+	m.RosterCursor = clamp(m.RosterCursor, 0, maxIndex(n))
+	m.RosterScroll = scrollAfterClamp(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 }
 
 // SetMessagesLen is SetRosterLen's twin for the message pane.
 func (m *Model) SetMessagesLen(n int) {
 	m.MessagesLen = n
-	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxScroll(n))
-	m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxIndex(n))
+	m.MessagesScroll = scrollAfterClamp(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 }
 
 // SetRosterViewport records how many rows of the roster pane are visible
-// this frame (0 if the caller does not track it) and recomputes
-// RosterScroll so a terminal resize can never leave the cursor off-screen.
+// this frame (0 if the caller does not track it) and re-fits RosterScroll to
+// the new height: always clamped to the new [0, maxTop] so a resize cannot
+// leave scroll past the last page, and additionally moved the minimum needed
+// to keep the cursor on screen IF THE CURSOR WAS ON SCREEN BEFORE (see
+// scrollAfterViewport for why that condition and not an unconditional
+// re-derive).
 func (m *Model) SetRosterViewport(n int) {
+	m.RosterScroll = scrollAfterViewport(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport, n)
 	m.RosterViewport = n
-	m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 }
 
 // SetMessagesViewport is SetRosterViewport's twin for the message pane.
 func (m *Model) SetMessagesViewport(n int) {
+	m.MessagesScroll = scrollAfterViewport(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport, n)
 	m.MessagesViewport = n
-	m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 }
 
-func maxScroll(n int) int {
+// ScrollRoster moves the roster pane's scroll offset by delta WITHOUT
+// moving its cursor (sp032 T1) — the entry point the wheel (T3) and the
+// tail-follow (T6) use. Clamped to [0, maxTop], so it can never point past
+// the last row that still shows content.
+func (m *Model) ScrollRoster(delta int) {
+	m.RosterScroll = clamp(m.RosterScroll+delta, 0, maxTop(m.RosterLen, m.RosterViewport))
+}
+
+// ScrollMessages is ScrollRoster's twin for the message pane.
+func (m *Model) ScrollMessages(delta int) {
+	m.MessagesScroll = clamp(m.MessagesScroll+delta, 0, maxTop(m.MessagesLen, m.MessagesViewport))
+}
+
+// maxTop is the largest valid scroll offset: the top row of the last page.
+//
+// viewport <= 0 is the legacy regime (see deriveScroll): there is no window,
+// so scroll behaves exactly like a cursor and its bound is the cursor's —
+// the last row index. The literal [0, max(0, len-viewport)] of the success
+// criterion would admit len itself there, which is a slice bound rather than
+// a row, and nothing in that regime scrolls independently anyway (the next
+// SetLen re-pins scroll to the cursor).
+func maxTop(length, viewport int) int {
+	if viewport <= 0 {
+		return maxIndex(length)
+	}
+	if length <= viewport {
+		return 0
+	}
+	return length - viewport
+}
+
+func maxIndex(n int) int {
 	if n <= 0 {
 		return 0
 	}
@@ -174,8 +227,8 @@ func deriveScroll(prevScroll, cursor, length, viewport int) int {
 	if viewport <= 0 {
 		return cursor
 	}
-	maxTop := length - viewport
-	if maxTop <= 0 {
+	top := maxTop(length, viewport)
+	if top == 0 {
 		// The whole list fits inside the viewport — nothing to scroll.
 		return 0
 	}
@@ -185,7 +238,58 @@ func deriveScroll(prevScroll, cursor, length, viewport int) int {
 	} else if cursor > scroll+viewport-1 {
 		scroll = cursor - viewport + 1
 	}
-	return clamp(scroll, 0, maxTop)
+	return clamp(scroll, 0, top)
+}
+
+// visible reports whether cursor sits inside the window a scroll offset of
+// scroll shows. In the legacy viewport <= 0 regime there is no window, and
+// scroll == cursor is the only state that regime ever produces, so that is
+// what "visible" means there.
+func visible(cursor, scroll, viewport int) bool {
+	if viewport <= 0 {
+		return scroll == cursor
+	}
+	return cursor >= scroll && cursor <= scroll+viewport-1
+}
+
+// scrollAfterClamp is what SetRosterLen/SetMessagesLen apply once the length
+// (and the cursor) have been clamped: the scroll keeps whatever value the
+// operator put it at, reduced only as far as the new bounds require.
+//
+// viewport <= 0 is the compatibility contract for every caller that sets
+// *Len and never *Viewport (--once, and every pre-sp032 test): there is no
+// window to hold anything inside, and the old model's `scroll` field WAS the
+// cursor in every observable way, so scroll keeps tracking it 1:1.
+func scrollAfterClamp(prevScroll, cursor, length, viewport int) int {
+	if viewport <= 0 {
+		return cursor
+	}
+	return clamp(prevScroll, 0, maxTop(length, viewport))
+}
+
+// scrollAfterViewport re-fits a scroll offset to a pane that just changed
+// height. It always clamps to the new [0, maxTop] (criterion 4: a resize
+// cannot leave scroll past the last full page), and it ensures the cursor is
+// still visible ONLY IF the cursor was visible under the OLD height.
+//
+// The condition is the load-bearing part. main.go re-reports a viewport on
+// every frame, and the reported value changes whenever a pane's row count
+// changes — i.e. on ordinary sampler ticks, not just on SIGWINCH. An
+// unconditional re-derive here would therefore undo a wheel scroll within
+// two seconds, exactly as a re-derive inside SetLen would. Gating on "was it
+// visible before" keeps sp031's resize guarantee (a reader whose selection
+// was on screen keeps it on screen across a resize —
+// TestCursor_ViewportResizeBringsCursorBackIntoView,
+// TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame) while leaving a
+// deliberately off-screen cursor (post-wheel, sp032 T3/T6) off-screen.
+func scrollAfterViewport(prevScroll, cursor, length, oldViewport, newViewport int) int {
+	if visible(cursor, prevScroll, oldViewport) {
+		return deriveScroll(prevScroll, cursor, length, newViewport)
+	}
+	if newViewport <= 0 {
+		return cursor
+	}
+	return clamp(prevScroll, 0, maxTop(length, newViewport))
 }
 
 // moveCursor shifts the focused pane's cursor by delta, clamped to the
@@ -195,10 +299,10 @@ func deriveScroll(prevScroll, cursor, length, viewport int) int {
 func (m *Model) moveCursor(delta int) {
 	switch m.Focus {
 	case PaneRoster:
-		m.RosterCursor = clamp(m.RosterCursor+delta, 0, maxScroll(m.RosterLen))
+		m.RosterCursor = clamp(m.RosterCursor+delta, 0, maxIndex(m.RosterLen))
 		m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 	case PaneMessages:
-		m.MessagesCursor = clamp(m.MessagesCursor+delta, 0, maxScroll(m.MessagesLen))
+		m.MessagesCursor = clamp(m.MessagesCursor+delta, 0, maxIndex(m.MessagesLen))
 		m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 	}
 }
