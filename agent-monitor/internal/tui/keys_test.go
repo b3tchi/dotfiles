@@ -2098,3 +2098,79 @@ func TestTail_NoViewportNeverFollowsOrCounts(t *testing.T) {
 		t.Errorf("PendingMessages = %d, want 0 — nothing is frozen without a window", m.PendingMessages)
 	}
 }
+
+// TestTail_WheelBackToTheBottomReturnsToLive pins the half of the invariant
+// the success criteria name no key for: LIVE is DERIVED, so ANY way back to
+// the tail thaws the pane — a wheel included — and not only the two keys
+// criterion 4 lists. Without it the pane could sit on the newest message
+// still advertising a `+N new` that no longer means anything.
+//
+// Reaching that state takes a prune: a wheel does not move the cursor, so
+// while the list only GROWS a scrolled-back pane's cursor falls behind the
+// last row and no amount of wheeling restores liveness. A bus that prunes
+// back to where the cursor is leaves exactly the "cursor on the last row,
+// scroll off the bottom" state the wheel can close.
+func TestTail_WheelBackToTheBottomReturnsToLive(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(-6) // frozen with the cursor still on row 19
+	m.SetMessagesLen(28)
+	if m.PendingMessages != 8 {
+		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
+	}
+
+	m.SetMessagesLen(20) // the bus pruned back: row 19 is the last row again
+	if m.PendingMessages != 8 {
+		t.Fatalf("setup: the prune changed the count: %d, want 8", m.PendingMessages)
+	}
+	if m.MessagesScroll != 4 {
+		t.Fatalf("setup: scroll = %d, want 4 (still off the bottom)", m.MessagesScroll)
+	}
+
+	// Part way back is still frozen — the scroll is not at the bottom yet.
+	m.ScrollMessages(3)
+	if m.PendingMessages != 8 {
+		t.Fatalf("a partial wheel thawed the pane: PendingMessages = %d, want 8", m.PendingMessages)
+	}
+
+	m.ScrollMessages(100)
+	if m.MessagesScroll != 10 {
+		t.Fatalf("scroll = %d, want 10 (the bottom of a 20-row list in a 10-row window)", m.MessagesScroll)
+	}
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d after wheeling back to the tail, want 0", m.PendingMessages)
+	}
+
+	// And it follows again.
+	m.SetMessagesLen(22)
+	if m.MessagesCursor != 21 {
+		t.Errorf("the pane did not resume following: cursor = %d, want 21", m.MessagesCursor)
+	}
+}
+
+// TestTail_CursorDownOntoTheLastRowReturnsToLive is the same invariant
+// through the other motion that can reach the tail: j/down. A reader who
+// scrolled back with the CURSOR (rather than the wheel) walks it forward
+// again, and the pane thaws when the cursor lands on the last row — no key
+// in moveCursor's path knows anything about the count.
+func TestTail_CursorDownOntoTheLastRowReturnsToLive(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.moveCursor(-3) // cursor 16, frozen
+	m.SetMessagesLen(22)
+	if m.PendingMessages != 2 {
+		t.Fatalf("setup: PendingMessages = %d, want 2", m.PendingMessages)
+	}
+
+	for i := 0; i < 5; i++ {
+		m.HandleKey(Key{Rune: 'j'})
+		if m.MessagesCursor != 21 && m.PendingMessages == 0 {
+			t.Fatalf("step %d thawed the pane early at cursor %d: PendingMessages = %d",
+				i, m.MessagesCursor, m.PendingMessages)
+		}
+	}
+	if m.MessagesCursor != 21 {
+		t.Fatalf("cursor = %d, want 21 (the last row)", m.MessagesCursor)
+	}
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d once the cursor reached the last row, want 0", m.PendingMessages)
+	}
+}
