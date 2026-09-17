@@ -894,7 +894,16 @@ func newTestShell(t *testing.T) *shell {
 // under test when the event itself is the input.
 func newWiredShell(t *testing.T, rosterRows, msgRows, width, height int) *shell {
 	t.Helper()
-	dir := t.TempDir()
+	return newWiredShellIn(t, t.TempDir(), rosterRows, msgRows, width, height)
+}
+
+// newWiredShellIn is newWiredShell with the stub directory handed in, so a
+// test that needs the message sample to GROW (sp032 T6's tail-follow) can
+// rewrite the pi-worker stub in that directory and re-Tick the monitor —
+// driving a real second sample through the real sampler rather than poking
+// a length onto the model.
+func newWiredShellIn(t *testing.T, dir string, rosterRows, msgRows, width, height int) *shell {
+	t.Helper()
 
 	rows := make([]source.Row, rosterRows)
 	for i := range rows {
@@ -909,6 +918,28 @@ func newWiredShell(t *testing.T, rosterRows, msgRows, width, height int) *shell 
 		t.Fatalf("marshal roster: %v", err)
 	}
 
+	writeStub(t, dir, "agent-census", "#!/bin/sh\ncat <<'JSON'\n"+string(rosterJSON)+"\nJSON\n")
+	writeMessageStub(t, dir, msgRows)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	s := newShell(ctx, model, census, msgs)
+	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return s
+}
+
+// writeMessageStub (re)writes the pi-worker stub so the next poll returns
+// msgRows messages. Called once by newWiredShellIn and again by a tail test
+// that wants the bus to have grown between two samples.
+func writeMessageStub(t *testing.T, dir string, msgRows int) {
+	t.Helper()
 	type wireMessage struct {
 		At      string   `json:"at"`
 		From    string   `json:"from"`
@@ -928,22 +959,7 @@ func newWiredShell(t *testing.T, rosterRows, msgRows, width, height int) *shell 
 	if err != nil {
 		t.Fatalf("marshal messages: %v", err)
 	}
-
-	writeStub(t, dir, "agent-census", "#!/bin/sh\ncat <<'JSON'\n"+string(rosterJSON)+"\nJSON\n")
 	writeStub(t, dir, "pi-worker", "#!/bin/sh\ncat <<'JSON'\n"+string(msgJSON)+"\nJSON\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	ctx := context.Background()
-	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
-	census.Refresh(ctx)
-	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
-	msgs.Tick(ctx)
-
-	model := tui.NewModel()
-	s := newShell(ctx, model, census, msgs)
-	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
-	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	return s
 }
 
 // settleLayout renders one frame off s's current state and returns the
@@ -2548,4 +2564,219 @@ func TestUpdate_PagingKeysReachTheFocusedPane(t *testing.T) {
 			t.Errorf("committed query = %q, want %q — only the rune belongs to the draft", s.model.Filter.Query, "G")
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T6: conditional tail-follow, through the real shell.
+//
+// tui's own tests own the derivation (what LIVE means, what the count does).
+// These own the WIRING: that a real second sample from a real sampler
+// reaches the model, that the count reaches render.RenderLog's header, and
+// that a real mouse press on the list's last row thaws the pane. A pending
+// count that stayed inside tui.Model and never reached a header would leave
+// every tui test green.
+// ---------------------------------------------------------------------------
+
+// messageHeaderLine is the message pane's header row in a rendered frame.
+func messageHeaderLine(t *testing.T, s *shell) string {
+	t.Helper()
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	if layout.messages.headerRows == 0 {
+		t.Fatalf("the message pane rendered no header: %v", lines)
+	}
+	return lines[layout.messages.firstRow]
+}
+
+// tailShell stands up a wired shell parked LIVE on the message pane, and
+// returns a grow function that publishes a larger sample through the real
+// sampler.
+func tailShell(t *testing.T, msgRows, width, height int) (*shell, func(int)) {
+	t.Helper()
+	dir := t.TempDir()
+	s := newWiredShellIn(t, dir, 5, msgRows, width, height)
+	settleLayout(s) // this frame's viewports reach the model
+
+	s.Update(key(tea.KeyTab)) // focus the message pane
+	s.Update(runeKey('G'))    // and park it live at the tail
+	if s.model.MessagesCursor != s.model.MessagesLen-1 {
+		t.Fatalf("setup: cursor = %d, want %d (the last row)", s.model.MessagesCursor, s.model.MessagesLen-1)
+	}
+
+	return s, func(n int) {
+		t.Helper()
+		writeMessageStub(t, dir, n)
+		if !s.msgs.Tick(s.ctx) {
+			t.Fatalf("the messages sampler did not deliver a new sample of %d", n)
+		}
+		settleLayout(s) // the sample reaches the model the way a frame does
+	}
+}
+
+// TestTail_ShellFollowsLiveAndFreezesScrolledBack is criteria 1 and 2 end to
+// end: a real growing sample moves the cursor while the pane is live, and
+// moves NOTHING once a real wheel event has scrolled it back.
+func TestTail_ShellFollowsLiveAndFreezesScrolledBack(t *testing.T) {
+	s, grow := tailShell(t, 20, 100, 30)
+
+	grow(24)
+	if s.model.MessagesCursor != 23 {
+		t.Errorf("a live pane did not follow the new sample: cursor = %d, want 23", s.model.MessagesCursor)
+	}
+	if s.model.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d on a live pane, want 0", s.model.PendingMessages)
+	}
+
+	// A real wheel event over the message pane freezes it.
+	layout := settleLayout(s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1
+	if target, _, _ := hitTest(layout, y); target != hitMessages {
+		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
+	}
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+
+	frozenCursor, frozenScroll := s.model.MessagesCursor, s.model.MessagesScroll
+	grow(27)
+	grow(30)
+	if s.model.MessagesCursor != frozenCursor || s.model.MessagesScroll != frozenScroll {
+		t.Errorf("a frozen pane moved: cursor/scroll = %d/%d, want %d/%d",
+			s.model.MessagesCursor, s.model.MessagesScroll, frozenCursor, frozenScroll)
+	}
+	if s.model.PendingMessages != 6 {
+		t.Errorf("PendingMessages = %d, want 6", s.model.PendingMessages)
+	}
+}
+
+// TestTail_PendingCountReachesTheLogHeader is criterion 3's wiring: the
+// count main.go holds is the one RenderLog renders. Asserted on the frame
+// the shell actually draws, so a main.go that never passed it fails here
+// even with every render and tui test green.
+func TestTail_PendingCountReachesTheLogHeader(t *testing.T) {
+	s, grow := tailShell(t, 20, 100, 30)
+
+	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
+		t.Fatalf("a live pane advertised pending messages: %q", h)
+	}
+
+	layout := settleLayout(s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	grow(25)
+
+	if s.model.PendingMessages != 5 {
+		t.Fatalf("setup: PendingMessages = %d, want 5", s.model.PendingMessages)
+	}
+	if h := messageHeaderLine(t, s); !strings.Contains(h, "+5 new") {
+		t.Errorf("the log header does not carry the pending count: %q", h)
+	}
+}
+
+// TestTail_ClickOnLastRowThroughShellUpdateZeroesCount is criterion 4's
+// mouse half, driven as a real tea.MouseMsg so the hit test, the dispatch
+// and the model entry point are all under test.
+func TestTail_ClickOnLastRowThroughShellUpdateZeroesCount(t *testing.T) {
+	s, grow := tailShell(t, 20, 100, 30)
+
+	layout := settleLayout(s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	grow(25)
+	if s.model.PendingMessages != 5 {
+		t.Fatalf("setup: PendingMessages = %d, want 5", s.model.PendingMessages)
+	}
+
+	// Wheel back down to the bottom, then press the pane's last data row —
+	// which, at the bottom, IS the list's last row.
+	layout = settleLayout(s)
+	for i := 0; i < 10; i++ {
+		s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	}
+	if s.model.PendingMessages != 5 {
+		t.Fatalf("scrolling to the bottom alone must not select the last row: PendingMessages = %d, want 5", s.model.PendingMessages)
+	}
+
+	layout = settleLayout(s)
+	last := layout.messages.firstRow + layout.messages.headerRows + layout.messages.dataRows - 1
+	if target, isData, _ := hitTest(layout, last); target != hitMessages || !isData {
+		t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (hitMessages, true)", last, target, isData)
+	}
+	s.Update(tea.MouseMsg{X: 5, Y: last, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+
+	if s.model.MessagesCursor != s.model.MessagesLen-1 {
+		t.Fatalf("the click did not land on the last row: cursor = %d, want %d", s.model.MessagesCursor, s.model.MessagesLen-1)
+	}
+	if s.model.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d after a click on the last row, want 0", s.model.PendingMessages)
+	}
+	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
+		t.Errorf("the header still advertises pending messages: %q", h)
+	}
+}
+
+// TestTail_ZoomedDetailStillFollowsAndCounts is the "messages arriving while
+// the detail pane is zoomed" edge case. renderFrame returns EARLY while
+// zoomed, before it re-reports the message pane's viewport — so the tail
+// logic must keep working off the viewport the last three-pane frame left
+// behind rather than silently entering the windowless regime.
+func TestTail_ZoomedDetailStillFollowsAndCounts(t *testing.T) {
+	s, grow := tailShell(t, 20, 100, 30)
+	s.Update(key(tea.KeyEnter)) // zoom the detail pane
+	if !s.model.DetailZoom {
+		t.Fatalf("test setup: the detail pane did not zoom")
+	}
+
+	grow(23)
+	if s.model.MessagesCursor != 22 {
+		t.Errorf("a live pane stopped following while zoomed: cursor = %d, want 22", s.model.MessagesCursor)
+	}
+
+	// Now freeze the log (a real wheel event, which needs the three-pane
+	// layout to have a message region to point at) and zoom again: the
+	// count must keep accruing behind the zoomed pane.
+	s.Update(key(tea.KeyEsc))
+	layout := settleLayout(s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(key(tea.KeyEnter))
+	if !s.model.DetailZoom {
+		t.Fatalf("test setup: the detail pane did not re-zoom")
+	}
+
+	frozenCursor, frozenScroll := s.model.MessagesCursor, s.model.MessagesScroll
+	grow(26)
+	if s.model.MessagesCursor != frozenCursor || s.model.MessagesScroll != frozenScroll {
+		t.Errorf("a frozen pane moved behind the zoom: cursor/scroll = %d/%d, want %d/%d",
+			s.model.MessagesCursor, s.model.MessagesScroll, frozenCursor, frozenScroll)
+	}
+	if s.model.PendingMessages != 3 {
+		t.Errorf("PendingMessages = %d while zoomed, want 3", s.model.PendingMessages)
+	}
+}
+
+// TestTail_OncePathNeverCountsOrFollows is the --once contract: that path
+// renders at height 0 and never reports a viewport, so the frame a pipe
+// receives must contain every message (not just the newest) and no `+N new`
+// segment — whatever the bus did between samples.
+func TestTail_OncePathNeverCountsOrFollows(t *testing.T) {
+	dir := t.TempDir()
+	s := newWiredShellIn(t, dir, 5, 20, 100, 0)
+
+	for _, n := range []int{20, 25, 30} {
+		writeMessageStub(t, dir, n)
+		if !s.msgs.Tick(s.ctx) {
+			t.Fatalf("the messages sampler did not deliver a sample of %d", n)
+		}
+		lines, _ := renderFrame(s.model, s.census.Last(), s.census.Stale(),
+			s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, 0)
+
+		if s.model.PendingMessages != 0 {
+			t.Fatalf("n=%d: --once counted %d pending messages", n, s.model.PendingMessages)
+		}
+		joined := strings.Join(lines, "\n")
+		if strings.Contains(joined, " new") {
+			t.Fatalf("n=%d: --once emitted a pending segment:\n%s", n, joined)
+		}
+		if !strings.Contains(joined, "message 00") {
+			t.Fatalf("n=%d: --once lost the oldest message — the tail followed a pane with no window:\n%s", n, joined)
+		}
+	}
 }

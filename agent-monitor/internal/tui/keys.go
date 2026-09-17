@@ -112,6 +112,16 @@ type Model struct {
 	MessagesLen      int
 	MessagesViewport int
 
+	// PendingMessages is how many messages have been appended since the
+	// message pane stopped being LIVE (sp032 T6) — the `+N new` the log
+	// header carries while the pane is frozen on purpose. It is zero
+	// whenever the pane is live, which is the invariant every mutator below
+	// restores rather than a value anyone has to remember to clear.
+	//
+	// It is a plain int, and Model stays a comparable struct: several
+	// fixtures compare whole models with `*m != want`.
+	PendingMessages int
+
 	// DetailScroll, DetailLen and DetailViewport are the detail pane's
 	// scroll state (sp032 T4), the same shape the other two panes use — and
 	// deliberately so: the pane's body is displayed through a
@@ -178,11 +188,85 @@ func (m *Model) SetRosterLen(n int) {
 	m.RosterScroll = scrollAfterClamp(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
 }
 
-// SetMessagesLen is SetRosterLen's twin for the message pane.
+// SetMessagesLen is SetRosterLen's twin for the message pane, and it is
+// additionally where sp032 T6's CONDITIONAL TAIL-FOLLOW lives: main.go calls
+// this on every sampler tick, so this is the one place a growing sample
+// becomes visible to the model.
+//
+// Live (messagesLive) means the reader is parked on the newest message, and
+// the pane then follows new arrivals onto the new last row. Not live means
+// the reader scrolled back deliberately, and then NOTHING moves — the
+// appended messages are COUNTED into PendingMessages instead, which is what
+// the header's `+N new` reports until End/G (or a click on the last row)
+// returns the pane to live.
+//
+// Both halves are a rule rather than a default: unconditional follow would
+// yank a reader off the message they are reading every two seconds, and
+// never following would stop the live view being live (sp032 ## solution,
+// which names both as anti-patterns).
+//
+// A SHRINKING sample (the bus was pruned) adds nothing — the count can never
+// go negative — and a sample that appends nothing leaves it exactly where it
+// was rather than resetting it.
 func (m *Model) SetMessagesLen(n int) {
+	live := m.messagesLive()
+	grown := n - m.MessagesLen
 	m.MessagesLen = n
+
+	if live {
+		m.MessagesCursor = maxIndex(n)
+		m.MessagesScroll = maxTop(n, m.MessagesViewport)
+		m.PendingMessages = 0
+		return
+	}
+
+	// The windowless regime counts nothing: see messagesLive for why --once
+	// must never see either half of this feature.
+	if grown > 0 && m.MessagesViewport > 0 {
+		m.PendingMessages += grown
+	}
 	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxIndex(n))
 	m.MessagesScroll = scrollAfterClamp(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+	// A shrink can put the cursor back on the (new) last row — the pane is
+	// live again by derivation, so the count it was carrying is stale.
+	m.clearPendingWhenLive()
+}
+
+// messagesLive derives sp032 T6's LIVE state for the message pane: the
+// cursor is on the LAST row and the scroll is at the BOTTOM. It is derived
+// on every read rather than stored, so no keystroke, wheel event or sample
+// can leave a "live" flag disagreeing with where the pane actually is.
+//
+// A pane with no reported viewport is never live, and that is a correctness
+// requirement rather than a convenience. viewport <= 0 is T1's legacy regime
+// where scroll IS the cursor (scrollAfterClamp), and it is what --once
+// reports (renderFrame's height == 0 path never calls SetMessagesViewport).
+// Following the tail there would set the cursor to the last row, drag the
+// scroll onto it, and leave main.go's scrolledMessageSample slicing every
+// message but the newest out of the frame a pipe receives — breaking
+// sp030 T9's contract in a feature that has nothing to say about --once.
+//
+// An EMPTY pane is live (maxIndex(0) and maxTop(0, v) are both 0): a pane
+// with nothing in it is trivially at its own end, which is what makes the
+// very first sample follow instead of arriving already `+N` behind.
+func (m *Model) messagesLive() bool {
+	if m.MessagesViewport <= 0 {
+		return false
+	}
+	return m.MessagesCursor == maxIndex(m.MessagesLen) &&
+		m.MessagesScroll == maxTop(m.MessagesLen, m.MessagesViewport)
+}
+
+// clearPendingWhenLive restores the invariant "a live pane is never behind".
+// Every mutator that can move the message pane's cursor or scroll ends with
+// it, so returning to the tail zeroes the count no matter WHICH way the
+// reader got there — End/G, a click on the last row, j onto it, a wheel, a
+// page, a resize — rather than only through the keys criterion 4 happens to
+// name.
+func (m *Model) clearPendingWhenLive() {
+	if m.messagesLive() {
+		m.PendingMessages = 0
+	}
 }
 
 // SetRosterViewport records how many rows of the roster pane are visible
@@ -201,6 +285,7 @@ func (m *Model) SetRosterViewport(n int) {
 func (m *Model) SetMessagesViewport(n int) {
 	m.MessagesScroll = scrollAfterViewport(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport, n)
 	m.MessagesViewport = n
+	m.clearPendingWhenLive()
 }
 
 // ScrollRoster moves the roster pane's scroll offset by delta WITHOUT
@@ -214,6 +299,7 @@ func (m *Model) ScrollRoster(delta int) {
 // ScrollMessages is ScrollRoster's twin for the message pane.
 func (m *Model) ScrollMessages(delta int) {
 	m.MessagesScroll = clamp(m.MessagesScroll+delta, 0, maxTop(m.MessagesLen, m.MessagesViewport))
+	m.clearPendingWhenLive()
 }
 
 // SetDetailLen records how many BODY lines the currently selected message
@@ -401,6 +487,7 @@ func (m *Model) moveCursor(delta int) {
 	case PaneMessages:
 		m.MessagesCursor = clamp(m.MessagesCursor+delta, 0, maxIndex(m.MessagesLen))
 		m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+		m.clearPendingWhenLive()
 	}
 }
 
@@ -428,6 +515,7 @@ func (m *Model) ClickPane(pane Pane, isData bool, offset int) {
 		m.RosterCursor = clamp(m.RosterScroll+offset, 0, maxIndex(m.RosterLen))
 	case PaneMessages:
 		m.MessagesCursor = clamp(m.MessagesScroll+offset, 0, maxIndex(m.MessagesLen))
+		m.clearPendingWhenLive()
 	}
 }
 
@@ -575,9 +663,11 @@ func (m *Model) GoToFirst() {
 // len — len is a slice bound and not a position a cursor may hold. On the
 // detail pane it is the last full page of the body.
 //
-// sp032 T6 additionally makes this return the message pane to live and zero
-// the pending count; that state does not exist yet and is deliberately not
-// anticipated here.
+// sp032 T6 additionally makes this return the message pane to LIVE: landing
+// on the last row with the scroll at the bottom IS the live predicate
+// (messagesLive), so jumpTo's clearPendingWhenLive zeroes the `+N new` count
+// as a consequence of where the cursor went rather than as a special case
+// keyed on which key was pressed.
 func (m *Model) GoToLast() {
 	m.jumpTo(maxInt)
 }
@@ -599,6 +689,7 @@ func (m *Model) jumpTo(idx int) {
 	case PaneMessages:
 		m.MessagesCursor = clamp(idx, 0, maxIndex(m.MessagesLen))
 		m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+		m.clearPendingWhenLive()
 	}
 }
 
@@ -791,6 +882,12 @@ func (m *Model) handleEditingKey(k Key) Outcome {
 		m.Filter = Filter{Set: true, Query: m.draft}
 		m.Editing = false
 		m.draft = ""
+		// sp032 T6 criterion 5: the committed filter changes the message
+		// list's IDENTITY, so "N messages appended since you scrolled back"
+		// is a count about a list that no longer exists. Liveness itself is
+		// re-derived by the next SetMessagesLen against the filtered
+		// length; only the stale count has to be dropped here.
+		m.PendingMessages = 0
 	case KeyBackspace:
 		if r := []rune(m.draft); len(r) > 0 {
 			m.draft = string(r[:len(r)-1])

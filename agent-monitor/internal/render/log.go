@@ -117,7 +117,21 @@ func subjectWidth(width int, cols []msgColumn) int {
 // of now. Rows print in the sample's own order (ParseMessages already
 // returns ascending id/time order), so the most recent message is the last
 // line — this renderer does not re-sort.
-func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width int) []string {
+//
+// pending is sp032 T6's tail counter: how many messages have arrived since
+// the message pane stopped being live (tui.Model.PendingMessages). A
+// positive value adds a `+N new` segment to the header line; zero — and the
+// four-argument call, which is what --once and every pre-T6 caller makes —
+// renders the header byte-for-byte as it did before T6.
+//
+// It is VARIADIC rather than a fifth parameter for exactly that reason. The
+// header's byte-identity when nothing is pending is a success criterion with
+// a test suite's worth of assertions already standing on it, and the
+// cheapest way to keep those assertions honest is to leave the call they
+// make untouched rather than to re-type them all and re-assert what they
+// used to say. At most one value is meaningful; extra ones are ignored the
+// way a mis-built call deserves rather than summed into a wrong count.
+func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width int, pending ...int) []string {
 	if sample == nil {
 		return []string{"messages — waiting for first sample"}
 	}
@@ -131,7 +145,7 @@ func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width in
 	allCols := append(append([]msgColumn{}, cols...), msgColSubject)
 
 	var lines []string
-	lines = append(lines, logHeaderLine(sample, stale, now))
+	lines = append(lines, logHeaderLine(sample, stale, now, firstOrZero(pending), width))
 	lines = append(lines, msgColumnHeaderLine(allCols, widths))
 
 	if len(sample.Messages) == 0 {
@@ -145,12 +159,58 @@ func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width in
 	return lines
 }
 
-func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time) string {
+func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time, pending, width int) string {
 	age := ageString(now, sample.At)
+	var base string
 	if stale {
-		return fmt.Sprintf("messages — STALE (last good sample %s old)", age)
+		base = fmt.Sprintf("messages — STALE (last good sample %s old)", age)
+	} else {
+		base = fmt.Sprintf("messages — updated %s ago", age)
 	}
-	return fmt.Sprintf("messages — updated %s ago", age)
+	return withPendingSegment(base, pending, width)
+}
+
+// firstOrZero reads RenderLog's variadic pending count. No value is the
+// pre-T6 call and means nothing is pending.
+func firstOrZero(vals []int) int {
+	if len(vals) == 0 {
+		return 0
+	}
+	return vals[0]
+}
+
+// withPendingSegment appends sp032 T6's `+N new` to a header line and fits
+// the result to width.
+//
+// Only a POSITIVE count is news: zero is a live pane, and a negative one is
+// a value tui.Model cannot produce but which must not render as `+-3 new` if
+// some future caller does. Both return base UNCHANGED — byte-for-byte the
+// header this renderer emitted before T6 existed, width included, since the
+// header was never width-fitted before and fitting it here would be a
+// silent regression on a narrow terminal.
+//
+// When the count IS positive the line has to fit, because the header is one
+// of the two free-text lines in this file (the other is "(no messages)") and
+// a line past the terminal width wraps — the failure every column in this
+// package is built to avoid. The COUNT is what survives the squeeze: it is
+// the entire signal that the pane is frozen on purpose, so the prose in
+// front of it is elided first, then its separator, and only a terminal too
+// narrow for the count itself overruns — the same trade-off subjectWidth
+// documents for the one column it refuses to drop.
+func withPendingSegment(base string, pending, width int) string {
+	if pending <= 0 {
+		return base
+	}
+	segment := fmt.Sprintf("  +%d new", pending)
+	if width <= 0 || displayWidth(base)+displayWidth(segment) <= width {
+		// width <= 0 is this package's "do not clamp" convention, the same
+		// one paneBudgets and RenderDetail use.
+		return base + segment
+	}
+	if room := width - displayWidth(segment); room > 0 {
+		return truncateCells(base, room) + segment
+	}
+	return strings.TrimLeft(segment, " ")
 }
 
 func msgColumnHeaderLine(cols []msgColumn, widths map[msgColumn]int) string {

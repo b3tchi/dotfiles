@@ -508,7 +508,14 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	}
 
 	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width)
-	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width)
+	// model.PendingMessages is sp032 T6's tail counter, and it is passed
+	// here rather than folded into the header by this file because render/
+	// owns every byte of a pane's content — the `+N new` segment is TEXT
+	// subject to the same width budget as everything else RenderLog emits.
+	// It is zero on the --once path by construction (the tail counts
+	// nothing without a reported viewport, and height == 0 never reports
+	// one), so that frame's bytes are unchanged.
+	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, model.PendingMessages)
 
 	// fitPanes re-derives the same budgets from the rendered line counts and
 	// does the actual trimming. The two derivations agree: a pane whose

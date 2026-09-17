@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +182,105 @@ func TestRenderDetail_KeepsTheFullAddress(t *testing.T) {
 	}
 	if !strings.Contains(joined, "a01M2M36Y5KJJ0YARD1BQQQQQQQ") {
 		t.Errorf("detail pane must carry the full recipient address: %q", joined)
+	}
+}
+
+// --- sp032 T6: the `+N new` header segment --------------------------------
+
+// TestRenderLog_HeaderByteIdenticalWhenNoPending is the regression anchor
+// for every log-header assertion above it. The pending count is an OPTIONAL
+// trailing argument precisely so the four-argument call every existing
+// caller and every existing test makes keeps compiling AND keeps rendering
+// the same bytes; this asserts the second half of that, which the compiler
+// cannot.
+func TestRenderLog_HeaderByteIdenticalWhenNoPending(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	for _, stale := range []bool{false, true} {
+		for _, width := range []int{8, 20, 26, 40, 100} {
+			omitted := RenderLog(sample, stale, now, width)
+			explicit := RenderLog(sample, stale, now, width, 0)
+			if omitted[0] != explicit[0] {
+				t.Fatalf("stale=%v width=%d: header differs between the 4-arg and the explicit-zero call:\n %q\n %q",
+					stale, width, omitted[0], explicit[0])
+			}
+			if strings.Contains(omitted[0], "new") {
+				t.Fatalf("stale=%v width=%d: a zero count leaked a segment into the header: %q", stale, width, omitted[0])
+			}
+		}
+	}
+
+	// And the exact bytes, so the header is pinned rather than merely
+	// self-consistent.
+	if got := RenderLog(sample, false, now, 100, 0)[0]; got != "messages — updated 30s ago" {
+		t.Fatalf("header = %q, want today's header unchanged", got)
+	}
+	if got := RenderLog(sample, true, now, 100, 0)[0]; got != "messages — STALE (last good sample 30s old)" {
+		t.Fatalf("stale header = %q, want today's stale header unchanged", got)
+	}
+}
+
+// TestRenderLog_HeaderCarriesPendingCount is criterion 3's positive half: a
+// frozen pane says so, and says by how much. Plain TEXT in the header line —
+// render/ emits no escapes and nothing here styles anything.
+func TestRenderLog_HeaderCarriesPendingCount(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	if got := RenderLog(sample, false, now, 100, 7)[0]; got != "messages — updated 30s ago  +7 new" {
+		t.Errorf("header = %q, want the base header with a ` +7 new` segment", got)
+	}
+	if got := RenderLog(sample, true, now, 100, 12)[0]; got != "messages — STALE (last good sample 30s old)  +12 new" {
+		t.Errorf("stale header = %q, want the stale header with a ` +12 new` segment", got)
+	}
+	// The count is the number, not a fixed word: 1 and 137 must both reach
+	// the header verbatim.
+	for _, n := range []int{1, 137} {
+		want := "+" + strconv.Itoa(n) + " new"
+		if got := RenderLog(sample, false, now, 100, n)[0]; !strings.Contains(got, want) {
+			t.Errorf("header = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// TestRenderLog_PendingSegmentKeepsTheWidthBudget is the edge case where the
+// count is wide enough to matter: the header is one of the two free-text
+// lines this renderer emits, and a segment that pushed it past the terminal
+// width would wrap — the one thing every other line in this package is
+// engineered not to do. The COUNT is what survives the squeeze, because it
+// is the whole signal; the prose in front of it is what gets elided.
+func TestRenderLog_PendingSegmentKeepsTheWidthBudget(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	for _, width := range []int{12, 20, 26, 40} {
+		for _, n := range []int{9, 4321, 987654} {
+			header := RenderLog(sample, false, now, width, n)[0]
+			if got := displayWidth(header); got > width {
+				t.Errorf("width=%d n=%d: header is %d cells wide: %q", width, n, got, header)
+			}
+			if want := "+" + strconv.Itoa(n) + " new"; !strings.Contains(header, want) {
+				t.Errorf("width=%d n=%d: the count was squeezed out of %q", width, n, header)
+			}
+		}
+	}
+}
+
+// TestRenderLog_NegativeAndZeroPendingRenderNothing pins the boundary: only
+// a POSITIVE count is news. A zero (a live pane) and a negative (which the
+// model cannot produce, but which this renderer must not turn into `+-3
+// new`) both leave the header alone.
+func TestRenderLog_NegativeAndZeroPendingRenderNothing(t *testing.T) {
+	at := time.Now()
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+	base := RenderLog(sample, false, at, 100)[0]
+	for _, n := range []int{0, -1, -99} {
+		if got := RenderLog(sample, false, at, 100, n)[0]; got != base {
+			t.Errorf("pending=%d changed the header: %q, want %q", n, got, base)
+		}
 	}
 }
