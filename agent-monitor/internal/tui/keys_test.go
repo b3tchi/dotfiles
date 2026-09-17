@@ -2202,3 +2202,162 @@ func TestTail_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
 		t.Errorf("PendingMessages = %d after the list came fully into view, want 0", m.PendingMessages)
 	}
 }
+
+// --- sp032 T8: the message pane opens live at the tail -------------------
+//
+// dotfiles-utob: a session opened showing the OLDEST message and was not
+// live until the operator pressed `G` once, because renderFrame filters (and
+// so calls SetMessagesLen) BEFORE it reports this frame's viewports. The
+// session's first length therefore lands in the windowless regime, where
+// T6's liveness is disabled BY DESIGN — and that design is load-bearing,
+// because --once renders in that same regime and must keep emitting the
+// whole log from the top.
+//
+// So the opening is a separate, explicit motion rather than a loosened gate:
+// OpenMessagesAtTail parks the pane on its newest message, and REFUSES to do
+// so for a pane with no window. cmd/ performs it once per interactive
+// session; nothing performs it on the --once path, which never reports a
+// viewport for it to consume in the first place.
+
+// TestStartup_OpenMessagesAtTailParksOnTheNewest is criteria 1 and 2 at the
+// state layer, driven in renderFrame's real call order: the length arrives
+// with no window, the viewport arrives second, and the opening follows it.
+func TestStartup_OpenMessagesAtTailParksOnTheNewest(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(20)
+	m.SetMessagesViewport(5)
+	if m.MessagesCursor != 0 {
+		t.Fatalf("setup: cursor = %d, want 0 — the pane has not been opened yet", m.MessagesCursor)
+	}
+
+	if !m.OpenMessagesAtTail() {
+		t.Fatalf("OpenMessagesAtTail refused a pane with a 5-row window")
+	}
+
+	if m.MessagesCursor != 19 {
+		t.Errorf("cursor = %d, want 19 (the newest message)", m.MessagesCursor)
+	}
+	if m.MessagesScroll != 15 {
+		t.Errorf("scroll = %d, want 15 (the bottom: 20 rows in a 5-row window)", m.MessagesScroll)
+	}
+	if !m.messagesLive() {
+		t.Errorf("a pane opened at its tail is not live")
+	}
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d, want 0 — a pane that opens live is not also behind", m.PendingMessages)
+	}
+}
+
+// TestStartup_OpenRefusedWithNoWindow is criterion 3 at the state layer, and
+// the trap this task is written around: maxTop(n, 0) is n-1, so an opening
+// that ignored the window would drag a --once frame's scroll onto its last
+// row and leave a pipe holding one message out of n.
+func TestStartup_OpenRefusedWithNoWindow(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesLen(20)
+
+	if m.OpenMessagesAtTail() {
+		t.Fatalf("OpenMessagesAtTail opened a pane with no window — that is the --once regime")
+	}
+	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+		t.Errorf("cursor/scroll = %d/%d, want 0/0 — a windowless pane renders from the top",
+			m.MessagesCursor, m.MessagesScroll)
+	}
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d, want 0 with no window", m.PendingMessages)
+	}
+
+	// And a zero-row window is the same regime, not a smaller one: a
+	// terminal too short for a single data row must leave the opening for
+	// the resize that gives the pane a row.
+	m.SetMessagesViewport(0)
+	if m.OpenMessagesAtTail() {
+		t.Fatalf("OpenMessagesAtTail opened a pane whose window is 0 rows")
+	}
+	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+		t.Errorf("cursor/scroll = %d/%d after a 0-row window, want 0/0", m.MessagesCursor, m.MessagesScroll)
+	}
+
+	m.SetMessagesViewport(1)
+	if !m.OpenMessagesAtTail() {
+		t.Fatalf("OpenMessagesAtTail refused a pane with a 1-row window")
+	}
+	if m.MessagesCursor != 19 || m.MessagesScroll != 19 {
+		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 19/19 (the newest message, alone on screen)",
+			m.MessagesCursor, m.MessagesScroll)
+	}
+}
+
+// TestStartup_OpeningTouchesNothingButTheMessagePane is criterion 5 at the
+// state layer: the roster has no newest row to be live on, so it opens where
+// it always did. Asserted as a whole-model comparison, so the opening cannot
+// quietly move the roster, the focus, the filter or the detail pane either.
+func TestStartup_OpeningTouchesNothingButTheMessagePane(t *testing.T) {
+	m := NewModel()
+	m.SetRosterLen(40)
+	m.SetMessagesLen(20)
+	m.SetRosterViewport(5)
+	m.SetMessagesViewport(5)
+
+	before := *m
+	want := before
+	want.MessagesCursor = 19
+	want.MessagesScroll = 15
+
+	m.OpenMessagesAtTail()
+
+	if *m != want {
+		t.Errorf("the opening changed more than the message pane's position:\n got %+v\nwant %+v", *m, want)
+	}
+	if m.RosterCursor != 0 || m.RosterScroll != 0 {
+		t.Errorf("the roster opened at %d/%d (cursor/scroll), want 0/0 — the first row", m.RosterCursor, m.RosterScroll)
+	}
+}
+
+// TestStartup_EmptyAndSingleMessageLogs covers the two degenerate first
+// samples. For both, the tail IS index 0 — so the assertion that matters is
+// the one after it: an opened pane is LIVE, and follows the next sample.
+func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
+	for _, n := range []int{0, 1} {
+		m := NewModel()
+		m.SetMessagesLen(n)
+		m.SetMessagesViewport(5)
+		if !m.OpenMessagesAtTail() {
+			t.Fatalf("n=%d: OpenMessagesAtTail refused", n)
+		}
+		if m.MessagesCursor != maxIndex(n) || m.MessagesScroll != 0 {
+			t.Errorf("n=%d: cursor/scroll = %d/%d, want %d/0", n, m.MessagesCursor, m.MessagesScroll, maxIndex(n))
+		}
+		if m.PendingMessages != 0 {
+			t.Errorf("n=%d: PendingMessages = %d, want 0", n, m.PendingMessages)
+		}
+
+		m.SetMessagesLen(n + 6) // the bus fills up
+		if want := n + 5; m.MessagesCursor != want {
+			t.Errorf("n=%d: the opened pane did not follow the next sample: cursor = %d, want %d", n, m.MessagesCursor, want)
+		}
+		if m.PendingMessages != 0 {
+			t.Errorf("n=%d: PendingMessages = %d after following, want 0", n, m.PendingMessages)
+		}
+	}
+}
+
+// TestStartup_OpeningClearsAPendingCountItInherits is the invariant "a live
+// pane is never behind", applied to the one motion that had no
+// clearPendingWhenLive before this task existed.
+func TestStartup_OpeningClearsAPendingCountItInherits(t *testing.T) {
+	m := NewModel()
+	m.SetMessagesViewport(5)
+	m.SetMessagesLen(20)
+	m.ScrollMessages(-9)
+	m.SetMessagesLen(24)
+	if m.PendingMessages == 0 {
+		t.Fatalf("setup: PendingMessages = 0, want a frozen pane carrying a count")
+	}
+
+	m.OpenMessagesAtTail()
+
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d after the pane was opened at its tail, want 0", m.PendingMessages)
+	}
+}

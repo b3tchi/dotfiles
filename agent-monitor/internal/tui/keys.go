@@ -269,6 +269,44 @@ func (m *Model) clearPendingWhenLive() {
 	}
 }
 
+// OpenMessagesAtTail is sp032 T8's OPENING: it parks the message pane on its
+// newest message with the scroll at the bottom, which by messagesLive's
+// derivation makes the pane LIVE — so the session's first sample is followed
+// from then on, and clearPendingWhenLive zeroes any count the pane had
+// picked up before it was opened.
+//
+// It exists as its own motion rather than as a rule inside SetMessagesLen or
+// SetMessagesViewport because of dotfiles-utob's actual cause: renderFrame
+// filters (and so sets the length) BEFORE it reports a viewport, so the
+// session's first length always lands in the windowless regime, where T6
+// disables liveness on purpose. Loosening that gate is the trap — maxTop(n,
+// 0) is n-1, so a windowless pane that followed its tail would leave --once
+// slicing every message but the newest out of the frame a pipe receives
+// (sp030 T9). Reporting the viewport first instead would reorder
+// renderFrame's filter-then-viewport sequence, which sp031 T1 pinned so a
+// resize cannot leave the cursor off-screen. An explicit motion, performed
+// once per INTERACTIVE session by cmd/ and never on the --once path, changes
+// neither.
+//
+// It REFUSES a pane with no window and reports so, for the same reason
+// messagesLive does: viewport <= 0 is the regime --once renders in, and a
+// caller that gets false is expected to try again when the pane has a row to
+// show the result in (a terminal too short for a data row is the live case
+// — see cmd/agent-monitor's openMessagesAtTailOnce).
+//
+// An empty log and a one-message log both open at index 0, which is where
+// they already were; what the opening buys there is LIVENESS, so the first
+// real sample arrives followed rather than counted.
+func (m *Model) OpenMessagesAtTail() bool {
+	if m.MessagesViewport <= 0 {
+		return false
+	}
+	m.MessagesCursor = maxIndex(m.MessagesLen)
+	m.MessagesScroll = maxTop(m.MessagesLen, m.MessagesViewport)
+	m.clearPendingWhenLive()
+	return true
+}
+
 // SetRosterViewport records how many rows of the roster pane are visible
 // this frame (0 if the caller does not track it) and re-fits RosterScroll to
 // the new height: always clamped to the new [0, maxTop] so a resize cannot

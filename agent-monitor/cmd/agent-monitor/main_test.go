@@ -2780,3 +2780,355 @@ func TestTail_OncePathNeverCountsOrFollows(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// sp032 T8: the message pane opens live at the tail, through the real shell.
+//
+// tui's own tests own what the opening DOES; these own that an interactive
+// session performs it — on the first frame, without the operator pressing
+// anything. Every test below sends no key at all, so none of them can pass
+// because some keystroke happened to reach GoToLast.
+// ---------------------------------------------------------------------------
+
+// firstFrame renders the frame a session actually opens with — s.View(), the
+// method bubbletea calls — and hands back its lines and layout. The two are
+// cross-checked against View's own string, so an assertion made on the
+// decomposed frame is an assertion about the bytes the operator sees.
+func firstFrame(t *testing.T, s *shell) ([]string, frameLayout) {
+	t.Helper()
+	view := s.View()
+	lines, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(),
+		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height)
+	if got := strings.Join(lines, "\n"); got != view {
+		t.Fatalf("the decomposed frame is not the one View returned:\n got %q\nwant %q", got, view)
+	}
+	return lines, layout
+}
+
+// TestStartup_MessagePaneOpensLiveAtTheTail is criterion 1 end to end: a
+// wired shell over a real sampler, sized by a real WindowSizeMsg, opens with
+// the cursor on the NEWEST message and the scroll at the bottom — and the
+// frame it returns shows that message and not the oldest one.
+func TestStartup_MessagePaneOpensLiveAtTheTail(t *testing.T) {
+	s := newWiredShellIn(t, t.TempDir(), 5, 20, 100, 30)
+
+	lines, layout := firstFrame(t, s)
+
+	if s.model.MessagesLen != 20 {
+		t.Fatalf("setup: MessagesLen = %d, want 20", s.model.MessagesLen)
+	}
+	if layout.messages.dataRows >= 20 {
+		t.Fatalf("setup: the message pane shows %d of 20 rows — this test needs a pane that cannot show them all", layout.messages.dataRows)
+	}
+	if s.model.MessagesCursor != 19 {
+		t.Errorf("MessagesCursor = %d, want 19 (the newest message) with no key ever pressed", s.model.MessagesCursor)
+	}
+	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
+		t.Errorf("MessagesScroll = %d, want %d (the bottom of a %d-row window)", s.model.MessagesScroll, want, layout.messages.dataRows)
+	}
+
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "message 19") {
+		t.Errorf("the newest message is not on the first frame:\n%s", joined)
+	}
+	if strings.Contains(joined, "message 00") {
+		t.Errorf("the first frame still starts at the oldest message:\n%s", joined)
+	}
+
+	// The selection mark is on the pane's LAST data row, which is what makes
+	// this the tail rather than merely a scrolled pane.
+	last := layout.messages.firstRow + layout.messages.headerRows + layout.messages.dataRows - 1
+	if !strings.Contains(lines[last], styleOn) {
+		t.Errorf("the last data row is not marked as the selection: %q", lines[last])
+	}
+	if !strings.Contains(lines[last], "message 19") {
+		t.Errorf("the marked row is not the newest message: %q", lines[last])
+	}
+}
+
+// TestStartup_PendingCountIsZeroOnTheFirstFrame is criterion 2, and it is
+// dotfiles-utob's visible symptom: a freshly opened monitor accrued `+N new`
+// from its first frame onward, because the pane it opened was never live. So
+// the assertion is made twice — on the opening frame, and again once the bus
+// has actually grown under it, which is the sample that used to produce the
+// count.
+func TestStartup_PendingCountIsZeroOnTheFirstFrame(t *testing.T) {
+	dir := t.TempDir()
+	s := newWiredShellIn(t, dir, 5, 20, 100, 30)
+
+	firstFrame(t, s)
+
+	if s.model.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d on the first frame, want 0", s.model.PendingMessages)
+	}
+	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
+		t.Errorf("a freshly opened monitor advertises pending messages: %q", h)
+	}
+
+	writeMessageStub(t, dir, 25)
+	if !s.msgs.Tick(s.ctx) {
+		t.Fatalf("the messages sampler did not deliver a sample of 25")
+	}
+	firstFrame(t, s)
+
+	if s.model.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d after the bus grew under an untouched session, want 0 — the pane opened live and follows", s.model.PendingMessages)
+	}
+	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
+		t.Errorf("the log header advertises pending messages nobody scrolled away from: %q", h)
+	}
+	if s.model.MessagesCursor != 24 {
+		t.Errorf("MessagesCursor = %d, want 24 (the newest of the grown sample)", s.model.MessagesCursor)
+	}
+}
+
+// TestStartup_RosterOpensAtTheFirstRow is criterion 5. The asymmetry is
+// deliberate: a census has no newest row to be live on, so the roster opens
+// on row one exactly as it always did.
+func TestStartup_RosterOpensAtTheFirstRow(t *testing.T) {
+	s := newWiredShellIn(t, t.TempDir(), 40, 20, 100, 30)
+
+	lines, layout := firstFrame(t, s)
+
+	if layout.roster.dataRows >= 40 {
+		t.Fatalf("setup: the roster shows %d of 40 rows — this test needs a pane that cannot show them all", layout.roster.dataRows)
+	}
+	if s.model.RosterCursor != 0 || s.model.RosterScroll != 0 {
+		t.Errorf("the roster opened at %d/%d (cursor/scroll), want 0/0", s.model.RosterCursor, s.model.RosterScroll)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "agent00") {
+		t.Errorf("the first roster row is not on the first frame:\n%s", joined)
+	}
+	if strings.Contains(joined, "agent39") {
+		t.Errorf("the roster opened at its tail:\n%s", joined)
+	}
+}
+
+// TestStartup_EmptyAndSingleMessageLogs drives the two degenerate first
+// samples through the real sampler, and then GROWS the bus: for these two
+// lengths the tail is index 0, so only the following sample can tell an
+// opened pane from one merely parked at the top.
+func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
+	for _, n := range []int{0, 1} {
+		t.Run(fmt.Sprintf("%d messages", n), func(t *testing.T) {
+			dir := t.TempDir()
+			s := newWiredShellIn(t, dir, 5, n, 100, 30)
+
+			firstFrame(t, s)
+
+			if s.model.MessagesLen != n {
+				t.Fatalf("setup: MessagesLen = %d, want %d", s.model.MessagesLen, n)
+			}
+			if s.model.MessagesCursor != 0 || s.model.MessagesScroll != 0 {
+				t.Errorf("cursor/scroll = %d/%d, want 0/0", s.model.MessagesCursor, s.model.MessagesScroll)
+			}
+			if s.model.PendingMessages != 0 {
+				t.Errorf("PendingMessages = %d, want 0", s.model.PendingMessages)
+			}
+
+			writeMessageStub(t, dir, n+12)
+			if !s.msgs.Tick(s.ctx) {
+				t.Fatalf("the messages sampler did not deliver a sample of %d", n+12)
+			}
+			firstFrame(t, s)
+
+			if want := n + 11; s.model.MessagesCursor != want {
+				t.Errorf("the opened pane did not follow the next sample: cursor = %d, want %d", s.model.MessagesCursor, want)
+			}
+			if s.model.PendingMessages != 0 {
+				t.Errorf("PendingMessages = %d after following, want 0", s.model.PendingMessages)
+			}
+		})
+	}
+}
+
+// TestStartup_FirstSampleAfterTheFirstWindowSize is the other message
+// ordering: the window arrives before any sample exists. The pane then opens
+// EMPTY, and an empty pane is live, so the first real sample is followed
+// rather than counted as `+N` the operator has already missed.
+func TestStartup_FirstSampleAfterTheFirstWindowSize(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeMessageStub(t, dir, 20)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+
+	s := newShell(ctx, tui.NewModel(), census, msgs)
+	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	firstFrame(t, s) // a frame with no sample at all yet
+
+	census.Refresh(ctx)
+	if !msgs.Tick(ctx) {
+		t.Fatalf("the messages sampler did not deliver its first sample")
+	}
+	lines, _ := firstFrame(t, s)
+
+	if s.model.MessagesCursor != 19 {
+		t.Errorf("MessagesCursor = %d, want 19 — the first sample must arrive followed", s.model.MessagesCursor)
+	}
+	if s.model.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d, want 0 on the frame the first sample arrives in", s.model.PendingMessages)
+	}
+	if joined := strings.Join(lines, "\n"); !strings.Contains(joined, "message 19") {
+		t.Errorf("the newest message is not on screen:\n%s", joined)
+	}
+}
+
+// TestStartup_ProjectFilterEmptiesTheRosterButNotTheLog is the --project
+// edge case: the flag composes onto the ROSTER only (sp031 T3), so a value
+// matching no agent must still leave the message pane opening at its tail.
+func TestStartup_ProjectFilterEmptiesTheRosterButNotTheLog(t *testing.T) {
+	s := newWiredShellIn(t, t.TempDir(), 5, 20, 100, 30)
+	s.model.Project = "no-such-project" // main.go sets this once, before the program runs
+
+	lines, layout := firstFrame(t, s)
+
+	if s.model.RosterLen != 0 {
+		t.Fatalf("setup: RosterLen = %d, want 0 for an unmatched --project", s.model.RosterLen)
+	}
+	if s.model.MessagesCursor != 19 {
+		t.Errorf("MessagesCursor = %d, want 19 — an empty roster must not hold the log shut", s.model.MessagesCursor)
+	}
+	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
+		t.Errorf("MessagesScroll = %d, want %d", s.model.MessagesScroll, want)
+	}
+	if joined := strings.Join(lines, "\n"); !strings.Contains(joined, "message 19") {
+		t.Errorf("the newest message is not on screen:\n%s", joined)
+	}
+}
+
+// TestStartup_LaterFramesDoNotReOpenTheTail is the other half of "opens":
+// the opening happens ONCE. Every subsequent frame — and a session draws one
+// per event — must leave a reader who scrolled back exactly where they are,
+// pending count included.
+func TestStartup_LaterFramesDoNotReOpenTheTail(t *testing.T) {
+	dir := t.TempDir()
+	s := newWiredShellIn(t, dir, 5, 20, 100, 30)
+	firstFrame(t, s)
+
+	// A real wheel event over the message pane scrolls back off the tail.
+	_, layout := firstFrame(t, s)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1
+	if target, _, _ := hitTest(layout, y); target != hitMessages {
+		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
+	}
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+
+	writeMessageStub(t, dir, 26)
+	if !s.msgs.Tick(s.ctx) {
+		t.Fatalf("the messages sampler did not deliver a sample of 26")
+	}
+	firstFrame(t, s)
+
+	wantCursor, wantScroll, wantPending := s.model.MessagesCursor, s.model.MessagesScroll, s.model.PendingMessages
+	if wantPending != 6 {
+		t.Fatalf("setup: PendingMessages = %d, want 6", wantPending)
+	}
+
+	for i := 1; i <= 3; i++ {
+		firstFrame(t, s)
+		if s.model.MessagesCursor != wantCursor || s.model.MessagesScroll != wantScroll {
+			t.Fatalf("frame %d re-opened the pane: cursor/scroll = %d/%d, want %d/%d",
+				i, s.model.MessagesCursor, s.model.MessagesScroll, wantCursor, wantScroll)
+		}
+		if s.model.PendingMessages != wantPending {
+			t.Fatalf("frame %d cleared the pending count: %d, want %d", i, s.model.PendingMessages, wantPending)
+		}
+	}
+
+	// A resize is not a second opening either.
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 34})
+	firstFrame(t, s)
+	if s.model.MessagesCursor != wantCursor {
+		t.Errorf("a resize re-opened the pane: cursor = %d, want %d", s.model.MessagesCursor, wantCursor)
+	}
+	if s.model.PendingMessages != wantPending {
+		t.Errorf("a resize cleared the pending count: %d, want %d", s.model.PendingMessages, wantPending)
+	}
+}
+
+// TestStartup_TooShortForADataRowOpensOnTheNextResize is the short-terminal
+// edge case: a message pane with no room for a data row is in the same
+// windowless regime --once renders in, so the opening WAITS rather than
+// being spent on a pane that cannot show its result. The one-row window is
+// the other half — the smallest pane that can be opened at all.
+func TestStartup_TooShortForADataRowOpensOnTheNextResize(t *testing.T) {
+	s := newWiredShellIn(t, t.TempDir(), 5, 20, 100, 5)
+
+	firstFrame(t, s)
+	if s.model.MessagesViewport != 0 {
+		t.Fatalf("setup: a 5-row terminal gave the message pane %d data rows, want 0", s.model.MessagesViewport)
+	}
+	if s.model.MessagesCursor != 0 || s.model.MessagesScroll != 0 {
+		t.Errorf("a pane with no data row was opened anyway: cursor/scroll = %d/%d, want 0/0",
+			s.model.MessagesCursor, s.model.MessagesScroll)
+	}
+
+	// One row: the newest message, alone on screen.
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 6})
+	lines, layout := firstFrame(t, s)
+	if s.model.MessagesViewport != 1 {
+		t.Fatalf("setup: a 6-row terminal gave the message pane %d data rows, want 1", s.model.MessagesViewport)
+	}
+	if s.model.MessagesCursor != 19 || s.model.MessagesScroll != 19 {
+		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 19/19", s.model.MessagesCursor, s.model.MessagesScroll)
+	}
+	row := lines[layout.messages.firstRow+layout.messages.headerRows]
+	if !strings.Contains(row, "message 19") {
+		t.Errorf("the single visible row is not the newest message: %q", row)
+	}
+
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	_, layout = firstFrame(t, s)
+	if s.model.MessagesCursor != 19 {
+		t.Errorf("MessagesCursor = %d, want 19 once the terminal had room to show it", s.model.MessagesCursor)
+	}
+	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
+		t.Errorf("MessagesScroll = %d, want %d", s.model.MessagesScroll, want)
+	}
+}
+
+// TestRunOnce_StillRendersFromTheTop is criterion 3's regression anchor: the
+// --once path reports no viewport, is never opened, and therefore still
+// emits the WHOLE log oldest-first. A fix that leaked liveness into the
+// windowless regime loses every message but the newest here.
+func TestRunOnce_StillRendersFromTheTop(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeMessageStub(t, dir, 40)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	out := buf.String()
+
+	oldest := strings.Index(out, "message 00")
+	newest := strings.Index(out, "message 39")
+	if oldest < 0 {
+		t.Fatalf("--once lost the oldest message:\n%s", out)
+	}
+	if newest < 0 {
+		t.Fatalf("--once lost the newest message:\n%s", out)
+	}
+	if oldest > newest {
+		t.Errorf("--once rendered the newest message before the oldest: %d > %d", oldest, newest)
+	}
+	for i := 0; i < 40; i++ {
+		if want := fmt.Sprintf("message %02d", i); !strings.Contains(out, want) {
+			t.Fatalf("--once dropped %q — the tail followed a pane with no window:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, " new") {
+		t.Errorf("--once emitted a pending segment:\n%s", out)
+	}
+	if strings.ContainsRune(out, 0x1b) {
+		t.Errorf("--once emitted an ESC byte: %q", out)
+	}
+}

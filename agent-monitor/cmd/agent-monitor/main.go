@@ -146,9 +146,12 @@ func runOnce(w io.Writer, project string) error {
 
 	// --once has no key input, so nothing ever filters or scrolls a frame
 	// it renders via a keystroke — a fresh, untouched Model is exactly "no
-	// interactive filter, no scroll", the same state an interactive session
-	// starts in too. --project is set directly, since it is not something a
-	// key ever commits.
+	// interactive filter, no scroll, top of the list". An interactive
+	// session starts from the same construction and then OPENS its message
+	// pane at the tail (sp032 T8, shell.View); this path never does, because
+	// it builds no shell and its height==0 frame reports no viewport for the
+	// opening to consume. --project is set directly, since it is not
+	// something a key ever commits.
 	model := tui.NewModel()
 	model.Project = project
 	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0)
@@ -192,6 +195,12 @@ type shell struct {
 	// now is the clock renderFrame stamps staleness and message ages
 	// against, injectable so a test can compare a frame byte-for-byte.
 	now func() time.Time
+
+	// opened records that this session's message pane has had its sp032 T8
+	// opening (openMessagesAtTailOnce). It is per-SESSION rather than
+	// per-frame: the opening puts the pane at its tail once, and every frame
+	// after it leaves a reader who scrolled back exactly where they are.
+	opened bool
 }
 
 func newShell(ctx context.Context, model *tui.Model, census *source.Monitor, msgs *source.MessagesMonitor) *shell {
@@ -299,7 +308,40 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 // it rather than being carried forward as a superstition.
 func (s *shell) View() string {
 	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	// sp032 T8: this session's FIRST frame opens the message pane at its
+	// tail (dotfiles-utob — a monitor that opens on the oldest message, and
+	// since T6 opens already `+N` behind, contradicts the conditional
+	// tail-follow sp032's ## solution commits to). It happens here, AFTER a
+	// frame has been laid out, because laying one out is the only thing that
+	// reports the pane's viewport — and the opening needs that viewport both
+	// to land the scroll at the bottom and to know the pane has a window at
+	// all. The frame is then composed a second time, so the very first frame
+	// the operator SEES is the opened one rather than the one before it.
+	//
+	// Exactly one frame in a session pays for the second composition, and
+	// nothing on the --once path pays for it at all: runOnce calls buildFrame
+	// directly and never constructs a shell.
+	if s.openMessagesAtTailOnce() {
+		lines, _ = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	}
 	return strings.Join(lines, "\n")
+}
+
+// openMessagesAtTailOnce performs this session's opening and reports whether
+// it just did. It is a no-op once the pane has been opened, so a later frame
+// or resize can never yank a reader who has scrolled back — and a no-op
+// while the pane has no window (a terminal too short for a data row, or a
+// frame drawn before the first tea.WindowSizeMsg), so the opening waits for
+// a window rather than being spent on a pane that cannot show its result.
+func (s *shell) openMessagesAtTailOnce() bool {
+	if s.opened {
+		return false
+	}
+	if !s.model.OpenMessagesAtTail() {
+		return false
+	}
+	s.opened = true
+	return true
 }
 
 // translateKey converts one bubbletea key event into the tui.Key values the
