@@ -150,7 +150,8 @@ func runOnce(w io.Writer, project string) error {
 	// key ever commits.
 	model := tui.NewModel()
 	model.Project = project
-	for _, line := range buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0) {
+	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0)
+	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
 	return nil
@@ -227,8 +228,59 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.msgs.Tick(s.ctx)
 			}
 		}
+
+	case tea.MouseMsg:
+		s.handleMouse(msg)
 	}
 	return s, nil
+}
+
+// handleMouse is sp032 T3's whole mouse surface: it recomputes THIS frame's
+// layout (the same one View() just drew — nothing about the model or the
+// geometry has changed between that draw and this event), converts the
+// event's Y into a (pane, row) via the ONE hit test, and hands the result to
+// a Model entry point. No arithmetic on msg.Y happens anywhere else.
+//
+// MouseActionMotion is dropped first and unconditionally: cell-motion
+// reporting sends a stream of these during a drag, and none of them is a
+// press. Every other button/action combination narrows from there.
+func (s *shell) handleMouse(msg tea.MouseMsg) {
+	if msg.Action == tea.MouseActionMotion {
+		return
+	}
+
+	_, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	target, isData, offset := hitTest(layout, msg.Y)
+
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress {
+			return
+		}
+		switch target {
+		case hitRoster:
+			s.model.ClickPane(tui.PaneRoster, isData, offset)
+		case hitMessages:
+			s.model.ClickPane(tui.PaneMessages, isData, offset)
+			// hitDetail and hitNone: sp032 T3 gives the detail pane no
+			// cursor and no focus stop (T4's job) and a separator/off-frame
+			// press changes nothing at all.
+		}
+	case tea.MouseButtonWheelUp:
+		switch target {
+		case hitRoster:
+			s.model.ScrollPane(tui.PaneRoster, -3)
+		case hitMessages:
+			s.model.ScrollPane(tui.PaneMessages, -3)
+		}
+	case tea.MouseButtonWheelDown:
+		switch target {
+		case hitRoster:
+			s.model.ScrollPane(tui.PaneRoster, 3)
+		case hitMessages:
+			s.model.ScrollPane(tui.PaneMessages, 3)
+		}
+	}
 }
 
 // View is renderFrame's lines joined with "\n", and nothing else. It is NOT
@@ -238,7 +290,8 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the output mapping now, so the cause is gone and the workaround goes with
 // it rather than being carried forward as a superstition.
 func (s *shell) View() string {
-	return strings.Join(buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height), "\n")
+	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	return strings.Join(lines, "\n")
 }
 
 // translateKey converts one bubbletea key event into the tui.Key values the
@@ -371,7 +424,7 @@ func runInteractive(project string) error {
 // *source.Monitor's last sample is unexported and only settable by execing
 // a real or stubbed binary — renderFrame takes samples directly so a test
 // can hand-build one).
-func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int) []string {
+func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int) ([]string, frameLayout) {
 	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height)
 }
 
@@ -388,7 +441,13 @@ func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *sou
 // toggle" — which is what --once passes (runOnce/buildFrame's height==0
 // path): a pipe has no cursor and no height, so a consumer asked for the
 // whole frame exactly as it rendered before this task.
-func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int) []string {
+//
+// The second return value is sp032 T3's layout: where each VISIBLE pane
+// landed in the lines slice this call also returns. It is derived from the
+// same paneBudgets/fitPanes call that trimmed roster/log — never a second
+// arithmetic on height — and it is the ONLY thing a mouse handler consults to
+// turn a screen row into (pane, row); see hitTest.
+func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int) ([]string, frameLayout) {
 	// Order matters, and is the whole point of this arrangement (sp031 T1's
 	// binding criterion: a resized terminal cannot leave the cursor
 	// off-screen). Filter FIRST — that fixes each pane's row count and, via
@@ -425,6 +484,20 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// way, and the surplus is redistributed identically.
 	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
 
+	// detailLines is rendered HERE, before the layout is built, because its
+	// ACTUAL length is not detailBudget: RenderDetail's clampToHeight only
+	// ever trims DOWN to the budget, exactly like roster/log's own clamp()
+	// (fitPanes above) — a short message renders fewer lines than its
+	// budget, with no padding to fill it. The layout must describe the
+	// frame that is actually returned, so it reads this slice's real
+	// length rather than the budget that merely bounds it.
+	var detailLines []string
+	if detailShown {
+		detailLines = render.RenderDetail(selectedMessage(model, msgSample), width, detailBudget)
+	}
+
+	layout := buildLayout(censusSample != nil, len(rosterRows), len(roster), msgSample != nil, len(msgRows), len(log), len(detailLines), detailShown)
+
 	// Make the cursor and the focus VISIBLE (dotfiles-uyih). sp031 shipped a
 	// cursor that moves, a scroll that follows it and a detail pane that
 	// tracks it — and nothing that drew any of it, so `tab` looked like a
@@ -449,9 +522,9 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 
 	if detailShown {
 		lines = append(lines, "")
-		lines = append(lines, render.RenderDetail(selectedMessage(model, msgSample), width, detailBudget)...)
+		lines = append(lines, detailLines...)
 	}
-	return lines
+	return lines, layout
 }
 
 // styleOn/styleOff are the reverse-video pair that marks the focused pane's
@@ -599,6 +672,177 @@ func paneBudgets(rosterLines, logLines, height int, detailVisible bool) (rosterB
 		rosterBudget += logBudget - logLines
 	}
 	return rosterBudget, logBudget, detailBudget, detailShown
+}
+
+// paneLayout is one VISIBLE pane's on-screen geometry for THIS frame, in the
+// SAME line-index space renderFrame's []string result uses — which is also
+// exactly the space a tea.MouseMsg's Y addresses, since View() emits those
+// lines with nothing else above them (no chrome, no cursor-home prefix).
+//
+// totalRows is the pane's whole rendered footprint, headerRows+dataRows for
+// an ordinary pane but headerRows+1 for a pane rendering the
+// "(no agents)"/"(no messages)" placeholder — that placeholder line occupies
+// a real screen row (a click there must still focus the pane, per T3's edge
+// cases) while dataRows stays 0 (there is nothing to select). The distinction
+// is why totalRows is carried separately rather than derived as
+// headerRows+dataRows every time.
+type paneLayout struct {
+	firstRow   int
+	headerRows int
+	dataRows   int
+	totalRows  int
+}
+
+// frameLayout is renderFrame's second return value: where the roster,
+// messages and (when shown) detail panes each landed. detail is the zero
+// paneLayout when detailShown is false — hitTest checks the flag before
+// consulting it, exactly like every other reader of model.DetailVisible.
+//
+// sp032 T3 gives the detail pane geometry here (criterion 1 asks for EVERY
+// visible pane) but no focus stop and no scroll authority — hitTest reports
+// hitDetail for a coordinate that lands on it, and every mouse handler in
+// this task treats that report as inert. T4 is what turns it into a third
+// focus stop.
+type frameLayout struct {
+	roster      paneLayout
+	messages    paneLayout
+	detail      paneLayout
+	detailShown bool
+}
+
+// buildLayout derives frameLayout from paneBudgets' own outputs and the
+// counts renderFrame already computed — it never re-implements the budget
+// arithmetic, only reads its result. rosterRenderedLen/logRenderedLen are the
+// roster/log slices' lengths AFTER fitPanes' clamp, and detailRenderedLen is
+// RenderDetail's own output length — all three are the exact number of
+// screen rows each pane occupies in THIS frame, which is not always its
+// budget: a pane (detail above all — a short message renders far fewer lines
+// than its budget, with no padding) can come in under budget, and the layout
+// must describe the frame actually returned rather than the ceiling that
+// merely bounds it.
+func buildLayout(haveRoster bool, rosterRows, rosterRenderedLen int, haveMessages bool, msgRows, logRenderedLen int, detailRenderedLen int, detailShown bool) frameLayout {
+	roster := paneRegion(0, haveRoster, rosterRows, rosterRenderedLen)
+
+	msgFirst := rosterRenderedLen + 1 // +1: the blank separator line
+	messages := paneRegion(msgFirst, haveMessages, msgRows, logRenderedLen)
+
+	layout := frameLayout{roster: roster, messages: messages, detailShown: detailShown}
+	if detailShown {
+		detailFirst := msgFirst + logRenderedLen + 1 // +1: the blank separator line
+		// RenderDetail has no column-header row and no placeholder-vs-data
+		// distinction that matters here (T3 gives the pane no cursor and no
+		// scroll — see frameLayout's doc): its first line is a header
+		// ("from → to", or the "(no message selected)" placeholder) and
+		// everything after is body, when there is a second line at all.
+		headerRows := min(1, detailRenderedLen)
+		layout.detail = paneLayout{
+			firstRow:   detailFirst,
+			headerRows: headerRows,
+			dataRows:   detailRenderedLen - headerRows,
+			totalRows:  detailRenderedLen,
+		}
+	}
+	return layout
+}
+
+// paneRegion is buildLayout's per-pane case split: no sample yet (the
+// "waiting for first sample" single line), too little budget to even fit the
+// header, an empty filtered list (the placeholder line), or the ordinary
+// header-plus-data-rows case. renderedLen is always the pane's ACTUAL
+// on-screen line count post-clamp, so a pane trimmed below its natural size
+// reports the geometry that is really on screen, not what it would have
+// wanted.
+func paneRegion(firstRow int, haveSample bool, filteredRows, renderedLen int) paneLayout {
+	if !haveSample {
+		return paneLayout{firstRow: firstRow, headerRows: renderedLen, totalRows: renderedLen}
+	}
+	if renderedLen < headerLines {
+		// Degenerate clamp (paneBudgets' avail<2 branch): even the column
+		// header did not survive. Every rendered line is "header" in the
+		// sense that none of it is a selectable row.
+		return paneLayout{firstRow: firstRow, headerRows: renderedLen, totalRows: renderedLen}
+	}
+	if filteredRows == 0 {
+		// The "(no agents)"/"(no messages)" placeholder: one real screen row
+		// beyond the header that is not a data row (see paneLayout doc).
+		return paneLayout{firstRow: firstRow, headerRows: headerLines, totalRows: renderedLen}
+	}
+	return paneLayout{
+		firstRow:   firstRow,
+		headerRows: headerLines,
+		dataRows:   renderedLen - headerLines,
+		totalRows:  renderedLen,
+	}
+}
+
+// hitTarget names which of the frame's regions a screen row belongs to.
+// hitDetail and hitNone both carry no further meaning in T3 — see
+// frameLayout's doc — but are named distinctly from each other so a future
+// task (T4) can tell "the detail pane, inert for now" from "no pane at all"
+// without re-deriving geometry.
+type hitTarget int
+
+const (
+	hitNone hitTarget = iota
+	hitRoster
+	hitMessages
+	hitDetail
+)
+
+// hitTest is sp032 T3's ONE place that converts a screen row into a pane and
+// an offset within it — every mouse handler in this file consumes its
+// result rather than doing its own arithmetic on a MouseMsg's Y. x is
+// deliberately not a parameter: the frame is a single full-width vertical
+// stack, so a column never selects a different pane, and a coordinate off
+// the right edge of the rendered content still names the same row a
+// terminal's cell grid would report it against.
+//
+// isData reports whether y landed on an actual selectable row (offset is
+// then that row's 0-based index within the pane's CURRENTLY VISIBLE data,
+// i.e. scroll + offset is the absolute row a caller should select). isData
+// is false for a header/column-header row, for the empty-list placeholder
+// row, and whenever target is hitNone or hitDetail — none of those is ever a
+// selection.
+func hitTest(layout frameLayout, y int) (target hitTarget, isData bool, offset int) {
+	if hit, ok := paneHit(layout.roster, y); ok {
+		return hitRoster, hit.isData, hit.offset
+	}
+	if hit, ok := paneHit(layout.messages, y); ok {
+		return hitMessages, hit.isData, hit.offset
+	}
+	if layout.detailShown {
+		if _, ok := paneHit(layout.detail, y); ok {
+			return hitDetail, false, 0
+		}
+	}
+	return hitNone, false, 0
+}
+
+type paneHitResult struct {
+	isData bool
+	offset int
+}
+
+// paneHit reports whether y falls anywhere within p's on-screen span
+// (ok==false covers both "above/below this pane" and, via the caller's
+// ordering in hitTest, "this row belongs to the separator between panes" —
+// a separator is simply a row no pane's span reaches).
+func paneHit(p paneLayout, y int) (paneHitResult, bool) {
+	rel := y - p.firstRow
+	if rel < 0 || rel >= p.totalRows {
+		return paneHitResult{}, false
+	}
+	if rel < p.headerRows {
+		return paneHitResult{}, true
+	}
+	dataOffset := rel - p.headerRows
+	if dataOffset < p.dataRows {
+		return paneHitResult{isData: true, offset: dataOffset}, true
+	}
+	// Beyond the real data rows but still inside the pane's span: the
+	// placeholder line (dataRows == 0, totalRows == headerRows+1). Focus
+	// only, per the edge case — never a selection of "(no agents)".
+	return paneHitResult{}, true
 }
 
 // paneLines predicts how many lines render.Render/render.RenderLog will

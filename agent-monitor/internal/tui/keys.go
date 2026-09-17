@@ -307,6 +307,47 @@ func (m *Model) moveCursor(delta int) {
 	}
 }
 
+// ClickPane is sp032 T3's left-press entry point: main.go's hit test has
+// already converted a screen (x, y) into (pane, isData, offset), and this is
+// the only place that turns THAT into model state. It focuses pane
+// unconditionally — including a header, column-header or placeholder press
+// (isData false) — and, only when isData is true, selects the row at that
+// pane's CURRENT scroll plus offset, clamped exactly like every other cursor
+// write in this file so a stale or out-of-range offset can never escape
+// [0, len-1].
+//
+// It deliberately does not check m.Editing. Every keyboard entry point
+// swallows runes into an open filter draft, but a mouse press is not a rune:
+// sp032 T3's edge case is that a click while Editing still moves focus and
+// selection, and the draft text is untouched either way since ClickPane
+// never reads or writes m.draft.
+func (m *Model) ClickPane(pane Pane, isData bool, offset int) {
+	m.Focus = pane
+	if !isData {
+		return
+	}
+	switch pane {
+	case PaneRoster:
+		m.RosterCursor = clamp(m.RosterScroll+offset, 0, maxIndex(m.RosterLen))
+	case PaneMessages:
+		m.MessagesCursor = clamp(m.MessagesScroll+offset, 0, maxIndex(m.MessagesLen))
+	}
+}
+
+// ScrollPane is sp032 T3's wheel entry point: it dispatches to Task 1's
+// ScrollRoster/ScrollMessages, which move scroll WITHOUT moving the cursor
+// and WITHOUT touching focus — so a wheel over an unfocused pane scrolls it
+// in place, exactly as the success criterion asks, through the one scroll
+// path T1 already built rather than a second one invented here.
+func (m *Model) ScrollPane(pane Pane, delta int) {
+	switch pane {
+	case PaneRoster:
+		m.ScrollRoster(delta)
+	case PaneMessages:
+		m.ScrollMessages(delta)
+	}
+}
+
 func (m *Model) toggleFocus() {
 	if m.Focus == PaneRoster {
 		m.Focus = PaneMessages

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-monitor/internal/render"
 	"agent-monitor/internal/source"
 	"agent-monitor/internal/tui"
 
@@ -345,13 +347,13 @@ func TestRenderFrame_DetailFollowsMessagesCursor(t *testing.T) {
 	// "→" only appears in the detail header (`from → to`), so checking for
 	// it distinguishes "the detail pane selected this sender" from "this
 	// sender merely appears as a log row", which would be true either way.
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, "alice →") {
 		t.Fatalf("expected the first message (cursor at 0) in the detail pane, got %v", lines)
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
-	lines = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, "carol →") {
 		t.Fatalf("expected the second message (cursor at 1) after moving down, got %v", lines)
 	}
@@ -364,7 +366,7 @@ func TestRenderFrame_EmptyMessageList_DetailShowsPlaceholder(t *testing.T) {
 	model := tui.NewModel()
 	msgs := &source.MessageSample{Messages: nil}
 
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, "no message selected") {
 		t.Fatalf("expected the detail placeholder with an empty message list, got %v", lines)
 	}
@@ -387,7 +389,7 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 	model.HandleKey(tui.Key{Rune: 'j'}) // select carol
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // off
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	// "→" only ever appears in the detail header (detailHeaderLine's
 	// `from → to`); the message pane's own SUBJECT column never contains it,
 	// so its absence is a precise "no detail region" check, distinct from
@@ -397,7 +399,7 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // on
-	lines = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, "carol →") {
 		t.Fatalf("expected carol still selected after toggling back on, got %v", lines)
 	}
@@ -411,7 +413,7 @@ func TestRenderFrame_TooShortForThreePanes_HidesDetailButKeepsHeaders(t *testing
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 5)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 5)
 	if containsSubstring(lines, "no message selected") {
 		t.Fatalf("height 5: expected detail hidden, got %v", lines)
 	}
@@ -431,7 +433,7 @@ func TestRenderFrame_OnceHeight_NoDetailNoToggle(t *testing.T) {
 	model := tui.NewModel() // DetailVisible defaults true
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 0)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 0)
 	if containsSubstring(lines, "no message selected") || containsSubstring(lines, "alice →") {
 		t.Fatalf("height 0 (--once) must never render a detail pane, got %v", lines)
 	}
@@ -454,11 +456,11 @@ func TestRenderFrame_ProjectFiltersRosterButNotMessages(t *testing.T) {
 	}}
 
 	unfiltered := tui.NewModel()
-	unfilteredLines := renderFrame(unfiltered, roster, false, msgs, false, time.Now(), 80, 40)
+	unfilteredLines, _ := renderFrame(unfiltered, roster, false, msgs, false, time.Now(), 80, 40)
 
 	filtered := tui.NewModel()
 	filtered.Project = "dotfiles"
-	filteredLines := renderFrame(filtered, roster, false, msgs, false, time.Now(), 80, 40)
+	filteredLines, _ := renderFrame(filtered, roster, false, msgs, false, time.Now(), 80, 40)
 
 	// Roster: --project must actually shrink it.
 	if !containsSubstring(unfilteredLines, "peer-copacks") {
@@ -511,7 +513,7 @@ func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
 	}
 	model.HandleKey(tui.Key{Special: tui.KeyEnter})
 
-	lines := renderFrame(model, roster, false, nil, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, nil, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, "peer-one") {
 		t.Fatalf("expected the row matching both --project and the filter, got %v", lines)
 	}
@@ -576,14 +578,14 @@ func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		model.HandleKey(tui.Key{Rune: 'j'})
 	}
-	lines := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
 	if !logRowHasSender(lines, "sender30") {
 		t.Fatalf("height 40: expected the cursor's row visible before the resize, got %v", lines)
 	}
 
 	// A single draw at a much shorter height. sender30 must be in THIS
 	// frame's message pane.
-	lines = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8)
+	lines, _ = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8)
 	if !logRowHasSender(lines, "sender30") {
 		t.Fatalf("height 8: the cursor's row is absent from the message pane in the frame that observed the resize, got %v", lines)
 	}
@@ -619,7 +621,7 @@ func TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt(t *testing.T) {
 	// A committed filter cuts the list to a single row. This frame must not
 	// panic slicing it.
 	model.Filter = tui.Filter{Set: true, Query: "sender07"}
-	lines := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
 
 	if model.MessagesScroll != 0 {
 		t.Fatalf("expected scroll clamped to 0 for a 1-row list, got %d", model.MessagesScroll)
@@ -661,7 +663,7 @@ func TestRenderFrame_FocusedPaneHeaderIsMarked(t *testing.T) {
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, testStyleOn+"agents") {
 		t.Fatalf("roster has focus, so its header must be marked; got %v", lines)
 	}
@@ -670,7 +672,7 @@ func TestRenderFrame_FocusedPaneHeaderIsMarked(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Special: tui.KeyTab})
-	lines = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
 	if !containsSubstring(lines, testStyleOn+"messages") {
 		t.Fatalf("after tab the messages pane has focus and must be marked; got %v", lines)
 	}
@@ -687,7 +689,7 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 		sampleMessage("carol", `"second"`),
 	}}
 
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	marked := styledLines(lines)
 	if !anyContains(marked, "alice") {
 		t.Fatalf("cursor at 0: alice's LOG ROW must be marked, got marked=%v all=%v", marked, lines)
@@ -697,7 +699,7 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
-	lines = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	marked = styledLines(lines)
 	if !anyContains(marked, "carol") {
 		t.Fatalf("cursor at 1: carol's row must be marked, got marked=%v all=%v", marked, lines)
@@ -711,7 +713,7 @@ func TestRenderFrame_EmptyListHasNoSelectionMark(t *testing.T) {
 	model.Focus = tui.PaneMessages
 	msgs := &source.MessageSample{Messages: nil}
 
-	lines := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	for _, l := range styledLines(lines) {
 		if strings.Contains(l, "(no messages)") {
 			t.Fatalf("the empty-list placeholder must not be marked as a selected row: %q", l)
@@ -1166,7 +1168,8 @@ func TestView_EqualsRenderFrameOutput(t *testing.T) {
 	// An independent model at the same starting state, so the comparison is
 	// "same model, same samples, same string" rather than a second pass over
 	// state the first render already mutated.
-	want := strings.Join(renderFrame(tui.NewModel(), census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), now, 100, 30), "\n")
+	wantLines, _ := renderFrame(tui.NewModel(), census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), now, 100, 30)
+	want := strings.Join(wantLines, "\n")
 
 	if got != want {
 		t.Errorf("View() differs from renderFrame's joined lines:\n got %q\nwant %q", got, want)
@@ -1192,5 +1195,584 @@ func TestInteractiveExitError_InterruptIsACleanExit(t *testing.T) {
 	real := errors.New("tty exploded")
 	if err := interactiveExitError(real); !errors.Is(err, real) {
 		t.Errorf("interactiveExitError(%v) = %v, want it passed through", real, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T3: pane geometry and the mouse.
+//
+// Most of these tests drive renderFrame -> hitTest -> Model.ClickPane/
+// ScrollPane directly, the same way sp031/sp032's existing renderFrame tests
+// hand-build a sample rather than exec a real agent-census/pi-worker: it
+// proves the arithmetic (hitTest's coordinate conversion, ClickPane/
+// ScrollPane's model writes) without a subprocess. One test
+// (TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame) goes
+// through the real shell.Update dispatch with stub binaries, the way
+// TestView_EqualsRenderFrameOutput does, to prove main.go's tea.MouseMsg case
+// actually calls hitTest/ClickPane rather than merely that they would work if
+// called.
+// ---------------------------------------------------------------------------
+
+// wideRoster/wideMessages build samples long enough to overflow any budget
+// this suite exercises, so a given height forces a real clamp rather than
+// leaving a pane's natural length untouched.
+func wideRoster(n int) *source.Sample {
+	rows := make([]source.Row, n)
+	for i := range rows {
+		rows[i] = source.Row{UID: fmt.Sprintf("agent%02d", i), Name: fmt.Sprintf("agent%02d", i)}
+	}
+	return &source.Sample{Rows: rows}
+}
+
+func wideMessages(n int) *source.MessageSample {
+	msgs := make([]source.Message, n)
+	for i := range msgs {
+		msgs[i] = sampleMessage(fmt.Sprintf("sender%02d", i), `"x"`)
+	}
+	return &source.MessageSample{Messages: msgs}
+}
+
+// TestLayout_MatchesPaneBudgets is success criterion 1: renderFrame's second
+// return value names each visible pane's first row, header height and
+// data-row count, and every one of those numbers must equal what
+// paneBudgets already allocated — never a second arithmetic on height.
+func TestLayout_MatchesPaneBudgets(t *testing.T) {
+	roster := wideRoster(100)
+	msgs := wideMessages(100)
+
+	// wantSplit mirrors the CONTRACT paneRegion implements (header rows vs
+	// data rows for an ordinary, non-empty, non-degenerate pane) so the test
+	// does not simply call paneRegion to check paneRegion. The degenerate
+	// (renderedLen < headerLines) case is exercised at the smallest heights.
+	wantSplit := func(renderedLen int) (headerRows, dataRows int) {
+		if renderedLen < headerLines {
+			return renderedLen, 0
+		}
+		return headerLines, renderedLen - headerLines
+	}
+
+	for _, height := range []int{5, 6, 7, 8, 10, 16, 24, 32, 40, 64, 80} {
+		for _, detailVisible := range []bool{false, true} {
+			t.Run(fmt.Sprintf("h=%d/detail=%v", height, detailVisible), func(t *testing.T) {
+				model := tui.NewModel()
+				model.DetailVisible = detailVisible
+
+				lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+
+				rosterLines := paneLines(true, 100)
+				logLines := paneLines(true, 100)
+				rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(rosterLines, logLines, height, detailVisible)
+
+				wantRosterLen := min(rosterLines, rosterBudget)
+				wantLogLen := min(logLines, logBudget)
+
+				if layout.detailShown != detailShown {
+					t.Fatalf("detailShown = %v, want %v", layout.detailShown, detailShown)
+				}
+
+				if layout.roster.firstRow != 0 {
+					t.Errorf("roster.firstRow = %d, want 0", layout.roster.firstRow)
+				}
+				wantRosterHeader, wantRosterData := wantSplit(wantRosterLen)
+				if layout.roster.headerRows != wantRosterHeader {
+					t.Errorf("roster.headerRows = %d, want %d", layout.roster.headerRows, wantRosterHeader)
+				}
+				if layout.roster.dataRows != wantRosterData {
+					t.Errorf("roster.dataRows = %d, want %d", layout.roster.dataRows, wantRosterData)
+				}
+				if layout.roster.totalRows != wantRosterLen {
+					t.Errorf("roster.totalRows = %d, want %d", layout.roster.totalRows, wantRosterLen)
+				}
+
+				wantMsgFirst := wantRosterLen + 1
+				if layout.messages.firstRow != wantMsgFirst {
+					t.Errorf("messages.firstRow = %d, want %d", layout.messages.firstRow, wantMsgFirst)
+				}
+				wantMsgHeader, wantMsgData := wantSplit(wantLogLen)
+				if layout.messages.headerRows != wantMsgHeader {
+					t.Errorf("messages.headerRows = %d, want %d", layout.messages.headerRows, wantMsgHeader)
+				}
+				if layout.messages.dataRows != wantMsgData {
+					t.Errorf("messages.dataRows = %d, want %d", layout.messages.dataRows, wantMsgData)
+				}
+				if layout.messages.totalRows != wantLogLen {
+					t.Errorf("messages.totalRows = %d, want %d", layout.messages.totalRows, wantLogLen)
+				}
+
+				wantTotal := wantMsgFirst + wantLogLen
+				if detailShown {
+					// RenderDetail's own output length is the ground truth
+					// here, not detailBudget: a short message (the fixture
+					// below is two lines) renders fewer lines than its
+					// budget, with no padding to fill it — exactly the bug
+					// this assertion exists to catch.
+					wantDetailLines := render.RenderDetail(selectedMessage(model, msgs), 80, detailBudget)
+					wantDetailLen := len(wantDetailLines)
+
+					wantDetailFirst := wantMsgFirst + wantLogLen + 1
+					if layout.detail.firstRow != wantDetailFirst {
+						t.Errorf("detail.firstRow = %d, want %d", layout.detail.firstRow, wantDetailFirst)
+					}
+					wantDetailHeader := min(1, wantDetailLen)
+					if layout.detail.headerRows != wantDetailHeader {
+						t.Errorf("detail.headerRows = %d, want %d", layout.detail.headerRows, wantDetailHeader)
+					}
+					if want := wantDetailLen - wantDetailHeader; layout.detail.dataRows != want {
+						t.Errorf("detail.dataRows = %d, want %d", layout.detail.dataRows, want)
+					}
+					if layout.detail.totalRows != wantDetailLen {
+						t.Errorf("detail.totalRows = %d, want %d", layout.detail.totalRows, wantDetailLen)
+					}
+					wantTotal += 1 + wantDetailLen
+				}
+				if len(lines) != wantTotal {
+					t.Errorf("len(lines) = %d, want %d (layout must describe the ACTUAL returned frame)", len(lines), wantTotal)
+				}
+			})
+		}
+	}
+}
+
+// TestMouse_ClickOnDataRowSelectsThatRow is success criterion 2's data-row
+// half, over pane x row offset x scroll offset, so a click at a scrolled
+// offset is proven rather than assumed (a click at scroll 0 cannot
+// distinguish "selects the clicked row" from "selects the absolute row
+// index").
+func TestMouse_ClickOnDataRowSelectsThatRow(t *testing.T) {
+	cases := []struct {
+		name  string
+		focus tui.Pane
+	}{
+		{"roster", tui.PaneRoster},
+		{"messages", tui.PaneMessages},
+	}
+
+	for _, tc := range cases {
+		for _, scroll := range []int{0, 3, 10} {
+			for _, offset := range []int{0, 2, 5} {
+				t.Run(fmt.Sprintf("%s/scroll=%d/offset=%d", tc.name, scroll, offset), func(t *testing.T) {
+					model := tui.NewModel()
+					model.DetailVisible = false
+					roster := wideRoster(50)
+					msgs := wideMessages(50)
+
+					// Settle a frame once so the pane reports a real
+					// viewport (sp032 T1's own tests use this same
+					// draw-then-act sequencing), THEN scroll.
+					renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+					if tc.focus == tui.PaneRoster {
+						model.ScrollRoster(scroll)
+					} else {
+						model.ScrollMessages(scroll)
+					}
+
+					_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+
+					pane := layout.roster
+					wantHit := hitRoster
+					if tc.focus == tui.PaneMessages {
+						pane = layout.messages
+						wantHit = hitMessages
+					}
+					if offset >= pane.dataRows {
+						t.Fatalf("test setup: offset %d exceeds this pane's %d visible data rows", offset, pane.dataRows)
+					}
+					y := pane.firstRow + pane.headerRows + offset
+
+					gotHit, isData, gotOffset := hitTest(layout, y)
+					if gotHit != wantHit || !isData || gotOffset != offset {
+						t.Fatalf("hitTest(y=%d) = (%v, isData=%v, offset=%d), want (%v, true, %d)",
+							y, gotHit, isData, gotOffset, wantHit, offset)
+					}
+
+					startFocus := tui.PaneMessages
+					if tc.focus == tui.PaneMessages {
+						startFocus = tui.PaneRoster
+					}
+					model.Focus = startFocus
+					model.ClickPane(tc.focus, isData, gotOffset)
+
+					if model.Focus != tc.focus {
+						t.Errorf("Focus = %v, want %v", model.Focus, tc.focus)
+					}
+					wantCursor := scroll + offset
+					gotCursor := model.RosterCursor
+					if tc.focus == tui.PaneMessages {
+						gotCursor = model.MessagesCursor
+					}
+					if gotCursor != wantCursor {
+						t.Errorf("cursor = %d, want scroll(%d)+offset(%d) = %d", gotCursor, scroll, offset, wantCursor)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestMouse_ClickOnHeaderFocusesWithoutSelecting is success criterion 2's
+// header half: both the status header line and the column-header line focus
+// the pane and leave its cursor exactly where it was.
+func TestMouse_ClickOnHeaderFocusesWithoutSelecting(t *testing.T) {
+	model := tui.NewModel()
+	model.DetailVisible = false
+	roster := wideRoster(20)
+	msgs := wideMessages(20)
+
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+
+	model.Focus = tui.PaneMessages
+	for i := 0; i < 4; i++ {
+		model.HandleKey(tui.Key{Rune: 'j'})
+	}
+	if model.MessagesCursor != 4 {
+		t.Fatalf("test setup: MessagesCursor = %d, want 4", model.MessagesCursor)
+	}
+
+	for _, y := range []int{layout.messages.firstRow, layout.messages.firstRow + 1} {
+		model.Focus = tui.PaneRoster // so the click has focus to change
+
+		target, isData, _ := hitTest(layout, y)
+		if target != hitMessages || isData {
+			t.Fatalf("hitTest(y=%d) = (%v, isData=%v), want (hitMessages, false)", y, target, isData)
+		}
+
+		model.ClickPane(tui.PaneMessages, isData, 0)
+		if model.Focus != tui.PaneMessages {
+			t.Errorf("y=%d: Focus = %v, want PaneMessages", y, model.Focus)
+		}
+		if model.MessagesCursor != 4 {
+			t.Errorf("y=%d: MessagesCursor = %d, want unchanged 4", y, model.MessagesCursor)
+		}
+	}
+}
+
+// TestMouse_ClickOnPlaceholderDoesNotSelect is the edge case: a click on the
+// "(no messages)" line focuses the pane but never selects the placeholder as
+// though it were a row.
+func TestMouse_ClickOnPlaceholderDoesNotSelect(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneRoster
+	model.DetailVisible = false
+	msgs := &source.MessageSample{Messages: []source.Message{}}
+
+	_, layout := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 24)
+
+	y := layout.messages.firstRow + layout.messages.headerRows // the "(no messages)" line
+	target, isData, _ := hitTest(layout, y)
+	if target != hitMessages || isData {
+		t.Fatalf("hitTest(placeholder) = (%v, isData=%v), want (hitMessages, false)", target, isData)
+	}
+
+	model.ClickPane(tui.PaneMessages, isData, 0)
+	if model.Focus != tui.PaneMessages {
+		t.Errorf("Focus = %v, want PaneMessages", model.Focus)
+	}
+	if model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 (nothing to select)", model.MessagesCursor)
+	}
+}
+
+// TestMouse_WheelScrollsPaneUnderPointerWithoutChangingFocus is success
+// criterion 3: the wheel moves the scroll of the pane UNDER THE POINTER,
+// even when that pane does not have focus, and touches nothing else — not
+// focus, not either pane's cursor, not the other pane's scroll.
+func TestMouse_WheelScrollsPaneUnderPointerWithoutChangingFocus(t *testing.T) {
+	model := tui.NewModel()
+	model.DetailVisible = false
+	model.Focus = tui.PaneRoster // focus differs from the pane under the pointer
+	roster := wideRoster(50)
+	msgs := wideMessages(50)
+
+	renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24) // settle the viewport
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+
+	y := layout.messages.firstRow + layout.messages.headerRows + 2
+	target, _, _ := hitTest(layout, y)
+	if target != hitMessages {
+		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
+	}
+
+	wantFocus := model.Focus
+	wantRosterCursor, wantMessagesCursor := model.RosterCursor, model.MessagesCursor
+	wantRosterScroll := model.RosterScroll
+
+	model.ScrollPane(tui.PaneMessages, 3)
+
+	if model.Focus != wantFocus {
+		t.Errorf("Focus changed: got %v, want %v", model.Focus, wantFocus)
+	}
+	if model.RosterCursor != wantRosterCursor {
+		t.Errorf("RosterCursor changed: got %d, want %d", model.RosterCursor, wantRosterCursor)
+	}
+	if model.MessagesCursor != wantMessagesCursor {
+		t.Errorf("MessagesCursor changed: got %d, want %d", model.MessagesCursor, wantMessagesCursor)
+	}
+	if model.RosterScroll != wantRosterScroll {
+		t.Errorf("the pane NOT under the pointer scrolled: RosterScroll %d -> %d", wantRosterScroll, model.RosterScroll)
+	}
+	if model.MessagesScroll != 3 {
+		t.Errorf("MessagesScroll = %d, want 3 (the wheel delta)", model.MessagesScroll)
+	}
+}
+
+// TestMouse_WheelOverDetailAndEmptyPaneIsSafe covers two of the edge cases
+// explicitly: a wheel over the (visible) detail pane must not panic or
+// fabricate a scroll authority — sp032 T3 gives the detail pane no cursor and
+// no scroll (T4's job) — and a wheel over a pane showing only the
+// placeholder must leave its scroll at 0, not go negative.
+func TestMouse_WheelOverDetailAndEmptyPaneIsSafe(t *testing.T) {
+	model := tui.NewModel()
+	model.DetailVisible = true
+	roster := wideRoster(3)
+	msgs := &source.MessageSample{Messages: []source.Message{}}
+
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+	if !layout.detailShown {
+		t.Fatalf("test setup: expected detail shown at height 24")
+	}
+
+	if target, _, _ := hitTest(layout, layout.detail.firstRow); target != hitDetail {
+		t.Fatalf("test setup: hitTest(detail) = %v, want hitDetail", target)
+	}
+	// hitDetail has no case in shell.handleMouse's switch — nothing to call.
+	// Asserting the target alone is the safety property here: T3 must never
+	// map a detail-pane coordinate onto PaneRoster/PaneMessages.
+
+	my := layout.messages.firstRow + layout.messages.headerRows
+	target, isData, _ := hitTest(layout, my)
+	if target != hitMessages || isData {
+		t.Fatalf("hitTest(placeholder) = (%v, isData=%v), want (hitMessages, false)", target, isData)
+	}
+	model.ScrollPane(tui.PaneMessages, -3)
+	if model.MessagesScroll != 0 {
+		t.Errorf("MessagesScroll = %d, want 0 for an empty list", model.MessagesScroll)
+	}
+	model.ScrollPane(tui.PaneMessages, 3)
+	if model.MessagesScroll != 0 {
+		t.Errorf("MessagesScroll = %d, want 0 for an empty list", model.MessagesScroll)
+	}
+}
+
+// TestMouse_ClickWhileEditingMovesSelectionWithoutCancellingDraft is the edge
+// case: unlike every keyboard entry point (which swallows runes into an open
+// filter draft — HandleKey checks Editing first), a mouse press is not a
+// rune. ClickPane must move focus and selection even while Editing is true,
+// and the draft itself (observable only via the eventual committed Filter)
+// must survive untouched.
+func TestMouse_ClickWhileEditingMovesSelectionWithoutCancellingDraft(t *testing.T) {
+	model := tui.NewModel()
+	model.DetailVisible = false
+	roster := wideRoster(20)
+	msgs := wideMessages(20)
+
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+
+	model.Focus = tui.PaneRoster
+	model.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "hello" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+	if !model.Editing {
+		t.Fatalf("test setup: expected Editing true after `/hello`")
+	}
+
+	y := layout.messages.firstRow + layout.messages.headerRows + 2
+	target, isData, offset := hitTest(layout, y)
+	if target != hitMessages || !isData {
+		t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (hitMessages, true)", y, target, isData)
+	}
+	model.ClickPane(tui.PaneMessages, isData, offset)
+
+	if model.Focus != tui.PaneMessages {
+		t.Errorf("Focus = %v, want PaneMessages: a click while Editing must still move focus", model.Focus)
+	}
+	if model.MessagesCursor != offset {
+		t.Errorf("MessagesCursor = %d, want %d: a click while Editing must still select", model.MessagesCursor, offset)
+	}
+	if !model.Editing {
+		t.Errorf("Editing = false, want true: the draft must not be cancelled by a click")
+	}
+
+	// Commit the draft now and confirm it was never touched by the click.
+	model.HandleKey(tui.Key{Special: tui.KeyEnter})
+	if model.Filter.Query != "hello" {
+		t.Errorf("Filter.Query = %q, want %q: the click must not have edited the draft", model.Filter.Query, "hello")
+	}
+}
+
+// TestMouse_ClickAtTopRowAndBeyondWidthIsSafe is the y==0 and
+// x-beyond-rendered-width edge cases: y==0 is the very first line of the
+// frame (the roster's own status header) and must focus, not panic or
+// underflow; x is not part of hitTest's contract at all (see its doc), so an
+// arbitrarily large x must not change the result.
+func TestMouse_ClickAtTopRowAndBeyondWidthIsSafe(t *testing.T) {
+	model := tui.NewModel()
+	model.DetailVisible = false
+	model.Focus = tui.PaneMessages
+	roster := wideRoster(20)
+	msgs := wideMessages(20)
+
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+
+	for _, x := range []int{0, 79, 1000, -5} {
+		target, isData, _ := hitTest(layout, 0)
+		if target != hitRoster || isData {
+			t.Fatalf("x=%d: hitTest(y=0) = (%v, isData=%v), want (hitRoster, false)", x, target, isData)
+		}
+	}
+
+	model.ClickPane(tui.PaneRoster, false, 0)
+	if model.Focus != tui.PaneRoster {
+		t.Errorf("Focus = %v, want PaneRoster after a y==0 press", model.Focus)
+	}
+}
+
+// TestMouse_MotionEventsIgnored is the edge case that cell-motion reporting
+// sends during a drag: shell.handleMouse must return before doing anything
+// else, so a motion "press" over a pane's header must not even focus it.
+func TestMouse_MotionEventsIgnored(t *testing.T) {
+	s := newTestShell(t)
+	s.model.SetRosterLen(5)
+	s.model.SetMessagesLen(5)
+	s.model.Focus = tui.PaneMessages
+	s.width, s.height = 80, 24
+
+	want := *s.model
+	s.Update(tea.MouseMsg{X: 0, Y: 0, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
+
+	if *s.model != want {
+		t.Errorf("a motion event changed model state:\n got %+v\nwant %+v", *s.model, want)
+	}
+}
+
+// wantMaxTop restates ScrollRoster/ScrollMessages's documented clamp bound
+// (keys.go's maxTop) so this test can check against the CONTRACT without
+// reaching into tui's unexported helper.
+func wantMaxTop(length, viewport int) int {
+	if viewport <= 0 {
+		if length <= 0 {
+			return 0
+		}
+		return length - 1
+	}
+	if length <= viewport {
+		return 0
+	}
+	return length - viewport
+}
+
+// TestMouse_NeverProducesOutOfRangeCursorOrScroll is success criterion 5: for
+// randomised (x, y) over randomised heights and row counts, no click or wheel
+// may leave a cursor outside [0, len-1] or a scroll outside its clamp. x is
+// generated (and ignored, per hitTest's doc) so the property is checked
+// exactly as the task states it.
+func TestMouse_NeverProducesOutOfRangeCursorOrScroll(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+
+	for i := 0; i < 500; i++ {
+		height := rng.Intn(80) + 1
+		rosterRows := rng.Intn(60)
+		msgRows := rng.Intn(60)
+		detailVisible := rng.Intn(2) == 0
+
+		model := tui.NewModel()
+		model.DetailVisible = detailVisible
+		roster := wideRoster(rosterRows)
+		msgs := wideMessages(msgRows)
+
+		_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+
+		_ = rng.Intn(200) - 20 // x: generated for fidelity to the property, unused by hitTest
+		y := rng.Intn(height+20) - 10
+
+		target, isData, offset := hitTest(layout, y)
+		switch target {
+		case hitRoster:
+			model.ClickPane(tui.PaneRoster, isData, offset)
+		case hitMessages:
+			model.ClickPane(tui.PaneMessages, isData, offset)
+		}
+
+		if model.RosterCursor < 0 || model.RosterCursor > maxIndexFor(model.RosterLen) {
+			t.Fatalf("iter %d: RosterCursor %d out of [0,%d)", i, model.RosterCursor, model.RosterLen)
+		}
+		if model.MessagesCursor < 0 || model.MessagesCursor > maxIndexFor(model.MessagesLen) {
+			t.Fatalf("iter %d: MessagesCursor %d out of [0,%d)", i, model.MessagesCursor, model.MessagesLen)
+		}
+
+		delta := rng.Intn(7) - 3
+		switch target {
+		case hitRoster:
+			model.ScrollPane(tui.PaneRoster, delta)
+		case hitMessages:
+			model.ScrollPane(tui.PaneMessages, delta)
+		}
+
+		if model.RosterScroll < 0 || model.RosterScroll > wantMaxTop(model.RosterLen, model.RosterViewport) {
+			t.Fatalf("iter %d: RosterScroll %d out of clamp [0,%d]", i, model.RosterScroll, wantMaxTop(model.RosterLen, model.RosterViewport))
+		}
+		if model.MessagesScroll < 0 || model.MessagesScroll > wantMaxTop(model.MessagesLen, model.MessagesViewport) {
+			t.Fatalf("iter %d: MessagesScroll %d out of clamp [0,%d]", i, model.MessagesScroll, wantMaxTop(model.MessagesLen, model.MessagesViewport))
+		}
+	}
+}
+
+func maxIndexFor(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return n - 1
+}
+
+// TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame is the
+// end-to-end proof that main.go's tea.MouseMsg case is wired to hitTest and
+// Model.ClickPane — every other sp032 T3 test above drives that pair
+// directly, which proves the arithmetic but not that Update ever reaches it.
+// It also proves criterion 4: clicking a message row updates the detail pane
+// in the SAME frame, since View() re-derives selectedMessage from whatever
+// Update just set.
+func TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[{\"from\":\"alice\",\"to\":[\"bob\"],\"content\":\"first message\",\"at\":\"2026-09-17T10:00:00Z\"},{\"from\":\"carol\",\"to\":[\"bob\"],\"content\":\"second message\",\"at\":\"2026-09-17T10:00:01Z\"}]'\n")
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("setenv PATH: %v", err)
+	}
+	defer os.Setenv("PATH", oldPath)
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	model.Focus = tui.PaneRoster
+	model.DetailVisible = true
+	s := newShell(ctx, model, census, msgs)
+	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
+
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	_, layout := renderFrame(s.model, census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), s.now(), s.width, s.height)
+	y := layout.messages.firstRow + layout.messages.headerRows + 1 // carol, the second message row
+
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+
+	if s.model.Focus != tui.PaneMessages {
+		t.Fatalf("Focus = %v, want PaneMessages after clicking a message row", s.model.Focus)
+	}
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("MessagesCursor = %d, want 1 (the clicked row)", s.model.MessagesCursor)
+	}
+
+	view := s.View()
+	if !strings.Contains(view, "carol →") {
+		t.Fatalf("expected the detail pane to show carol's message in the SAME frame, got:\n%s", view)
+	}
+	if strings.Contains(view, "alice →") {
+		t.Fatalf("expected alice's message no longer selected, got:\n%s", view)
 	}
 }
