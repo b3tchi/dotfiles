@@ -19,10 +19,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp032|agent-monitor-mouse-and-scrollable-panes]]
-
-
 ## ready
+
+- [[sp032|agent-monitor-mouse-and-scrollable-panes]]
 
 
 - [[sp012|live-region-xshape-overlay]]
