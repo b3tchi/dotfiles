@@ -2405,3 +2405,147 @@ func TestDetail_WideSingleLinePayloadWrapsAndScrolls(t *testing.T) {
 		t.Fatalf("scrolling a 4000-cell single-line payload showed the same first row %q", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// sp032 T5: paging keys on all three panes.
+// ---------------------------------------------------------------------------
+
+// TestUpdate_PagingKeysReachTheFocusedPane is T5 criterion 1 and 2 driven
+// through the REAL dispatch path — a tea.KeyMsg into shell.Update over wired
+// monitors — rather than by calling a tui.Model method and asserting the
+// value just passed in. Home and End were not decoded at all before this
+// task: a model that pages correctly behind a translateKey that drops the
+// event is a feature no operator can reach, and only an event-level test
+// says so.
+//
+// The pane is 60 rows deep in a 30-row terminal, so the roster viewport is a
+// real number well under the row count and a page is a distinguishable jump
+// rather than a clamp to the end.
+func TestUpdate_PagingKeysReachTheFocusedPane(t *testing.T) {
+	t.Run("pgdn advances the roster by its viewport minus one", func(t *testing.T) {
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		vp := s.model.RosterViewport
+		if vp < 3 {
+			t.Fatalf("setup: roster viewport = %d, want a pageable pane", vp)
+		}
+		s.Update(key(tea.KeyPgDown))
+		if want := vp - 1; s.model.RosterCursor != want {
+			t.Errorf("RosterCursor = %d after PgDn with viewport %d, want %d", s.model.RosterCursor, vp, want)
+		}
+	})
+
+	t.Run("end then home walk the roster to its ends", func(t *testing.T) {
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		last := s.model.RosterLen - 1
+		if last <= 0 {
+			t.Fatalf("setup: RosterLen = %d", s.model.RosterLen)
+		}
+
+		s.Update(key(tea.KeyEnd))
+		if s.model.RosterCursor != last {
+			t.Errorf("RosterCursor = %d after End, want the last row %d", s.model.RosterCursor, last)
+		}
+		s.Update(key(tea.KeyHome))
+		if s.model.RosterCursor != 0 {
+			t.Errorf("RosterCursor = %d after Home, want 0", s.model.RosterCursor)
+		}
+	})
+
+	t.Run("G is End through the real path", func(t *testing.T) {
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		last := s.model.RosterLen - 1
+		s.Update(runeKey('G'))
+		if s.model.RosterCursor != last {
+			t.Errorf("RosterCursor = %d after G, want %d", s.model.RosterCursor, last)
+		}
+	})
+
+	t.Run("the message pane pages once it has focus", func(t *testing.T) {
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		s.Update(key(tea.KeyTab))
+		if s.model.Focus != tui.PaneMessages {
+			t.Fatalf("setup: Focus = %v after one tab, want PaneMessages", s.model.Focus)
+		}
+		settleLayout(s)
+		vp := s.model.MessagesViewport
+		if vp < 3 {
+			t.Fatalf("setup: messages viewport = %d, want a pageable pane", vp)
+		}
+		s.Update(key(tea.KeyPgDown))
+		if want := vp - 1; s.model.MessagesCursor != want {
+			t.Errorf("MessagesCursor = %d after PgDn with viewport %d, want %d", s.model.MessagesCursor, vp, want)
+		}
+		if s.model.RosterCursor != 0 {
+			t.Errorf("PgDn on the message pane moved the roster to %d", s.model.RosterCursor)
+		}
+	})
+
+	t.Run("home and end on a focused detail pane leave the message cursor alone", func(t *testing.T) {
+		// Criterion 4 at the event level: the detail pane renders whatever
+		// the message cursor selects, so End reaching that cursor would
+		// change the message on screen while the reader is paging its body.
+		s := newDetailShell(t, 6, 60, 100, 40)
+		s.Update(key(tea.KeyTab)) // messages
+		s.Update(key(tea.KeyPgDown))
+		settleLayout(s)
+		selected := s.model.MessagesCursor
+		if selected == 0 {
+			t.Fatalf("setup: MessagesCursor still 0 after PgDn on the message pane")
+		}
+		s.Update(key(tea.KeyTab)) // messages -> detail
+		if s.model.Focus != tui.PaneDetail {
+			t.Fatalf("setup: Focus = %v after a second tab, want PaneDetail", s.model.Focus)
+		}
+		settleLayout(s)
+
+		headerBefore, _ := detailPaneLines(t, s)
+		for _, k := range []tea.KeyMsg{key(tea.KeyEnd), key(tea.KeyHome), key(tea.KeyPgDown), runeKey('G')} {
+			s.Update(k)
+			if s.model.MessagesCursor != selected {
+				t.Fatalf("key %v on the detail pane moved MessagesCursor %d -> %d", k, selected, s.model.MessagesCursor)
+			}
+		}
+		if header, _ := detailPaneLines(t, s); header != headerBefore {
+			t.Errorf("the detail header changed under the reader: %q -> %q", headerBefore, header)
+		}
+	})
+
+	t.Run("end reaches the bottom of a focused detail body", func(t *testing.T) {
+		s := newDetailShell(t, 3, 120, 100, 40)
+		focusDetail(t, s)
+		settleLayout(s)
+		if s.model.DetailLen <= s.model.DetailViewport {
+			t.Fatalf("setup: body %d lines in a %d-row window, want a scrollable body",
+				s.model.DetailLen, s.model.DetailViewport)
+		}
+		s.Update(key(tea.KeyEnd))
+		if want := s.model.DetailLen - s.model.DetailViewport; s.model.DetailScroll != want {
+			t.Errorf("DetailScroll = %d after End, want the last full page %d", s.model.DetailScroll, want)
+		}
+		s.Update(key(tea.KeyHome))
+		if s.model.DetailScroll != 0 {
+			t.Errorf("DetailScroll = %d after Home, want 0", s.model.DetailScroll)
+		}
+	})
+
+	t.Run("paging keys are swallowed by an open filter draft", func(t *testing.T) {
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		s.Update(runeKey('/'))
+		before := s.model.RosterCursor
+		for _, k := range []tea.KeyMsg{key(tea.KeyEnd), key(tea.KeyPgDown), key(tea.KeyHome), key(tea.KeyPgUp), runeKey('G')} {
+			s.Update(k)
+			if s.model.RosterCursor != before {
+				t.Fatalf("key %v moved RosterCursor %d -> %d while a draft was open", k, before, s.model.RosterCursor)
+			}
+		}
+		s.Update(key(tea.KeyEnter))
+		if s.model.Filter.Query != "G" {
+			t.Errorf("committed query = %q, want %q — only the rune belongs to the draft", s.model.Filter.Query, "G")
+		}
+	})
+}

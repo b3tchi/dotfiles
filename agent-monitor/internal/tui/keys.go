@@ -505,14 +505,111 @@ func (m *Model) hideDetail() {
 }
 
 // detailPage is how far PgUp/PgDn move the detail body: one full window, or
-// a single line before any viewport has been reported. Task 5 generalises
-// paging to the other two panes; this task decodes it for the detail pane
-// alone.
+// a single line before any viewport has been reported.
+//
+// A FULL window here, against listPage's window-minus-one for the two list
+// panes, is sp032 T5 criterion 1 as written and not an inconsistency. The
+// list panes keep one overlapping row because a reader re-finds their place
+// by the row they were already looking at, and that row carries a selection
+// the cursor must land relative to. The detail pane has no cursor and no
+// selectable row, so there is nothing to land relative to and a full window
+// is simply the page.
 func (m *Model) detailPage() int {
 	if m.DetailViewport > 0 {
 		return m.DetailViewport
 	}
 	return 1
+}
+
+// listPage is how far PgUp/PgDn move a LIST pane's cursor: one window minus
+// the overlapping row, floored at one row.
+//
+// The floor is the whole reason this is a function. viewport-1 is -1 when no
+// viewport has been reported (the --once path, and every frame before the
+// first render) and 0 for a pane collapsed to a single row; a raw viewport-1
+// would make PgDn page UP in the first case and do nothing at all in the
+// second. Paging always moves at least one row in the direction it names.
+func listPage(viewport int) int {
+	step := viewport - 1
+	if step < 1 {
+		return 1
+	}
+	return step
+}
+
+// PageUp and PageDown are PgUp/PgDn on whichever pane has focus (sp032 T5
+// criterion 1). They go through moveCursor for the two list panes, so the
+// clamp and the minimum-move scroll adjustment are Task 1's single
+// implementation rather than a second one written here, and through
+// ScrollDetail for the third, which is the offset authority sp032's
+// ## solution names for that pane.
+//
+// Nothing here reads or writes MessagesCursor when the detail pane has focus
+// (criterion 4): the pane shows whatever that cursor selects, so a page that
+// nudged it would swap the message out from under a reader mid-body.
+func (m *Model) PageUp() {
+	if m.Focus == PaneDetail {
+		m.ScrollDetail(-m.detailPage())
+		return
+	}
+	m.moveCursor(-listPage(m.focusedViewport()))
+}
+
+// PageDown is PageUp's mirror.
+func (m *Model) PageDown() {
+	if m.Focus == PaneDetail {
+		m.ScrollDetail(m.detailPage())
+		return
+	}
+	m.moveCursor(listPage(m.focusedViewport()))
+}
+
+// GoToFirst is Home: the first row of the focused list pane, or the top of
+// the focused detail body. It is a no-op on an empty list — maxIndex(0) is
+// 0, which is where an empty pane's cursor already sits.
+func (m *Model) GoToFirst() {
+	m.jumpTo(0)
+}
+
+// GoToLast is End (and its vim spelling G): the LAST ROW INDEX, len-1, not
+// len — len is a slice bound and not a position a cursor may hold. On the
+// detail pane it is the last full page of the body.
+//
+// sp032 T6 additionally makes this return the message pane to live and zero
+// the pending count; that state does not exist yet and is deliberately not
+// anticipated here.
+func (m *Model) GoToLast() {
+	m.jumpTo(maxInt)
+}
+
+// maxInt is the "as far as this pane goes" sentinel jumpTo clamps down from,
+// so GoToLast needs no per-pane length arithmetic of its own.
+const maxInt = int(^uint(0) >> 1)
+
+// jumpTo moves the focused pane to an absolute position, clamped into that
+// pane's own bounds, and re-fits the scroll the same way a cursor keystroke
+// does — so the row Home/End selects is on screen, not merely selected.
+func (m *Model) jumpTo(idx int) {
+	switch m.Focus {
+	case PaneDetail:
+		m.DetailScroll = clamp(idx, 0, detailMaxTop(m.DetailLen, m.DetailViewport))
+	case PaneRoster:
+		m.RosterCursor = clamp(idx, 0, maxIndex(m.RosterLen))
+		m.RosterScroll = deriveScroll(m.RosterScroll, m.RosterCursor, m.RosterLen, m.RosterViewport)
+	case PaneMessages:
+		m.MessagesCursor = clamp(idx, 0, maxIndex(m.MessagesLen))
+		m.MessagesScroll = deriveScroll(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
+	}
+}
+
+// focusedViewport is the focused LIST pane's window height. The detail pane
+// never reaches here — both callers branch on it first — because its page is
+// a full window rather than a window minus one.
+func (m *Model) focusedViewport() int {
+	if m.Focus == PaneMessages {
+		return m.MessagesViewport
+	}
+	return m.RosterViewport
 }
 
 // FilterRoster applies --project (m.Project) and the committed interactive
@@ -598,6 +695,10 @@ const (
 	KeyEsc
 	KeyPgUp
 	KeyPgDn
+	// KeyHome and KeyEnd arrive with sp032 T5, which is also what widens
+	// KeyPgUp/KeyPgDn past the detail pane they were decoded for.
+	KeyHome
+	KeyEnd
 )
 
 // Key is one keypress: either a printable Rune, or a Special key. The zero
@@ -621,10 +722,11 @@ type Outcome struct {
 // HandleKey drives ft016's key surface: `q`/Ctrl-C quit, `r` forces a
 // refresh, `tab` moves focus, `/` opens filter editing, arrows/jk move the
 // focused pane's cursor (the view follows — see moveCursor/deriveScroll),
-// `d` toggles the detail pane (sp031 T5). While Editing is true, every key
-// belongs to the filter draft instead (Enter commits, Backspace edits, any
-// other rune appends) — see the Editing field doc for why this must come
-// first.
+// `d` toggles the detail pane (sp031 T5), and PgUp/PgDn/Home/End/G page the
+// focused pane (sp032 T5). While Editing is true, every key belongs to the
+// filter draft instead (Enter commits, Backspace edits, any other rune
+// appends, and the paging keys are swallowed outright) — see the Editing
+// field doc for why this must come first.
 func (m *Model) HandleKey(k Key) Outcome {
 	if m.Editing {
 		return m.handleEditingKey(k)
@@ -648,13 +750,13 @@ func (m *Model) HandleKey(k Key) Outcome {
 	case k.Special == KeyEsc:
 		m.DetailZoom = false
 	case k.Special == KeyPgUp:
-		if m.Focus == PaneDetail {
-			m.ScrollDetail(-m.detailPage())
-		}
+		m.PageUp()
 	case k.Special == KeyPgDn:
-		if m.Focus == PaneDetail {
-			m.ScrollDetail(m.detailPage())
-		}
+		m.PageDown()
+	case k.Special == KeyHome:
+		m.GoToFirst()
+	case k.Special == KeyEnd || k.Rune == 'G':
+		m.GoToLast()
 	case k.Rune == '/':
 		m.Editing = true
 		m.draft = ""
@@ -674,6 +776,14 @@ func (m *Model) HandleKey(k Key) Outcome {
 // the detail zoom in the same keystroke.
 func (m *Model) handleEditingKey(k Key) Outcome {
 	switch k.Special {
+	case KeyPgUp, KeyPgDn, KeyHome, KeyEnd:
+		// sp032 T5 criterion 3, spelled out rather than left to the default
+		// arm. These are not runes, so the "every rune belongs to the draft"
+		// rule says nothing about them, and without this arm a reader would
+		// have to reason about whether falling through to default happens to
+		// be inert today. Naming them keeps the swallow a decision: a paging
+		// key must not move a pane out from under an open filter draft, and
+		// it must not edit the draft either.
 	case KeyEsc:
 		m.Editing = false
 		m.draft = ""

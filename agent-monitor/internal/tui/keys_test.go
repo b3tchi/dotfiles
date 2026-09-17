@@ -1240,33 +1240,58 @@ func TestDetail_ScrollKeysMoveOnlyTheDetailPane(t *testing.T) {
 	}
 }
 
-// TestPaging_DoesNotReachRosterOrMessages is the Task 5 boundary stated as a
-// test: PgUp/PgDn are decoded here for the DETAIL pane only. If a later task
-// widens them it will delete this test on purpose; until then a paging key
-// that quietly moved the roster would be scope creep nobody asked for.
-func TestPaging_DoesNotReachRosterOrMessages(t *testing.T) {
-	for _, focus := range []Pane{PaneRoster, PaneMessages} {
-		for _, k := range []Key{{Special: KeyPgDn}, {Special: KeyPgUp}} {
-			m := NewModel()
-			m.SetRosterLen(100)
-			m.SetRosterViewport(10)
-			m.SetMessagesLen(100)
-			m.SetMessagesViewport(10)
-			// Park both panes mid-list so BOTH directions have room to
-			// move. Asserting from scroll 0 would make the PgUp case
-			// vacuous — a clamp at 0 is indistinguishable from a key that
-			// was never decoded.
-			m.ScrollRoster(30)
-			m.ScrollMessages(30)
+// TestPaging_DoesNotCrossPanes is sp032 T4's TestPaging_DoesNotReachRosterOrMessages,
+// rewritten by T5 rather than deleted. T4 decoded PgUp/PgDn for the DETAIL
+// pane alone and pinned that boundary by asserting the keys changed NOTHING
+// when the roster or messages had focus; T5's criterion 1 is precisely the
+// change that invalidates that assertion, so the "reaches no other pane"
+// claim is restated the way it survives: a paging key moves the FOCUSED pane
+// and only the focused pane.
+//
+// Two properties of the original are kept deliberately, because both were
+// found by mutation and both still matter:
+//
+//   - one key at a time, never a PgDn/PgUp PAIR — a pair round-trips, so a
+//     model paging the wrong pane would land back where it started and a
+//     before/after compare across the pair would see nothing;
+//   - from a MID-LIST position, so a clamp at 0 is distinguishable from a key
+//     that was never decoded at all.
+func TestPaging_DoesNotCrossPanes(t *testing.T) {
+	type snapshot struct{ roster, rosterScroll, messages, messagesScroll, detail int }
+	snap := func(m *Model) snapshot {
+		return snapshot{m.RosterCursor, m.RosterScroll, m.MessagesCursor, m.MessagesScroll, m.DetailScroll}
+	}
+
+	for _, focus := range []Pane{PaneRoster, PaneMessages, PaneDetail} {
+		for _, k := range []Key{
+			{Special: KeyPgDn}, {Special: KeyPgUp},
+			{Special: KeyHome}, {Special: KeyEnd}, {Rune: 'G'},
+		} {
+			m := pagingModel()
+			// Park every pane mid-list so BOTH directions have room to move
+			// on all three.
+			m.RosterCursor, m.RosterScroll = 40, 35
+			m.MessagesCursor, m.MessagesScroll = 40, 35
+			m.ScrollDetail(40)
 			m.Focus = focus
 
-			// One key at a time: a PgDn/PgUp PAIR round-trips, so a model
-			// that paged both panes would end up back where it started and
-			// a before/after compare across the pair would see nothing.
-			before := *m
+			before := snap(m)
 			m.HandleKey(k)
-			if *m != before {
-				t.Errorf("focus %v, key %+v: paging changed model state\n got %+v\nwant %+v", focus, k, *m, before)
+			after := snap(m)
+
+			if before == after {
+				t.Errorf("focus %v, key %+v: nothing moved at all", focus, k)
+			}
+			if focus != PaneRoster && (after.roster != before.roster || after.rosterScroll != before.rosterScroll) {
+				t.Errorf("focus %v, key %+v: roster moved (cursor %d->%d, scroll %d->%d)",
+					focus, k, before.roster, after.roster, before.rosterScroll, after.rosterScroll)
+			}
+			if focus != PaneMessages && (after.messages != before.messages || after.messagesScroll != before.messagesScroll) {
+				t.Errorf("focus %v, key %+v: messages moved (cursor %d->%d, scroll %d->%d)",
+					focus, k, before.messages, after.messages, before.messagesScroll, after.messagesScroll)
+			}
+			if focus != PaneDetail && after.detail != before.detail {
+				t.Errorf("focus %v, key %+v: detail scroll moved %d->%d", focus, k, before.detail, after.detail)
 			}
 		}
 	}
@@ -1371,4 +1396,438 @@ func TestTab_WhileZoomedIsANoOp(t *testing.T) {
 	if m.Focus != PaneRoster {
 		t.Errorf("Focus = %v after tab once un-zoomed, want the cycle to resume at PaneRoster", m.Focus)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// sp032 T5: paging keys on all three panes.
+// ---------------------------------------------------------------------------
+
+// pagingModel is a three-pane model with every pane long enough to page and
+// a window of 10 rows on each, so viewport-1 is 9 and a landed cursor is a
+// distinguishable number rather than a clamp.
+func pagingModel() *Model {
+	m := NewModel()
+	m.SetRosterLen(100)
+	m.SetRosterViewport(10)
+	m.SetMessagesLen(100)
+	m.SetMessagesViewport(10)
+	m.SetDetailLen(100)
+	m.SetDetailViewport(10)
+	return m
+}
+
+// TestPaging_PgDnAdvancesByViewportMinusOne is criterion 1 per pane, one key
+// at a time from a MID-LIST position, asserting the index the cursor lands
+// on. Starting mid-list and never round-tripping a PgDn against a PgUp is
+// deliberate: T4's first attempt at this boundary paged from 0 and compared
+// across a PgDn/PgUp pair, which a mutation paging the wrong pane satisfied
+// by cancelling itself out.
+//
+// The step is viewport-1 rather than viewport because a page that moved by a
+// full window would leave no line in common between the old view and the new
+// one; the overlapping row is what tells a reader where they landed.
+func TestPaging_PgDnAdvancesByViewportMinusOne(t *testing.T) {
+	t.Run("roster", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneRoster
+		m.RosterCursor = 40
+		m.HandleKey(Key{Special: KeyPgDn})
+		if m.RosterCursor != 49 {
+			t.Errorf("RosterCursor = %d after PgDn from 40 with viewport 10, want 49", m.RosterCursor)
+		}
+		if m.MessagesCursor != 0 || m.DetailScroll != 0 {
+			t.Errorf("PgDn on the roster moved another pane: messages=%d detail=%d", m.MessagesCursor, m.DetailScroll)
+		}
+	})
+
+	t.Run("messages", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneMessages
+		m.MessagesCursor = 40
+		m.HandleKey(Key{Special: KeyPgDn})
+		if m.MessagesCursor != 49 {
+			t.Errorf("MessagesCursor = %d after PgDn from 40 with viewport 10, want 49", m.MessagesCursor)
+		}
+		if m.RosterCursor != 0 || m.DetailScroll != 0 {
+			t.Errorf("PgDn on the messages pane moved another pane: roster=%d detail=%d", m.RosterCursor, m.DetailScroll)
+		}
+	})
+
+	t.Run("detail scrolls by the full viewport height", func(t *testing.T) {
+		// The detail pane has no cursor and no overlapping-row affordance to
+		// preserve — sp032's criterion 1 says a full height for it and
+		// viewport-1 for the two list panes, and that difference is the
+		// assertion here, not an oversight.
+		m := pagingModel()
+		m.Focus = PaneDetail
+		m.ScrollDetail(40)
+		m.HandleKey(Key{Special: KeyPgDn})
+		if m.DetailScroll != 50 {
+			t.Errorf("DetailScroll = %d after PgDn from 40 with viewport 10, want 50", m.DetailScroll)
+		}
+	})
+
+	t.Run("pgup is the mirror", func(t *testing.T) {
+		for _, c := range []struct {
+			name  string
+			focus Pane
+			get   func(*Model) int
+			set   func(*Model)
+			want  int
+		}{
+			{"roster", PaneRoster, func(m *Model) int { return m.RosterCursor }, func(m *Model) { m.RosterCursor = 40 }, 31},
+			{"messages", PaneMessages, func(m *Model) int { return m.MessagesCursor }, func(m *Model) { m.MessagesCursor = 40 }, 31},
+			{"detail", PaneDetail, func(m *Model) int { return m.DetailScroll }, func(m *Model) { m.ScrollDetail(40) }, 30},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				m := pagingModel()
+				m.Focus = c.focus
+				c.set(m)
+				m.HandleKey(Key{Special: KeyPgUp})
+				if got := c.get(m); got != c.want {
+					t.Errorf("after PgUp from 40 with viewport 10, got %d, want %d", got, c.want)
+				}
+			})
+		}
+	})
+}
+
+// TestPaging_HomeAndEndSelectFirstAndLast is criterion 2. End is asserted at
+// len-1 — the last ROW index — rather than at len, which is a slice bound and
+// not a position any cursor may hold.
+func TestPaging_HomeAndEndSelectFirstAndLast(t *testing.T) {
+	t.Run("roster", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneRoster
+		m.RosterCursor = 40
+
+		m.HandleKey(Key{Special: KeyEnd})
+		if m.RosterCursor != 99 {
+			t.Errorf("RosterCursor = %d after End over 100 rows, want 99", m.RosterCursor)
+		}
+		// The last row must be ON SCREEN, not merely selected: a cursor at
+		// 99 with scroll still at 31 is a selection the reader cannot see.
+		if m.RosterScroll != 90 {
+			t.Errorf("RosterScroll = %d after End, want the last full page 90", m.RosterScroll)
+		}
+
+		m.HandleKey(Key{Special: KeyHome})
+		if m.RosterCursor != 0 {
+			t.Errorf("RosterCursor = %d after Home, want 0", m.RosterCursor)
+		}
+		if m.RosterScroll != 0 {
+			t.Errorf("RosterScroll = %d after Home, want 0", m.RosterScroll)
+		}
+	})
+
+	t.Run("messages", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneMessages
+		m.MessagesCursor = 40
+
+		m.HandleKey(Key{Special: KeyEnd})
+		if m.MessagesCursor != 99 || m.MessagesScroll != 90 {
+			t.Errorf("after End: cursor=%d scroll=%d, want 99/90", m.MessagesCursor, m.MessagesScroll)
+		}
+		m.HandleKey(Key{Special: KeyHome})
+		if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+			t.Errorf("after Home: cursor=%d scroll=%d, want 0/0", m.MessagesCursor, m.MessagesScroll)
+		}
+	})
+
+	t.Run("detail goes to the ends of the body", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneDetail
+		m.ScrollDetail(40)
+
+		m.HandleKey(Key{Special: KeyEnd})
+		if m.DetailScroll != 90 {
+			t.Errorf("DetailScroll = %d after End over a 100-line body in a 10-row window, want 90", m.DetailScroll)
+		}
+		m.HandleKey(Key{Special: KeyHome})
+		if m.DetailScroll != 0 {
+			t.Errorf("DetailScroll = %d after Home, want 0", m.DetailScroll)
+		}
+	})
+}
+
+// TestPaging_GIsEnd pins the vim spelling of End on every pane. It is
+// asserted as "the same state End leaves behind" rather than as its own
+// numbers, so the two spellings cannot drift apart later.
+func TestPaging_GIsEnd(t *testing.T) {
+	for _, focus := range []Pane{PaneRoster, PaneMessages, PaneDetail} {
+		viaEnd := pagingModel()
+		viaEnd.Focus = focus
+		viaEnd.RosterCursor, viaEnd.MessagesCursor = 40, 40
+		viaEnd.ScrollDetail(40)
+		viaEnd.HandleKey(Key{Special: KeyEnd})
+
+		viaG := pagingModel()
+		viaG.Focus = focus
+		viaG.RosterCursor, viaG.MessagesCursor = 40, 40
+		viaG.ScrollDetail(40)
+		viaG.HandleKey(Key{Rune: 'G'})
+
+		if *viaG != *viaEnd {
+			t.Errorf("focus %v: G left %+v, End left %+v", focus, *viaG, *viaEnd)
+		}
+	}
+
+	// And it really moved — otherwise "G equals End" would also hold for a
+	// G that did nothing against an End that did nothing.
+	m := pagingModel()
+	m.Focus = PaneMessages
+	m.MessagesCursor = 40
+	m.HandleKey(Key{Rune: 'G'})
+	if m.MessagesCursor != 99 {
+		t.Errorf("MessagesCursor = %d after G, want 99", m.MessagesCursor)
+	}
+}
+
+// TestPaging_ClampsAtBothEnds covers the empty, single-row and
+// viewport-larger-than-the-list shapes for every key in the set. None of
+// them may produce an index outside [0, len-1] or a scroll outside its own
+// clamp, and on an empty list every one of them is a no-op.
+func TestPaging_ClampsAtBothEnds(t *testing.T) {
+	keys := []Key{
+		{Special: KeyPgUp}, {Special: KeyPgDn},
+		{Special: KeyHome}, {Special: KeyEnd}, {Rune: 'G'},
+	}
+
+	t.Run("empty list is a no-op", func(t *testing.T) {
+		for _, focus := range []Pane{PaneRoster, PaneMessages} {
+			for _, k := range keys {
+				m := NewModel()
+				m.SetRosterLen(0)
+				m.SetRosterViewport(10)
+				m.SetMessagesLen(0)
+				m.SetMessagesViewport(10)
+				m.Focus = focus
+				before := *m
+				m.HandleKey(k)
+				if *m != before {
+					t.Errorf("focus %v key %+v on an empty list changed state:\n got %+v\nwant %+v", focus, k, *m, before)
+				}
+			}
+		}
+	})
+
+	t.Run("single row", func(t *testing.T) {
+		for _, k := range keys {
+			m := NewModel()
+			m.SetMessagesLen(1)
+			m.SetMessagesViewport(10)
+			m.Focus = PaneMessages
+			m.HandleKey(k)
+			if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+				t.Errorf("key %+v over a single row: cursor=%d scroll=%d, want 0/0", k, m.MessagesCursor, m.MessagesScroll)
+			}
+		}
+	})
+
+	t.Run("viewport larger than the list", func(t *testing.T) {
+		for _, k := range keys {
+			m := NewModel()
+			m.SetRosterLen(4)
+			m.SetRosterViewport(20)
+			m.Focus = PaneRoster
+			m.RosterCursor = 2
+			m.HandleKey(k)
+			if m.RosterCursor < 0 || m.RosterCursor > 3 {
+				t.Errorf("key %+v left RosterCursor = %d, want it inside [0,3]", k, m.RosterCursor)
+			}
+			if m.RosterScroll != 0 {
+				t.Errorf("key %+v left RosterScroll = %d over a list that fits, want 0", k, m.RosterScroll)
+			}
+		}
+	})
+
+	t.Run("repeated keys pin at the ends", func(t *testing.T) {
+		m := pagingModel()
+		m.Focus = PaneMessages
+		for i := 0; i < 50; i++ {
+			m.HandleKey(Key{Special: KeyPgDn})
+		}
+		if m.MessagesCursor != 99 || m.MessagesScroll != 90 {
+			t.Errorf("after 50 PgDn: cursor=%d scroll=%d, want 99/90", m.MessagesCursor, m.MessagesScroll)
+		}
+		for i := 0; i < 50; i++ {
+			m.HandleKey(Key{Special: KeyPgUp})
+		}
+		if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+			t.Errorf("after 50 PgUp: cursor=%d scroll=%d, want 0/0", m.MessagesCursor, m.MessagesScroll)
+		}
+	})
+
+	t.Run("detail with a nil message", func(t *testing.T) {
+		// Nothing selected: cmd/ reports a body of zero lines. Every key in
+		// the set must leave the scroll at 0 rather than at a negative or a
+		// phantom offset.
+		for _, k := range keys {
+			m := NewModel()
+			m.SetDetailViewport(10)
+			m.SetDetailLen(0)
+			m.Focus = PaneDetail
+			m.HandleKey(k)
+			if m.DetailScroll != 0 {
+				t.Errorf("key %+v over an empty detail body left DetailScroll = %d, want 0", k, m.DetailScroll)
+			}
+		}
+	})
+}
+
+// TestPaging_WhileEditingIsSwallowed is criterion 3. PgUp/PgDn/Home/End are
+// not runes, so the rune-into-the-draft rule says nothing about them: without
+// an explicit branch a paging key typed during a `/` query would move a pane
+// out from under the draft. G is in the table for the opposite reason — it IS
+// a rune, so "swallowed" means it lands in the draft as text, and a G that
+// jumped to the last row while a query was open would be the same defect
+// wearing the other hat.
+func TestPaging_WhileEditingIsSwallowed(t *testing.T) {
+	cases := []struct {
+		name string
+		key  Key
+	}{
+		{"pgup", Key{Special: KeyPgUp}},
+		{"pgdn", Key{Special: KeyPgDn}},
+		{"home", Key{Special: KeyHome}},
+		{"end", Key{Special: KeyEnd}},
+		{"G", Key{Rune: 'G'}},
+		{"g", Key{Rune: 'g'}},
+	}
+	for _, c := range cases {
+		for _, focus := range []Pane{PaneRoster, PaneMessages, PaneDetail} {
+			t.Run(c.name+"/"+map[Pane]string{PaneRoster: "roster", PaneMessages: "messages", PaneDetail: "detail"}[focus], func(t *testing.T) {
+				m := pagingModel()
+				m.Focus = focus
+				m.RosterCursor, m.MessagesCursor = 40, 40
+				m.ScrollDetail(40)
+				m.RosterScroll, m.MessagesScroll = 31, 31
+
+				m.HandleKey(Key{Rune: '/'}) // open the draft
+				m.HandleKey(Key{Rune: 'a'})
+				before := *m
+
+				m.HandleKey(c.key)
+
+				if m.RosterCursor != before.RosterCursor || m.RosterScroll != before.RosterScroll {
+					t.Errorf("roster moved while editing: cursor %d->%d scroll %d->%d",
+						before.RosterCursor, m.RosterCursor, before.RosterScroll, m.RosterScroll)
+				}
+				if m.MessagesCursor != before.MessagesCursor || m.MessagesScroll != before.MessagesScroll {
+					t.Errorf("messages moved while editing: cursor %d->%d scroll %d->%d",
+						before.MessagesCursor, m.MessagesCursor, before.MessagesScroll, m.MessagesScroll)
+				}
+				if m.DetailScroll != before.DetailScroll {
+					t.Errorf("detail moved while editing: scroll %d->%d", before.DetailScroll, m.DetailScroll)
+				}
+				if !m.Editing {
+					t.Errorf("Editing = false after %s, want the draft still open", c.name)
+				}
+
+				// Commit and read the draft back through the committed
+				// filter: a rune belongs in the query, a special key does
+				// not.
+				m.HandleKey(Key{Special: KeyEnter})
+				want := "a"
+				if c.key.Rune != 0 {
+					want = "a" + string(c.key.Rune)
+				}
+				if m.Filter.Query != want {
+					t.Errorf("committed query = %q after %s, want %q", m.Filter.Query, c.name, want)
+				}
+			})
+		}
+	}
+}
+
+// TestPaging_OnDetailDoesNotMoveTheMessageCursor is criterion 4. The detail
+// pane shows whatever the message cursor selects, so a paging key that moved
+// that cursor would swap the message out from under the reader mid-page —
+// the one failure mode that makes a scrollable detail pane worse than a
+// truncated one.
+func TestPaging_OnDetailDoesNotMoveTheMessageCursor(t *testing.T) {
+	for _, k := range []Key{
+		{Special: KeyPgUp}, {Special: KeyPgDn},
+		{Special: KeyHome}, {Special: KeyEnd}, {Rune: 'G'},
+	} {
+		m := pagingModel()
+		m.Focus = PaneDetail
+		m.MessagesCursor = 40
+		m.MessagesScroll = 31
+		m.RosterCursor = 40
+		m.RosterScroll = 31
+		m.ScrollDetail(40)
+
+		m.HandleKey(k)
+
+		if m.MessagesCursor != 40 || m.MessagesScroll != 31 {
+			t.Errorf("key %+v on the detail pane moved the message pane: cursor=%d scroll=%d, want 40/31",
+				k, m.MessagesCursor, m.MessagesScroll)
+		}
+		if m.RosterCursor != 40 || m.RosterScroll != 31 {
+			t.Errorf("key %+v on the detail pane moved the roster: cursor=%d scroll=%d, want 40/31",
+				k, m.RosterCursor, m.RosterScroll)
+		}
+		if m.DetailScroll == 40 {
+			t.Errorf("key %+v on the detail pane did not move the detail scroll at all", k)
+		}
+	}
+}
+
+// TestPaging_ViewportZeroDoesNotStepBackwards is the degenerate shape the
+// step expression invites: viewport-1 is -1 when no viewport has been
+// reported (the --once path, and any frame before the first render), and a
+// PgDn that stepped -1 would page UP. The floor is one row, so paging still
+// moves in the direction it names.
+func TestPaging_ViewportZeroDoesNotStepBackwards(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		focus Pane
+		get   func(*Model) int
+		set   func(*Model, int)
+	}{
+		{"roster", PaneRoster, func(m *Model) int { return m.RosterCursor }, func(m *Model, v int) { m.RosterCursor = v }},
+		{"messages", PaneMessages, func(m *Model) int { return m.MessagesCursor }, func(m *Model, v int) { m.MessagesCursor = v }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := NewModel()
+			m.SetRosterLen(100)
+			m.SetMessagesLen(100)
+			m.Focus = c.focus // viewport never set: still 0
+			c.set(m, 40)
+
+			m.HandleKey(Key{Special: KeyPgDn})
+			if got := c.get(m); got != 41 {
+				t.Errorf("PgDn with viewport 0 from 40 landed on %d, want 41", got)
+			}
+			m.HandleKey(Key{Special: KeyPgUp})
+			if got := c.get(m); got != 40 {
+				t.Errorf("PgUp with viewport 0 from 41 landed on %d, want 40", got)
+			}
+		})
+	}
+
+	t.Run("viewport one also steps forward", func(t *testing.T) {
+		// viewport-1 is 0 here, which would make paging a silent no-op.
+		m := NewModel()
+		m.SetMessagesLen(100)
+		m.SetMessagesViewport(1)
+		m.Focus = PaneMessages
+		m.MessagesCursor = 40
+		m.HandleKey(Key{Special: KeyPgDn})
+		if m.MessagesCursor != 41 {
+			t.Errorf("PgDn with viewport 1 from 40 landed on %d, want 41", m.MessagesCursor)
+		}
+	})
+
+	t.Run("detail viewport zero", func(t *testing.T) {
+		m := NewModel()
+		m.SetDetailLen(100)
+		m.Focus = PaneDetail
+		m.HandleKey(Key{Special: KeyPgDn})
+		if m.DetailScroll < 0 {
+			t.Errorf("DetailScroll = %d after PgDn with no viewport, want it non-negative", m.DetailScroll)
+		}
+	})
 }

@@ -349,6 +349,10 @@ func translateKey(k tea.KeyMsg) []tui.Key {
 		return []tui.Key{{Special: tui.KeyPgUp}}
 	case tea.KeyPgDown:
 		return []tui.Key{{Special: tui.KeyPgDn}}
+	case tea.KeyHome:
+		return []tui.Key{{Special: tui.KeyHome}}
+	case tea.KeyEnd:
+		return []tui.Key{{Special: tui.KeyEnd}}
 	}
 	return nil
 }
