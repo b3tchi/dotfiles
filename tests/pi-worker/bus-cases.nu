@@ -2489,8 +2489,8 @@ def main [repo: string, big: string] {
 
             let rows = (do { cd $repo; bus-messages })
             assert-eq ($rows | length) 1 "the envelope outlives its sender"
-            assert-eq ($rows | first | get from) "impl-1†" "and history still says who sent it, marked as gone"
-            assert-eq ($rows | first | get to) ["r1"] "the live recipient is unmarked"
+            assert-eq ($rows | first | get from) "impl-1" "and history still says who sent it"
+            assert-eq ($rows | first | get to) ["r1"] "and the live recipient resolves as it always did"
         }
         rm -rf $root; rm -rf $repo
     })
@@ -2511,8 +2511,8 @@ def main [repo: string, big: string] {
 
             let rows = (do { cd $repo; bus-messages })
             assert-eq ($rows | length) 2 "both envelopes are on the bus"
-            assert-eq ($rows | first | get from) "impl-1†" "the dead namesake keeps its own name, marked"
-            assert-eq ($rows | last | get from) "impl-1" "and the live one is not marked by its predecessor"
+            assert-eq ($rows | first | get from) "impl-1" "the dead namesake keeps its own name"
+            assert-eq ($rows | last | get from) "impl-1" "and the live one is unaffected by its predecessor"
         }
         rm -rf $root; rm -rf $repo
     })

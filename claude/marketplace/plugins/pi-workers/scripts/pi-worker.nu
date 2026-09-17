@@ -1656,19 +1656,11 @@ def release-address-at [slug: string, address: string]: nothing -> nothing {
 # `label-address`, `addresses-named` and `presence-dir` never consult this
 # file, so a tombstoned label can neither route mail nor resurrect a claim —
 # it answers "what was this called", a question about something already said,
-# and nothing else. Reading it as liveness is what the mark below exists to
-# prevent.
+# and nothing else.
 #
 # UNPRUNED, deliberately: a tombstone is one short line per dead party, and
 # the cost of never pruning is a file that grows by a line per `rm`. Pruning
 # is a filter-and-rewrite if that ever stops being true.
-
-# What a display appends to a name it resolved from a tombstone. Without it a
-# dead `impl-1` and a live `impl-1` render identically, and [[adr0017]] is
-# exactly the rule against a display stating more than its evidence supports:
-# the evidence here is "this address WAS called impl-1", not "impl-1 is
-# there". One cell wide, so a column width means the same thing either way.
-const RETIRED_MARK = "†"
 
 def retired-path [slug: string]: nothing -> string {
     state-root | path join $slug "retired.jsonl"
@@ -1745,15 +1737,22 @@ export def project-retired [repo: string = ""]: nothing -> list<record> {
 }
 
 # What a display renders for one address: its live label, else its tombstoned
-# label marked as gone, else the raw address ([[adr0017]] — an address nothing
-# resolves is an observation about the registry, and the raw form is the one
-# an operator can copy back into a command).
+# label, else the raw address ([[adr0017]] — an address nothing resolves is an
+# observation about the registry, and the raw form is the one an operator can
+# copy back into a command).
+#
+# A tombstoned name is rendered PLAIN, not marked as gone. What this resolves
+# is a log — a record of what was already said — and every line in it is
+# historical whether or not its author is still running; liveness is the
+# roster's question, asked of the roster, and answered there per row. A mark
+# here would annotate every party that has ever been cleaned up, which says
+# more about `rm` than about the message.
 def render-address [address: string, labels: record, retired: record]: nothing -> string {
     if ($address | is-empty) { return "" }
     let live = ($labels | get -o $address)
     if $live != null { return $live }
     let gone = ($retired | get -o $address)
-    if $gone != null { return $"($gone)($RETIRED_MARK)" }
+    if $gone != null { return $gone }
     $address
 }
 
@@ -2510,8 +2509,7 @@ export def bus-messages []: nothing -> list<record> {
     let slug = (resolve-project-slug (current-repo))
     let labels = (address-labels $slug)
     # dotfiles-mqse: a released party's envelopes outlive its registry record,
-    # so the log resolves through the tombstones too — marked, never silently
-    # as though the sender were still there.
+    # so the log resolves through the tombstones too.
     let retired = (retired-labels $slug)
 
     let files = (
