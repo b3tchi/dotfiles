@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp032|agent-monitor-mouse-and-scrollable-panes]]
+
 - [[sp031|agent-monitor-detail-and-project]]
 
 - [[sp030|agent-monitor]]

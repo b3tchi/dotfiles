@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp032|agent-monitor-mouse-and-scrollable-panes]]
 
 
 - [[sp012|live-region-xshape-overlay]]
