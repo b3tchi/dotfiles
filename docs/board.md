@@ -6,7 +6,6 @@ sections when status flips.
 
 ## idea
 
-
 - [[sp025|agent-inbox]]
 
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
@@ -19,6 +18,8 @@ sections when status flips.
 - [[sp003|fix-categories]]
 
 ## spec
+
+- [[sp032|agent-monitor-mouse-and-scrollable-panes]]
 
 
 ## ready
