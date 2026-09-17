@@ -2174,3 +2174,31 @@ func TestTail_CursorDownOntoTheLastRowReturnsToLive(t *testing.T) {
 		t.Errorf("PendingMessages = %d once the cursor reached the last row, want 0", m.PendingMessages)
 	}
 }
+
+// TestTail_ResizeIntoLivenessZeroesTheCount is the last motion that can
+// satisfy the live predicate without any input at all: a terminal resize.
+// SetMessagesViewport re-fits the scroll, and a window tall enough to show
+// the whole list puts it at 0 — which IS the bottom. A pane whose cursor is
+// already on the last row is then live, and a `+N new` it kept carrying
+// would be advertising messages that are on screen.
+func TestTail_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(-6)
+	m.SetMessagesLen(28)
+	m.SetMessagesLen(20) // pruned back: the cursor is the last row again
+	if m.PendingMessages != 8 {
+		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
+	}
+	if m.MessagesScroll != 4 {
+		t.Fatalf("setup: scroll = %d, want 4 (off the bottom)", m.MessagesScroll)
+	}
+
+	m.SetMessagesViewport(20) // the terminal grew: the whole list fits
+
+	if m.MessagesScroll != 0 {
+		t.Fatalf("scroll = %d, want 0 — a list that fits its window has only one offset", m.MessagesScroll)
+	}
+	if m.PendingMessages != 0 {
+		t.Errorf("PendingMessages = %d after the list came fully into view, want 0", m.PendingMessages)
+	}
+}
