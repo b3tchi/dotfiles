@@ -62,7 +62,19 @@ linux:
         # Collection,Item,Session} (plain algorithm) and stores every item in
         # gopass under the "secretservice/" namespace — GPG/age-encrypted at
         # rest, and scoped so the daemon never reads the rest of the store.
-        (cd "$DOT_DIR/secretservice" && go build -o "$HOME/.local/bin/gopass-secretservice" .)
+        # dotfiles-8kro: the subshell's status was swallowed by the commands
+        # that follow, so a failed build still reported the dot installed —
+        # and this one matters more than most: the secretservice daemon is
+        # what answers org.freedesktop.Secret, so a stale or missing binary
+        # is a broken keyring rather than a missing convenience.
+        if (cd "$DOT_DIR/secretservice" && go build -o "$HOME/.local/bin/gopass-secretservice" .); then
+          echo "gopass: built ~/.local/bin/gopass-secretservice"
+        elif [ -x "$HOME/.local/bin/gopass-secretservice" ]; then
+          echo "gopass: WARNING -- go build FAILED; ~/.local/bin/gopass-secretservice is the PREVIOUS binary and is now stale. Re-run 'rotz install gopass' once the build error is fixed." >&2
+        else
+          echo "gopass: go build FAILED and gopass-secretservice was never built -- nothing will answer org.freedesktop.Secret. Fix the build error and re-run 'rotz install gopass'." >&2
+          exit 1
+        fi
 
         # canvas-mcp-relay: the canvas-authoring MCP server binds its OAuth
         # redirect listener on [::1] only, while WSL forwards Windows
@@ -70,7 +82,14 @@ linux:
         # hangs forever. MSAL picks a fresh port per sign-in, so this watches
         # for new listeners and bridges 127.0.0.1:<port> -> [::1]:<port>.
         # Only ports owned by the canvas process are bridged.
-        (cd "$DOT_DIR/relay" && go build -o "$HOME/.local/bin/canvas-mcp-relay" .)
+        if (cd "$DOT_DIR/relay" && go build -o "$HOME/.local/bin/canvas-mcp-relay" .); then
+          echo "gopass: built ~/.local/bin/canvas-mcp-relay"
+        elif [ -x "$HOME/.local/bin/canvas-mcp-relay" ]; then
+          echo "gopass: WARNING -- go build FAILED; ~/.local/bin/canvas-mcp-relay is the PREVIOUS binary and is now stale. Re-run 'rotz install gopass' once the build error is fixed." >&2
+        else
+          echo "gopass: go build FAILED and canvas-mcp-relay was never built -- canvas-authoring OAuth will hang on WSL until this succeeds. Fix the build error and re-run 'rotz install gopass'." >&2
+          exit 1
+        fi
 
         # Run without an interactive login, and start now.
         sudo loginctl enable-linger "{{ whoami.username }}" || true

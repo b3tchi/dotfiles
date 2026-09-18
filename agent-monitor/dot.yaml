@@ -42,11 +42,31 @@ linux:
           echo "agent-monitor: built $SRC/agent-monitor from ./cmd/agent-monitor"
         else
           rm -f "$TMP"
-          echo "agent-monitor: go build FAILED -- $SRC/agent-monitor left \
-      unchanged. Re-run 'rotz install agent-monitor' once the build error is \
-      fixed; the ~/.local/bin/agent-monitor link (rotz link) simply points at \
-      whatever last built successfully, or nothing yet if this is the first \
-      build." >&2
+          # dotfiles-8kro: report the failure through the EXIT STATUS, not
+          # only through a message rotz does not read. Which status depends
+          # on whether anything usable survives:
+          #
+          #   a previous binary exists -> exit 0. The guarded temp-file build
+          #     exists precisely so a bad build cannot break a working setup,
+          #     and aborting a whole `rotz install meta-*` over a module that
+          #     still works would be a worse outcome than the stale binary.
+          #     The warning is loud instead.
+          #
+          #   nothing was ever built  -> exit 1. There is no fallback, the
+          #     ~/.local/bin link resolves to nothing, and reporting the dot
+          #     installed would be a plain lie. rotz aborts the run by
+          #     default; `rotz install -c` pushes past it deliberately.
+          if [ -f "$SRC/agent-monitor" ]; then
+            echo "agent-monitor: WARNING -- go build FAILED; $SRC/agent-monitor \
+      is the PREVIOUS binary and is now stale. Re-run 'rotz install \
+      agent-monitor' once the build error is fixed." >&2
+          else
+            echo "agent-monitor: go build FAILED and no previously built \
+      binary exists -- the ~/.local/bin/agent-monitor link has nothing to \
+      resolve to. Fix the build error and re-run 'rotz install \
+      agent-monitor'." >&2
+            exit 1
+          fi
         fi
       else
         echo "agent-monitor: no Go toolchain on PATH -- skipping the build \

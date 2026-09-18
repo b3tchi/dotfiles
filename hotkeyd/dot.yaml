@@ -90,10 +90,24 @@ linux:
       the daemon on EVERY display)"
         else
           rm -f "$TMP"
-          echo "hotkeyd: go build FAILED -- $SRC/hotkeyd left unchanged. If it \
-      was never built, every display is now without a keybinding daemon and \
-      'hotkeyd.sh start' will refuse with exit 78 until this succeeds; i3's own \
-      binds still work via 'hotkeyd-panic.sh panic'." >&2
+          # dotfiles-8kro: the exit status has to carry the failure, because
+          # rotz reads that and not this message. A surviving previous binary
+          # keeps every display working, so that case warns and exits 0 rather
+          # than aborting a whole `rotz install meta-*`; with nothing built,
+          # 'hotkeyd.sh start' refuses with exit 78 and there is no daemon at
+          # all, which is a failed install and says so.
+          if [ -f "$SRC/hotkeyd" ]; then
+            echo "hotkeyd: WARNING -- go build FAILED; $SRC/hotkeyd is the \
+      PREVIOUS binary and is now stale. Every display still has a keybinding \
+      daemon, but not the one you just changed. Re-run 'rotz install hotkeyd' \
+      once the build error is fixed." >&2
+          else
+            echo "hotkeyd: go build FAILED and hotkeyd was never built -- \
+      every display is now without a keybinding daemon and 'hotkeyd.sh start' \
+      will refuse with exit 78 until this succeeds; i3's own binds still work \
+      via 'hotkeyd-panic.sh panic'." >&2
+            exit 1
+          fi
         fi
       else
         echo "hotkeyd: no Go toolchain on PATH -- skipping the go build \

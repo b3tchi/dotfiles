@@ -52,8 +52,16 @@ linux:
             SRC="$ROOT/preview"
           fi
         fi
-        go build -C "$SRC" -o ~/.local/bin/preview-d .
-        echo "preview: built ~/.local/bin/preview-d from $SRC"
+        # dotfiles-8kro: see akm-graph/dot.yaml -- the echo used to claim a
+        # build that may not have happened, and swallowed the status with it.
+        if go build -C "$SRC" -o ~/.local/bin/preview-d .; then
+          echo "preview: built ~/.local/bin/preview-d from $SRC"
+        elif [ -x "$HOME/.local/bin/preview-d" ]; then
+          echo "preview: WARNING -- go build FAILED; ~/.local/bin/preview-d is the PREVIOUS binary and is now stale. Re-run 'rotz install preview' once the build error is fixed." >&2
+        else
+          echo "preview: go build FAILED and no previously built daemon exists -- there is no ~/.local/bin/preview-d to run. Fix the build error and re-run 'rotz install preview'." >&2
+          exit 1
+        fi
       else
         echo "preview: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install preview')" >&2
       fi

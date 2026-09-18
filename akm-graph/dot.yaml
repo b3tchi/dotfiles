@@ -22,8 +22,20 @@ linux:
             SRC="$ROOT/akm-graph"
           fi
         fi
-        go build -C "$SRC" -o ~/.local/bin/akm-graph-d .
-        echo "akm-graph: built ~/.local/bin/akm-graph-d from $SRC"
+        # dotfiles-8kro: the trailing echo used to run even when the build
+        # failed -- it both printed "built" for a build that did not happen
+        # and masked the nonzero status, so rotz reported the dot installed.
+        # Now the status decides: a surviving previous binary warns and
+        # exits 0 (a stale daemon beats aborting a whole `rotz install
+        # meta-*`), nothing built at all exits 1.
+        if go build -C "$SRC" -o ~/.local/bin/akm-graph-d .; then
+          echo "akm-graph: built ~/.local/bin/akm-graph-d from $SRC"
+        elif [ -x "$HOME/.local/bin/akm-graph-d" ]; then
+          echo "akm-graph: WARNING -- go build FAILED; ~/.local/bin/akm-graph-d is the PREVIOUS binary and is now stale. Re-run 'rotz install akm-graph' once the build error is fixed." >&2
+        else
+          echo "akm-graph: go build FAILED and no previously built daemon exists -- there is no ~/.local/bin/akm-graph-d to run. Fix the build error and re-run 'rotz install akm-graph'." >&2
+          exit 1
+        fi
       else
         echo "akm-graph: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install akm-graph')" >&2
       fi

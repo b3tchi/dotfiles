@@ -22,7 +22,17 @@ linux:
       # package install above still succeeds on hosts without go.
       if command -v go >/dev/null 2>&1; then
         mkdir -p ~/.local/bin
-        go build -C ~/.dotfiles/d2/router -o ~/.local/bin/d2-router-d .
+        # dotfiles-8kro: this one already failed the install (the build was
+        # the last command in the branch), which is right when nothing was
+        # ever built and too harsh when a working daemon is already there.
+        if go build -C ~/.dotfiles/d2/router -o ~/.local/bin/d2-router-d .; then
+          echo "d2-router: built ~/.local/bin/d2-router-d"
+        elif [ -x "$HOME/.local/bin/d2-router-d" ]; then
+          echo "d2-router: WARNING -- go build FAILED; ~/.local/bin/d2-router-d is the PREVIOUS binary and is now stale. Re-run 'rotz install d2' once the build error is fixed." >&2
+        else
+          echo "d2-router: go build FAILED and no previously built daemon exists -- there is no ~/.local/bin/d2-router-d to run. Fix the build error and re-run 'rotz install d2'." >&2
+          exit 1
+        fi
       else
         echo "d2-router: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install d2')" >&2
       fi
