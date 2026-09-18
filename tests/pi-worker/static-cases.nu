@@ -352,11 +352,21 @@ let cases = [
     (run-case "static/pi-worker-tool-verbs-match-the-cli-verb-set" {
         # sp029 T9's drift guard: the `pi_worker` tool's verb enum must be
         # exactly the CLI's `main <verb>` set, minus the worker-only verbs
-        # (`result`/`settled`, which have their own tool) and the two
+        # (`result`/`settled`, which have their own tool) and those
         # deliberately excluded from any LLM-facing surface (`reclaim`,
-        # `doctor`). A verb added to one side and not the other is exactly
-        # the failure this plugin has already had once — two halves of one
-        # contract disagreeing silently.
+        # `doctor`, `register`, `unregister`). A verb added to one side and
+        # not the other is exactly the failure this plugin has already had
+        # once — two halves of one contract disagreeing silently.
+        #
+        # dotfiles-btkt.1 on the two newest exclusions: `register` claims an
+        # address for a PERSON, at that person's own terminal, and the only
+        # party who can say a human is present is the human. An agent granted
+        # this verb could put a label on the bus that nobody is reading and
+        # every other agent would then address in good faith — the silent
+        # grave `to-address-for-send` refuses an unclaimed label to prevent,
+        # reopened from the other side. A Pi session that needs an address of
+        # its own already claims one for itself (`claimSelfAddress`), so
+        # nothing on the agent surface loses a capability here.
         let worker_text = (open --raw $worker)
         let cli_verbs = (
             $worker_text
@@ -364,7 +374,7 @@ let cases = [
             | where {|l| $l | str starts-with 'def "main ' }
             | each {|l| $l | str replace 'def "main ' "" | split row '"' | get 0 }
         )
-        let not_initiator = ["result" "settled" "reclaim" "doctor"]
+        let not_initiator = ["result" "settled" "reclaim" "doctor" "register" "unregister"]
         let expected_tool_verbs = ($cli_verbs | where {|v| $v not-in $not_initiator } | sort)
 
         let extension_text = (open --raw $extension)

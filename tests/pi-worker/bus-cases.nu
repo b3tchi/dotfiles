@@ -2581,6 +2581,131 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo
     })
 
+    # ------------------------------------------- a person on the bus (dotfiles-btkt.1)
+    #
+    # Every other party claims an address through something that PLACED it: a
+    # spawn (`claim-unique-address`), a run (`ensure-address`), or a Pi session
+    # claiming for itself from the extension. A person places nothing and runs
+    # no extension, so before `register` the only way onto the bus was a raw
+    # `use pi-worker.nu *; ensure-address ...` one-liner against the module —
+    # and `to-address-for-send` refuses an unclaimed label, so a person without
+    # one is unaddressable by name rather than merely unlisted.
+    #
+    # `register` is resolve-or-claim, not claim-or-refuse: a person whose shell
+    # died still has mail sitting in their queue, and a refusal would lock them
+    # out of reading it. Fresh-per-session comes from `unregister` at exit.
+
+    (run-case "person/register-makes-a-person-addressable-by-name" {
+        let repo = (make-repo "person-register")
+        let root = (make-runtime "person-register")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            # Unaddressable before: this is the refusal `register` exists to lift.
+            assert-rejects { do { cd $repo; to-address-for-send "jan" --repo $repo } } "jan" "an unclaimed label names nobody who could ever claim that queue"
+
+            let out = (do { cd $repo; ^$nu.current-exe $script register --label "jan" | complete })
+            assert-eq $out.exit_code 0 $"register failed: ($out.stderr)"
+            let party = ($out.stdout | from json)
+
+            assert-eq $party.label "jan" "the verb answers with the label it claimed"
+            assert-true (do { cd $repo; address-shaped? $party.address }) "and a minted address, not a label dressed as one"
+            assert-eq (do { cd $repo; to-address-for-send "jan" --repo $repo }) $party.address "which the send path now resolves"
+
+            let record = (do { cd $repo; address-label $party.address --repo $repo })
+            assert-eq $record.kind "person" "the registry says what kind of party this is"
+            assert-eq $record.name "jan" "under the label a display will show"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/register-hands-back-the-same-address-to-a-second-shell" {
+        # The reconnect case, and the reason this is `ensure-address` rather
+        # than `claim-unique-address`: a person's terminal dies with mail
+        # already in their queue. Registering again must return them to THAT
+        # queue — a fresh address would leave every unread message addressed to
+        # a party nothing is reading any more.
+        let repo = (make-repo "person-reconnect")
+        let root = (make-runtime "person-reconnect")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let first = (do { cd $repo; ^$nu.current-exe $script register --label "jan" | complete } | get stdout | from json)
+            let sender = (do { cd $repo; claim-address $repo "peer-1" --role "peer" })
+            do { cd $repo; bus-send --to [$first.address] --from $sender --content "while you were away" }
+
+            let second = (do { cd $repo; ^$nu.current-exe $script register --label "jan" | complete })
+            assert-eq $second.exit_code 0 $"a second register failed: ($second.stderr)"
+            assert-eq ($second.stdout | from json | get address) $first.address "a person reconnects to the address their mail was sent to"
+
+            let mail = (do { cd $repo; bus-wait --as $first.address })
+            assert-eq ($mail | length) 1 "and the message waiting for them is still readable"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/unregister-tombstones-the-label-and-stops-delivery" {
+        # The exit half of per-session lifetime (the decision taken on the bus
+        # 2026-09-18): the address goes, the label is free again, and the
+        # tombstone keeps the log legible for everything the person already
+        # said. A released person must not stay addressable, or mail goes to a
+        # queue nobody will ever read.
+        let repo = (make-repo "person-unregister")
+        let root = (make-runtime "person-unregister")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let party = (do { cd $repo; ^$nu.current-exe $script register --label "jan" | complete } | get stdout | from json)
+            let peer = (do { cd $repo; claim-address $repo "peer-1" --role "peer" })
+            do { cd $repo; bus-send --to [$peer] --from $party.address --content "signing off" }
+
+            let out = (do { cd $repo; ^$nu.current-exe $script unregister --label "jan" | complete })
+            assert-eq $out.exit_code 0 $"unregister failed: ($out.stderr)"
+
+            assert-eq (do { cd $repo; address-label $party.address --repo $repo }) null "the address record is gone"
+            assert-eq (do { cd $repo; label-address-for "jan" --repo $repo }) null "and the label is no longer reserved"
+            assert-rejects { do { cd $repo; to-address-for-send "jan" --repo $repo } } "jan" "so nothing can address the person who left"
+
+            let stone = (do { cd $repo; project-retired $repo } | where address == $party.address)
+            assert-eq ($stone | length) 1 "one departure, one tombstone"
+            assert-eq ($stone | first | get kind) "person" "which remembers it was a person, not a worker"
+            assert-eq (do { cd $repo; bus-messages } | first | get from) "jan" "and history still names them"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/unregister-is-silent-about-a-label-nobody-holds" {
+        # Cleanup, not an assertion — the same contract `release-address` has.
+        # A person's shell exits on a path that may already have unregistered,
+        # and a refusal there would turn tidy-up into a failure.
+        let repo = (make-repo "person-unregister-twice")
+        let root = (make-runtime "person-unregister-twice")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            do { cd $repo; ^$nu.current-exe $script register --label "jan" | complete }
+            do { cd $repo; ^$nu.current-exe $script unregister --label "jan" | complete }
+            let again = (do { cd $repo; ^$nu.current-exe $script unregister --label "jan" | complete })
+            assert-eq $again.exit_code 0 $"a second unregister failed: ($again.stderr)"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/register-refuses-a-label-a-display-cannot-show" {
+        # `claim-address` holds the label to a character set because it is worn
+        # as a tmux window name and rendered in every refusal. The CLI must
+        # surface that refusal rather than dying on an internal path.
+        let repo = (make-repo "person-bad-label")
+        let root = (make-runtime "person-bad-label")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let out = (do { cd $repo; ^$nu.current-exe $script register --label "jan smith" | complete })
+            assert-true ($out.exit_code != 0) "a label with a space is refused"
+            assert-true ($out.stderr | str contains "jan smith") "and the refusal names it"
+
+            let empty = (do { cd $repo; ^$nu.current-exe $script register | complete })
+            assert-true ($empty.exit_code != 0) "and a missing --label is refused by name"
+            assert-true ($empty.stderr | str contains "--label") "naming the flag that is missing"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
 ]
 
 $cases | to json

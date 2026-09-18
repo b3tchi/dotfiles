@@ -5728,6 +5728,12 @@ def usage []: nothing -> string {
         "  settled  --as                         report settling with nothing to show"
         "  wait     --as [--block] [--timeout]  mail addressed to --as, or nothing"
         "  rm       --uid                        release a finished worker's address"
+        "  register --label [--role] [--kind]    join this project's bus as a party"
+        "                                       nothing spawned — a PERSON at a terminal."
+        "                                       Resolve-or-claim: registering again"
+        "                                       reconnects to the same queue"
+        "  unregister --label                    leave the bus: the address and the label"
+        "                                       go, the tombstone keeps history legible"
         "  status   <uid>                        one worker's state, from the bus"
         "  liveness <uid> [--socket]             live | exited | unknown, from tmux"
         "  inspect  <uid>                        identity, last result, resume command"
@@ -6182,6 +6188,85 @@ def "main timeline" [uid: string, --json] {
         $events | select "+s" event state detail | print
     }
 }
+# A PERSON on the bus (dotfiles-btkt.1).
+#
+# Every other party is claimed by something that placed it: `spawn` claims a
+# worker (`claim-unique-address`), a spawn claims its run (`ensure-address`),
+# and a Pi session with no PI_WORKER_UID claims for itself from the extension
+# (`claimSelfAddress`, `--role self --kind self`). A person places nothing and
+# runs no extension, so there was no CLI path at all — registering a human
+# meant a raw `use pi-worker.nu *; ensure-address ...` against the module, and
+# until they ran it `to-address-for-send` refused their label, which is the
+# strong refusal: not unlisted, unaddressable.
+#
+# `kind: person` is what distinguishes the row from a `self` session that
+# happens to have a human watching it. Nothing branches on it today — the
+# registry's `kind` is read by displays, never by the resolver — so it is
+# metadata a roster can use once it shows people at all (dotfiles-btkt.2).
+#
+# RESOLVE-OR-CLAIM, like a run and unlike a worker. A worker takes a fresh
+# claim every time because a respawn is a different worker wearing a recycled
+# role. A person is the same person: their terminal dies with mail already in
+# their queue, and a refusal — or a fresh address — would strand every unread
+# message at a queue nobody reads any more. So registering twice reconnects.
+# Fresh-per-session comes from `unregister` at exit, which is the lifetime
+# jan chose on the bus (2026-09-18): minted per session, tombstoned on the way
+# out, exactly the `self-<hex>` shape.
+def "main register" [--label: string = "", --role: string = "person", --kind: string = "person"] {
+    require-flags "register" [
+        [flag, value, what];
+        ["--label" $label "the name this person is addressed by, e.g. jan; it is what `send --to` takes and what every display shows"]
+    ]
+    let repo = (current-repo)
+    if ($repo | is-empty) {
+        error make {msg: "register refused: not inside a git repository, and a bus is scoped to one project. Stand in the repository this person is joining"}
+    }
+    let address = (ensure-address $repo $label --role $role --kind $kind)
+    # The exports are the point of printing anything: a shell that carries
+    # them behaves like a spawned worker's window, so `wait`/`send`/`result`
+    # need no `--as` and — more to the point — `wait --as <label>` stops being
+    # refused for reading a queue the session cannot prove it owns.
+    {
+        label: $label
+        address: $address
+        kind: $kind
+        role: $role
+        project: $repo
+        exports: {PI_WORKER_UID: $label, PI_WORKER_ADDRESS: $address}
+    } | to json | print
+}
+
+# Leave the bus, keeping the log legible.
+#
+# Releasing writes the tombstone (`release-address-at` → `append-retired`)
+# before the record goes, so everything this person already said still renders
+# under their name while nothing can address them any more. Both halves are
+# released: the address, and the label reservation that pointed at it.
+#
+# SILENT about a label nobody holds, by the same contract `release-address`
+# keeps: every caller here is cleaning up rather than asserting, a shell may
+# exit down a path that already unregistered, and a refusal would turn tidy-up
+# into a failure. The answer says what it found, so a caller that does care
+# can look at `released`.
+def "main unregister" [--label: string = ""] {
+    require-flags "unregister" [
+        [flag, value, what];
+        ["--label" $label "the person to release, as `register` claimed them"]
+    ]
+    let repo = (current-repo)
+    if ($repo | is-empty) {
+        error make {msg: "unregister refused: not inside a git repository, and a bus is scoped to one project"}
+    }
+    let address = (label-address-for $label --repo $repo)
+    if $address == null {
+        {label: $label, released: false, address: null} | to json | print
+        return
+    }
+    release-address $repo $address
+    release-label $repo $label
+    {label: $label, released: true, address: $address} | to json | print
+}
+
 def "main rm" [--uid: string = ""] {
     require-flags "rm" [[flag, value, what]; ["--uid" $uid $UID_IS]]
     let run = (resolve-run $uid)
