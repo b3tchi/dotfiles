@@ -3273,11 +3273,17 @@ func writeWhoamiLabelStub(t *testing.T, dir, plainJSON, labelJSON string) {
 		"fi\n")
 }
 
-// TestMain_AsResolvesNamedPartyThroughWhoamiLabel is dotfiles-ng1w.13's
-// success case: an operator whose bus label ("orchestrator") differs from
-// their OS username ("jan") passes --as and the header names the NAMED
-// party — resolved through a distinct `whoami --label orchestrator` answer
-// carrying its own address, not the OS-user answer with the label swapped.
+// TestMain_AsResolvesNamedPartyThroughWhoamiLabel is an integration smoke
+// check on top of TestResolveIdentity_AsCallsWhoamiWithLabelFlag (the test
+// that actually pins the argv and fails on a revert to the pre-.13
+// local-rename): it confirms the label a `--label` answer carries reaches
+// the rendered header end to end through main.go's wiring. It does NOT by
+// itself distinguish real `--label` routing from a Go-side rename, because
+// the header only ever prints identity.Label (main.go's withIdentityHeader)
+// and never the address — a reverted local-rename implementation renames
+// the same Label and passes this test too. The address-level proof that
+// would catch that revert is TestMain_AsResolvesNamedPartysAddressForForYouMatching
+// below, via the for-you marker, which IS address-derived.
 func TestMain_AsResolvesNamedPartyThroughWhoamiLabel(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
@@ -3298,6 +3304,67 @@ func TestMain_AsResolvesNamedPartyThroughWhoamiLabel(t *testing.T) {
 	}
 	if strings.Contains(out, "you are jan") {
 		t.Fatalf("header named the OS user's own label instead of --as's named party:\n%s", out)
+	}
+}
+
+// writeWhoamiLabelAndMessagesStub extends writeWhoamiLabelStub with a
+// `messages` branch, so a test can hand runOnce a fixed bus alongside a
+// --label-aware whoami — needed to make an address-derived assertion (the
+// for-you marker), the one thing this file's header-only assertions cannot
+// tell apart from a Go-side label rename.
+func writeWhoamiLabelAndMessagesStub(t *testing.T, dir, plainJSON, labelJSON, messagesJSON string) {
+	t.Helper()
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\n"+
+		"if [ \"$1\" = \"whoami\" ]; then\n"+
+		"  if [ \"$3\" = \"--label\" ]; then\n"+
+		"    echo '"+labelJSON+"'\n"+
+		"  else\n"+
+		"    echo '"+plainJSON+"'\n"+
+		"  fi\n"+
+		"elif [ \"$1\" = \"messages\" ]; then\n"+
+		"  echo '"+messagesJSON+"'\n"+
+		"else\n"+
+		"  echo '[]'\n"+
+		"fi\n")
+}
+
+// TestMain_AsResolvesNamedPartysAddressForForYouMatching is the
+// regression-proof TestMain_AsResolvesNamedPartyThroughWhoamiLabel's doc
+// comment above disclaims: the reviewer's revert to the pre-.13 local-rename
+// implementation (identity.Label = as, address left as the OS user's own)
+// still renders "orchestrator" in the header, so no header-text assertion
+// can catch it. The row mark ("*", render.markCell) IS address-derived —
+// msgCellFor/forYouRow compare m.ToAddresses against the identity's ADDRESS
+// string, never its Label — so a message addressed only to the named
+// party's own address must be marked when --as names that party, and must
+// NOT be marked when --as is absent (the OS user's own, different,
+// address). A local-rename revert breaks the first half: --as would still
+// carry the OS-user address, which never appears in this message's
+// to_addresses, so the row is never marked.
+func TestMain_AsResolvesNamedPartysAddressForForYouMatching(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeWhoamiLabelAndMessagesStub(t, dir,
+		`{"user":"jan","label":"jan","address":"aOWN00000000000000000000001","kind":"person","registered":true}`,
+		`{"user":"jan","label":"orchestrator","address":"aORCH0000000000000000000002","kind":"person","registered":true}`,
+		`[{"at":"2026-09-19T10:00:00Z","id":"01","from":"lead","to":["orchestrator"],"kind":"message","content":"hi","from_address":"aFROM0000000000000000000009","to_addresses":["aORCH0000000000000000000002"]}]`,
+	)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var withAs bytes.Buffer
+	if err := runOnce(&withAs, "", "orchestrator"); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if !strings.Contains(withAs.String(), "* ") {
+		t.Fatalf("--as's named-party address did not match the message's to_addresses (no row mark), got:\n%s", withAs.String())
+	}
+
+	var withoutAs bytes.Buffer
+	if err := runOnce(&withoutAs, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if strings.Contains(withoutAs.String(), "* ") {
+		t.Fatalf("the OS user's own address must not match a message addressed to the named party, got:\n%s", withoutAs.String())
 	}
 }
 
