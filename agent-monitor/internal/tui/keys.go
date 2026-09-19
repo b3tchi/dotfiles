@@ -797,11 +797,12 @@ func (m *Model) FilterRoster(rows []source.Row) []source.Row {
 	return filtered
 }
 
-// FilterMessages applies the committed filter to messages on the field the
-// message pane declares as its own: From, the sender identity — the message
-// pane's analogue of the roster's uid/name, and cheap to match without
-// invoking render's width-parameterised subject derivation. An unset filter
-// returns messages unchanged.
+// FilterMessages applies the committed filter to messages on From, the
+// sender identity, OR any entry of To, the recipient list — matching
+// FilterRoster's case-insensitive substring rule. A row matching on both
+// fields still appears once (dotfiles-1xfo: filtering by a worker's label
+// must surface every message that mentions it, sent or received). An unset
+// filter returns messages unchanged.
 func (m *Model) FilterMessages(msgs []source.Message) []source.Message {
 	if !m.Filter.Set {
 		return msgs
@@ -811,6 +812,13 @@ func (m *Model) FilterMessages(msgs []source.Message) []source.Message {
 	for _, msg := range msgs {
 		if strings.Contains(strings.ToLower(msg.From), q) {
 			out = append(out, msg)
+			continue
+		}
+		for _, to := range msg.To {
+			if strings.Contains(strings.ToLower(to), q) {
+				out = append(out, msg)
+				break
+			}
 		}
 	}
 	return out

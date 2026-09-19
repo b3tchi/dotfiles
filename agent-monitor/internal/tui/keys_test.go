@@ -275,6 +275,82 @@ func TestFilterMessages_MatchesFromField(t *testing.T) {
 	}
 }
 
+// dotfiles-1xfo's exact reproduction: a message addressed TO peer-3 (not
+// FROM it) must survive the filter — the bug was that ten messages sent to a
+// worker vanished under its own name filter.
+func TestFilterMessages_MatchesRecipient(t *testing.T) {
+	m := NewModel()
+	m.HandleKey(Key{Rune: '/'})
+	for _, r := range "peer-3" {
+		m.HandleKey(Key{Rune: r})
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+
+	msgs := []source.Message{
+		{From: "peer-1", To: []string{"peer-2"}},
+		{From: "peer-1", To: []string{"peer-3"}},
+	}
+	got := m.FilterMessages(msgs)
+	if len(got) != 1 || len(got[0].To) != 1 || got[0].To[0] != "peer-3" {
+		t.Fatalf("expected only the message addressed to peer-3 to survive, got %+v", got)
+	}
+}
+
+func TestFilterMessages_MatchesSecondRecipient(t *testing.T) {
+	m := NewModel()
+	m.HandleKey(Key{Rune: '/'})
+	for _, r := range "peer-3" {
+		m.HandleKey(Key{Rune: r})
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+
+	msgs := []source.Message{
+		{From: "peer-1", To: []string{"peer-2", "peer-4"}},
+		{From: "peer-1", To: []string{"peer-2", "peer-3"}},
+	}
+	got := m.FilterMessages(msgs)
+	if len(got) != 1 || len(got[0].To) != 2 || got[0].To[1] != "peer-3" {
+		t.Fatalf("expected only the message with peer-3 as second recipient to survive, got %+v", got)
+	}
+}
+
+func TestFilterMessages_RowMatchingBothAppearsOnce(t *testing.T) {
+	m := NewModel()
+	m.HandleKey(Key{Rune: '/'})
+	for _, r := range "peer-3" {
+		m.HandleKey(Key{Rune: r})
+	}
+	m.HandleKey(Key{Special: KeyEnter})
+
+	msgs := []source.Message{
+		{From: "peer-3", To: []string{"peer-3"}},
+	}
+	got := m.FilterMessages(msgs)
+	if len(got) != 1 {
+		t.Fatalf("expected the row matching on both From and To to appear exactly once, got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterMessages_EmptyQueryUnchanged(t *testing.T) {
+	m := NewModel()
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Special: KeyEnter})
+
+	msgs := []source.Message{
+		{From: "peer-1", To: []string{"peer-2"}},
+		{From: "peer-3", To: nil},
+	}
+	got := m.FilterMessages(msgs)
+	if len(got) != len(msgs) {
+		t.Fatalf("expected an empty query to return every row unchanged, got %d want %d", len(got), len(msgs))
+	}
+	for i := range msgs {
+		if got[i].From != msgs[i].From {
+			t.Fatalf("row %d changed under empty query: got %+v want %+v", i, got[i], msgs[i])
+		}
+	}
+}
+
 func TestFilterRoster_UnsetFilterReturnsRowsUnchanged(t *testing.T) {
 	m := NewModel()
 	rows := []source.Row{{Name: "peer-1"}, {Name: "peer-2"}}
