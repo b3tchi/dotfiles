@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp033|agent-monitor-person-inbox]]
 
 
 
