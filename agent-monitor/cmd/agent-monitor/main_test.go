@@ -3273,7 +3273,7 @@ func writeWhoamiLabelStub(t *testing.T, dir, plainJSON, labelJSON string) {
 		"fi\n")
 }
 
-// TestMain_AsResolvesNamedPartyThroughWhoamiLabel is an integration smoke
+// TestMain_AsLabelReachesTheHeader is an integration smoke
 // check on top of TestResolveIdentity_AsCallsWhoamiWithLabelFlag (the test
 // that actually pins the argv and fails on a revert to the pre-.13
 // local-rename): it confirms the label a `--label` answer carries reaches
@@ -3284,7 +3284,7 @@ func writeWhoamiLabelStub(t *testing.T, dir, plainJSON, labelJSON string) {
 // the same Label and passes this test too. The address-level proof that
 // would catch that revert is TestMain_AsResolvesNamedPartysAddressForForYouMatching
 // below, via the for-you marker, which IS address-derived.
-func TestMain_AsResolvesNamedPartyThroughWhoamiLabel(t *testing.T) {
+func TestMain_AsLabelReachesTheHeader(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
 	writeWhoamiLabelStub(t, dir,
@@ -3329,7 +3329,7 @@ func writeWhoamiLabelAndMessagesStub(t *testing.T, dir, plainJSON, labelJSON, me
 }
 
 // TestMain_AsResolvesNamedPartysAddressForForYouMatching is the
-// regression-proof TestMain_AsResolvesNamedPartyThroughWhoamiLabel's doc
+// regression-proof TestMain_AsLabelReachesTheHeader's doc
 // comment above disclaims: the reviewer's revert to the pre-.13 local-rename
 // implementation (identity.Label = as, address left as the OS user's own)
 // still renders "orchestrator" in the header, so no header-text assertion
@@ -3398,9 +3398,15 @@ func TestMain_AsAgainstAmbiguousLabelYieldsNoIdentity(t *testing.T) {
 // TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel pins main.go's
 // other half of "identity wiring" (files_touched): tui.Model.HasIdentity is
 // what OpenComposer (sp033 T8) gates on, and it has no per-keystroke path —
-// cmd/ is the only place that ever sets it, exactly like Project. runOnce
-// builds its own throwaway Model, so this drives it through buildFrame
-// directly rather than reaching into runInteractive's program.
+// cmd/ is the only place that ever sets it, exactly like Project. Neither
+// runOnce nor runInteractive exposes the *tui.Model they build internally
+// (runOnce returns only an error; runInteractive would need a live
+// bubbletea program on a real terminal), so this drives the assertion
+// through resolveIdentityForModel — the exact unexported helper both of
+// them call to do this wiring (sp033 T4 followup) — rather than
+// reimplementing the assignment inline: deleting the assignment inside
+// resolveIdentityForModel now turns this test red, which reimplementing it
+// here never would.
 func TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
@@ -3408,8 +3414,7 @@ func TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	model := tui.NewModel()
-	identity := resolveIdentity(context.Background(), "")
-	model.HasIdentity = identity.Registered
+	identity := resolveIdentityForModel(context.Background(), model, "")
 
 	if !model.HasIdentity {
 		t.Fatalf("a registered whoami answer must set HasIdentity, got identity=%+v", identity)

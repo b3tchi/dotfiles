@@ -162,8 +162,6 @@ func runOnce(w io.Writer, project string, as ...string) error {
 	msgMonitor := source.NewMessagesMonitor(source.NewMessagesSampler())
 	msgMonitor.Tick(ctx)
 
-	identity := resolveIdentity(ctx, firstOrEmpty(as))
-
 	// --once has no key input, so nothing ever filters or scrolls a frame
 	// it renders via a keystroke — a fresh, untouched Model is exactly "no
 	// interactive filter, no scroll, top of the list". An interactive
@@ -174,7 +172,7 @@ func runOnce(w io.Writer, project string, as ...string) error {
 	// directly, since it is not something a key ever commits.
 	model := tui.NewModel()
 	model.Project = project
-	model.HasIdentity = identity.Registered
+	identity := resolveIdentityForModel(ctx, model, firstOrEmpty(as))
 	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0, identity)
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
@@ -204,6 +202,17 @@ func resolveIdentity(ctx context.Context, as string) source.Identity {
 	if as != "" && !identity.Registered {
 		fmt.Fprintf(os.Stderr, "agent-monitor: --as %q: no identity resolved (not registered)\n", as)
 	}
+	return identity
+}
+
+// resolveIdentityForModel is runOnce's and runInteractive's shared identity
+// wiring: resolve, then set model.HasIdentity from the result — the seam
+// between sp033 T4 (identity resolution) and sp033 T8 (OpenComposer's
+// !HasIdentity refusal, keys.go:913), factored so a test can call the exact
+// statement production depends on instead of reimplementing it.
+func resolveIdentityForModel(ctx context.Context, model *tui.Model, as string) source.Identity {
+	identity := resolveIdentity(ctx, as)
+	model.HasIdentity = identity.Registered
 	return identity
 }
 
@@ -699,8 +708,7 @@ func runInteractive(project string, as string) error {
 	// exec away.
 	censusMonitor.Refresh(ctx)
 	msgMonitor.Tick(ctx)
-	identity := resolveIdentity(ctx, as)
-	model.HasIdentity = identity.Registered
+	identity := resolveIdentityForModel(ctx, model, as)
 
 	p := tea.NewProgram(newShell(ctx, model, censusMonitor, msgMonitor, identity), programOptions()...)
 
