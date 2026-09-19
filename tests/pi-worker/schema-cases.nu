@@ -298,7 +298,12 @@ let n = ($env.PIW_MINT_N | into int)
         rm -rf $root; rm -rf $repo
     })
 
-    (run-case "messages/returns-every-envelope-in-id-order-with-exactly-six-fields" {
+    (run-case "messages/returns-every-envelope-in-id-order-with-exactly-eight-fields" {
+        # sp033 T1 widened this from six fields to eight, additively:
+        # from_address/to_addresses publish the raw addresses render-address
+        # already resolved through, beside the existing rendered from/to. The
+        # six original fields are unchanged in name and value — this case is
+        # the regression anchor for that (design's success criterion 2).
         let repo = (make-repo "messages-order")
         let root = (make-runtime "messages-order")
         with-runtime $root {
@@ -310,7 +315,7 @@ let n = ($env.PIW_MINT_N | into int)
             assert-eq ($got | length) 3 "every envelope in the project bus is returned"
             assert-eq ($got | get id) ([$a.id $b.id $c.id] | sort) "returned in lexical id order — ids are lexically sortable, so no sequence arithmetic is involved"
             for row in $got {
-                assert-eq (($row | columns) | sort) (["at" "content" "from" "id" "kind" "to"] | sort) "exactly the six documented fields, nothing invented"
+                assert-eq (($row | columns) | sort) (["at" "content" "from" "from_address" "id" "kind" "to" "to_addresses"] | sort) "exactly the eight documented fields, nothing invented"
             }
 
             let first = ($got | where id == $a.id | first)

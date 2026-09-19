@@ -2546,6 +2546,13 @@ export def bus-messages []: nothing -> list<record> {
                 to: ($to | each {|a| render-address $a $labels $retired })
                 kind: ($parsed | get -o kind | default "")
                 content: ($parsed | get -o content)
+                # sp033 T1: the raw addresses `render-address` already resolved
+                # through, published alongside the labels. adr0034: a reply
+                # is addressed to the envelope's ADDRESS, never to a
+                # re-resolved label, and by the time a consumer saw `from`/
+                # `to` above, the address had already been spent on display.
+                from_address: $from
+                to_addresses: $to
             }
         }
     }

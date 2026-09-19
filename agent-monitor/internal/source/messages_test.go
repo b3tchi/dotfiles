@@ -105,6 +105,86 @@ func TestParseMessages_ObjectContent_PassedThroughOpaque(t *testing.T) {
 	}
 }
 
+// sp033 T1: bus-messages now publishes from_address/to_addresses alongside
+// the rendered from/to. This fixture is inline rather than testdata/
+// messages.json, which deliberately stays in the pre-T1 shape so it can
+// double as the missing-fields fixture below.
+const addressFieldsFixture = `[
+  {
+    "at": "2026-09-19T00:00:00Z",
+    "id": "01M24E11K5M3AYPRFHRVH70394",
+    "from": "impl-1",
+    "to": ["impl-2"],
+    "kind": "inbox",
+    "content": "hello",
+    "from_address": "aADDR0000000000000000000001",
+    "to_addresses": ["aADDR0000000000000000000002"]
+  },
+  {
+    "at": "2026-09-19T00:01:00Z",
+    "id": "01M24E67X055CVGG48A3ZDXT2E",
+    "from": "retired-label",
+    "to": ["impl-2", "impl-3"],
+    "kind": "inbox",
+    "content": "signing off",
+    "from_address": "aADDR0000000000000000000009",
+    "to_addresses": ["aADDR0000000000000000000002", "aADDR0000000000000000000003"]
+  }
+]`
+
+func TestParseMessages_AddressFieldsPopulated(t *testing.T) {
+	msgs, err := ParseMessages([]byte(addressFieldsFixture))
+	if err != nil {
+		t.Fatalf("ParseMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want 2", len(msgs))
+	}
+
+	first := msgs[0]
+	if first.FromAddress != "aADDR0000000000000000000001" {
+		t.Fatalf("got FromAddress=%q, want aADDR0000000000000000000001", first.FromAddress)
+	}
+	if len(first.ToAddresses) != 1 || first.ToAddresses[0] != "aADDR0000000000000000000002" {
+		t.Fatalf("got ToAddresses=%v, want [aADDR0000000000000000000002]", first.ToAddresses)
+	}
+
+	// The tombstone case: From renders the (possibly tombstoned) label while
+	// FromAddress reports the sender's raw address regardless — the two
+	// fields are allowed to disagree on purpose.
+	second := msgs[1]
+	if second.From != "retired-label" {
+		t.Fatalf("got From=%q, want retired-label (the rendered label)", second.From)
+	}
+	if second.FromAddress != "aADDR0000000000000000000009" {
+		t.Fatalf("got FromAddress=%q, want aADDR0000000000000000000009", second.FromAddress)
+	}
+	if len(second.ToAddresses) != 2 || second.ToAddresses[0] != "aADDR0000000000000000000002" || second.ToAddresses[1] != "aADDR0000000000000000000003" {
+		t.Fatalf("got ToAddresses=%v, want two addresses in order", second.ToAddresses)
+	}
+}
+
+func TestParseMessages_MissingAddressFieldsAreEmptyNotAnError(t *testing.T) {
+	// testdata/messages.json predates from_address/to_addresses entirely —
+	// exactly the shape an older pi-worker on PATH still emits. Criterion 3:
+	// this must degrade to empty values, never a parse error.
+	msgs, err := ParseMessages(fixture(t))
+	if err != nil {
+		t.Fatalf("ParseMessages on a pre-T1 payload must not error: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want 4", len(msgs))
+	}
+	for i, m := range msgs {
+		if m.FromAddress != "" {
+			t.Fatalf("message %d: got FromAddress=%q, want empty on a payload missing the field", i, m.FromAddress)
+		}
+		if len(m.ToAddresses) != 0 {
+			t.Fatalf("message %d: got ToAddresses=%v, want empty on a payload missing the field", i, m.ToAddresses)
+		}
+	}
+}
+
 func TestParseMessages_EmptyPayload_EmptyListNotError(t *testing.T) {
 	msgs, err := ParseMessages([]byte(""))
 	if err != nil {

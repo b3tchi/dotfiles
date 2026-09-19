@@ -16,17 +16,27 @@ import (
 )
 
 // Message is one envelope, in the shape `pi-worker messages --json` emits:
-// {at, id, from, to, kind, content}. Content stays a json.RawMessage — the
-// transport interprets no content (adr0028), and this package is not the
-// transport either; only render.DeriveSubject ever looks inside it, and only
-// exactly as far as its documented derivation rules go.
+// {at, id, from, to, kind, content, from_address, to_addresses}. Content
+// stays a json.RawMessage — the transport interprets no content (adr0028),
+// and this package is not the transport either; only render.DeriveSubject
+// ever looks inside it, and only exactly as far as its documented derivation
+// rules go.
+//
+// FromAddress/ToAddresses (sp033 T1) are the raw addresses From/To were
+// rendered from — never re-resolved from the label, per adr0034: a label two
+// parties share is exactly what resolution refuses to answer, so a reply
+// must address the envelope's own address. Ordinary Go zero-value decoding
+// means a row from an older pi-worker that predates these fields yields
+// empty values rather than a parse error.
 type Message struct {
-	At      string          `json:"at"`
-	ID      string          `json:"id"`
-	From    string          `json:"from"`
-	To      []string        `json:"to"`
-	Kind    string          `json:"kind"`
-	Content json.RawMessage `json:"content"`
+	At          string          `json:"at"`
+	ID          string          `json:"id"`
+	From        string          `json:"from"`
+	To          []string        `json:"to"`
+	Kind        string          `json:"kind"`
+	Content     json.RawMessage `json:"content"`
+	FromAddress string          `json:"from_address"`
+	ToAddresses []string        `json:"to_addresses"`
 }
 
 const messagesBinary = "pi-worker"

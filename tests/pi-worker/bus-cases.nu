@@ -2706,6 +2706,70 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo
     })
 
+    # ------------------------------------------- raw addresses beside rendered labels (sp033 T1)
+    #
+    # `bus-messages` has always resolved `from`/`to` through `render-address`
+    # before returning them, so the minted address a reply needs never left
+    # the nu side. adr0034: a reply is addressed to the envelope's ADDRESS,
+    # never to a re-resolved label — a label two parties share is exactly what
+    # resolution refuses to answer. `from_address`/`to_addresses` publish the
+    # raw values the projection already had in scope, additively: the four
+    # existing fields (at, id, from, to, kind, content) are untouched.
+
+    (run-case "messages/rows-carry-the-raw-addresses-beside-the-rendered-labels" {
+        let repo = (make-repo "raw-addresses")
+        let root = (make-runtime "raw-addresses")
+        with-runtime $root {
+            let sender = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let recipient = (do { cd $repo; claim-address $repo "impl-2" --role "impl" })
+            do { cd $repo; bus-send --to [$recipient] --from $sender --content "hello" }
+
+            let row = (do { cd $repo; bus-messages } | first)
+            assert-eq $row.from "impl-1" "the rendered sender label is unchanged"
+            assert-eq $row.to ["impl-2"] "the rendered recipient labels are unchanged"
+            assert-eq $row.from_address $sender "from_address carries the raw sender address"
+            assert-eq $row.to_addresses [$recipient] "to_addresses carries the raw recipient addresses"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/a-released-senders-address-survives-in-the-projection" {
+        # Pairs a tombstoned label with its raw address in one row: `from`
+        # keeps rendering the tombstoned label (dotfiles-mqse), while
+        # `from_address` reports the sender's raw address regardless — the
+        # two fields are allowed to disagree on purpose.
+        let repo = (make-repo "raw-address-retired-sender")
+        let root = (make-runtime "raw-address-retired-sender")
+        with-runtime $root {
+            let sender = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let recipient = (do { cd $repo; claim-address $repo "impl-2" --role "impl" })
+            do { cd $repo; bus-send --to [$recipient] --from $sender --content "signing off" }
+            do { cd $repo; release-address $repo $sender }
+
+            let row = (do { cd $repo; bus-messages } | first)
+            assert-eq $row.from "impl-1" "the tombstoned label still renders"
+            assert-eq $row.from_address $sender "but from_address is the raw address regardless"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "messages/multi-recipient-rows-keep-arity" {
+        let repo = (make-repo "raw-addresses-multi")
+        let root = (make-runtime "raw-addresses-multi")
+        with-runtime $root {
+            let sender = (do { cd $repo; claim-address $repo "impl-1" --role "impl" })
+            let r1 = (do { cd $repo; claim-address $repo "impl-2" --role "impl" })
+            let r2 = (do { cd $repo; claim-address $repo "impl-3" --role "impl" })
+            let r3 = (do { cd $repo; claim-address $repo "impl-4" --role "impl" })
+            do { cd $repo; bus-send --to [$r1, $r2, $r3] --from $sender --content "all hands" }
+
+            let row = (do { cd $repo; bus-messages } | first)
+            assert-eq $row.to ["impl-2", "impl-3", "impl-4"] "rendered recipients keep order and arity"
+            assert-eq $row.to_addresses [$r1, $r2, $r3] "to_addresses keeps the same order and arity as to"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
 ]
 
 $cases | to json
