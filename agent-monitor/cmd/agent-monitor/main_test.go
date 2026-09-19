@@ -212,7 +212,7 @@ func TestFitPanes_TotalNeverExceedsHeight_TwoWay(t *testing.T) {
 	}
 
 	for _, h := range []int{3, 10, 24, 40} {
-		roster, log, _, shown := fitPanes(long(100), long(100), h, false)
+		roster, log, _, shown, _, _ := fitPanes(long(100), long(100), h, false, false)
 		if shown {
 			t.Errorf("height %d: detail must stay hidden when detailVisible is false", h)
 		}
@@ -231,7 +231,7 @@ func TestFitPanes_ShortPaneYieldsItsSurplus(t *testing.T) {
 	// Three agents and a busy bus: the roster should not hold half the screen
 	// empty while messages are being trimmed. detail off, so this is exactly
 	// the pre-T5 two-way case.
-	roster, log, _, shown := fitPanes([]string{"hdr", "a", "b"}, make([]string, 100), 25, false)
+	roster, log, _, shown, _, _ := fitPanes([]string{"hdr", "a", "b"}, make([]string, 100), 25, false, false)
 	if shown {
 		t.Fatalf("expected detail hidden with detailVisible=false")
 	}
@@ -246,7 +246,7 @@ func TestFitPanes_ShortPaneYieldsItsSurplus(t *testing.T) {
 func TestFitPanes_TrimsFromBottomKeepingHeaders(t *testing.T) {
 	roster := []string{"ROSTER HEADER", "r1", "r2", "r3", "r4", "r5"}
 	log := []string{"LOG HEADER", "m1", "m2", "m3", "m4", "m5"}
-	gotRoster, gotLog, _, _ := fitPanes(roster, log, 7, false)
+	gotRoster, gotLog, _, _, _, _ := fitPanes(roster, log, 7, false, false)
 
 	if gotRoster[0] != "ROSTER HEADER" {
 		t.Errorf("roster lost its header: %q", gotRoster)
@@ -271,7 +271,7 @@ func TestFitPanes_ThreeWay_TotalNeverExceedsHeight(t *testing.T) {
 	}
 
 	for _, h := range []int{3, 10, 24, 40, 80} {
-		roster, log, detailBudget, shown := fitPanes(long(100), long(100), h, true)
+		roster, log, detailBudget, shown, _, _ := fitPanes(long(100), long(100), h, true, false)
 		total := len(roster) + 1 + len(log)
 		if shown {
 			total += 1 + detailBudget
@@ -301,7 +301,7 @@ func TestFitPanes_DetailCapNeverExceedsThirdOrEight(t *testing.T) {
 	}
 
 	for _, h := range []int{24, 40, 80} {
-		_, _, detailBudget, shown := fitPanes(long(100), long(100), h, true)
+		_, _, detailBudget, shown, _, _ := fitPanes(long(100), long(100), h, true, false)
 		if !shown {
 			t.Fatalf("height %d: expected detail shown", h)
 		}
@@ -312,7 +312,7 @@ func TestFitPanes_DetailCapNeverExceedsThirdOrEight(t *testing.T) {
 			t.Errorf("height %d: detail budget %d exceeds a third of height", h, detailBudget)
 		}
 	}
-	if _, _, detailBudget, _ := fitPanes(long(100), long(100), 80, true); detailBudget*2 > 80 {
+	if _, _, detailBudget, _, _, _ := fitPanes(long(100), long(100), 80, true, false); detailBudget*2 > 80 {
 		t.Errorf("height 80: detail budget %d must not reach half the screen", detailBudget)
 	}
 }
@@ -322,7 +322,7 @@ func TestFitPanes_DetailCapNeverExceedsThirdOrEight(t *testing.T) {
 // roster/log into uselessness, and the two remaining panes are unaffected
 // (still non-empty, still keep the surplus-redistribution behaviour).
 func TestFitPanes_DetailHidesBelowMinimumHeight(t *testing.T) {
-	roster, log, detailBudget, shown := fitPanes([]string{"hdr", "a"}, []string{"hdr", "b"}, 3, true)
+	roster, log, detailBudget, shown, _, _ := fitPanes([]string{"hdr", "a"}, []string{"hdr", "b"}, 3, true, false)
 	if shown {
 		t.Fatalf("height 3: expected detail hidden, got budget %d", detailBudget)
 	}
@@ -335,7 +335,7 @@ func TestFitPanes_DetailHidesBelowMinimumHeight(t *testing.T) {
 // budget function directly: even at a generous height, detailVisible=false
 // must yield shown=false and budget 0.
 func TestFitPanes_DetailVisibleFalseAlwaysHides(t *testing.T) {
-	_, _, detailBudget, shown := fitPanes([]string{"hdr"}, []string{"hdr"}, 80, false)
+	_, _, detailBudget, shown, _, _ := fitPanes([]string{"hdr"}, []string{"hdr"}, 80, false, false)
 	if shown || detailBudget != 0 {
 		t.Errorf("detailVisible=false: expected shown=false budget=0, got shown=%v budget=%d", shown, detailBudget)
 	}
@@ -1369,7 +1369,7 @@ func TestLayout_MatchesPaneBudgets(t *testing.T) {
 
 				rosterLines := paneLines(true, 100)
 				logLines := paneLines(true, 100)
-				rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(rosterLines, logLines, height, detailVisible, false)
+				rosterBudget, logBudget, detailBudget, detailShown, _, _ := paneBudgets(rosterLines, logLines, height, detailVisible, false, false)
 
 				wantRosterLen := min(rosterLines, rosterBudget)
 				wantLogLen := min(logLines, logBudget)
@@ -3436,5 +3436,425 @@ func TestMain_SendIsNotPerformedInTheSamplerLoop(t *testing.T) {
 				t.Fatalf("a sampler loop execed send: %v — RunLoop/RunMessagesLoop must stay reader-only (adr0014)", call)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sp033 T10: the composer region, the build gate, and an end-to-end pass.
+// ---------------------------------------------------------------------------
+
+// newComposerReadyShell builds a wired shell with one real message on the
+// bus, addressed so OpenComposer has an address to bind to, and a resolved
+// identity so it does not refuse for that reason instead.
+func newComposerReadyShell(t *testing.T, width, height int) *shell {
+	t.Helper()
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\ncat <<'JSON'\n"+
+		`[{"at":"2026-09-19T10:00:00Z","id":"01","from":"lead","to":["bob"],"kind":"message","content":"hi","from_address":"aFROM0000000000000000000001","to_addresses":["aTO00000000000000000000002"]}]`+
+		"\nJSON\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	mm := source.NewMessagesMonitor(source.NewMessagesSampler())
+	mm.Tick(ctx)
+
+	model := tui.NewModel()
+	model.HasIdentity = true
+	s := newShell(ctx, model, census, mm)
+	s.identity = source.Identity{Address: "aOPERATOR00000000000000000003", Label: "me", Registered: true}
+	s.now = func() time.Time { return time.Date(2026, 9, 19, 10, 0, 5, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	settleLayout(s)
+	return s
+}
+
+// TestUpdate_AKeyOpensComposerBoundToSelectedMessage is the wiring T8
+// deliberately left out (## plan: "Model holds no message list"): `a`
+// through a real tea.KeyMsg must reach OpenComposer with the SELECTED
+// message's from_address, resolved by main.go's own selectedMessage — the
+// same lookup the detail pane already uses.
+func TestUpdate_AKeyOpensComposerBoundToSelectedMessage(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+
+	s.Update(runeKey('a'))
+
+	if !s.model.Composing {
+		t.Fatalf("expected 'a' to open the composer")
+	}
+	if s.model.ComposeTo != "aFROM0000000000000000000001" {
+		t.Fatalf("got ComposeTo %q, want the selected message's from_address", s.model.ComposeTo)
+	}
+}
+
+// TestUpdate_ARuneWhileComposingIsDraftTextNotReopen is criterion 3's
+// unstated twin: 'a' is the trigger only when nothing is already open. A
+// second 'a' typed into a live reply must be an ordinary character, exactly
+// like 'q'/'d'/'/' already are (sp033 T8 criterion 2) — a re-trigger would
+// silently eat the operator's own letter.
+func TestUpdate_ARuneWhileComposingIsDraftTextNotReopen(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+	wantTo := s.model.ComposeTo
+
+	s.Update(runeKey('a'))
+
+	outcome := s.model.HandleKey(tui.Key{Rune: 0x13}) // ctrl+s
+	if outcome.Send == nil {
+		t.Fatalf("expected the second 'a' to have landed in the draft")
+	}
+	if outcome.Send.Body != "a" {
+		t.Fatalf("got draft %q, want %q", outcome.Send.Body, "a")
+	}
+	if outcome.Send.To != wantTo {
+		t.Fatalf("recipient changed from %q to %q", wantTo, outcome.Send.To)
+	}
+}
+
+// TestUpdate_ARuneWhileEditingIsFilterTextNotComposer is the filter draft's
+// side of the same rule: 'a' typed into an open `/` query must not open the
+// composer underneath it — Editing and Composing can never be true together
+// (OpenComposer's own refusal), so the filter draft must win.
+func TestUpdate_ARuneWhileEditingIsFilterTextNotComposer(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+
+	s.Update(runeKey('/'))
+	s.Update(runeKey('a'))
+	if s.model.Composing {
+		t.Fatalf("'a' while editing a filter must not open the composer")
+	}
+	s.Update(key(tea.KeyEnter))
+	if s.model.Filter.Query != "a" {
+		t.Fatalf("got committed filter %q, want %q", s.model.Filter.Query, "a")
+	}
+}
+
+// TestUpdate_ANoSelectionRefusesAndNotesWhy is criterion 6 reached through a
+// real keypress rather than a direct OpenComposer call: nothing sampled,
+// nothing selected, so 'a' must refuse and say why (sendNotice, the same
+// transient status line T9 built for a failed send).
+func TestUpdate_ANoSelectionRefusesAndNotesWhy(t *testing.T) {
+	s := newTestShell(t)
+
+	s.Update(runeKey('a'))
+
+	if s.model.Composing {
+		t.Fatalf("expected 'a' with nothing selected to refuse")
+	}
+	if s.sendNotice == "" {
+		t.Fatalf("expected a refusal reason in sendNotice")
+	}
+}
+
+// TestUpdate_OpeningComposerClearsAnyExistingZoom is the layout precondition
+// criterion 1 rests on: the composer renders BELOW the detail pane, which
+// the zoom's full-screen layout has no room for, so a successful open must
+// leave zoom behind rather than composing invisibly underneath it.
+func TestUpdate_OpeningComposerClearsAnyExistingZoom(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.model.Focus = tui.PaneMessages
+	s.Update(key(tea.KeyEnter))
+	if !s.model.DetailZoom {
+		t.Fatalf("setup: enter did not zoom")
+	}
+
+	s.Update(runeKey('a'))
+
+	if !s.model.Composing {
+		t.Fatalf("expected 'a' to open the composer even while zoomed")
+	}
+	if s.model.DetailZoom {
+		t.Fatalf("expected opening the composer to clear the zoom")
+	}
+}
+
+// TestUpdate_CtrlSKeyReachesTheComposer is translateKey's missing case,
+// found while wiring this task (DEVIATION, see bd notes): sp033 T9's own
+// tests only ever construct tui.Key{Rune: 0x13} directly, so a real ctrl+s
+// keypress never reached commitCompose before this task added the
+// tea.KeyCtrlS case. Composing closes synchronously inside HandleKey, before
+// the resulting tea.Cmd is even returned, so this needs no working
+// `pi-worker send` on PATH to observe.
+func TestUpdate_CtrlSKeyReachesTheComposer(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+	for _, r := range "hi" {
+		s.Update(runeKey(r))
+	}
+
+	s.Update(key(tea.KeyCtrlS))
+
+	if s.model.Composing {
+		t.Fatalf("ctrl+s through a real keypress must close the composer")
+	}
+}
+
+// TestFocus_TabSkipsClosedComposer is criterion 3: tab has never had a fourth
+// stop (Pane has exactly three values), so a closed composer costs tab
+// nothing. While OPEN, every key including tab belongs to the draft
+// (handleComposingKey's default arm swallows a Special key it does not
+// recognise), and esc afterwards must leave Focus exactly where it was —
+// nothing in the composer's lifecycle ever touches Model.Focus.
+func TestFocus_TabSkipsClosedComposer(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	startFocus := s.model.Focus
+
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+	if s.model.Focus != startFocus {
+		t.Fatalf("opening the composer moved Focus from %v to %v", startFocus, s.model.Focus)
+	}
+
+	s.Update(key(tea.KeyTab))
+	if s.model.Focus != startFocus {
+		t.Fatalf("tab while composing moved Focus to %v, want it swallowed as draft input and Focus left at %v", s.model.Focus, startFocus)
+	}
+
+	s.Update(key(tea.KeyEsc))
+	if s.model.Composing {
+		t.Fatalf("esc did not close the composer")
+	}
+	if s.model.Focus != startFocus {
+		t.Fatalf("esc from the composer left Focus at %v, want it restored to %v", s.model.Focus, startFocus)
+	}
+
+	// Regression: once closed, tab cycles the three ordinary stops exactly
+	// as before this task.
+	s.Update(key(tea.KeyTab))
+	if s.model.Focus != tui.PaneMessages {
+		t.Fatalf("tab after closing the composer landed on %v, want PaneMessages", s.model.Focus)
+	}
+}
+
+// TestLayout_ComposerRegionSizedFromBudgets is criterion 1: the composer's
+// on-screen geometry must equal what paneBudgets already allocated — never a
+// second arithmetic on height, exactly the same regression TestLayout_
+// MatchesPaneBudgets pins for the detail pane.
+func TestLayout_ComposerRegionSizedFromBudgets(t *testing.T) {
+	roster := wideRoster(50)
+	msgs := wideMessages(50)
+
+	for _, height := range []int{16, 24, 32, 40, 64, 80} {
+		t.Run(fmt.Sprintf("h=%d", height), func(t *testing.T) {
+			model := tui.NewModel()
+			model.HasIdentity = true
+			if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
+				t.Fatalf("setup: OpenComposer refused: %s", reason)
+			}
+
+			lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+
+			rosterLines := paneLines(true, 50)
+			logLines := paneLines(true, 50)
+			_, _, _, _, composerBudget, composerShown := paneBudgets(rosterLines, logLines, height, model.DetailVisible, false, true)
+
+			if layout.composerShown != composerShown {
+				t.Fatalf("composerShown = %v, want %v", layout.composerShown, composerShown)
+			}
+			if !composerShown {
+				return
+			}
+			if layout.composer.totalRows > composerBudget {
+				t.Errorf("composer occupies %d rows, want at most its budget %d", layout.composer.totalRows, composerBudget)
+			}
+			if layout.composer.firstRow+layout.composer.totalRows > len(lines) {
+				t.Fatalf("composer region (first %d, rows %d) falls outside the %d-line frame", layout.composer.firstRow, layout.composer.totalRows, len(lines))
+			}
+		})
+	}
+}
+
+// TestLayout_FrameByteIdenticalWhenComposerClosed is criterion 2, the
+// regression anchor: touching the composer and closing it again must leave
+// no trace — the exact same lines and the exact same layout as a model that
+// never touched it at all, at the same width and sample.
+func TestLayout_FrameByteIdenticalWhenComposerClosed(t *testing.T) {
+	roster := wideRoster(20)
+	msgs := wideMessages(20)
+	now := time.Now()
+
+	baseline := tui.NewModel()
+	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40)
+
+	touched := tui.NewModel()
+	touched.HasIdentity = true
+	if ok, reason := touched.OpenComposer("aADDRESS0000000000000000001"); !ok {
+		t.Fatalf("setup: OpenComposer refused: %s", reason)
+	}
+	for _, r := range "draft that never gets sent" {
+		touched.HandleKey(tui.Key{Rune: r})
+	}
+	touched.HandleKey(tui.Key{Special: tui.KeyEsc})
+	if touched.Composing {
+		t.Fatalf("setup: esc did not close the composer")
+	}
+
+	gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40)
+
+	if len(gotLines) != len(baseLines) {
+		t.Fatalf("closed composer changed the frame's line count: got %d, want %d", len(gotLines), len(baseLines))
+	}
+	for i := range baseLines {
+		if gotLines[i] != baseLines[i] {
+			t.Fatalf("line %d differs after touching and closing the composer:\ngot:  %q\nwant: %q", i, gotLines[i], baseLines[i])
+		}
+	}
+	if gotLayout != baseLayout {
+		t.Fatalf("closed composer changed the layout:\ngot:  %+v\nwant: %+v", gotLayout, baseLayout)
+	}
+}
+
+// TestLayout_ShortTerminalKeepsTheMessageList is the edge case: a terminal
+// too short for four regions gives the composer rows over the detail pane,
+// never over the message list it is replying within. height 14 is chosen so
+// both detailCap and composerCap individually say yes (their own solo
+// checks pass) but showing both at once would squeeze roster+messages below
+// minPaneRows*2 — the case fitsBothPanes exists for.
+func TestLayout_ShortTerminalKeepsTheMessageList(t *testing.T) {
+	roster := wideRoster(50)
+	msgs := wideMessages(50)
+	const height = 14
+
+	model := tui.NewModel()
+	model.HasIdentity = true
+	if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
+		t.Fatalf("setup: OpenComposer refused: %s", reason)
+	}
+
+	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+
+	if layout.detailShown {
+		t.Errorf("expected the detail pane to lose its room to the composer at height %d", height)
+	}
+	if !layout.composerShown {
+		t.Fatalf("expected the composer to still show at height %d", height)
+	}
+	if layout.roster.totalRows < minPaneRows || layout.messages.totalRows < minPaneRows {
+		t.Errorf("roster/messages squeezed below the floor: roster=%d messages=%d, want at least %d each",
+			layout.roster.totalRows, layout.messages.totalRows, minPaneRows)
+	}
+	if len(lines) > height {
+		t.Errorf("frame is %d lines, want at most %d", len(lines), height)
+	}
+
+	// Regression: without a composer open, the SAME height still shows
+	// detail exactly as sp032 left it.
+	plain := tui.NewModel()
+	_, plainLayout := renderFrame(plain, roster, false, msgs, false, time.Now(), 80, height)
+	if !plainLayout.detailShown {
+		t.Errorf("without a composer open, detail should still show at height %d (regression)", height)
+	}
+}
+
+// TestOnce_NeverRendersComposer is criterion 4: --once (height 0, through
+// renderFrame directly — buildFrame/runOnce are what actually call it with
+// height 0) never renders a composer, matching how it already treats the
+// detail pane. A composer with an open draft is built here to prove the
+// height gate wins over Composing being true, not merely that a fresh model
+// has nothing to show.
+func TestOnce_NeverRendersComposer(t *testing.T) {
+	roster := wideRoster(3)
+	msgs := wideMessages(3)
+
+	model := tui.NewModel()
+	model.HasIdentity = true
+	if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
+		t.Fatalf("setup: OpenComposer refused: %s", reason)
+	}
+	for _, r := range "hello" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+
+	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 0)
+
+	if layout.composerShown {
+		t.Fatalf("expected --once (height 0) to never show the composer")
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "reply to") {
+			t.Fatalf("--once frame contains composer text: %q", l)
+		}
+	}
+}
+
+// TestView_FailedSendNoticeAppearsInTheReopenedComposer is the surface T9's
+// comment on shell.sendNotice promised this task ("T10 gives the composer
+// its own region and reads this"): a failed send reopens the composer
+// (handleSendResult) with the SAME recipient and draft, and that reopened
+// header is exactly where the CLI's stderr becomes visible.
+func TestView_FailedSendNoticeAppearsInTheReopenedComposer(t *testing.T) {
+	s := newComposerReadyShell(t, 160, 40)
+	s.sender = &source.Sender{Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return nil, errors.New("send refused: unknown recipient")
+	}}
+
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+	for _, r := range "hi" {
+		s.Update(runeKey(r))
+	}
+	_, cmd := s.Update(key(tea.KeyCtrlS))
+	if cmd == nil {
+		t.Fatalf("expected ctrl+s to dispatch a send command")
+	}
+	s.Update(cmd())
+
+	if !s.model.Composing {
+		t.Fatalf("expected the failed send to reopen the composer")
+	}
+
+	view := s.View()
+	if !strings.Contains(view, "failed") || !strings.Contains(view, "unknown recipient") {
+		t.Fatalf("view does not surface the failed send's notice:\n%s", view)
+	}
+}
+
+// TestView_SuccessfulSendNoticeIsInvisible documents the accepted shape of
+// criterion 2: a successful send closes the composer BEFORE the notice is
+// even set (commitCompose runs synchronously inside HandleKey, before the
+// tea.Cmd it returns is ever invoked), so there is no region left to render
+// "sent to X" into — the reply's own appearance in the ordinary message list
+// on the next tick is the confirmation (T9 criterion 3), not a banner. This
+// pins that a successful sendNotice never resurrects the composer region, so
+// criterion 2's byte-identical frame survives a successful send exactly
+// like it survives a closed composer that was never touched at all.
+func TestView_SuccessfulSendNoticeIsInvisible(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.sender = &source.Sender{Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return nil, nil
+	}}
+
+	s.Update(runeKey('a'))
+	for _, r := range "hi" {
+		s.Update(runeKey(r))
+	}
+	_, cmd := s.Update(key(tea.KeyCtrlS))
+	if cmd == nil {
+		t.Fatalf("expected ctrl+s to dispatch a send command")
+	}
+	s.Update(cmd())
+
+	if s.model.Composing {
+		t.Fatalf("a successful send must not reopen the composer")
+	}
+	if s.sendNotice == "" {
+		t.Fatalf("expected a confirmation in sendNotice")
+	}
+
+	view := s.View()
+	if strings.Contains(view, "reply to") {
+		t.Fatalf("a closed composer must not render, even with a pending sendNotice:\n%s", view)
 	}
 }

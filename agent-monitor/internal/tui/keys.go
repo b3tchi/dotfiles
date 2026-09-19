@@ -925,6 +925,12 @@ func (m *Model) OpenComposer(toAddress string) (bool, string) {
 	return true, ""
 }
 
+// ComposeDraft exposes the reply draft's current text (sp033 T10): the
+// composer's on-screen region needs to show what the operator is typing, and
+// composeDraft is otherwise package-private exactly like the filter's own
+// draft field — this is the one read-only door into it, mirroring ComposeTo.
+func (m *Model) ComposeDraft() string { return m.composeDraft }
+
 // SendRequest is what ctrl+s yields from the composer (criterion 3): the
 // address OpenComposer bound at open time and the draft's final text. T9
 // dispatches it as a tea.Cmd; nothing here interprets or sends it — the

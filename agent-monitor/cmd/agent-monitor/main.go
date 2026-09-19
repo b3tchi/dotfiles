@@ -72,6 +72,14 @@ const (
 	detailCapRows    = 8
 	detailCapDivisor = 3
 
+	// composerCapRows and composerCapDivisor are detailCapRows/detailCapDivisor's
+	// twin for the composer region (sp033 T10): the same shape, deliberately
+	// equal, so the ONLY thing that decides who loses a row under a squeeze
+	// is the priority paneBudgets applies (detail first, composer second),
+	// never one pane simply having a stingier cap than the other.
+	composerCapRows    = 8
+	composerCapDivisor = 3
+
 	// headerLines is how many lines Render/RenderLog always spend on a
 	// pane's own header (the status line plus the column header row),
 	// regardless of how many data rows follow. It converts a pane's total
@@ -302,6 +310,9 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		for _, k := range translateKey(msg) {
+			if s.tryOpenComposer(k) {
+				continue
+			}
 			outcome := s.model.HandleKey(k)
 			if outcome.Quit {
 				return s, tea.Quit
@@ -322,6 +333,40 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.handleSendResult(msg)
 	}
 	return s, nil
+}
+
+// tryOpenComposer is `a`'s dispatch (sp033 T10, the wiring T8 deliberately
+// left out): Model.OpenComposer needs the SELECTED message's from_address,
+// and Model holds no message list to read that from — only main.go, which
+// already threads s.msgs through selectedMessage for the detail pane, does.
+// It reports whether it consumed k, so Update's loop skips HandleKey for
+// exactly this one key and only when it means "open the composer" — while
+// Editing or Composing, 'a' is text, and falling through to HandleKey is what
+// makes it belong to whichever draft is open, unchanged.
+//
+// A successful open also drops the detail zoom: the composer renders BELOW
+// the detail pane (criterion 1), which the zoom's full-screen layout has no
+// room for, and nothing in the composing key surface (handleComposingKey
+// swallows Enter as a newline, not a zoom) can re-enter zoom while Composing
+// is true — so this is the only place that invariant needs enforcing.
+func (s *shell) tryOpenComposer(k tui.Key) bool {
+	if k.Rune != 'a' {
+		return false
+	}
+	if s.model.Editing || s.model.Composing {
+		return false
+	}
+	toAddress := ""
+	if msg := selectedMessage(s.model, s.msgs.Last()); msg != nil {
+		toAddress = msg.FromAddress
+	}
+	opened, reason := s.model.OpenComposer(toAddress)
+	if !opened {
+		s.sendNotice = reason
+		return true
+	}
+	s.model.DetailZoom = false
+	return true
 }
 
 // sendResultMsg is what a dispatched send reports back into Update — never
@@ -375,15 +420,26 @@ func (s *shell) handleSendResult(msg sendResultMsg) {
 }
 
 // recipientLabel resolves an address to the rendered label a currently
-// known envelope carries for it — the same From/To rendering pi-worker.nu
-// already computed (ft014 T1's from_address/to_addresses widening), never a
-// second Go-side registry lookup (the ## plan's absolute rule: "the
-// registry is read in nu, never in Go"). Falls back to the address itself
-// when no known envelope carries it — a recipient released between open and
-// send (## edge_cases) has no label left to show, and the address is an
-// honest thing to show instead of guessing or crashing.
+// known envelope carries for it, off the shell's own last sample. See
+// recipientLabelFromSample, which does the actual lookup: it takes a sample
+// directly (rather than a monitor) so renderFrame — a package-level function
+// with no shell to call, but the msgSample it was already handed — can
+// resolve the SAME label for the composer's header, sp033 T10, without a
+// second lookup rule.
 func (s *shell) recipientLabel(address string) string {
-	sample := s.msgs.Last()
+	return recipientLabelFromSample(s.msgs.Last(), address)
+}
+
+// recipientLabelFromSample is recipientLabel's lookup: the same From/To
+// rendering pi-worker.nu already computed (ft014 T1's
+// from_address/to_addresses widening), never a second Go-side registry
+// lookup (the ## plan's absolute rule: "the registry is read in nu, never in
+// Go"). Falls back to the address itself when no known envelope carries it —
+// a recipient released between open and send (## edge_cases), or a reply
+// composer whose selected message has since scrolled out of the sample, has
+// no label left to show, and the address is an honest thing to show instead
+// of guessing or crashing.
+func recipientLabelFromSample(sample *source.MessageSample, address string) string {
 	if sample == nil {
 		return address
 	}
@@ -462,7 +518,7 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 // the output mapping now, so the cause is gone and the workaround goes with
 // it rather than being carried forward as a superstition.
 func (s *shell) View() string {
-	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
 	// sp032 T8: this session's FIRST frame opens the message pane at its
 	// live end (dotfiles-utob — a monitor that opened on the wrong end, and
 	// since T6 opens already `+N` behind, contradicts the conditional
@@ -478,9 +534,40 @@ func (s *shell) View() string {
 	// nothing on the --once path pays for it at all: runOnce calls buildFrame
 	// directly and never constructs a shell.
 	if s.openMessagesAtHeadOnce() {
-		lines, _ = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
+		lines, layout = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
 	}
+	lines = applySendNotice(lines, layout, s.sendNotice, s.width)
 	return strings.Join(lines, "\n")
+}
+
+// applySendNotice overlays sendNotice onto the composer's own header row,
+// using the SAME layout renderFrame already computed — never a second pass
+// over model state. It lives in View(), not renderFrame, because sendNotice
+// is shell state (sp033 T9's send result), and renderFrame is a
+// package-level function with no shell to read it from; every renderFrame
+// call this package's tests make (none of them touching sendNotice) is
+// therefore unaffected.
+//
+// It is a no-op whenever the composer is not shown — which is exactly the
+// successful-send case (commitCompose already closed it before the tea.Cmd
+// even ran, T9's TestSend_DispatchedAsCmdShowsConfirmation), so that
+// confirmation has no region left to render into; the reply appearing in the
+// ordinary message list on the next tick (T9 criterion 3) IS that
+// confirmation. A FAILED send reopens the composer (handleSendResult) with
+// the SAME recipient and draft restored, which is exactly when this overlay
+// has a header row to attach "send to X failed: …" to.
+func applySendNotice(lines []string, layout frameLayout, notice string, width int) []string {
+	if notice == "" || !layout.composerShown || layout.composer.headerRows == 0 {
+		return lines
+	}
+	idx := layout.composer.firstRow
+	if idx < 0 || idx >= len(lines) {
+		return lines
+	}
+	out := make([]string, len(lines))
+	copy(out, lines)
+	out[idx] = render.TruncateCells(out[idx]+"  "+notice, width)
+	return out
 }
 
 // openMessagesAtHeadOnce performs this session's opening and reports whether
@@ -527,6 +614,13 @@ func translateKey(k tea.KeyMsg) []tui.Key {
 		return keys
 	case tea.KeyCtrlC:
 		return []tui.Key{{Rune: 0x03}}
+	case tea.KeyCtrlS:
+		// sp033 T8's commitCompose checks for the raw 0x13 (DC3) rune rather
+		// than a Special key, and every existing test drives it that way
+		// (tui.Key{Rune: 0x13}) — this is the one place that mapping from a
+		// real keypress was still missing, since T8/T9 only ever exercised it
+		// by constructing the Key directly.
+		return []tui.Key{{Rune: 0x13}}
 	case tea.KeyUp:
 		return []tui.Key{{Special: tui.KeyUp}}
 	case tea.KeyDown:
@@ -696,7 +790,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// scroll to the cursor, which would silently discard a wheel offset
 	// (sp032 T1's whole point) for the duration of the zoom.
 	if height > 0 && model.DetailVisible && model.DetailZoom {
-		_, _, detailBudget, _ := paneBudgets(rosterLines, logLines, height, true, true)
+		_, _, detailBudget, _, _, _ := paneBudgets(rosterLines, logLines, height, true, true, model.Composing)
 		detailLines := renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, true)
 		return detailLines, frameLayout{
 			detail:      detailRegion(0, len(detailLines)),
@@ -705,7 +799,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	}
 
 	if height > 0 {
-		rosterBudget, logBudget, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible, false)
+		rosterBudget, logBudget, _, _, _, _ := paneBudgets(rosterLines, logLines, height, model.DetailVisible, false, model.Composing)
 		model.SetRosterViewport(viewportRows(min(rosterLines, rosterBudget)))
 		model.SetMessagesViewport(viewportRows(min(logLines, logBudget)))
 	}
@@ -750,7 +844,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// and a pane only scrolls when it is at or over its budget — so the
 	// "is this pane shorter than its share?" test lands the same way either
 	// way, and the surplus is redistributed identically.
-	roster, log, detailBudget, detailShown := fitPanes(roster, log, height, model.DetailVisible)
+	roster, log, detailBudget, detailShown, composerBudget, composerShown := fitPanes(roster, log, height, model.DetailVisible, model.Composing)
 
 	// detailLines is rendered HERE, before the layout is built, because its
 	// ACTUAL length is not detailBudget: a short message occupies fewer
@@ -763,7 +857,17 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 		detailLines = renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, false)
 	}
 
-	layout := buildLayout(censusSample != nil, len(rosterRows), len(roster), msgSample != nil, len(msgRows), len(log), len(detailLines), detailShown)
+	// composerLines is detailLines' twin (sp033 T10 criterion 1): rendered
+	// from its own ACTUAL length, never composerBudget, for the same reason.
+	// composerShown is false whenever model.Composing is false (paneBudgets'
+	// height<=0 branch and its composerVisible gate both force it), so this
+	// costs nothing on every frame the composer is closed — criterion 2.
+	var composerLines []string
+	if composerShown {
+		composerLines = renderComposerPane(model, msgSample, width, composerBudget)
+	}
+
+	layout := buildLayout(censusSample != nil, len(rosterRows), len(roster), msgSample != nil, len(msgRows), len(log), len(detailLines), detailShown, len(composerLines), composerShown)
 
 	// Make the cursor and the focus VISIBLE (dotfiles-uyih). sp031 shipped a
 	// cursor that moves, a scroll that follows it and a detail pane that
@@ -786,6 +890,12 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 		// does not mark anything — it is the only pane on screen, so there
 		// is nothing for a focus mark to distinguish it from.)
 		detailLines = markPane(detailLines, model.Focus == tui.PaneDetail, 0, 0, 0)
+		// The composer has no cursor and no other stop to distinguish it
+		// from (nothing else is focusable while Composing — every key
+		// belongs to the draft), so it is marked focused unconditionally
+		// whenever it is shown at all, exactly like the zoom layout marks
+		// nothing because there is nothing to distinguish there either.
+		composerLines = markPane(composerLines, true, 0, 0, 0)
 	}
 
 	var lines []string
@@ -796,6 +906,10 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	if detailShown {
 		lines = append(lines, "")
 		lines = append(lines, detailLines...)
+	}
+	if composerShown {
+		lines = append(lines, "")
+		lines = append(lines, composerLines...)
 	}
 	return lines, layout
 }
@@ -905,23 +1019,35 @@ func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Mes
 // reintroduce, so the invariant is re-asserted here rather than assumed.
 //
 // height<=0 (the --once contract) returns roster and log untouched and
-// detail always hidden — no clamping at all, exactly as before this task.
+// detail and the composer always hidden — no clamping at all, exactly as
+// before this task.
 //
-// The detail pane is capped independently at roughly a third of height or
-// detailCapRows, whichever is smaller, and hides itself (falling back to
-// the original two-way split) when detailVisible is false or when giving it
-// that budget would leave less than minPaneRows*2 lines for roster+messages
-// combined — the "squeezed into uselessness" floor the edge_cases call out.
-// Below that, roster and messages redistribute surplus exactly as they did
-// before detail existed: each gets half the remaining rows, minus the blank
-// separator(s); whatever a short pane does not use goes to the other, so a
-// machine with three agents and a busy bus still fills the screen with
-// messages rather than padding. Trimming takes from the BOTTOM, which keeps
-// each pane's header line — a pane whose header scrolled away is
-// unreadable, and the header is what carries the staleness indicator.
-func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, logOut []string, detailBudget int, detailShown bool) {
-	rosterBudget, logBudget, detailBudget, detailShown := paneBudgets(len(roster), len(log), height, detailVisible, false)
-	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown
+// The detail pane and the composer (sp033 T10) are each capped independently
+// at roughly a third of height or their own *CapRows, whichever is smaller,
+// and each hides itself (falling back to the original two-way split) when
+// its own visibility flag is false or when showing it ALONE would leave less
+// than minPaneRows*2 lines for roster+messages combined — the "squeezed into
+// uselessness" floor the edge_cases call out. When BOTH want to show, a
+// second check (fitsBothPanes) re-derives that same floor against their
+// COMBINED cost — three separators and two budgets, not one of each — and
+// drops detail first, the composer only if the list would still be squeezed
+// even without detail too. That ordering is criterion 1's edge case, "the
+// composer wins rows over the DETAIL pane, never over the message list it is
+// replying within": composer/detail are given EQUAL caps on purpose, so the
+// only thing that decides who loses a row is this priority, never one pane
+// simply having a stingier budget than the other.
+//
+// Below whatever survives, roster and messages redistribute surplus exactly
+// as they did before detail (and now the composer) existed: each gets half
+// the remaining rows, minus the blank separator(s); whatever a short pane
+// does not use goes to the other, so a machine with three agents and a busy
+// bus still fills the screen with messages rather than padding. Trimming
+// takes from the BOTTOM, which keeps each pane's header line — a pane whose
+// header scrolled away is unreadable, and the header is what carries the
+// staleness indicator.
+func fitPanes(roster, log []string, height int, detailVisible, composerVisible bool) (rosterOut, logOut []string, detailBudget int, detailShown bool, composerBudget int, composerShown bool) {
+	rosterBudget, logBudget, detailBudget, detailShown, composerBudget, composerShown := paneBudgets(len(roster), len(log), height, detailVisible, false, composerVisible)
+	return clamp(roster, rosterBudget), clamp(log, logBudget), detailBudget, detailShown, composerBudget, composerShown
 }
 
 // paneBudgets is fitPanes' arithmetic with the []string arguments replaced
@@ -929,20 +1055,27 @@ func fitPanes(roster, log []string, height int, detailVisible bool) (rosterOut, 
 // anything is rendered — the ordering sp031 T1's criterion needs (see
 // renderFrame). A budget of -1 means "do not clamp" (the height<=0 --once
 // contract); clamp treats any negative n that way.
-func paneBudgets(rosterLines, logLines, height int, detailVisible, detailZoom bool) (rosterBudget, logBudget, detailBudget int, detailShown bool) {
+//
+// This is the SINGLE arithmetic sp033 T10's own SRE note names: the composer
+// gets no second calculation of its own anywhere else in this file, exactly
+// like the detail pane before it.
+func paneBudgets(rosterLines, logLines, height int, detailVisible, detailZoom, composerVisible bool) (rosterBudget, logBudget, detailBudget int, detailShown bool, composerBudget int, composerShown bool) {
 	if height <= 0 {
-		return -1, -1, 0, false
+		return -1, -1, 0, false, 0, false
 	}
 
-	// sp032 T4's zoom is a THIRD case of the same arithmetic rather than a
-	// second arithmetic somewhere else: the detail pane takes every row,
-	// the other two get none, and there is no separator because there is
-	// nothing to separate. detailBudget is the pane's TOTAL line budget in
-	// both layouts (its header plus its viewport), so the "viewport takes
-	// height-1 rows" of the criterion falls out of renderDetailPane's one
-	// header line, not out of a second subtraction here.
+	// sp032 T4's zoom is a case of the same arithmetic rather than a second
+	// arithmetic somewhere else: the detail pane takes every row, the other
+	// two (and the composer) get none, and there is no separator because
+	// there is nothing to separate. detailBudget is the pane's TOTAL line
+	// budget in both layouts (its header plus its viewport), so the
+	// "viewport takes height-1 rows" of the criterion falls out of
+	// renderDetailPane's one header line, not out of a second subtraction
+	// here. The composer cannot legally be open while zoomed (tryOpenComposer
+	// clears the zoom on a successful open, and nothing reachable while
+	// Composing re-enters it), so this branch simply never shows it.
 	if detailVisible && detailZoom {
-		return 0, 0, height, true
+		return 0, 0, height, true, 0, false
 	}
 
 	detailBudget, detailShown = detailCap(height)
@@ -950,16 +1083,37 @@ func paneBudgets(rosterLines, logLines, height int, detailVisible, detailZoom bo
 		detailBudget, detailShown = 0, false
 	}
 
-	seps := 1 // the blank line between roster and messages
-	if detailShown {
-		seps = 2 // plus the blank line between messages and detail
+	composerBudget, composerShown = composerCap(height)
+	if !composerVisible {
+		composerBudget, composerShown = 0, false
 	}
 
-	avail := height - seps - detailBudget
+	// Priority under a squeeze: detail loses first, the composer only if the
+	// list would still be squeezed without detail too. With composerCap and
+	// detailCap sharing the exact same shape, dropping detail alone already
+	// resolves every case fitsBothPanes can construct against these two
+	// constants — the second check exists so retuning either constant later
+	// can never silently break the priority order.
+	if detailShown && !fitsBothPanes(height, detailBudget, composerBudget) {
+		detailBudget, detailShown = 0, false
+	}
+	if composerShown && !fitsBothPanes(height, detailBudget, composerBudget) {
+		composerBudget, composerShown = 0, false
+	}
+
+	seps := 1 // the blank line between roster and messages
+	if detailShown {
+		seps++ // plus the blank line between messages and detail
+	}
+	if composerShown {
+		seps++ // plus the blank line before the composer
+	}
+
+	avail := height - seps - detailBudget - composerBudget
 	if avail < 2 {
 		// Degenerate terminal: one row each is the most that is still two
 		// panes. Below that there is nothing useful to show.
-		return 1, 1, detailBudget, detailShown
+		return 1, 1, detailBudget, detailShown, composerBudget, composerShown
 	}
 
 	rosterBudget = avail / 2
@@ -969,7 +1123,24 @@ func paneBudgets(rosterLines, logLines, height int, detailVisible, detailZoom bo
 	} else if logLines < logBudget {
 		rosterBudget += logBudget - logLines
 	}
-	return rosterBudget, logBudget, detailBudget, detailShown
+	return rosterBudget, logBudget, detailBudget, detailShown, composerBudget, composerShown
+}
+
+// fitsBothPanes reports whether showing detail and the composer TOGETHER, at
+// the given budgets, still leaves roster+messages at least minPaneRows*2
+// combined lines — detailCap/composerCap each check this in isolation
+// (assuming the OTHER is absent), which is exactly wrong the one frame both
+// want to show at once; this is the combined check paneBudgets applies
+// before trusting either self-assessment.
+func fitsBothPanes(height, detailBudget, composerBudget int) bool {
+	seps := 1
+	if detailBudget > 0 {
+		seps++
+	}
+	if composerBudget > 0 {
+		seps++
+	}
+	return height-seps-detailBudget-composerBudget >= minPaneRows*2
 }
 
 // paneLayout is one VISIBLE pane's on-screen geometry for THIS frame, in the
@@ -1001,11 +1172,16 @@ type paneLayout struct {
 // hitDetail for a coordinate that lands on it, and every mouse handler in
 // this task treats that report as inert. T4 is what turns it into a third
 // focus stop.
+// composer is the zero paneLayout when composerShown is false — hitTest has
+// no case for it yet (sp033 T10 gives the composer a region and focus, not a
+// mouse target), so nothing consults it while it is empty.
 type frameLayout struct {
-	roster      paneLayout
-	messages    paneLayout
-	detail      paneLayout
-	detailShown bool
+	roster        paneLayout
+	messages      paneLayout
+	detail        paneLayout
+	detailShown   bool
+	composer      paneLayout
+	composerShown bool
 }
 
 // buildLayout derives frameLayout from paneBudgets' own outputs and the
@@ -1018,16 +1194,27 @@ type frameLayout struct {
 // than its budget, with no padding) can come in under budget, and the layout
 // must describe the frame actually returned rather than the ceiling that
 // merely bounds it.
-func buildLayout(haveRoster bool, rosterRows, rosterRenderedLen int, haveMessages bool, msgRows, logRenderedLen int, detailRenderedLen int, detailShown bool) frameLayout {
+// composerRenderedLen/composerShown are detailRenderedLen/detailShown's
+// twin (sp033 T10): the composer's region, when shown, sits BELOW wherever
+// the frame's stack currently ends — after detail if detail is shown, after
+// the log otherwise — never at a fixed offset of its own.
+func buildLayout(haveRoster bool, rosterRows, rosterRenderedLen int, haveMessages bool, msgRows, logRenderedLen int, detailRenderedLen int, detailShown bool, composerRenderedLen int, composerShown bool) frameLayout {
 	roster := paneRegion(0, haveRoster, rosterRows, rosterRenderedLen)
 
 	msgFirst := rosterRenderedLen + 1 // +1: the blank separator line
 	messages := paneRegion(msgFirst, haveMessages, msgRows, logRenderedLen)
 
-	layout := frameLayout{roster: roster, messages: messages, detailShown: detailShown}
+	layout := frameLayout{roster: roster, messages: messages, detailShown: detailShown, composerShown: composerShown}
+
+	next := msgFirst + logRenderedLen
 	if detailShown {
-		detailFirst := msgFirst + logRenderedLen + 1 // +1: the blank separator line
-		layout.detail = detailRegion(detailFirst, detailRenderedLen)
+		next++ // the blank separator line before detail
+		layout.detail = detailRegion(next, detailRenderedLen)
+		next += detailRenderedLen
+	}
+	if composerShown {
+		next++ // the blank separator line before the composer
+		layout.composer = detailRegion(next, composerRenderedLen)
 	}
 	return layout
 }
@@ -1115,6 +1302,55 @@ func renderDetailPane(model *tui.Model, msg *source.Message, width, budget int, 
 		// render/ produced them in — which is what the "no line exceeds the
 		// width" reasoning and every byte-comparing frame test assume.
 		out = append(out, strings.TrimRight(line, " "))
+	}
+	return out
+}
+
+// renderComposerPane is sp033 T10's composer region: the recipient's
+// rendered label (never a second registry lookup — recipientLabelFromSample)
+// plus the send/cancel hint on one header line, then the draft's own text.
+// It is sized from budget exactly like renderDetailPane, which is what keeps
+// paneBudgets the one arithmetic that decides how many rows either pane gets
+// (this file never computes a composer height a second way).
+//
+// budget < 1 renders nothing — the caller (renderFrame) only calls this when
+// fitPanes/paneBudgets reported composerShown true, so this guard is a
+// defensive floor rather than a path anything exercises today.
+func renderComposerPane(model *tui.Model, sample *source.MessageSample, width, budget int) []string {
+	if budget < 1 {
+		return nil
+	}
+	label := recipientLabelFromSample(sample, model.ComposeTo)
+	header := render.TruncateCells(fmt.Sprintf("reply to %s  (ctrl+s send · esc cancel)", label), width)
+
+	bodyRows := budget - 1 // the header line is chrome above the draft
+	if bodyRows < 0 {
+		bodyRows = 0
+	}
+	out := []string{header}
+	if bodyRows == 0 {
+		return out
+	}
+	return append(out, composerBodyLines(model.ComposeDraft(), width, bodyRows)...)
+}
+
+// composerBodyLines renders the draft's TAIL — its last bodyRows lines, with
+// a trailing cursor marker on the very last one (so an empty draft still
+// shows where typing lands). The tail, not the head, because
+// handleComposingKey's only cursor position is the END of the text: nothing
+// in the composing key surface moves within the draft, only appends to or
+// backspaces from its end, so the rows worth keeping on screen while a
+// multi-line reply outgrows its budget (## edge_cases) are always the ones
+// closest to where the next keystroke lands.
+func composerBodyLines(draft string, width, bodyRows int) []string {
+	lines := strings.Split(draft, "\n")
+	lines[len(lines)-1] += "▏"
+	if len(lines) > bodyRows {
+		lines = lines[len(lines)-bodyRows:]
+	}
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = render.TruncateCells(l, width)
 	}
 	return out
 }
@@ -1290,6 +1526,24 @@ func detailCap(height int) (budget int, shown bool) {
 	budget = height / detailCapDivisor
 	if budget > detailCapRows {
 		budget = detailCapRows
+	}
+	if budget < 1 {
+		return 0, false
+	}
+	if height-budget-2 < minPaneRows*2 {
+		return 0, false
+	}
+	return budget, true
+}
+
+// composerCap is detailCap's twin for the composer region (sp033 T10): same
+// shape, same constants, checked in isolation exactly like detailCap is —
+// paneBudgets' fitsBothPanes is what re-checks the case both this and
+// detailCap said yes to at once.
+func composerCap(height int) (budget int, shown bool) {
+	budget = height / composerCapDivisor
+	if budget > composerCapRows {
+		budget = composerCapRows
 	}
 	if budget < 1 {
 		return 0, false

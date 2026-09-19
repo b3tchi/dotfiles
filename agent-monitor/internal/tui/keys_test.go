@@ -2977,3 +2977,22 @@ func TestForYou_FilterCommitResetsTheCount(t *testing.T) {
 		t.Errorf("the filtered sample resurrected a count: %d, want 0", m.ForYouCount)
 	}
 }
+
+// TestComposer_ComposeDraftExposesTypedText is sp033 T10: the composer's
+// on-screen region (cmd/) needs to read back what the operator has typed,
+// and composeDraft is otherwise unexported exactly like the filter's draft.
+func TestComposer_ComposeDraftExposesTypedText(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+
+	if got := m.ComposeDraft(); got != "" {
+		t.Fatalf("got ComposeDraft() %q on a freshly opened composer, want empty", got)
+	}
+	for _, r := range "hi" {
+		m.HandleKey(Key{Rune: r})
+	}
+	if got := m.ComposeDraft(); got != "hi" {
+		t.Fatalf("got ComposeDraft() %q, want %q", got, "hi")
+	}
+}
