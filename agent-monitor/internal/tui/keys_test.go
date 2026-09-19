@@ -2880,3 +2880,66 @@ func TestComposer_ReplyToOwnMessage(t *testing.T) {
 		t.Fatalf("expected ComposeTo %q, got %q", "my-own-address", m.ComposeTo)
 	}
 }
+
+// --- sp033 T7: the for-you count -------------------------------------------
+
+// TestForYou_CountAndPendingAreIndependent is the test plan's named case: on
+// a frozen (not-live) pane, a sample that appends rows where only SOME are
+// for-you must grow PendingMessages by the total and ForYouCount by the
+// for-you subset — two different numbers from the same tick, neither
+// derived from the other. A second, LIVE pane in the same test proves the
+// same call zeroes both counters identically, so "independent" doesn't
+// silently mean "the live case never got exercised".
+func TestForYou_CountAndPendingAreIndependent(t *testing.T) {
+	frozen := liveMessagePane(t, 20, 10)
+	frozen.ScrollMessages(5) // no longer live
+	frozen.SetMessagesLen(23)
+	frozen.AddForYouArrivals(1) // of the 3 new rows, 1 was for-you
+
+	if frozen.PendingMessages != 3 {
+		t.Fatalf("PendingMessages = %d, want 3 (every new row)", frozen.PendingMessages)
+	}
+	if frozen.ForYouCount != 1 {
+		t.Fatalf("ForYouCount = %d, want 1 (only the for-you subset)", frozen.ForYouCount)
+	}
+
+	// Accumulates across ticks independently, same as PendingMessages.
+	frozen.SetMessagesLen(25)
+	frozen.AddForYouArrivals(0) // neither of the 2 new rows was for-you
+	if frozen.PendingMessages != 5 {
+		t.Fatalf("PendingMessages = %d, want 5 (accumulated)", frozen.PendingMessages)
+	}
+	if frozen.ForYouCount != 1 {
+		t.Fatalf("ForYouCount = %d, want 1 (unchanged — nothing new was for-you)", frozen.ForYouCount)
+	}
+
+	live := liveMessagePane(t, 20, 10)
+	live.SetMessagesLen(23)
+	live.AddForYouArrivals(2) // a live pane reads zero regardless of n
+	if live.PendingMessages != 0 {
+		t.Fatalf("live PendingMessages = %d, want 0", live.PendingMessages)
+	}
+	if live.ForYouCount != 0 {
+		t.Fatalf("live ForYouCount = %d, want 0 — a live pane is never behind", live.ForYouCount)
+	}
+}
+
+// TestForYou_ReturnToLiveZeroesTheCount restates
+// TestOrder_HomeReturnsToLiveAndZeroesCount for ForYouCount: the same
+// return-to-live that zeroes PendingMessages zeroes its twin, since both go
+// through clearPendingWhenLive.
+func TestForYou_ReturnToLiveZeroesTheCount(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(5)
+	m.SetMessagesLen(26)
+	m.AddForYouArrivals(2)
+	if m.ForYouCount != 2 {
+		t.Fatalf("setup: ForYouCount = %d, want 2", m.ForYouCount)
+	}
+
+	m.HandleKey(Key{Special: KeyHome})
+
+	if m.ForYouCount != 0 {
+		t.Errorf("ForYouCount = %d, want 0 once the pane is live again", m.ForYouCount)
+	}
+}

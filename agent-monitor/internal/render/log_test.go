@@ -211,7 +211,7 @@ func TestRenderLog_HeaderByteIdenticalWhenNoPending(t *testing.T) {
 	for _, stale := range []bool{false, true} {
 		for _, width := range []int{8, 20, 26, 40, 100} {
 			omitted := RenderLog(sample, stale, now, width)
-			explicit := RenderLog(sample, stale, now, width, 0)
+			explicit := RenderLog(sample, stale, now, width, LogSignals{})
 			if omitted[0] != explicit[0] {
 				t.Fatalf("stale=%v width=%d: header differs between the 4-arg and the explicit-zero call:\n %q\n %q",
 					stale, width, omitted[0], explicit[0])
@@ -224,10 +224,10 @@ func TestRenderLog_HeaderByteIdenticalWhenNoPending(t *testing.T) {
 
 	// And the exact bytes, so the header is pinned rather than merely
 	// self-consistent.
-	if got := RenderLog(sample, false, now, 100, 0)[0]; got != "messages — updated 30s ago" {
+	if got := RenderLog(sample, false, now, 100, LogSignals{})[0]; got != "messages — updated 30s ago" {
 		t.Fatalf("header = %q, want today's header unchanged", got)
 	}
-	if got := RenderLog(sample, true, now, 100, 0)[0]; got != "messages — STALE (last good sample 30s old)" {
+	if got := RenderLog(sample, true, now, 100, LogSignals{})[0]; got != "messages — STALE (last good sample 30s old)" {
 		t.Fatalf("stale header = %q, want today's stale header unchanged", got)
 	}
 }
@@ -240,17 +240,17 @@ func TestRenderLog_HeaderCarriesPendingCount(t *testing.T) {
 	now := at.Add(30 * time.Second)
 	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
 
-	if got := RenderLog(sample, false, now, 100, 7)[0]; got != "messages — updated 30s ago  +7 new" {
+	if got := RenderLog(sample, false, now, 100, LogSignals{Pending: 7})[0]; got != "messages — updated 30s ago  +7 new" {
 		t.Errorf("header = %q, want the base header with a ` +7 new` segment", got)
 	}
-	if got := RenderLog(sample, true, now, 100, 12)[0]; got != "messages — STALE (last good sample 30s old)  +12 new" {
+	if got := RenderLog(sample, true, now, 100, LogSignals{Pending: 12})[0]; got != "messages — STALE (last good sample 30s old)  +12 new" {
 		t.Errorf("stale header = %q, want the stale header with a ` +12 new` segment", got)
 	}
 	// The count is the number, not a fixed word: 1 and 137 must both reach
 	// the header verbatim.
 	for _, n := range []int{1, 137} {
 		want := "+" + strconv.Itoa(n) + " new"
-		if got := RenderLog(sample, false, now, 100, n)[0]; !strings.Contains(got, want) {
+		if got := RenderLog(sample, false, now, 100, LogSignals{Pending: n})[0]; !strings.Contains(got, want) {
 			t.Errorf("header = %q, want it to contain %q", got, want)
 		}
 	}
@@ -269,7 +269,7 @@ func TestRenderLog_PendingSegmentKeepsTheWidthBudget(t *testing.T) {
 
 	for _, width := range []int{12, 20, 26, 40} {
 		for _, n := range []int{9, 4321, 987654} {
-			header := RenderLog(sample, false, now, width, n)[0]
+			header := RenderLog(sample, false, now, width, LogSignals{Pending: n})[0]
 			if got := displayWidth(header); got > width {
 				t.Errorf("width=%d n=%d: header is %d cells wide: %q", width, n, got, header)
 			}
@@ -289,8 +289,175 @@ func TestRenderLog_NegativeAndZeroPendingRenderNothing(t *testing.T) {
 	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
 	base := RenderLog(sample, false, at, 100)[0]
 	for _, n := range []int{0, -1, -99} {
-		if got := RenderLog(sample, false, at, 100, n)[0]; got != base {
+		if got := RenderLog(sample, false, at, 100, LogSignals{Pending: n})[0]; got != base {
 			t.Errorf("pending=%d changed the header: %q, want %q", n, got, base)
+		}
+	}
+}
+
+// --- sp033 T7: the for-you count and the row marker ------------------------
+
+// forYouMessages builds a fixture where exactly one message is addressed to
+// identityAddr (via ToAddresses, never the rendered To label), one is FROM
+// identityAddr (never marked — edge case: your own sent mail is not for
+// you), and one is addressed to an unrelated address.
+const identityAddr = "a01M2M36Y5KJJ0YARD1BIDENTITY"
+
+func forYouMessages() []source.Message {
+	return []source.Message{
+		{
+			At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+			From: "worker-a", To: []string{"jan"}, Kind: "message",
+			Content: json.RawMessage(`"addressed to you"`), ToAddresses: []string{identityAddr},
+		},
+		{
+			At: "2026-09-12T12:01:00.000000Z", ID: "a2",
+			From: "jan", To: []string{"worker-b"}, Kind: "message",
+			Content: json.RawMessage(`"sent by you"`), FromAddress: identityAddr, ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERB"},
+		},
+		{
+			At: "2026-09-12T12:02:00.000000Z", ID: "a3",
+			From: "worker-c", To: []string{"worker-d"}, Kind: "message",
+			Content: json.RawMessage(`"not yours"`), ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERD"},
+		},
+	}
+}
+
+// TestForYou_MarksRowsAddressedToTheIdentityAddress is criterion 1/4: a row
+// whose ToAddresses contains the identity's address carries the marker;
+// rows that don't, don't.
+func TestForYou_MarksRowsAddressedToTheIdentityAddress(t *testing.T) {
+	at := time.Now()
+	sample := &source.MessageSample{Messages: forYouMessages(), At: at}
+	lines := RenderLog(sample, false, at, 100, LogSignals{Identity: identityAddr})
+
+	dataLines := lines[2:]
+	if !strings.HasPrefix(dataLines[0], markCell) {
+		t.Errorf("row addressed to the identity missing its marker: %q", dataLines[0])
+	}
+	if strings.HasPrefix(dataLines[1], markCell) {
+		t.Errorf("row FROM the identity (not to it) wrongly marked: %q", dataLines[1])
+	}
+	if strings.HasPrefix(dataLines[2], markCell) {
+		t.Errorf("row addressed to someone else wrongly marked: %q", dataLines[2])
+	}
+}
+
+// TestForYou_DoesNotMarkYourOwnSentMessages restates the middle row of
+// TestForYou_MarksRowsAddressedToTheIdentityAddress as its own named case,
+// exactly as the test plan lists it: a message with your address in
+// FromAddress and NOT in ToAddresses is never marked, no matter that you
+// wrote it.
+func TestForYou_DoesNotMarkYourOwnSentMessages(t *testing.T) {
+	at := time.Now()
+	msg := forYouMessages()[1]
+	if msg.FromAddress != identityAddr {
+		t.Fatalf("fixture drift: message 1 is no longer FROM the identity")
+	}
+	sample := &source.MessageSample{Messages: []source.Message{msg}, At: at}
+	lines := RenderLog(sample, false, at, 100, LogSignals{Identity: identityAddr})
+	if strings.HasPrefix(lines[2], markCell) {
+		t.Errorf("a message you sent was marked for-you: %q", lines[2])
+	}
+}
+
+// TestForYou_PreviousRegistrationAddressIsNotYou is criterion 1's edge case:
+// an address a message was addressed to under a PREVIOUS registration is not
+// the CURRENT identity's address (adr0034 never reuses one), so a message to
+// the old address must not be marked just because it happens to be present
+// in this sample.
+func TestForYou_PreviousRegistrationAddressIsNotYou(t *testing.T) {
+	at := time.Now()
+	oldAddr := "a01M2M36Y5KJJ0YARD1BOLDADDR1"
+	currentAddr := "a01M2M36Y5KJJ0YARD1BNEWADDR2"
+	msg := source.Message{
+		At: at.Format(time.RFC3339Nano), ID: "a1",
+		From: "worker-a", To: []string{"jan"}, Kind: "message",
+		Content: json.RawMessage(`"addressed to the old you"`), ToAddresses: []string{oldAddr},
+	}
+	sample := &source.MessageSample{Messages: []source.Message{msg}, At: at}
+	lines := RenderLog(sample, false, at, 100, LogSignals{Identity: currentAddr})
+	if strings.HasPrefix(lines[2], markCell) {
+		t.Errorf("a message to a released address was marked for-you: %q", lines[2])
+	}
+}
+
+// TestForYou_NoIdentityRendersNothingExtra is criterion 5: absent an
+// identity, RenderLog must not add the marker column, must not add the `N
+// for you` segment even if ForYou is (incorrectly) nonzero, and the header
+// must be byte-identical to a call with no LogSignals at all.
+func TestForYou_NoIdentityRendersNothingExtra(t *testing.T) {
+	at := time.Now()
+	sample := &source.MessageSample{Messages: forYouMessages(), At: at}
+
+	withoutSignals := RenderLog(sample, false, at, 100)
+	withZeroSignals := RenderLog(sample, false, at, 100, LogSignals{ForYou: 3})
+	for i := range withoutSignals {
+		if withoutSignals[i] != withZeroSignals[i] {
+			t.Fatalf("line %d differs with no identity but ForYou set: %q vs %q", i, withoutSignals[i], withZeroSignals[i])
+		}
+	}
+	if strings.Contains(withZeroSignals[0], "for you") {
+		t.Errorf("header carried a for-you segment with no identity: %q", withZeroSignals[0])
+	}
+}
+
+// TestRenderLog_HeaderByteIdenticalWhenBothCountsZero is sp033 T7 criterion
+// 3's negative half: with an identity resolved but both counts at zero, the
+// header must still read exactly as T6 left it — the marker column may
+// appear on rows (criterion 4 is independent of the count), but the header
+// LINE itself carries neither segment.
+func TestRenderLog_HeaderByteIdenticalWhenBothCountsZero(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	want := RenderLog(sample, false, now, 100)[0]
+	got := RenderLog(sample, false, now, 100, LogSignals{Identity: identityAddr})[0]
+	if got != want {
+		t.Fatalf("header with an identity but both counts zero = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLog_HeaderCarriesBothSegmentsDistinctly is criterion 3's
+// positive half: pending and for-you can both be present, and the header
+// must say both rather than folding them into one number.
+func TestRenderLog_HeaderCarriesBothSegmentsDistinctly(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	got := RenderLog(sample, false, now, 100, LogSignals{Pending: 7, ForYou: 3, Identity: identityAddr})[0]
+	if !strings.Contains(got, "+7 new") {
+		t.Errorf("header = %q, missing the pending segment", got)
+	}
+	if !strings.Contains(got, "3 for you") {
+		t.Errorf("header = %q, missing the for-you segment", got)
+	}
+}
+
+// TestForYou_SegmentKeepsTheWidthBudgetAlongsidePending is the named edge
+// case "the count's width against the header's budget, with +N new also
+// present": at a width that can fit both segments (with the prose elided
+// first, exactly as withCountSegments' single-segment case already does),
+// the header must carry both and never exceed width.
+func TestForYou_SegmentKeepsTheWidthBudgetAlongsidePending(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	// "  +42 new, 7 for you" is 20 cells; every width below fits it exactly
+	// or with room to spare for (elided) prose.
+	for _, width := range []int{20, 26, 32, 40} {
+		header := RenderLog(sample, false, now, width, LogSignals{Pending: 42, ForYou: 7, Identity: identityAddr})[0]
+		if got := displayWidth(header); got > width {
+			t.Errorf("width=%d: header is %d cells wide: %q", width, got, header)
+		}
+		if !strings.Contains(header, "+42 new") {
+			t.Errorf("width=%d: pending segment squeezed out of %q", width, header)
+		}
+		if !strings.Contains(header, "7 for you") {
+			t.Errorf("width=%d: for-you segment squeezed out of %q", width, header)
 		}
 	}
 }

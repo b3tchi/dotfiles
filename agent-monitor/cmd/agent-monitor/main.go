@@ -587,8 +587,9 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// breaks the apparent circularity (slicing needs pane sizes, pane sizes
 	// looked like they needed rendered output): paneBudgets needs only LINE
 	// COUNTS, and a pane's line count is a pure function of its row count.
+	resolvedIdentity := firstIdentityOrZero(identity)
 	rosterRows := filterRosterRows(model, censusSample)
-	msgRows := filterMessageRows(model, msgSample)
+	msgRows := filterMessageRows(model, msgSample, resolvedIdentity)
 	rosterLines := paneLines(censusSample != nil, len(rosterRows))
 	logLines := paneLines(msgSample != nil, len(msgRows))
 
@@ -622,7 +623,21 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// everything else RenderLog emits. It is zero on the --once path by
 	// construction (nothing counts without a reported viewport, and
 	// height == 0 never reports one), so that frame's bytes are unchanged.
-	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, model.PendingMessages)
+	// model.PendingMessages/ForYouCount are sp032 T6's and sp033 T7's
+	// counters, and both are passed here rather than folded into the header
+	// by this file because render/ owns every byte of a pane's content — the
+	// `+N new`/`N for you` segments are TEXT subject to the same width
+	// budget as everything else RenderLog emits. resolvedIdentity.Address is
+	// what T7's row marker compares ToAddresses against; both counters are
+	// zero and the address is empty on the --once path by construction
+	// (nothing counts without a reported viewport, and height == 0 never
+	// reports one; --once also never resolves an unregistered identity), so
+	// that frame's bytes are unchanged.
+	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, render.LogSignals{
+		Pending:  model.PendingMessages,
+		ForYou:   model.ForYouCount,
+		Identity: resolvedIdentity.Address,
+	})
 	// sp033 T4 criterion 4: the resolved identity is named once in the
 	// message pane header, so the operator can see which party the monitor
 	// thinks they are. This is a post-processing step on RenderLog's output,
@@ -632,7 +647,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// case) leaves the header untouched, which is what keeps criterion 3's
 	// byte-identical frame true without this file special-casing "no
 	// identity" as a second code path.
-	log = withIdentityHeader(log, firstIdentityOrZero(identity), width)
+	log = withIdentityHeader(log, resolvedIdentity, width)
 
 	// fitPanes re-derives the same budgets from the rendered line counts and
 	// does the actual trimming. The two derivations agree: a pane whose
@@ -1220,13 +1235,46 @@ func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 // scrolledMessageSample/markPane, and selectedMessage below) agrees on what
 // index 0 means. See orderedMessages for why the reorder lives here rather
 // than in render/log.go or in tui.Model.
-func filterMessageRows(model *tui.Model, sample *source.MessageSample) []source.Message {
+func filterMessageRows(model *tui.Model, sample *source.MessageSample, identity source.Identity) []source.Message {
 	if sample == nil {
 		return nil
 	}
 	msgs := orderedMessages(model, sample)
+	before := model.MessagesLen
 	model.SetMessagesLen(len(msgs))
+	model.AddForYouArrivals(countNewForYou(msgs, before, identity))
 	return msgs
+}
+
+// countNewForYou is sp033 T7's arrival count for Model.AddForYouArrivals,
+// SetMessagesLen's `grown := n - m.MessagesLen` restated at this file's
+// boundary (Model itself holds no source.Message to compare against). msgs
+// is already in the pane's display order — newest-first, sp033 T6 — so the
+// rows genuinely NEW this tick are its first `len(msgs)-before` entries; of
+// those, this counts the ones whose ToAddresses contains the identity's
+// address (criterion 1: an address comparison, never a label one, matching
+// render.forYouRow's rule exactly). An unregistered identity never counts —
+// there is no address to compare against — and a shrink (before > len(msgs))
+// yields zero new rows, the same floor SetMessagesLen enforces for
+// PendingMessages.
+func countNewForYou(msgs []source.Message, before int, identity source.Identity) int {
+	if !identity.Registered {
+		return 0
+	}
+	grown := len(msgs) - before
+	if grown <= 0 {
+		return 0
+	}
+	n := 0
+	for _, m := range msgs[:grown] {
+		for _, a := range m.ToAddresses {
+			if a == identity.Address {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
 
 // orderedMessages applies the committed filter and puts the result into the

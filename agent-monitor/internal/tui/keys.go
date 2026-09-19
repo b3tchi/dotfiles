@@ -142,6 +142,24 @@ type Model struct {
 	// fixtures compare whole models with `*m != want`.
 	PendingMessages int
 
+	// ForYouCount is PendingMessages' twin for sp033 T7: of the rows
+	// PendingMessages counted (arrived while the message pane was not live),
+	// how many carry the operator's own address in ToAddresses — an address
+	// comparison, never a label one (## plan's binding rule). It renders as
+	// the header's `N for you` segment, kept deliberately separate from
+	// PendingMessages' `+N new` — the two count different things, and
+	// collapsing them loses the signal on exactly the busy bus that
+	// motivated this feature (## plan anti-patterns).
+	//
+	// Model holds no source.Message here to compare against, so it cannot
+	// derive this itself the way messagesLive derives liveness: main.go
+	// (which reads the identity and this tick's messages) counts the
+	// for-you rows among what's newly arrived and hands the result to
+	// AddForYouArrivals. It is zero whenever the pane is live, exactly like
+	// PendingMessages, and for the same reason PendingMessages stays a
+	// plain int: several fixtures compare whole models with `*m != want`.
+	ForYouCount int
+
 	// DetailScroll, DetailLen and DetailViewport are the detail pane's
 	// scroll state (sp032 T4), the same shape the other two panes use — and
 	// deliberately so: the pane's body is displayed through a
@@ -244,6 +262,7 @@ func (m *Model) SetMessagesLen(n int) {
 		m.MessagesCursor = 0
 		m.MessagesScroll = 0
 		m.PendingMessages = 0
+		m.ForYouCount = 0
 		return
 	}
 
@@ -292,6 +311,31 @@ func (m *Model) messagesLive() bool {
 func (m *Model) clearPendingWhenLive() {
 	if m.messagesLive() {
 		m.PendingMessages = 0
+		m.ForYouCount = 0
+	}
+}
+
+// AddForYouArrivals is ForYouCount's accumulation step, twinning
+// SetMessagesLen's `m.PendingMessages += grown`. main.go calls it once per
+// tick, right after SetMessagesLen, with however many of THIS tick's newly
+// arrived rows carry the identity's address in ToAddresses (cmd/agent-
+// monitor's countNewForYou is the one place that comparison happens — Model
+// holds no source.Message to compare against here).
+//
+// It re-derives messagesLive() itself rather than trusting the caller to
+// skip the call on a live pane: a tick where nothing for-you arrived still
+// calls this with n == 0, and a live pane must read zero regardless of what
+// n is, exactly like clearPendingWhenLive restores for PendingMessages. The
+// windowless regime (MessagesViewport <= 0) counts nothing, for the same
+// reason SetMessagesLen's grown-count gate exists: --once must never see
+// this feature either.
+func (m *Model) AddForYouArrivals(n int) {
+	if m.messagesLive() {
+		m.ForYouCount = 0
+		return
+	}
+	if n > 0 && m.MessagesViewport > 0 {
+		m.ForYouCount += n
 	}
 }
 
