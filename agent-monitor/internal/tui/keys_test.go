@@ -2566,3 +2566,317 @@ func TestStartup_OpeningClearsAPendingCountItInherits(t *testing.T) {
 		t.Errorf("PendingMessages = %d after the pane was opened at its head, want 0", m.PendingMessages)
 	}
 }
+
+// sp033 T8: the composer, as a mode on the pure model. OpenComposer takes
+// the recipient address directly (the shape cmd/ will supply it in, once
+// T9/T10 wire `r` up to it) rather than a message — Model holds no message
+// data, the same reason SetDetailSelection takes an opaque identity string
+// rather than a source.Message.
+
+// TestComposer_OpensBoundToTheSelectedAddress is criterion 1: a successful
+// open records ComposeTo from the address handed in, at open time.
+func TestComposer_OpensBoundToTheSelectedAddress(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+
+	ok, reason := m.OpenComposer("peer-3-address")
+	if !ok {
+		t.Fatalf("expected OpenComposer to succeed, got refused: %q", reason)
+	}
+	if !m.Composing {
+		t.Fatalf("expected Composing true after a successful open")
+	}
+	if m.ComposeTo != "peer-3-address" {
+		t.Fatalf("expected ComposeTo %q, got %q", "peer-3-address", m.ComposeTo)
+	}
+}
+
+// TestComposer_NoMessageSelectedDoesNotOpen is criterion 6's first case: an
+// empty address (cmd/'s spelling of "nothing is selected") refuses, and says
+// why rather than opening silently or panicking.
+func TestComposer_NoMessageSelectedDoesNotOpen(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+
+	ok, reason := m.OpenComposer("")
+	if ok {
+		t.Fatalf("expected OpenComposer to refuse with no address")
+	}
+	if reason == "" {
+		t.Fatalf("expected a reason for the refusal, got empty string")
+	}
+	if m.Composing {
+		t.Fatalf("expected Composing to stay false on refusal")
+	}
+}
+
+// TestComposer_NoIdentityDoesNotOpen is criterion 6's second case: an
+// unregistered monitor (HasIdentity false, NewModel's default) has no FROM
+// to reply as, so `r` must refuse even with a message selected.
+func TestComposer_NoIdentityDoesNotOpen(t *testing.T) {
+	m := NewModel()
+
+	ok, reason := m.OpenComposer("peer-3-address")
+	if ok {
+		t.Fatalf("expected OpenComposer to refuse with no identity")
+	}
+	if reason == "" {
+		t.Fatalf("expected a reason for the refusal, got empty string")
+	}
+	if m.Composing {
+		t.Fatalf("expected Composing to stay false on refusal")
+	}
+}
+
+// TestComposer_RunesAreTextNotCommands is criterion 2: q, d, / and G are
+// text while composing, exactly as they are in a filter draft. Committing
+// via ctrl+s and reading the yielded body is the only way to observe the
+// draft from outside the package, matching how filter tests read
+// m.Filter.Query rather than the unexported draft field.
+func TestComposer_RunesAreTextNotCommands(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+
+	for _, r := range "qd/G" {
+		out := m.HandleKey(Key{Rune: r})
+		if out.Quit || out.ForceRefresh {
+			t.Fatalf("rune %q while composing must not quit or force-refresh, got %+v", r, out)
+		}
+	}
+	if !m.Composing {
+		t.Fatalf("typing q/d/G must not close the composer")
+	}
+
+	out := m.HandleKey(Key{Rune: 0x13}) // ctrl+s
+	if out.Send == nil {
+		t.Fatalf("expected a Send outcome from ctrl+s")
+	}
+	if out.Send.Body != "qd/G" {
+		t.Fatalf("expected draft %q, got %q", "qd/G", out.Send.Body)
+	}
+}
+
+// TestComposer_EnterInsertsNewline is criterion 2's second half: enter must
+// not commit (that is ctrl+s's job), it inserts a newline into a multi-line
+// draft.
+func TestComposer_EnterInsertsNewline(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+
+	for _, r := range "line1" {
+		m.HandleKey(Key{Rune: r})
+	}
+	out := m.HandleKey(Key{Special: KeyEnter})
+	if out.Send != nil {
+		t.Fatalf("enter must not commit the draft, got Send %+v", out.Send)
+	}
+	if !m.Composing {
+		t.Fatalf("enter must not close the composer")
+	}
+	for _, r := range "line2" {
+		m.HandleKey(Key{Rune: r})
+	}
+
+	out = m.HandleKey(Key{Rune: 0x13}) // ctrl+s
+	if out.Send == nil {
+		t.Fatalf("expected a Send outcome from ctrl+s")
+	}
+	if want := "line1\nline2"; out.Send.Body != want {
+		t.Fatalf("expected draft %q, got %q", want, out.Send.Body)
+	}
+}
+
+// TestComposer_EscAbandonsDraft is criterion 3's first half: esc closes and
+// drops the draft, yielding nothing.
+func TestComposer_EscAbandonsDraft(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+	for _, r := range "never sent" {
+		m.HandleKey(Key{Rune: r})
+	}
+
+	out := m.HandleKey(Key{Special: KeyEsc})
+	if out.Send != nil {
+		t.Fatalf("esc must not yield a Send outcome, got %+v", out.Send)
+	}
+	if m.Composing {
+		t.Fatalf("expected Composing false after esc")
+	}
+	if m.ComposeTo != "" {
+		t.Fatalf("expected ComposeTo cleared after esc, got %q", m.ComposeTo)
+	}
+
+	// The abandoned draft must not resurface in the next reply.
+	m.OpenComposer("peer-3-address")
+	out = m.HandleKey(Key{Rune: 0x13})
+	if out.Send != nil {
+		t.Fatalf("expected the fresh composer to start with an empty draft, got Send %+v", out.Send)
+	}
+}
+
+// TestComposer_CtrlSYieldsDraftAndCloses is criterion 3's second half: ctrl+s
+// on a non-empty draft closes the composer and hands the caller a
+// SendRequest carrying the address bound at open time and the full body.
+func TestComposer_CtrlSYieldsDraftAndCloses(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+	for _, r := range "hello" {
+		m.HandleKey(Key{Rune: r})
+	}
+
+	out := m.HandleKey(Key{Rune: 0x13})
+	if out.Send == nil {
+		t.Fatalf("expected a Send outcome from ctrl+s")
+	}
+	if out.Send.To != "peer-3-address" {
+		t.Fatalf("expected To %q, got %q", "peer-3-address", out.Send.To)
+	}
+	if out.Send.Body != "hello" {
+		t.Fatalf("expected Body %q, got %q", "hello", out.Send.Body)
+	}
+	if m.Composing {
+		t.Fatalf("expected Composing false after ctrl+s")
+	}
+	if m.ComposeTo != "" {
+		t.Fatalf("expected ComposeTo cleared after ctrl+s, got %q", m.ComposeTo)
+	}
+}
+
+// TestComposer_EmptyDraftIsANoOp is criterion 5: ctrl+s on an empty or
+// whitespace-only draft neither yields a Send nor closes the composer, so
+// nothing is dispatched and the operator's cursor stays where they left it.
+func TestComposer_EmptyDraftIsANoOp(t *testing.T) {
+	for _, draft := range []string{"", "   ", "\n\t "} {
+		m := NewModel()
+		m.HasIdentity = true
+		m.OpenComposer("peer-3-address")
+		for _, r := range draft {
+			m.HandleKey(Key{Rune: r})
+		}
+
+		out := m.HandleKey(Key{Rune: 0x13})
+		if out.Send != nil {
+			t.Fatalf("draft %q: expected no Send outcome, got %+v", draft, out.Send)
+		}
+		if !m.Composing {
+			t.Fatalf("draft %q: expected the composer to stay open", draft)
+		}
+	}
+}
+
+// TestComposer_RecipientSurvivesASampleThatMovesTheList is criterion 1's
+// safety property exercised directly: once open, nothing that moves the
+// message pane's cursor or grows its sample changes ComposeTo, because
+// commitCompose never re-reads the selection — it reads the address
+// OpenComposer captured. This is the case that fails any implementation
+// that reads the selection at send time instead.
+func TestComposer_RecipientSurvivesASampleThatMovesTheList(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.Focus = PaneMessages
+	m.SetMessagesViewport(5)
+	m.SetMessagesLen(3)
+	m.MessagesCursor = 1 // the operator is replying to the row at index 1
+
+	ok, _ := m.OpenComposer("original-recipient-address")
+	if !ok {
+		t.Fatalf("setup: OpenComposer refused")
+	}
+
+	// A sample arrives mid-draft and reorders/grows the list under the
+	// cursor — exactly what a live bus does between keystrokes.
+	m.SetMessagesLen(10)
+	m.MessagesCursor = 7
+
+	for _, r := range "reply text" {
+		m.HandleKey(Key{Rune: r})
+	}
+	out := m.HandleKey(Key{Rune: 0x13})
+	if out.Send == nil {
+		t.Fatalf("expected a Send outcome")
+	}
+	if out.Send.To != "original-recipient-address" {
+		t.Fatalf("expected the reply to stay addressed to %q despite the list moving, got %q",
+			"original-recipient-address", out.Send.To)
+	}
+}
+
+// TestComposer_PagingKeysSwallowed is criterion 4: PgUp/PgDn/Home/End are
+// swallowed outright while composing — named explicitly rather than left to
+// the default arm ([[sp032]] T5's rule) — so they neither move a pane out
+// from under the open draft nor leak into it as text.
+func TestComposer_PagingKeysSwallowed(t *testing.T) {
+	for _, k := range []Key{
+		{Special: KeyPgUp}, {Special: KeyPgDn}, {Special: KeyHome}, {Special: KeyEnd},
+	} {
+		m := NewModel()
+		m.HasIdentity = true
+		m.Focus = PaneMessages
+		m.SetMessagesViewport(5)
+		m.SetMessagesLen(10)
+		m.MessagesCursor = 4
+		m.OpenComposer("peer-3-address")
+		beforeCursor := m.MessagesCursor
+		beforeScroll := m.MessagesScroll
+
+		out := m.HandleKey(k)
+		if out.Quit || out.ForceRefresh || out.Send != nil {
+			t.Fatalf("key %+v while composing must be swallowed, got Outcome %+v", k, out)
+		}
+		if !m.Composing {
+			t.Fatalf("key %+v must not close the composer", k)
+		}
+		if m.MessagesCursor != beforeCursor || m.MessagesScroll != beforeScroll {
+			t.Fatalf("key %+v must not move the message pane while composing: cursor %d->%d, scroll %d->%d",
+				k, beforeCursor, m.MessagesCursor, beforeScroll, m.MessagesScroll)
+		}
+
+		out = m.HandleKey(Key{Rune: 0x13})
+		if out.Send != nil {
+			t.Fatalf("key %+v must not have written into the draft: ctrl+s on an untouched draft must stay a no-op, got Send %+v", k, out.Send)
+		}
+	}
+}
+
+// TestComposer_UnicodeAndWideRunes is the edge case named in ## edge_cases:
+// the draft must accumulate and yield multi-byte runes exactly, the same
+// guarantee the filter draft already has via []rune-based Backspace.
+func TestComposer_UnicodeAndWideRunes(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	m.OpenComposer("peer-3-address")
+
+	for _, r := range "héllo 世界 🎉" {
+		m.HandleKey(Key{Rune: r})
+	}
+	m.HandleKey(Key{Special: KeyBackspace}) // drop the trailing emoji
+
+	out := m.HandleKey(Key{Rune: 0x13})
+	if out.Send == nil {
+		t.Fatalf("expected a Send outcome")
+	}
+	if want := "héllo 世界 "; out.Send.Body != want {
+		t.Fatalf("expected draft %q, got %q", want, out.Send.Body)
+	}
+}
+
+// TestComposer_ReplyToOwnMessage is an edge case named in ## edge_cases: the
+// composer has no concept of "your own message" — it only ever sees the
+// address it was handed, so replying to your own from_address is
+// unremarkable at this layer (any policy about it belongs elsewhere).
+func TestComposer_ReplyToOwnMessage(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+
+	ok, reason := m.OpenComposer("my-own-address")
+	if !ok {
+		t.Fatalf("expected OpenComposer to succeed, got refused: %q", reason)
+	}
+	if m.ComposeTo != "my-own-address" {
+		t.Fatalf("expected ComposeTo %q, got %q", "my-own-address", m.ComposeTo)
+	}
+}

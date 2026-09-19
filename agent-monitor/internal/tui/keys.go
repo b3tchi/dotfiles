@@ -93,6 +93,13 @@ type Model struct {
 	// regardless of which project a roster row belongs to.
 	Project string
 
+	// HasIdentity records whether the monitor resolved an operator identity
+	// at startup (sp033 T4's source.ResolveIdentity). Like Project, cmd/
+	// sets this once — there is no per-keystroke path to it. OpenComposer
+	// refuses without it: a reply needs a FROM the send path (T9) can use,
+	// and absent an identity there is none to offer.
+	HasIdentity bool
+
 	// Editing is true from `/` until Enter commits (or the model is fed
 	// another `/`, restarting the draft). Every rune key belongs to the
 	// draft while Editing is true — including 'q' and 'r', which would
@@ -101,6 +108,18 @@ type Model struct {
 	// TestFilter_QWhileEditingIsTextNotQuit).
 	Editing bool
 	draft   string
+
+	// Composing is sp033 T8's reply mode: true from a successful
+	// OpenComposer until Esc abandons or ctrl+s yields the draft. It follows
+	// Editing's idiom exactly — every rune belongs to the draft while it is
+	// true — with one difference from a filter draft: ComposeTo is bound
+	// ONCE, at open time, and never re-read. A message arriving mid-draft
+	// can reorder the list under the cursor; reading the selection again at
+	// send time would let that reorder redirect the reply (criterion 1,
+	// TestComposer_RecipientSurvivesASampleThatMovesTheList).
+	Composing    bool
+	ComposeTo    string
+	composeDraft string
 
 	RosterCursor   int
 	RosterScroll   int
@@ -824,6 +843,104 @@ func (m *Model) FilterMessages(msgs []source.Message) []source.Message {
 	return out
 }
 
+// OpenComposer is sp033 T8's opening: `r` on a focused message, mapped by
+// cmd/ onto this call with the SELECTED message's from_address (empty when
+// nothing is selected) — the same shape as SetDetailSelection, which is the
+// existing precedent for cmd/ pushing an address-shaped fact into Model
+// rather than Model re-deriving it from a message list it does not hold.
+//
+// toAddress is bound into ComposeTo immediately and never re-read: that is
+// criterion 1's safety property, and it is what makes "reply went to the
+// wrong worker because the list moved" unrepresentable rather than merely
+// unlikely.
+//
+// It refuses in two cases, criterion 6, each with its own reason so a caller
+// can say why rather than silently doing nothing:
+//   - toAddress == "": nothing was selected to reply to.
+//   - !m.HasIdentity: there is no resolved FROM the reply could be sent as.
+//
+// It also refuses while a filter draft is open or a composer is already
+// open, since either would collide with the mode this call is about to
+// enter.
+func (m *Model) OpenComposer(toAddress string) (bool, string) {
+	if toAddress == "" {
+		return false, "no message selected"
+	}
+	if !m.HasIdentity {
+		return false, "not registered: no identity to reply from"
+	}
+	if m.Editing {
+		return false, "a filter is being edited"
+	}
+	if m.Composing {
+		return false, "a reply is already being composed"
+	}
+	m.Composing = true
+	m.ComposeTo = toAddress
+	m.composeDraft = ""
+	return true, ""
+}
+
+// SendRequest is what ctrl+s yields from the composer (criterion 3): the
+// address OpenComposer bound at open time and the draft's final text. T9
+// dispatches it as a tea.Cmd; nothing here interprets or sends it — the
+// composer's job ends at handing it over.
+type SendRequest struct {
+	To   string
+	Body string
+}
+
+// handleComposingKey is the reply draft's key surface, handleEditingKey's
+// twin (sp033 T8): every rune belongs to the draft (criterion 2, including
+// 'q', 'd', '/' and 'G' — exactly the filter draft's rule), the paging keys
+// are swallowed explicitly rather than left to the default arm (criterion 4,
+// [[sp032]] T5's rule restated for this mode), and Enter INSERTS a newline
+// rather than committing — the one point where this diverges from
+// handleEditingKey, since a reply is multi-line and Enter is not its commit
+// key.
+func (m *Model) handleComposingKey(k Key) Outcome {
+	switch k.Special {
+	case KeyPgUp, KeyPgDn, KeyHome, KeyEnd:
+		// See handleEditingKey's identical arm: a paging key must not move a
+		// pane out from under an open draft, and must not edit the draft
+		// either.
+	case KeyEsc:
+		m.Composing = false
+		m.ComposeTo = ""
+		m.composeDraft = ""
+	case KeyEnter:
+		m.composeDraft += "\n"
+	case KeyBackspace:
+		if r := []rune(m.composeDraft); len(r) > 0 {
+			m.composeDraft = string(r[:len(r)-1])
+		}
+	default:
+		if k.Rune == 0x13 { // ctrl+s
+			return m.commitCompose()
+		}
+		if k.Rune != 0 {
+			m.composeDraft += string(k.Rune)
+		}
+	}
+	return Outcome{}
+}
+
+// commitCompose is ctrl+s: criterion 5 makes an empty or whitespace-only
+// draft a no-op that leaves the composer open rather than yielding an empty
+// SendRequest — trimming only decides THAT, never mutates the draft itself,
+// so a draft of pure whitespace the operator meant to keep typing into is
+// not silently cleared.
+func (m *Model) commitCompose() Outcome {
+	if strings.TrimSpace(m.composeDraft) == "" {
+		return Outcome{}
+	}
+	req := &SendRequest{To: m.ComposeTo, Body: m.composeDraft}
+	m.Composing = false
+	m.ComposeTo = ""
+	m.composeDraft = ""
+	return Outcome{Send: req}
+}
+
 // SpecialKey names a non-printable key HandleKey acts on. main.go's
 // translateKey is what maps a bubbletea key event onto these.
 type SpecialKey int
@@ -859,13 +976,18 @@ type Key struct {
 	Special SpecialKey
 }
 
-// Outcome is what one HandleKey call asks its caller to do. Both fields are
-// false for the overwhelming majority of keys (scrolling, focus, filter
+// Outcome is what one HandleKey call asks its caller to do. All fields are
+// zero for the overwhelming majority of keys (scrolling, focus, filter
 // editing) — those mutate Model directly and need nothing further from the
 // caller.
 type Outcome struct {
 	Quit         bool
 	ForceRefresh bool
+
+	// Send is set by ctrl+s on a non-empty composer draft (sp033 T8
+	// criterion 3): the caller (T9) dispatches it as a tea.Cmd. Nil for
+	// every other key, including a whitespace-only ctrl+s (criterion 5).
+	Send *SendRequest
 }
 
 // HandleKey drives ft016's key surface: `q`/Ctrl-C quit, `r` forces a
@@ -875,10 +997,15 @@ type Outcome struct {
 // focused pane (sp032 T5). While Editing is true, every key belongs to the
 // filter draft instead (Enter commits, Backspace edits, any other rune
 // appends, and the paging keys are swallowed outright) — see the Editing
-// field doc for why this must come first.
+// field doc for why this must come first. While Composing is true (sp033
+// T8), every key belongs to the reply draft instead, checked second so a
+// filter can never be open at the same time as a composer.
 func (m *Model) HandleKey(k Key) Outcome {
 	if m.Editing {
 		return m.handleEditingKey(k)
+	}
+	if m.Composing {
+		return m.handleComposingKey(k)
 	}
 
 	switch {
