@@ -5707,6 +5707,21 @@ def require-flags [verb: string, wanted: table<flag: string, value: any, what: s
     }
 }
 
+# The OS username, from `id -un` (sp033 T2/T3): never `$env.USER`, which is
+# unset in some session shapes and trivially spoofed in every one, where `id`
+# asks the kernel directly. Shared by every verb that treats "your label is
+# your username" as a property of the system rather than a convention the
+# operator keeps: `whoami`, `register`, `unregister`. One derivation, so the
+# pair cannot drift into disagreeing about who the OS user is.
+def os-username [verb: string]: nothing -> string {
+    let probe = (do { ^id -un } | complete)
+    let user = ($probe.stdout | str trim)
+    if $probe.exit_code != 0 or ($user | is-empty) {
+        error make {msg: $"($verb) refused: `id -un` produced no OS username to look up"}
+    }
+    $user
+}
+
 # What a verb calls the worker it acts on. sp029 T9: there is no more "run the
 # worker belongs to" concept on the CLI — every verb below resolves its own
 # worker's project scope from the repository the caller is standing in
@@ -5735,12 +5750,16 @@ def usage []: nothing -> string {
         "  settled  --as                         report settling with nothing to show"
         "  wait     --as [--block] [--timeout]  mail addressed to --as, or nothing"
         "  rm       --uid                        release a finished worker's address"
-        "  register --label [--role] [--kind]    join this project's bus as a party"
+        "  register [--label] [--role] [--kind]  join this project's bus as a party"
         "                                       nothing spawned — a PERSON at a terminal."
-        "                                       Resolve-or-claim: registering again"
-        "                                       reconnects to the same queue"
-        "  unregister --label                    leave the bus: the address and the label"
-        "                                       go, the tombstone keeps history legible"
+        "                                       --label defaults to `id -un`: your label"
+        "                                       is your username. Resolve-or-claim:"
+        "                                       registering again reconnects to the"
+        "                                       same queue"
+        "  unregister [--label]                  leave the bus: the address and the label"
+        "                                       go, the tombstone keeps history legible."
+        "                                       --label defaults to `id -un`, same as"
+        "                                       register"
         "  whoami   [--json]                     which party the OS user (`id -un`) is;"
         "                                       registered: false is a clean answer, not"
         "                                       a refusal, when nobody registered"
@@ -6223,14 +6242,14 @@ def "main timeline" [uid: string, --json] {
 # jan chose on the bus (2026-09-18): minted per session, tombstoned on the way
 # out, exactly the `self-<hex>` shape.
 def "main register" [--label: string = "", --role: string = "person", --kind: string = "person"] {
-    require-flags "register" [
-        [flag, value, what];
-        ["--label" $label "the name this person is addressed by, e.g. jan; it is what `send --to` takes and what every display shows"]
-    ]
     let repo = (current-repo)
     if ($repo | is-empty) {
         error make {msg: "register refused: not inside a git repository, and a bus is scoped to one project. Stand in the repository this person is joining"}
     }
+    # No --label: "your label is your username" (sp033 T3), so `whoami`'s
+    # derivation is reused rather than re-typed — an explicit --label still
+    # wins and never touches `id -un` at all.
+    let label = (if ($label | is-empty) { os-username "register" } else { $label })
     let address = (ensure-address $repo $label --role $role --kind $kind)
     # The exports are the point of printing anything: a shell that carries
     # them behaves like a spawned worker's window, so `wait`/`send`/`result`
@@ -6259,14 +6278,12 @@ def "main register" [--label: string = "", --role: string = "person", --kind: st
 # into a failure. The answer says what it found, so a caller that does care
 # can look at `released`.
 def "main unregister" [--label: string = ""] {
-    require-flags "unregister" [
-        [flag, value, what];
-        ["--label" $label "the person to release, as `register` claimed them"]
-    ]
     let repo = (current-repo)
     if ($repo | is-empty) {
         error make {msg: "unregister refused: not inside a git repository, and a bus is scoped to one project"}
     }
+    # Symmetric with `register`: no --label releases the same OS-user default.
+    let label = (if ($label | is-empty) { os-username "unregister" } else { $label })
     let address = (label-address-for $label --repo $repo)
     if $address == null {
         {label: $label, released: false, address: null} | to json | print
@@ -6297,11 +6314,7 @@ def "main whoami" [--json] {
     if ($repo | is-empty) {
         error make {msg: "whoami refused: not inside a git repository, and a bus is scoped to one project"}
     }
-    let probe = (do { ^id -un } | complete)
-    let user = ($probe.stdout | str trim)
-    if $probe.exit_code != 0 or ($user | is-empty) {
-        error make {msg: "whoami refused: `id -un` produced no OS username to look up"}
-    }
+    let user = (os-username "whoami")
     let candidates = (project-addresses $repo | where name == $user and kind == "person")
     let result = if ($candidates | length) == 0 {
         {user: $user, label: $user, address: null, kind: null, registered: false}

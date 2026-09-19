@@ -2698,12 +2698,108 @@ def main [repo: string, big: string] {
             let out = (do { cd $repo; ^$nu.current-exe $script register --label "jan smith" | complete })
             assert-true ($out.exit_code != 0) "a label with a space is refused"
             assert-true ($out.stderr | str contains "jan smith") "and the refusal names it"
-
-            let empty = (do { cd $repo; ^$nu.current-exe $script register | complete })
-            assert-true ($empty.exit_code != 0) "and a missing --label is refused by name"
-            assert-true ($empty.stderr | str contains "--label") "naming the flag that is missing"
         }
         rm -rf $root; rm -rf $repo
+    })
+
+    # ------------------------------------------- register/unregister default to the OS user (sp033 T3)
+    #
+    # "Your label is your username" becomes a property of the system rather
+    # than a convention the operator keeps: a bare `register` claims the label
+    # `id -un` returns, `unregister` releases the same default, and `whoami`
+    # agrees with what `register` just claimed by construction (they share
+    # `os-username`, not two derivations of it).
+
+    (run-case "person/register-with-no-label-claims-the-os-user" {
+        let repo = (make-repo "person-register-default")
+        let root = (make-runtime "person-register-default")
+        let script = (worker-script $env.FILE_PWD)
+        let user = (^id -un | str trim)
+        with-runtime $root {
+            let out = (do { cd $repo; ^$nu.current-exe $script register | complete })
+            assert-eq $out.exit_code 0 $"a bare register failed: ($out.stderr)"
+            let party = ($out.stdout | from json)
+
+            assert-eq $party.label $user "the label defaults to `id -un`"
+            assert-true (do { cd $repo; address-shaped? $party.address }) "and a minted address, not a label dressed as one"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/an-explicit-label-still-overrides-the-default" {
+        let repo = (make-repo "person-register-explicit")
+        let root = (make-runtime "person-register-explicit")
+        let script = (worker-script $env.FILE_PWD)
+        let user = (^id -un | str trim)
+        with-runtime $root {
+            let out = (do { cd $repo; ^$nu.current-exe $script register --label "impl-2" | complete })
+            assert-eq $out.exit_code 0 $"register --label failed: ($out.stderr)"
+            let party = ($out.stdout | from json)
+
+            assert-eq $party.label "impl-2" "an explicit --label still wins, unchanged from today"
+            assert-true ($party.label != $user) "and it is not the OS user by coincidence of this test"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/register-then-whoami-agree" {
+        # The round trip: the two verbs must derive the OS user the SAME way,
+        # or `whoami` could disagree with what `register` just claimed. This is
+        # the one case that would catch them drifting.
+        let repo = (make-repo "person-register-whoami-agree")
+        let root = (make-runtime "person-register-whoami-agree")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let party = (do { cd $repo; ^$nu.current-exe $script register | complete } | get stdout | from json)
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --json | complete })
+            assert-eq $out.exit_code 0 $"whoami failed: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.registered true "the bare register whoami now sees"
+            assert-eq $answer.address $party.address "the two verbs agree on the address by construction"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/unregister-with-no-label-releases-the-default" {
+        let repo = (make-repo "person-unregister-default")
+        let root = (make-runtime "person-unregister-default")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let party = (do { cd $repo; ^$nu.current-exe $script register | complete } | get stdout | from json)
+
+            let out = (do { cd $repo; ^$nu.current-exe $script unregister | complete })
+            assert-eq $out.exit_code 0 $"a bare unregister failed: ($out.stderr)"
+            let released = ($out.stdout | from json)
+
+            assert-eq $released.released true "the same default label was released"
+            assert-eq $released.address $party.address "the same address `register` claimed"
+            assert-eq (do { cd $repo; address-label $party.address --repo $repo }) null "the address record is gone"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "person/an-illegal-username-is-refused-naming-it" {
+        # `id -un` can answer with something the bus cannot wear as a label
+        # (here, a space). `claim-address`'s existing refusal must surface
+        # rather than the username being mangled into legality.
+        let repo = (make-repo "person-register-illegal-user")
+        let root = (make-runtime "person-register-illegal-user")
+        let script = (worker-script $env.FILE_PWD)
+        let sandbox = ([(fixture-base) $"person-illegal-user-stub-(random chars --length 6)"] | path join)
+        rm -rf $sandbox
+        mkdir $sandbox
+        "#!/bin/bash\necho 'not a legal label'\n" | save -f ($sandbox | path join "id")
+        chmod +x ($sandbox | path join "id")
+        with-runtime $root {
+            with-env {PATH: ([$sandbox] ++ $env.PATH)} {
+                let out = (do { cd $repo; ^$nu.current-exe $script register | complete })
+                assert-true ($out.exit_code != 0) "an illegal OS username is refused rather than mangled"
+                assert-true ($out.stderr | str contains "not a legal label") "the refusal names the value"
+            }
+        }
+        rm -rf $root; rm -rf $repo; rm -rf $sandbox
     })
 
     # ------------------------------------------- whoami: which party the OS user is (sp033 T2)
