@@ -3254,13 +3254,37 @@ func TestMain_UnregisteredIdentityLeavesHeaderUnchanged(t *testing.T) {
 	}
 }
 
-// TestMain_AsOverridesTheDisplayedLabel is criterion 2: --as renames the
-// label the header shows without needing a second, Go-side registry lookup —
-// the address ResolveIdentity used is still whoami's own answer.
-func TestMain_AsOverridesTheDisplayedLabel(t *testing.T) {
+// writeWhoamiLabelStub is writeWhoamiStub's dotfiles-ng1w.13 sibling: it
+// dispatches on whether whoami was called WITH `--label` (argv[3], since
+// ResolveIdentity always emits `whoami --json` first) so a test can prove
+// --as actually reached pi-worker as `--label`, rather than the plumbing
+// silently falling back to the OS-user answer.
+func writeWhoamiLabelStub(t *testing.T, dir, plainJSON, labelJSON string) {
+	t.Helper()
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\n"+
+		"if [ \"$1\" = \"whoami\" ]; then\n"+
+		"  if [ \"$3\" = \"--label\" ]; then\n"+
+		"    echo '"+labelJSON+"'\n"+
+		"  else\n"+
+		"    echo '"+plainJSON+"'\n"+
+		"  fi\n"+
+		"else\n"+
+		"  echo '[]'\n"+
+		"fi\n")
+}
+
+// TestMain_AsResolvesNamedPartyThroughWhoamiLabel is dotfiles-ng1w.13's
+// success case: an operator whose bus label ("orchestrator") differs from
+// their OS username ("jan") passes --as and the header names the NAMED
+// party — resolved through a distinct `whoami --label orchestrator` answer
+// carrying its own address, not the OS-user answer with the label swapped.
+func TestMain_AsResolvesNamedPartyThroughWhoamiLabel(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
-	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":"aABCDEFGHJKMNPQRSTVWXYZ012","kind":"person","registered":true}`)
+	writeWhoamiLabelStub(t, dir,
+		`{"user":"jan","label":"jan","address":"aOWN00000000000000000000001","kind":"person","registered":true}`,
+		`{"user":"jan","label":"orchestrator","address":"aORCH0000000000000000000002","kind":"person","registered":true}`,
+	)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	var buf bytes.Buffer
@@ -3270,10 +3294,37 @@ func TestMain_AsOverridesTheDisplayedLabel(t *testing.T) {
 	out := buf.String()
 
 	if !strings.Contains(out, "orchestrator") {
-		t.Fatalf("header does not carry --as's override label:\n%s", out)
+		t.Fatalf("header does not name the resolved party %q:\n%s", "orchestrator", out)
 	}
 	if strings.Contains(out, "you are jan") {
-		t.Fatalf("header still names the un-overridden label:\n%s", out)
+		t.Fatalf("header named the OS user's own label instead of --as's named party:\n%s", out)
+	}
+}
+
+// TestMain_AsAgainstAmbiguousLabelYieldsNoIdentity is requirement 1 end to
+// end: whoami refusing an ambiguous --label (non-zero exit, exactly what two
+// `kind: person` addresses sharing a label produces) must leave the header
+// exactly as unidentified as no --as at all — never a half-identity that
+// names a label the monitor could not actually resolve an address for.
+func TestMain_AsAgainstAmbiguousLabelYieldsNoIdentity(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\n"+
+		"if [ \"$1\" = \"whoami\" ] && [ \"$3\" = \"--label\" ]; then\n"+
+		"  echo 'shared is worn by 2 kind: person addresses' >&2\n"+
+		"  exit 1\n"+
+		"fi\n"+
+		"echo '[]'\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, "", "shared-label"); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	out := buf.String()
+
+	if strings.Contains(out, "you are") {
+		t.Fatalf("an ambiguous --label must yield no identity, got header:\n%s", out)
 	}
 }
 

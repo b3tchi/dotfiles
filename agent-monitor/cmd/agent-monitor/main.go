@@ -98,7 +98,7 @@ const (
 func main() {
 	project := flag.String("project", "", "restrict the roster to one project")
 	once := flag.Bool("once", false, "render one frame to stdout and exit 0: no raw mode, no alternate screen, so it composes in a pipe")
-	as := flag.String("as", "", "override the resolved identity's displayed label; the address still comes from pi-worker whoami's own answer, never a second registry lookup")
+	as := flag.String("as", "", "resolve identity as this bus label via pi-worker whoami --label, for an operator whose label isn't their OS username; no separate registry lookup")
 	flag.Parse()
 
 	if *once {

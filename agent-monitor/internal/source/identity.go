@@ -56,15 +56,34 @@ type whoamiAnswer struct {
 // over a session.
 //
 // as, when non-empty, is --as's value: the escape hatch for an operator
-// whose bus label deliberately is not their OS username. It overrides the
-// LABEL only, never the address — the address always comes from this same
-// whoami answer, so --as never becomes a second, Go-side registry lookup.
-// An --as given against an unregistered whoami answer has no address to
-// attach to, so it still resolves to the zero Identity: "a label nobody
-// holds" (edge case 4) is exactly what an unregistered whoami answer already
-// says, and main.go's caller is what decides whether to say so on stderr.
+// whose bus label deliberately is not their OS username. It is passed
+// straight through as whoami's own `--label` flag (dotfiles-ng1w.11), so the
+// resolved identity is that NAMED party's own record — address, kind,
+// registered — never the OS-user record with the label swapped in. That is
+// the only way --as can carry an address at all without a second, Go-side
+// registry lookup (sp033's plan forbids one; dotfiles-3yg4 already paid for
+// that duplication once).
+//
+// answer.User is deliberately never read to decide WHO the identity is:
+// whoami always reports it as the OS user asking (`id -un`), even when
+// --label names someone else entirely (dotfiles-ng1w.11's audit advisory).
+// Only address/kind/registered say who was asked about; identity.User below
+// carries answer.User purely as "who is running this monitor" metadata, not
+// as part of the identity being resolved.
+//
+// Whatever the reason — a label nobody holds (registered: false), a label
+// two `kind: person` parties share (whoami refuses by name, non-zero exit),
+// a tombstoned label, or whoami failing for any other reason — this
+// resolves to the zero Identity. There is no partial state where a Label is
+// set without a matching Address: that half-identity is exactly what would
+// let this file's for-you comparison and Sender.Send's --as disagree about
+// who the operator is (adr0034).
 func ResolveIdentity(ctx context.Context, exec Exec, as string) Identity {
-	out, err := exec(ctx, identityBinary, "whoami", "--json")
+	args := []string{"whoami", "--json"}
+	if as != "" {
+		args = append(args, "--label", as)
+	}
+	out, err := exec(ctx, identityBinary, args...)
 	if err != nil {
 		return Identity{}
 	}
@@ -78,9 +97,6 @@ func ResolveIdentity(ctx context.Context, exec Exec, as string) Identity {
 	identity := Identity{User: answer.User, Label: answer.Label, Registered: true}
 	if answer.Address != nil {
 		identity.Address = *answer.Address
-	}
-	if as != "" {
-		identity.Label = as
 	}
 	return identity
 }
