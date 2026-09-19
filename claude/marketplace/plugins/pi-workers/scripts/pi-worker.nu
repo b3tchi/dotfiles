@@ -5741,6 +5741,9 @@ def usage []: nothing -> string {
         "                                       reconnects to the same queue"
         "  unregister --label                    leave the bus: the address and the label"
         "                                       go, the tombstone keeps history legible"
+        "  whoami   [--json]                     which party the OS user (`id -un`) is;"
+        "                                       registered: false is a clean answer, not"
+        "                                       a refusal, when nobody registered"
         "  status   <uid>                        one worker's state, from the bus"
         "  liveness <uid> [--socket]             live | exited | unknown, from tmux"
         "  inspect  <uid>                        identity, last result, resume command"
@@ -6272,6 +6275,47 @@ def "main unregister" [--label: string = ""] {
     release-address $repo $address
     release-label $repo $label
     {label: $label, released: true, address: $address} | to json | print
+}
+
+# Which party the OS user is (sp033 T2, dotfiles-ng1w.2).
+#
+# The registry lookup lives here, in the module that owns the layout, and
+# never in Go — `agent-monitor` re-deriving this from `$XDG_RUNTIME_DIR` is
+# exactly the second-copy failure dotfiles-3yg4 already paid for once.
+#
+# `user` is `^id -un`, never `$env.USER`: the environment variable is unset in
+# some session shapes and trivially spoofed in every one, where `id` asks the
+# kernel directly. A label match alone is the wrong-party bug this verb exists
+# not to have — a worker or a run can wear a human's name too — so the answer
+# requires BOTH the label and `kind: person`. Unregistered is a CLEAN ANSWER,
+# not a refusal ([[adr0017]]): the two capabilities that gate on this (T4)
+# are absent because nobody is here, not because something failed. Two
+# `kind: person` addresses sharing the label is refused by name, matching
+# `to-address`'s own rule, rather than picked between.
+def "main whoami" [--json] {
+    let repo = (current-repo)
+    if ($repo | is-empty) {
+        error make {msg: "whoami refused: not inside a git repository, and a bus is scoped to one project"}
+    }
+    let probe = (do { ^id -un } | complete)
+    let user = ($probe.stdout | str trim)
+    if $probe.exit_code != 0 or ($user | is-empty) {
+        error make {msg: "whoami refused: `id -un` produced no OS username to look up"}
+    }
+    let candidates = (project-addresses $repo | where name == $user and kind == "person")
+    let result = if ($candidates | length) == 0 {
+        {user: $user, label: $user, address: null, kind: null, registered: false}
+    } else if ($candidates | length) == 1 {
+        let party = ($candidates | first)
+        {user: $user, label: $user, address: $party.address, kind: $party.kind, registered: true}
+    } else {
+        error make {msg: $"'($user)' is worn by ($candidates | length) `kind: person` addresses in this project \(($candidates | get address | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
+    }
+    if $json {
+        $result | to json | print
+    } else {
+        [$result] | select user label address kind registered | print
+    }
 }
 
 def "main rm" [--uid: string = ""] {
