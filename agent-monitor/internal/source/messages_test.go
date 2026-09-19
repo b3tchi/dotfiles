@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -264,5 +266,135 @@ func TestMessagesMonitor_NeverBlanksOnFailure(t *testing.T) {
 	}
 	if !m.Stale() {
 		t.Fatalf("should be stale after a failed tick")
+	}
+}
+
+// writeSendStub drops an executable shell script named `pi-worker` into dir
+// — the real-subprocess twin of stubExec above, needed here because the
+// argv/metacharacter cases (sp033 T9) have to prove exec.Command never
+// invokes a shell, which a Go-level stub cannot: a `sh -c` shortcut and a
+// direct exec.Command call look identical to a Go func stub that just
+// records the (name, args) it was handed, but they differ the moment a real
+// `$`, backtick or embedded newline reaches an actual process. This is a
+// small local copy of cmd/agent-monitor/main_test.go's own writeStub rather
+// than a shared export — a source-internal test helper reaching into cmd/
+// would invert this package's own dependency direction.
+func writeSendStub(t *testing.T, dir, script string) {
+	t.Helper()
+	p := filepath.Join(dir, "pi-worker")
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatalf("write pi-worker stub: %v", err)
+	}
+}
+
+// readNullSeparated reads a NUL-delimited argv dump written by the stub
+// scripts below (`printf '%s\0' "$a"` per argument) — NUL is the one byte
+// that cannot appear inside a Unix argv element, so it is the only safe
+// delimiter for an argument that may itself contain a literal newline
+// (TestSend_BodyWithMetacharactersArrivesIntact).
+func readNullSeparated(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	parts := strings.Split(string(data), "\x00")
+	if len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
+}
+
+func withStubPath(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestSend_ArgvShape is the test_plan's argv case: a stub `pi-worker`
+// records every argv element it received, and this asserts the exact five
+// flags ft014's `main send` documents plus the verb, with the body arriving
+// as ONE argument — not a shell-quoted fragment of a longer string a `sh -c`
+// implementation would produce instead.
+func TestSend_ArgvShape(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "argv.out")
+	writeSendStub(t, dir, "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > \""+out+"\"\n")
+	withStubPath(t, dir)
+
+	sender := &Sender{Exec: RealExec}
+	if err := sender.Send(context.Background(), "addr-from", "addr-to", "hello world"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got := readNullSeparated(t, out)
+	want := []string{"send", "--as", "addr-from", "--to", "addr-to", "--content", "hello world"}
+	if len(got) != len(want) {
+		t.Fatalf("got argv %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got argv %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSend_BodyWithMetacharactersArrivesIntact is criterion 5 against a real
+// subprocess: quotes, `$`, a backtick and an embedded newline all reach
+// pi-worker's argv exactly as typed, because exec.Command never hands
+// anything to a shell to re-interpret.
+func TestSend_BodyWithMetacharactersArrivesIntact(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "argv.out")
+	writeSendStub(t, dir, "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > \""+out+"\"\n")
+	withStubPath(t, dir)
+
+	body := "quote\" dollar$VAR backtick`whoami` newline\nend"
+	sender := &Sender{Exec: RealExec}
+	if err := sender.Send(context.Background(), "me", "you", body); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got := readNullSeparated(t, out)
+	if len(got) != 7 {
+		t.Fatalf("got argv %v, want 7 elements", got)
+	}
+	if got[6] != body {
+		t.Fatalf("got body arg %q, want %q byte-identical", got[6], body)
+	}
+}
+
+// TestSend_NonZeroExitReturnsStderr proves the real extraction path: a
+// stub that exits non-zero after writing to stderr, run through RealExec's
+// actual cmd.Output() (which populates *exec.ExitError.Stderr), comes back
+// as an error whose message IS that stderr text — not "exit status 1", and
+// not silently swallowed (dotfiles-oj4c, dotfiles-9oa4).
+func TestSend_NonZeroExitReturnsStderr(t *testing.T) {
+	dir := t.TempDir()
+	writeSendStub(t, dir, "#!/bin/sh\necho 'send refused: unknown recipient' >&2\nexit 1\n")
+	withStubPath(t, dir)
+
+	sender := &Sender{Exec: RealExec}
+	err := sender.Send(context.Background(), "me", "ghost", "hi")
+	if err == nil {
+		t.Fatalf("expected an error")
+	}
+	if err.Error() != "send refused: unknown recipient" {
+		t.Fatalf("got error %q, want the CLI's stderr verbatim", err.Error())
+	}
+}
+
+// TestSend_MissingBinaryIsAnErrorNotAPanic covers pi-worker disappearing
+// from PATH mid-session (## edge_cases): PATH points at an empty directory,
+// so the underlying error is a LookPath failure (*exec.Error, not
+// *exec.ExitError) — Send's errors.As branch must not match it, and must
+// not panic either.
+func TestSend_MissingBinaryIsAnErrorNotAPanic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+
+	sender := &Sender{Exec: RealExec}
+	err := sender.Send(context.Background(), "me", "you", "hi")
+	if err == nil {
+		t.Fatalf("expected an error when pi-worker is not on PATH")
 	}
 }

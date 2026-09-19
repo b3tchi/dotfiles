@@ -9,9 +9,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -167,4 +169,52 @@ func (m *MessagesMonitor) Tick(ctx context.Context) bool {
 //     retried only on the ticker's own next firing, never inline.
 func RunMessagesLoop(ctx context.Context, m *MessagesMonitor, interval time.Duration, onTick func(changed bool)) {
 	_ = RunSingleTicked(ctx, nil, interval, m.Tick, onTick)
+}
+
+// Sender is agent-monitor's one path off the two read-only samplers above:
+// `pi-worker send`, the write this package's ## plan (sp033 T9) adds
+// alongside the sampler rather than inside it. It shares the Exec/RealExec
+// shape MessagesSampler already uses so a test can stub it the same way,
+// and it is deliberately never reached from RunMessagesLoop or RunLoop —
+// cmd/agent-monitor dispatches Send as a tea.Cmd, off the render path and
+// outside both sampler loops, so adr0014's three reader-loop guards are
+// neither relaxed nor re-implemented for a writer.
+type Sender struct {
+	Exec Exec
+}
+
+// NewSender builds a Sender against the real pi-worker binary.
+func NewSender() *Sender { return &Sender{Exec: RealExec} }
+
+// Send execs `pi-worker send --as <from> --to <toAddress> --content <body>`
+// — the exact verb and flags ft014's `main send` documents — with the body
+// as ONE argv element (criterion 5). exec.Command never invokes a shell, so
+// a body carrying quotes, `$`, backticks or a newline reaches pi-worker
+// byte-identical: this package formats nothing it sends and parses nothing
+// it reads (adr0031), and there is no string concatenation here for a
+// metacharacter to survive. from is the operator's own resolved ADDRESS
+// (sp033 T4's identity), never a label — pi-worker.nu's `to-address` already
+// returns an address-shaped `--as` unchanged, so this never becomes a
+// second, Go-side registry lookup.
+//
+// On a non-zero exit this returns the CLI's stderr verbatim as the error's
+// own message (criterion 1) when the underlying error is a real
+// *exec.ExitError with stderr captured — RealExec's cmd.Output() populates
+// that field whenever the process actually ran and exited non-zero. A stub
+// Exec in a test, or a real LookPath failure when pi-worker disappears from
+// PATH mid-session (edge case), carries no such stderr to unwrap, so that
+// error is returned exactly as the Exec call produced it — never a panic,
+// per TestSend_MissingBinaryIsAnErrorNotAPanic.
+func (s *Sender) Send(ctx context.Context, from, toAddress, body string) error {
+	_, err := s.Exec(ctx, messagesBinary, "send", "--as", from, "--to", toAddress, "--content", body)
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return errors.New(stderr)
+		}
+	}
+	return err
 }

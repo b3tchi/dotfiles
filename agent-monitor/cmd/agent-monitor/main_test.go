@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3271,5 +3272,169 @@ func TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel(t *testing.T) {
 	}
 	if ok, reason := model.OpenComposer("aSOMEADDRESS0123456789ABCDE"); !ok {
 		t.Fatalf("OpenComposer refused despite a resolved identity: %s", reason)
+	}
+}
+
+// TestSend_DispatchedAsCmdShowsConfirmation is sp033 T9 criterion 3: a
+// successful send does not block Update (the stubbed Sender is invoked from
+// the tea.Cmd sendCmd returns, exactly as bubbletea would call it) and its
+// result sets a transient confirmation naming the recipient's rendered
+// label, resolved from an already-sampled envelope rather than a second
+// registry lookup (## plan's absolute rule).
+func TestSend_DispatchedAsCmdShowsConfirmation(t *testing.T) {
+	s := newTestShell(t)
+	s.model.HasIdentity = true
+	s.identity = source.Identity{Address: "aFROM0000000000000000000001", Label: "me", Registered: true}
+	s.msgs = source.NewMessagesMonitor(&source.MessagesSampler{Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte(`[{"at":"2026-09-19T10:00:00Z","id":"01","from":"lead","to":["worker-3"],"kind":"message","content":"hi","from_address":"aFROM0000000000000000000001","to_addresses":["aTO00000000000000000000002"]}]`), nil
+	}})
+	s.msgs.Tick(context.Background())
+
+	var gotArgs []string
+	s.sender = &source.Sender{Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		gotArgs = append([]string{name}, args...)
+		return nil, nil
+	}}
+
+	if ok, reason := s.model.OpenComposer("aTO00000000000000000000002"); !ok {
+		t.Fatalf("OpenComposer refused: %s", reason)
+	}
+	for _, r := range "on it" {
+		s.model.HandleKey(tui.Key{Rune: r})
+	}
+	outcome := s.model.HandleKey(tui.Key{Rune: 0x13})
+	if outcome.Send == nil {
+		t.Fatalf("expected ctrl+s to yield a SendRequest")
+	}
+
+	cmd := s.sendCmd(outcome.Send)
+	msg := cmd()
+	result, ok := msg.(sendResultMsg)
+	if !ok {
+		t.Fatalf("got %T, want sendResultMsg", msg)
+	}
+	if result.err != nil {
+		t.Fatalf("Send: %v", result.err)
+	}
+	if len(gotArgs) < 4 || gotArgs[1] != "send" || gotArgs[3] != "aFROM0000000000000000000001" {
+		t.Fatalf("got exec args %v, want --as to carry the operator's own address", gotArgs)
+	}
+
+	s.handleSendResult(result)
+
+	if s.model.Composing {
+		t.Fatalf("a successful send must not reopen the composer")
+	}
+	if s.sendNotice != "sent to worker-3" {
+		t.Fatalf("got sendNotice %q, want it to name the recipient's rendered label", s.sendNotice)
+	}
+}
+
+// TestMain_FailedSendRestoresTheDraft is sp033 T9 criterion 4: a non-zero
+// exit shows the CLI's stderr and reopens the composer with the SAME
+// recipient and body the operator had typed — restored by replaying the
+// body through the model's own key surface (handleSendResult's doc), the
+// only way to reach composeDraft from outside the tui package.
+func TestMain_FailedSendRestoresTheDraft(t *testing.T) {
+	s := newTestShell(t)
+	s.model.HasIdentity = true
+	s.identity = source.Identity{Address: "aFROM0000000000000000000001", Label: "me", Registered: true}
+	s.sender = &source.Sender{Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return nil, errors.New("send refused: unknown recipient")
+	}}
+
+	if ok, reason := s.model.OpenComposer("aTO00000000000000000000002"); !ok {
+		t.Fatalf("OpenComposer refused: %s", reason)
+	}
+	body := "quote\" dollar$VAR\nsecond line"
+	for _, r := range body {
+		s.model.HandleKey(tui.Key{Rune: r})
+	}
+	outcome := s.model.HandleKey(tui.Key{Rune: 0x13})
+	if outcome.Send == nil {
+		t.Fatalf("expected ctrl+s to yield a SendRequest")
+	}
+	if s.model.Composing {
+		t.Fatalf("commitCompose should have closed the composer before the send is even dispatched")
+	}
+
+	cmd := s.sendCmd(outcome.Send)
+	msg := cmd()
+	result, ok := msg.(sendResultMsg)
+	if !ok {
+		t.Fatalf("got %T, want sendResultMsg", msg)
+	}
+	if result.err == nil {
+		t.Fatalf("expected the stub's error to come back")
+	}
+
+	s.handleSendResult(result)
+
+	if !s.model.Composing {
+		t.Fatalf("a failed send must reopen the composer")
+	}
+	if s.model.ComposeTo != "aTO00000000000000000000002" {
+		t.Fatalf("got ComposeTo %q, want the original recipient restored", s.model.ComposeTo)
+	}
+	if !strings.Contains(s.sendNotice, "failed") || !strings.Contains(s.sendNotice, "unknown recipient") {
+		t.Fatalf("got sendNotice %q, want it to carry the CLI's stderr", s.sendNotice)
+	}
+
+	// composeDraft is unexported (tui package); the only way to observe the
+	// restored body from here is to commit again and read what ctrl+s
+	// yields.
+	again := s.model.HandleKey(tui.Key{Rune: 0x13})
+	if again.Send == nil {
+		t.Fatalf("expected the restored draft to still commit")
+	}
+	if again.Send.Body != body {
+		t.Fatalf("got restored body %q, want %q byte-identical", again.Send.Body, body)
+	}
+}
+
+// TestMain_SendIsNotPerformedInTheSamplerLoop is sp033 T9 criterion 2's
+// regression guard: RunLoop and RunMessagesLoop — the exact tick functions
+// runInteractive wires to the roster and message samplers — never exec
+// `send`, proven by driving both loops for real against a recording stub
+// and inspecting every argv they produced.
+func TestMain_SendIsNotPerformedInTheSamplerLoop(t *testing.T) {
+	var mu sync.Mutex
+	var calls [][]string
+	rec := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		mu.Lock()
+		calls = append(calls, append([]string{name}, args...))
+		mu.Unlock()
+		return []byte("[]"), nil
+	}
+
+	census := source.NewMonitor(&source.Sampler{Exec: rec, StampPath: filepath.Join(t.TempDir(), "stamp")})
+	msgs := source.NewMessagesMonitor(&source.MessagesSampler{Exec: rec})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		source.RunLoop(ctx, census, 10*time.Millisecond, 10*time.Millisecond, func(bool) {})
+	}()
+	go func() {
+		defer wg.Done()
+		source.RunMessagesLoop(ctx, msgs, 10*time.Millisecond, func(bool) {})
+	}()
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) == 0 {
+		t.Fatalf("expected the loops to have ticked at least once in 150ms")
+	}
+	for _, call := range calls {
+		for _, a := range call {
+			if a == "send" {
+				t.Fatalf("a sampler loop execed send: %v — RunLoop/RunMessagesLoop must stay reader-only (adr0014)", call)
+			}
+		}
 	}
 }

@@ -222,6 +222,19 @@ type shell struct {
 	census *source.Monitor
 	msgs   *source.MessagesMonitor
 
+	// sender is sp033 T9's one write path: `pi-worker send`, execed by
+	// sendCmd's tea.Cmd — never called from Update directly (that would
+	// block the render loop) and never called from a sampler's Tick (that
+	// would put a writer inside adr0014's guarded reader loops).
+	sender *source.Sender
+
+	// sendNotice is the composer's transient status line: "sent to X" on a
+	// successful send (criterion 3) or the CLI's stderr on a failed one
+	// (criterion 4). It is plain text with nowhere of its own to render
+	// yet — T10 gives the composer its own region and reads this — so this
+	// task's own tests assert it directly rather than through a frame.
+	sendNotice string
+
 	// identity is who ResolveIdentity said the operator is, resolved ONCE at
 	// startup (runInteractive) and never re-derived on a tick — see
 	// source.Identity's doc for why a user who registers mid-session stays
@@ -254,7 +267,7 @@ type shell struct {
 // identity — the zero source.Identity{} (Registered false) is exactly what
 // they get, and exactly what leaves the header byte-identical (criterion 3).
 func newShell(ctx context.Context, model *tui.Model, census *source.Monitor, msgs *source.MessagesMonitor, identity ...source.Identity) *shell {
-	return &shell{ctx: ctx, model: model, census: census, msgs: msgs, identity: firstIdentityOrZero(identity), width: 80, now: time.Now}
+	return &shell{ctx: ctx, model: model, census: census, msgs: msgs, sender: source.NewSender(), identity: firstIdentityOrZero(identity), width: 80, now: time.Now}
 }
 
 // firstIdentityOrZero reads newShell's/buildFrame's/renderFrame's variadic
@@ -297,12 +310,94 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.census.Refresh(s.ctx)
 				s.msgs.Tick(s.ctx)
 			}
+			if outcome.Send != nil {
+				return s, s.sendCmd(outcome.Send)
+			}
 		}
 
 	case tea.MouseMsg:
 		s.handleMouse(msg)
+
+	case sendResultMsg:
+		s.handleSendResult(msg)
 	}
 	return s, nil
+}
+
+// sendResultMsg is what a dispatched send reports back into Update — never
+// performed inline (criterion 2). It carries the ORIGINAL request rather
+// than making Update re-derive it from Model: commitCompose already cleared
+// Composing/ComposeTo/the draft by the time this arrives, so req is the
+// only place left holding what was actually sent.
+type sendResultMsg struct {
+	req *tui.SendRequest
+	err error
+}
+
+// sendCmd dispatches source.Sender.Send as a tea.Cmd (criterion 2): it runs
+// on bubbletea's own command goroutine, never on Update's, so a slow or
+// hung pi-worker cannot freeze the render loop. from is the operator's own
+// resolved ADDRESS (sp033 T4's identity) — never the label — matching
+// Sender.Send's own contract and adr0034's "addresses identify, labels
+// display" rule.
+func (s *shell) sendCmd(req *tui.SendRequest) tea.Cmd {
+	from := s.identity.Address
+	sender := s.sender
+	ctx := s.ctx
+	return func() tea.Msg {
+		err := sender.Send(ctx, from, req.To, req.Body)
+		return sendResultMsg{req: req, err: err}
+	}
+}
+
+// handleSendResult applies one dispatched send's outcome. A success sets a
+// transient confirmation naming the recipient's rendered LABEL (criterion
+// 3) — the reply itself is never inserted locally; it arrives through the
+// ordinary message tick like every other envelope, so there stays exactly
+// one source of truth for what is on the bus. A failure shows the CLI's
+// stderr and replays the draft's body back through the model's own key
+// surface to reopen the composer exactly as it was (criterion 4): nothing
+// the operator typed is lost. Replaying via HandleKey rather than a new
+// Model setter keeps this restore inside the existing "every rune belongs
+// to the draft" contract instead of adding a second way to mutate it.
+func (s *shell) handleSendResult(msg sendResultMsg) {
+	label := s.recipientLabel(msg.req.To)
+	if msg.err != nil {
+		s.sendNotice = fmt.Sprintf("send to %s failed: %s", label, msg.err)
+		if opened, _ := s.model.OpenComposer(msg.req.To); opened {
+			for _, r := range msg.req.Body {
+				s.model.HandleKey(tui.Key{Rune: r})
+			}
+		}
+		return
+	}
+	s.sendNotice = fmt.Sprintf("sent to %s", label)
+}
+
+// recipientLabel resolves an address to the rendered label a currently
+// known envelope carries for it — the same From/To rendering pi-worker.nu
+// already computed (ft014 T1's from_address/to_addresses widening), never a
+// second Go-side registry lookup (the ## plan's absolute rule: "the
+// registry is read in nu, never in Go"). Falls back to the address itself
+// when no known envelope carries it — a recipient released between open and
+// send (## edge_cases) has no label left to show, and the address is an
+// honest thing to show instead of guessing or crashing.
+func (s *shell) recipientLabel(address string) string {
+	sample := s.msgs.Last()
+	if sample == nil {
+		return address
+	}
+	for _, m := range sample.Messages {
+		if m.FromAddress == address {
+			return m.From
+		}
+		for i, a := range m.ToAddresses {
+			if a == address && i < len(m.To) {
+				return m.To[i]
+			}
+		}
+	}
+	return address
 }
 
 // handleMouse is sp032 T3's whole mouse surface: it recomputes THIS frame's
