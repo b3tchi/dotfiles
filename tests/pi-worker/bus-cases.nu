@@ -2831,6 +2831,31 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $non_repo
     })
 
+    (run-case "whoami/id-un-failure-is-refused-not-reported-as-an-empty-user" {
+        # Edge case: `id -un` unavailable or empty must refuse rather than
+        # answer with an empty username. Same PATH-stub sandbox
+        # `pipeline-cases.nu`'s `make-tmux` already uses for a fake `pi`
+        # (lines 16-24, `with-env {PATH: ([$t.bin] ++ $env.PATH)}`) — a stub
+        # `id` ahead of the real one on PATH exercises the same failure a
+        # broken or absent `id` binary would produce.
+        let repo = (make-repo "whoami-id-failure")
+        let root = (make-runtime "whoami-id-failure")
+        let script = (worker-script $env.FILE_PWD)
+        let sandbox = ([(fixture-base) $"whoami-id-stub-(random chars --length 6)"] | path join)
+        rm -rf $sandbox
+        mkdir $sandbox
+        "#!/bin/bash\nexit 1\n" | save -f ($sandbox | path join "id")
+        chmod +x ($sandbox | path join "id")
+        with-runtime $root {
+            with-env {PATH: ([$sandbox] ++ $env.PATH)} {
+                let out = (do { cd $repo; ^$nu.current-exe $script whoami --json | complete })
+                assert-true ($out.exit_code != 0) "a failing `id -un` must be a refusal, not an empty-user answer"
+                assert-true ($out.stderr | str contains "id -un") "the refusal names what failed"
+            }
+        }
+        rm -rf $root; rm -rf $repo; rm -rf $sandbox
+    })
+
     # ------------------------------------------- raw addresses beside rendered labels (sp033 T1)
     #
     # `bus-messages` has always resolved `from`/`to` through `render-address`
