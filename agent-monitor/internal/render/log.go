@@ -1,8 +1,11 @@
-// log.go renders the message pane: one row per envelope, oldest-first /
-// newest-last (a scrolling log's natural reading order), with a derived
-// SUBJECT column (subject.go) instead of a nonexistent envelope field
-// (adr0028). It joins nothing itself — every value came from the
-// source.MessageSample it was handed, exactly like roster.go's Render.
+// log.go renders the message pane: one row per envelope, newest-first (sp033
+// T6 — row 0 is the newest arrival, an inbox's natural reading order rather
+// than a transcript's), with a derived SUBJECT column (subject.go) instead
+// of a nonexistent envelope field (adr0028). It joins nothing itself — every
+// value came from the source.MessageSample it was handed, exactly like
+// roster.go's Render, and it does not sort: cmd/agent-monitor's
+// orderedMessages is what puts rows in this order before RenderLog ever
+// sees them (see RenderLog's own doc for why the reorder lives there).
 package render
 
 import (
@@ -114,12 +117,19 @@ func subjectWidth(width int, cols []msgColumn) int {
 }
 
 // RenderLog turns a MessageSample into terminal lines at the given width, as
-// of now. Rows print in the sample's own order (ParseMessages already
-// returns ascending id/time order), so the most recent message is the last
-// line — this renderer does not re-sort.
+// of now. Rows print in the sample's own order — this renderer does not
+// re-sort — and since sp033 T6 that order is newest-first: cmd/agent-monitor
+// hands it a sample already reordered by orderedMessages, not
+// source.ParseMessages' raw ascending id/time order. Keeping the sort out of
+// this package is deliberate: main.go is what threads MessagesCursor through
+// SetMessagesLen, the scrolled slice and the detail pane's selection, so it
+// is the one place that can keep all three agreeing on what row 0 means; a
+// second reorder here would be exactly the hidden-second-order this task's
+// anti-pattern list forbids, just moved to a different file.
 //
-// pending is sp032 T6's tail counter: how many messages have arrived since
-// the message pane stopped being live (tui.Model.PendingMessages). A
+// pending is sp032 T6's counter, inverted for the head by sp033 T6: how many
+// messages have arrived since the message pane stopped being live
+// (tui.Model.PendingMessages). A
 // positive value adds a `+N new` segment to the header line; zero — and the
 // four-argument call, which is what --once and every pre-T6 caller makes —
 // renders the header byte-for-byte as it did before T6.

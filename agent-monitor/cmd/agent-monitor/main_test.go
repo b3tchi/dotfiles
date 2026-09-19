@@ -355,18 +355,21 @@ func TestRenderFrame_DetailFollowsMessagesCursor(t *testing.T) {
 		sampleMessage("carol", `"second"`),
 	}}
 
+	// sp033 T6: the pane renders newest-first, so row 0 is carol — the LAST
+	// message in the sample's ascending wire order, not the first.
+	//
 	// "→" only appears in the detail header (`from → to`), so checking for
 	// it distinguishes "the detail pane selected this sender" from "this
 	// sender merely appears as a log row", which would be true either way.
 	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
-	if !containsSubstring(lines, "alice →") {
-		t.Fatalf("expected the first message (cursor at 0) in the detail pane, got %v", lines)
+	if !containsSubstring(lines, "carol →") {
+		t.Fatalf("expected the newest message (cursor at row 0) in the detail pane, got %v", lines)
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
 	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
-	if !containsSubstring(lines, "carol →") {
-		t.Fatalf("expected the second message (cursor at 1) after moving down, got %v", lines)
+	if !containsSubstring(lines, "alice →") {
+		t.Fatalf("expected the older message (cursor at row 1) after moving down, got %v", lines)
 	}
 }
 
@@ -397,22 +400,23 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 	// bounds the cursor) before any key is read — see runInteractive's
 	// initial draw(). Mirror that ordering here.
 	renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
-	model.HandleKey(tui.Key{Rune: 'j'}) // select carol
+	// sp033 T6: row 0 is carol (the newest), so 'j' selects alice.
+	model.HandleKey(tui.Key{Rune: 'j'}) // select alice
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // off
 	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	// "→" only ever appears in the detail header (detailHeaderLine's
 	// `from → to`); the message pane's own SUBJECT column never contains it,
 	// so its absence is a precise "no detail region" check, distinct from
-	// "carol" which legitimately still appears as a log row.
+	// "alice" which legitimately still appears as a log row.
 	if containsSubstring(lines, "→") {
 		t.Fatalf("expected no detail region while toggled off, got %v", lines)
 	}
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // on
 	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
-	if !containsSubstring(lines, "carol →") {
-		t.Fatalf("expected carol still selected after toggling back on, got %v", lines)
+	if !containsSubstring(lines, "alice →") {
+		t.Fatalf("expected alice still selected after toggling back on, got %v", lines)
 	}
 }
 
@@ -584,20 +588,22 @@ func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
 	sample := &source.MessageSample{Messages: msgs}
 
 	// Settle on a tall terminal (a real session always draws before reading
-	// a key), then walk the cursor deep into the list.
+	// a key), then walk the cursor deep into the list. sp033 T6: row 0 is
+	// sender39 (the newest, last in the ascending sample), so 30 steps down
+	// lands on sender09.
 	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
 	for i := 0; i < 30; i++ {
 		model.HandleKey(tui.Key{Rune: 'j'})
 	}
 	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
-	if !logRowHasSender(lines, "sender30") {
+	if !logRowHasSender(lines, "sender09") {
 		t.Fatalf("height 40: expected the cursor's row visible before the resize, got %v", lines)
 	}
 
-	// A single draw at a much shorter height. sender30 must be in THIS
+	// A single draw at a much shorter height. sender09 must be in THIS
 	// frame's message pane.
 	lines, _ = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8)
-	if !logRowHasSender(lines, "sender30") {
+	if !logRowHasSender(lines, "sender09") {
 		t.Fatalf("height 8: the cursor's row is absent from the message pane in the frame that observed the resize, got %v", lines)
 	}
 }
@@ -700,20 +706,21 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 		sampleMessage("carol", `"second"`),
 	}}
 
+	// sp033 T6: row 0 is carol (the newest, last in the ascending sample).
 	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	marked := styledLines(lines)
-	if !anyContains(marked, "alice") {
-		t.Fatalf("cursor at 0: alice's LOG ROW must be marked, got marked=%v all=%v", marked, lines)
+	if !anyContains(marked, "carol") {
+		t.Fatalf("cursor at 0: carol's LOG ROW must be marked, got marked=%v all=%v", marked, lines)
 	}
-	if anyContains(marked, "carol") {
-		t.Fatalf("cursor at 0: carol's row must not be marked, got marked=%v", marked)
+	if anyContains(marked, "alice") {
+		t.Fatalf("cursor at 0: alice's row must not be marked, got marked=%v", marked)
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
 	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
 	marked = styledLines(lines)
-	if !anyContains(marked, "carol") {
-		t.Fatalf("cursor at 1: carol's row must be marked, got marked=%v all=%v", marked, lines)
+	if !anyContains(marked, "alice") {
+		t.Fatalf("cursor at 1: alice's row must be marked, got marked=%v all=%v", marked, lines)
 	}
 }
 
@@ -2206,7 +2213,13 @@ func TestZoom_HidesOtherPanesAndRestoresScrollOnExit(t *testing.T) {
 		if strings.Contains(l, "agent0") {
 			t.Fatalf("zoomed frame still renders a roster row: %q", l)
 		}
-		if strings.Contains(l, "sender01") || strings.Contains(l, "sender02") {
+		// sp033 T6: this shell never triggers the explicit head-opening (only
+		// settleLayout, not View()), so the cursor sits at its raw zero value
+		// — which is now row 0 of the REORDERED list, i.e. sender02, the
+		// newest of the three ascending messages. sender00/sender01 must
+		// appear nowhere in a zoomed frame: not as log rows (the log is
+		// hidden) and not as the detail selection (sender02 is selected).
+		if strings.Contains(l, "sender00") || strings.Contains(l, "sender01") {
 			t.Fatalf("zoomed frame still renders the message log: %q", l)
 		}
 	}
@@ -2577,14 +2590,16 @@ func TestUpdate_PagingKeysReachTheFocusedPane(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// sp032 T6: conditional tail-follow, through the real shell.
+// sp033 T6: conditional head-follow, through the real shell (inverts sp032
+// T6's tail-follow wiring tests to the other end — see keys_test.go for the
+// state-layer restatement of the underlying invariants).
 //
 // tui's own tests own the derivation (what LIVE means, what the count does).
 // These own the WIRING: that a real second sample from a real sampler
 // reaches the model, that the count reaches render.RenderLog's header, and
-// that a real mouse press on the list's last row thaws the pane. A pending
-// count that stayed inside tui.Model and never reached a header would leave
-// every tui test green.
+// that a real mouse press on row 0 thaws the pane. A pending count that
+// stayed inside tui.Model and never reached a header would leave every tui
+// test green.
 // ---------------------------------------------------------------------------
 
 // messageHeaderLine is the message pane's header row in a rendered frame.
@@ -2597,19 +2612,19 @@ func messageHeaderLine(t *testing.T, s *shell) string {
 	return lines[layout.messages.firstRow]
 }
 
-// tailShell stands up a wired shell parked LIVE on the message pane, and
-// returns a grow function that publishes a larger sample through the real
-// sampler.
-func tailShell(t *testing.T, msgRows, width, height int) (*shell, func(int)) {
+// headShell stands up a wired shell parked LIVE on the message pane (row 0,
+// scroll at the top), and returns a grow function that publishes a larger
+// sample through the real sampler.
+func headShell(t *testing.T, msgRows, width, height int) (*shell, func(int)) {
 	t.Helper()
 	dir := t.TempDir()
 	s := newWiredShellIn(t, dir, 5, msgRows, width, height)
 	settleLayout(s) // this frame's viewports reach the model
 
 	s.Update(key(tea.KeyTab)) // focus the message pane
-	s.Update(runeKey('G'))    // and park it live at the tail
-	if s.model.MessagesCursor != s.model.MessagesLen-1 {
-		t.Fatalf("setup: cursor = %d, want %d (the last row)", s.model.MessagesCursor, s.model.MessagesLen-1)
+	s.Update(runeKey('g'))    // and park it live at the head
+	if s.model.MessagesCursor != 0 || s.model.MessagesScroll != 0 {
+		t.Fatalf("setup: cursor/scroll = %d/%d, want 0/0 (row 0)", s.model.MessagesCursor, s.model.MessagesScroll)
 	}
 
 	return s, func(n int) {
@@ -2622,27 +2637,29 @@ func tailShell(t *testing.T, msgRows, width, height int) (*shell, func(int)) {
 	}
 }
 
-// TestTail_ShellFollowsLiveAndFreezesScrolledBack is criteria 1 and 2 end to
-// end: a real growing sample moves the cursor while the pane is live, and
-// moves NOTHING once a real wheel event has scrolled it back.
-func TestTail_ShellFollowsLiveAndFreezesScrolledBack(t *testing.T) {
-	s, grow := tailShell(t, 20, 100, 30)
+// TestOrder_ShellFollowsLiveAndFreezesScrolledBack is criteria 1 and 2 end to
+// end: a real growing sample leaves a live pane on row 0 (which IS
+// following, since row 0 never moves), and moves NOTHING once a real wheel
+// event has scrolled it away.
+func TestOrder_ShellFollowsLiveAndFreezesScrolledBack(t *testing.T) {
+	s, grow := headShell(t, 20, 100, 30)
 
 	grow(24)
-	if s.model.MessagesCursor != 23 {
-		t.Errorf("a live pane did not follow the new sample: cursor = %d, want 23", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("a live pane did not stay on row 0: cursor = %d, want 0", s.model.MessagesCursor)
 	}
 	if s.model.PendingMessages != 0 {
 		t.Errorf("PendingMessages = %d on a live pane, want 0", s.model.PendingMessages)
 	}
 
-	// A real wheel event over the message pane freezes it.
+	// A real wheel event over the message pane freezes it. WheelDown, since
+	// row 0 (live) now sits at the TOP of the pane.
 	layout := settleLayout(s)
 	y := layout.messages.firstRow + layout.messages.headerRows + 1
 	if target, _, _ := hitTest(layout, y); target != hitMessages {
 		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
 	}
-	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
 
 	frozenCursor, frozenScroll := s.model.MessagesCursor, s.model.MessagesScroll
 	grow(27)
@@ -2656,12 +2673,12 @@ func TestTail_ShellFollowsLiveAndFreezesScrolledBack(t *testing.T) {
 	}
 }
 
-// TestTail_PendingCountReachesTheLogHeader is criterion 3's wiring: the
+// TestOrder_PendingCountReachesTheLogHeader is criterion 3's wiring: the
 // count main.go holds is the one RenderLog renders. Asserted on the frame
 // the shell actually draws, so a main.go that never passed it fails here
 // even with every render and tui test green.
-func TestTail_PendingCountReachesTheLogHeader(t *testing.T) {
-	s, grow := tailShell(t, 20, 100, 30)
+func TestOrder_PendingCountReachesTheLogHeader(t *testing.T) {
+	s, grow := headShell(t, 20, 100, 30)
 
 	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
 		t.Fatalf("a live pane advertised pending messages: %q", h)
@@ -2669,7 +2686,7 @@ func TestTail_PendingCountReachesTheLogHeader(t *testing.T) {
 
 	layout := settleLayout(s)
 	y := layout.messages.firstRow + layout.messages.headerRows + 1
-	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
 	grow(25)
 
 	if s.model.PendingMessages != 5 {
@@ -2680,63 +2697,58 @@ func TestTail_PendingCountReachesTheLogHeader(t *testing.T) {
 	}
 }
 
-// TestTail_ClickOnLastRowThroughShellUpdateZeroesCount is criterion 4's
+// TestOrder_ClickOnRowZeroThroughShellUpdateZeroesCount is criterion 4's
 // mouse half, driven as a real tea.MouseMsg so the hit test, the dispatch
 // and the model entry point are all under test.
-func TestTail_ClickOnLastRowThroughShellUpdateZeroesCount(t *testing.T) {
-	s, grow := tailShell(t, 20, 100, 30)
+//
+// It moves the CURSOR (not the scroll) away from row 0 first: unlike the
+// tail, row 0 never moves as the list grows, so a pane frozen only by
+// scroll would become live again from a wheel alone, proving nothing about
+// the click. Moving the cursor is what makes the click's re-selection of
+// row 0 the thing under test.
+func TestOrder_ClickOnRowZeroThroughShellUpdateZeroesCount(t *testing.T) {
+	s, grow := headShell(t, 20, 100, 30)
 
-	layout := settleLayout(s)
-	y := layout.messages.firstRow + layout.messages.headerRows + 1
-	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(key(tea.KeyDown)) // cursor to row 1: not live
 	grow(25)
 	if s.model.PendingMessages != 5 {
 		t.Fatalf("setup: PendingMessages = %d, want 5", s.model.PendingMessages)
 	}
 
-	// Wheel back down to the bottom, then press the pane's last data row —
-	// which, at the bottom, IS the list's last row.
-	layout = settleLayout(s)
-	for i := 0; i < 10; i++ {
-		s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	// The pane's first data row is row 0 of the list (scroll never moved).
+	layout := settleLayout(s)
+	first := layout.messages.firstRow + layout.messages.headerRows
+	if target, isData, _ := hitTest(layout, first); target != hitMessages || !isData {
+		t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (hitMessages, true)", first, target, isData)
 	}
-	if s.model.PendingMessages != 5 {
-		t.Fatalf("scrolling to the bottom alone must not select the last row: PendingMessages = %d, want 5", s.model.PendingMessages)
-	}
+	s.Update(tea.MouseMsg{X: 5, Y: first, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 
-	layout = settleLayout(s)
-	last := layout.messages.firstRow + layout.messages.headerRows + layout.messages.dataRows - 1
-	if target, isData, _ := hitTest(layout, last); target != hitMessages || !isData {
-		t.Fatalf("test setup: hitTest(y=%d) = (%v, isData=%v), want (hitMessages, true)", last, target, isData)
-	}
-	s.Update(tea.MouseMsg{X: 5, Y: last, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-
-	if s.model.MessagesCursor != s.model.MessagesLen-1 {
-		t.Fatalf("the click did not land on the last row: cursor = %d, want %d", s.model.MessagesCursor, s.model.MessagesLen-1)
+	if s.model.MessagesCursor != 0 {
+		t.Fatalf("the click did not land on row 0: cursor = %d, want 0", s.model.MessagesCursor)
 	}
 	if s.model.PendingMessages != 0 {
-		t.Errorf("PendingMessages = %d after a click on the last row, want 0", s.model.PendingMessages)
+		t.Errorf("PendingMessages = %d after a click on row 0, want 0", s.model.PendingMessages)
 	}
 	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
 		t.Errorf("the header still advertises pending messages: %q", h)
 	}
 }
 
-// TestTail_ZoomedDetailStillFollowsAndCounts is the "messages arriving while
-// the detail pane is zoomed" edge case. renderFrame returns EARLY while
-// zoomed, before it re-reports the message pane's viewport — so the tail
-// logic must keep working off the viewport the last three-pane frame left
-// behind rather than silently entering the windowless regime.
-func TestTail_ZoomedDetailStillFollowsAndCounts(t *testing.T) {
-	s, grow := tailShell(t, 20, 100, 30)
+// TestOrder_ZoomedDetailStillFollowsAndCounts is the "messages arriving
+// while the detail pane is zoomed" edge case. renderFrame returns EARLY
+// while zoomed, before it re-reports the message pane's viewport — so the
+// head-follow logic must keep working off the viewport the last three-pane
+// frame left behind rather than silently entering the windowless regime.
+func TestOrder_ZoomedDetailStillFollowsAndCounts(t *testing.T) {
+	s, grow := headShell(t, 20, 100, 30)
 	s.Update(key(tea.KeyEnter)) // zoom the detail pane
 	if !s.model.DetailZoom {
 		t.Fatalf("test setup: the detail pane did not zoom")
 	}
 
 	grow(23)
-	if s.model.MessagesCursor != 22 {
-		t.Errorf("a live pane stopped following while zoomed: cursor = %d, want 22", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("a live pane stopped following while zoomed: cursor = %d, want 0", s.model.MessagesCursor)
 	}
 
 	// Now freeze the log (a real wheel event, which needs the three-pane
@@ -2745,7 +2757,7 @@ func TestTail_ZoomedDetailStillFollowsAndCounts(t *testing.T) {
 	s.Update(key(tea.KeyEsc))
 	layout := settleLayout(s)
 	y := layout.messages.firstRow + layout.messages.headerRows + 1
-	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
 	s.Update(key(tea.KeyEnter))
 	if !s.model.DetailZoom {
 		t.Fatalf("test setup: the detail pane did not re-zoom")
@@ -2792,12 +2804,13 @@ func TestTail_OncePathNeverCountsOrFollows(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// sp032 T8: the message pane opens live at the tail, through the real shell.
+// sp032 T8 (moved from the tail to the head by sp033 T6): the message pane
+// opens live, through the real shell.
 //
 // tui's own tests own what the opening DOES; these own that an interactive
 // session performs it — on the first frame, without the operator pressing
 // anything. Every test below sends no key at all, so none of them can pass
-// because some keystroke happened to reach GoToLast.
+// because some keystroke happened to reach GoToFirst.
 // ---------------------------------------------------------------------------
 
 // firstFrame renders the frame a session actually opens with — s.View(), the
@@ -2815,11 +2828,11 @@ func firstFrame(t *testing.T, s *shell) ([]string, frameLayout) {
 	return lines, layout
 }
 
-// TestStartup_MessagePaneOpensLiveAtTheTail is criterion 1 end to end: a
+// TestStartup_MessagePaneOpensLiveAtTheHead is criterion 1 end to end: a
 // wired shell over a real sampler, sized by a real WindowSizeMsg, opens with
-// the cursor on the NEWEST message and the scroll at the bottom — and the
-// frame it returns shows that message and not the oldest one.
-func TestStartup_MessagePaneOpensLiveAtTheTail(t *testing.T) {
+// the cursor on the NEWEST message (row 0) and the scroll at the top — and
+// the frame it returns shows that message first, not the oldest one.
+func TestStartup_MessagePaneOpensLiveAtTheHead(t *testing.T) {
 	s := newWiredShellIn(t, t.TempDir(), 5, 20, 100, 30)
 
 	lines, layout := firstFrame(t, s)
@@ -2830,11 +2843,11 @@ func TestStartup_MessagePaneOpensLiveAtTheTail(t *testing.T) {
 	if layout.messages.dataRows >= 20 {
 		t.Fatalf("setup: the message pane shows %d of 20 rows — this test needs a pane that cannot show them all", layout.messages.dataRows)
 	}
-	if s.model.MessagesCursor != 19 {
-		t.Errorf("MessagesCursor = %d, want 19 (the newest message) with no key ever pressed", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 (the newest message) with no key ever pressed", s.model.MessagesCursor)
 	}
-	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
-		t.Errorf("MessagesScroll = %d, want %d (the bottom of a %d-row window)", s.model.MessagesScroll, want, layout.messages.dataRows)
+	if s.model.MessagesScroll != 0 {
+		t.Errorf("MessagesScroll = %d, want 0 (the top)", s.model.MessagesScroll)
 	}
 
 	joined := strings.Join(lines, "\n")
@@ -2842,17 +2855,17 @@ func TestStartup_MessagePaneOpensLiveAtTheTail(t *testing.T) {
 		t.Errorf("the newest message is not on the first frame:\n%s", joined)
 	}
 	if strings.Contains(joined, "message 00") {
-		t.Errorf("the first frame still starts at the oldest message:\n%s", joined)
+		t.Errorf("the first frame already reaches the oldest message:\n%s", joined)
 	}
 
-	// The selection mark is on the pane's LAST data row, which is what makes
-	// this the tail rather than merely a scrolled pane.
-	last := layout.messages.firstRow + layout.messages.headerRows + layout.messages.dataRows - 1
-	if !strings.Contains(lines[last], styleOn) {
-		t.Errorf("the last data row is not marked as the selection: %q", lines[last])
+	// The selection mark is on the pane's FIRST data row, which is what
+	// makes this the head rather than merely a scrolled pane.
+	first := layout.messages.firstRow + layout.messages.headerRows
+	if !strings.Contains(lines[first], styleOn) {
+		t.Errorf("the first data row is not marked as the selection: %q", lines[first])
 	}
-	if !strings.Contains(lines[last], "message 19") {
-		t.Errorf("the marked row is not the newest message: %q", lines[last])
+	if !strings.Contains(lines[first], "message 19") {
+		t.Errorf("the marked row is not the newest message: %q", lines[first])
 	}
 }
 
@@ -2887,8 +2900,8 @@ func TestStartup_PendingCountIsZeroOnTheFirstFrame(t *testing.T) {
 	if h := messageHeaderLine(t, s); strings.Contains(h, "new") {
 		t.Errorf("the log header advertises pending messages nobody scrolled away from: %q", h)
 	}
-	if s.model.MessagesCursor != 24 {
-		t.Errorf("MessagesCursor = %d, want 24 (the newest of the grown sample)", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 (row 0 stays the newest of the grown sample)", s.model.MessagesCursor)
 	}
 }
 
@@ -2917,8 +2930,8 @@ func TestStartup_RosterOpensAtTheFirstRow(t *testing.T) {
 
 // TestStartup_EmptyAndSingleMessageLogs drives the two degenerate first
 // samples through the real sampler, and then GROWS the bus: for these two
-// lengths the tail is index 0, so only the following sample can tell an
-// opened pane from one merely parked at the top.
+// lengths the head IS index 0 (as it always is), so the following sample is
+// what tells an opened, following pane from one merely parked there.
 func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 	for _, n := range []int{0, 1} {
 		t.Run(fmt.Sprintf("%d messages", n), func(t *testing.T) {
@@ -2943,8 +2956,8 @@ func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 			}
 			firstFrame(t, s)
 
-			if want := n + 11; s.model.MessagesCursor != want {
-				t.Errorf("the opened pane did not follow the next sample: cursor = %d, want %d", s.model.MessagesCursor, want)
+			if s.model.MessagesCursor != 0 {
+				t.Errorf("the opened pane did not follow the next sample: cursor = %d, want 0", s.model.MessagesCursor)
 			}
 			if s.model.PendingMessages != 0 {
 				t.Errorf("PendingMessages = %d after following, want 0", s.model.PendingMessages)
@@ -2978,8 +2991,8 @@ func TestStartup_FirstSampleAfterTheFirstWindowSize(t *testing.T) {
 	}
 	lines, _ := firstFrame(t, s)
 
-	if s.model.MessagesCursor != 19 {
-		t.Errorf("MessagesCursor = %d, want 19 — the first sample must arrive followed", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 — the first sample must arrive followed", s.model.MessagesCursor)
 	}
 	if s.model.PendingMessages != 0 {
 		t.Errorf("PendingMessages = %d, want 0 on the frame the first sample arrives in", s.model.PendingMessages)
@@ -2991,43 +3004,43 @@ func TestStartup_FirstSampleAfterTheFirstWindowSize(t *testing.T) {
 
 // TestStartup_ProjectFilterEmptiesTheRosterButNotTheLog is the --project
 // edge case: the flag composes onto the ROSTER only (sp031 T3), so a value
-// matching no agent must still leave the message pane opening at its tail.
+// matching no agent must still leave the message pane opening at its head.
 func TestStartup_ProjectFilterEmptiesTheRosterButNotTheLog(t *testing.T) {
 	s := newWiredShellIn(t, t.TempDir(), 5, 20, 100, 30)
 	s.model.Project = "no-such-project" // main.go sets this once, before the program runs
 
-	lines, layout := firstFrame(t, s)
+	lines, _ := firstFrame(t, s)
 
 	if s.model.RosterLen != 0 {
 		t.Fatalf("setup: RosterLen = %d, want 0 for an unmatched --project", s.model.RosterLen)
 	}
-	if s.model.MessagesCursor != 19 {
-		t.Errorf("MessagesCursor = %d, want 19 — an empty roster must not hold the log shut", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 — an empty roster must not hold the log shut", s.model.MessagesCursor)
 	}
-	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
-		t.Errorf("MessagesScroll = %d, want %d", s.model.MessagesScroll, want)
+	if s.model.MessagesScroll != 0 {
+		t.Errorf("MessagesScroll = %d, want 0", s.model.MessagesScroll)
 	}
 	if joined := strings.Join(lines, "\n"); !strings.Contains(joined, "message 19") {
 		t.Errorf("the newest message is not on screen:\n%s", joined)
 	}
 }
 
-// TestStartup_LaterFramesDoNotReOpenTheTail is the other half of "opens":
+// TestStartup_LaterFramesDoNotReOpenTheHead is the other half of "opens":
 // the opening happens ONCE. Every subsequent frame — and a session draws one
 // per event — must leave a reader who scrolled back exactly where they are,
 // pending count included.
-func TestStartup_LaterFramesDoNotReOpenTheTail(t *testing.T) {
+func TestStartup_LaterFramesDoNotReOpenTheHead(t *testing.T) {
 	dir := t.TempDir()
 	s := newWiredShellIn(t, dir, 5, 20, 100, 30)
 	firstFrame(t, s)
 
-	// A real wheel event over the message pane scrolls back off the tail.
+	// A real wheel event over the message pane scrolls it away from the head.
 	_, layout := firstFrame(t, s)
 	y := layout.messages.firstRow + layout.messages.headerRows + 1
 	if target, _, _ := hitTest(layout, y); target != hitMessages {
 		t.Fatalf("test setup: hitTest(y=%d) = %v, want hitMessages", y, target)
 	}
-	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
 
 	writeMessageStub(t, dir, 26)
 	if !s.msgs.Tick(s.ctx) {
@@ -3085,8 +3098,8 @@ func TestStartup_TooShortForADataRowOpensOnTheNextResize(t *testing.T) {
 	if s.model.MessagesViewport != 1 {
 		t.Fatalf("setup: a 6-row terminal gave the message pane %d data rows, want 1", s.model.MessagesViewport)
 	}
-	if s.model.MessagesCursor != 19 || s.model.MessagesScroll != 19 {
-		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 19/19", s.model.MessagesCursor, s.model.MessagesScroll)
+	if s.model.MessagesCursor != 0 || s.model.MessagesScroll != 0 {
+		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 0/0", s.model.MessagesCursor, s.model.MessagesScroll)
 	}
 	row := lines[layout.messages.firstRow+layout.messages.headerRows]
 	if !strings.Contains(row, "message 19") {
@@ -3094,20 +3107,23 @@ func TestStartup_TooShortForADataRowOpensOnTheNextResize(t *testing.T) {
 	}
 
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	_, layout = firstFrame(t, s)
-	if s.model.MessagesCursor != 19 {
-		t.Errorf("MessagesCursor = %d, want 19 once the terminal had room to show it", s.model.MessagesCursor)
+	_, _ = firstFrame(t, s)
+	if s.model.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d, want 0 once the terminal had room to show it", s.model.MessagesCursor)
 	}
-	if want := 20 - layout.messages.dataRows; s.model.MessagesScroll != want {
-		t.Errorf("MessagesScroll = %d, want %d", s.model.MessagesScroll, want)
+	if s.model.MessagesScroll != 0 {
+		t.Errorf("MessagesScroll = %d, want 0", s.model.MessagesScroll)
 	}
 }
 
-// TestRunOnce_StillRendersFromTheTop is criterion 3's regression anchor: the
-// --once path reports no viewport, is never opened, and therefore still
-// emits the WHOLE log oldest-first. A fix that leaked liveness into the
-// windowless regime loses every message but the newest here.
-func TestRunOnce_StillRendersFromTheTop(t *testing.T) {
+// TestRunOnce_StillRendersNewestFirst is criterion 1's regression anchor for
+// the --once path: it reports no viewport and is never opened, but it still
+// goes through the same reorder (cmd/agent-monitor's orderedMessages) as the
+// interactive path, so the WHOLE log renders newest-first there too — sp033
+// T6 criterion 1 names both paths explicitly. A fix that special-cased
+// --once back to the old order would pass every other test and fail only
+// here.
+func TestRunOnce_StillRendersNewestFirst(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
 	writeMessageStub(t, dir, 40)
@@ -3127,12 +3143,12 @@ func TestRunOnce_StillRendersFromTheTop(t *testing.T) {
 	if newest < 0 {
 		t.Fatalf("--once lost the newest message:\n%s", out)
 	}
-	if oldest > newest {
-		t.Errorf("--once rendered the newest message before the oldest: %d > %d", oldest, newest)
+	if newest > oldest {
+		t.Errorf("--once rendered the oldest message before the newest: %d > %d", newest, oldest)
 	}
 	for i := 0; i < 40; i++ {
 		if want := fmt.Sprintf("message %02d", i); !strings.Contains(out, want) {
-			t.Fatalf("--once dropped %q — the tail followed a pane with no window:\n%s", want, out)
+			t.Fatalf("--once dropped %q — a windowless pane must still emit every message:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, " new") {

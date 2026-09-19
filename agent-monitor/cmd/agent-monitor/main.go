@@ -148,10 +148,10 @@ func runOnce(w io.Writer, project string) error {
 	// it renders via a keystroke — a fresh, untouched Model is exactly "no
 	// interactive filter, no scroll, top of the list". An interactive
 	// session starts from the same construction and then OPENS its message
-	// pane at the tail (sp032 T8, shell.View); this path never does, because
-	// it builds no shell and its height==0 frame reports no viewport for the
-	// opening to consume. --project is set directly, since it is not
-	// something a key ever commits.
+	// pane at its live end (sp032 T8, shell.View; the head since sp033 T6);
+	// this path never does, because it builds no shell and its height==0
+	// frame reports no viewport for the opening to consume. --project is set
+	// directly, since it is not something a key ever commits.
 	model := tui.NewModel()
 	model.Project = project
 	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0)
@@ -197,9 +197,10 @@ type shell struct {
 	now func() time.Time
 
 	// opened records that this session's message pane has had its sp032 T8
-	// opening (openMessagesAtTailOnce). It is per-SESSION rather than
-	// per-frame: the opening puts the pane at its tail once, and every frame
-	// after it leaves a reader who scrolled back exactly where they are.
+	// opening (openMessagesAtHeadOnce). It is per-SESSION rather than
+	// per-frame: the opening puts the pane at its live end once (the head,
+	// since sp033 T6), and every frame after it leaves a reader who scrolled
+	// back exactly where they are.
 	opened bool
 }
 
@@ -309,35 +310,36 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 func (s *shell) View() string {
 	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
 	// sp032 T8: this session's FIRST frame opens the message pane at its
-	// tail (dotfiles-utob — a monitor that opens on the oldest message, and
+	// live end (dotfiles-utob — a monitor that opened on the wrong end, and
 	// since T6 opens already `+N` behind, contradicts the conditional
-	// tail-follow sp032's ## solution commits to). It happens here, AFTER a
-	// frame has been laid out, because laying one out is the only thing that
-	// reports the pane's viewport — and the opening needs that viewport both
-	// to land the scroll at the bottom and to know the pane has a window at
-	// all. The frame is then composed a second time, so the very first frame
-	// the operator SEES is the opened one rather than the one before it.
+	// live-follow sp032's ## solution commits to; sp033 T6 moved that end
+	// from the tail to the head). It happens here, AFTER a frame has been
+	// laid out, because laying one out is the only thing that reports the
+	// pane's viewport — and the opening needs that viewport both to land the
+	// scroll at row 0 and to know the pane has a window at all. The frame is
+	// then composed a second time, so the very first frame the operator SEES
+	// is the opened one rather than the one before it.
 	//
 	// Exactly one frame in a session pays for the second composition, and
 	// nothing on the --once path pays for it at all: runOnce calls buildFrame
 	// directly and never constructs a shell.
-	if s.openMessagesAtTailOnce() {
+	if s.openMessagesAtHeadOnce() {
 		lines, _ = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// openMessagesAtTailOnce performs this session's opening and reports whether
+// openMessagesAtHeadOnce performs this session's opening and reports whether
 // it just did. It is a no-op once the pane has been opened, so a later frame
 // or resize can never yank a reader who has scrolled back — and a no-op
 // while the pane has no window (a terminal too short for a data row, or a
 // frame drawn before the first tea.WindowSizeMsg), so the opening waits for
 // a window rather than being spent on a pane that cannot show its result.
-func (s *shell) openMessagesAtTailOnce() bool {
+func (s *shell) openMessagesAtHeadOnce() bool {
 	if s.opened {
 		return false
 	}
-	if !s.model.OpenMessagesAtTail() {
+	if !s.model.OpenMessagesAtHead() {
 		return false
 	}
 	s.opened = true
@@ -550,13 +552,13 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	}
 
 	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width)
-	// model.PendingMessages is sp032 T6's tail counter, and it is passed
-	// here rather than folded into the header by this file because render/
-	// owns every byte of a pane's content — the `+N new` segment is TEXT
-	// subject to the same width budget as everything else RenderLog emits.
-	// It is zero on the --once path by construction (the tail counts
-	// nothing without a reported viewport, and height == 0 never reports
-	// one), so that frame's bytes are unchanged.
+	// model.PendingMessages is sp032 T6's counter (inverted to the head by
+	// sp033 T6), and it is passed here rather than folded into the header by
+	// this file because render/ owns every byte of a pane's content — the
+	// `+N new` segment is TEXT subject to the same width budget as
+	// everything else RenderLog emits. It is zero on the --once path by
+	// construction (nothing counts without a reported viewport, and
+	// height == 0 never reports one), so that frame's bytes are unchanged.
 	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, model.PendingMessages)
 
 	// fitPanes re-derives the same budgets from the rendered line counts and
@@ -683,16 +685,19 @@ func viewportRows(paneLines int) int {
 }
 
 // selectedMessage returns the message under the message pane's cursor, from
-// the full FILTERED list — not the slice already scrolled into RenderLog's
-// view — so the detail pane tracks selection regardless of what happens to
-// be scrolled on screen. nil means nothing is selected: an empty log, or (as
-// a guard, not expected given SetMessagesLen's same-pass clamp) a cursor
-// past the end; either way RenderDetail's own nil case is the placeholder.
+// the full FILTERED, ORDERED list — not the slice already scrolled into
+// RenderLog's view — so the detail pane tracks selection regardless of what
+// happens to be scrolled on screen. It goes through orderedMessages, the
+// same reorder filterMessageRows applies, so MessagesCursor indexes the same
+// row here as it does on screen. nil means nothing is selected: an empty
+// log, or (as a guard, not expected given SetMessagesLen's same-pass clamp)
+// a cursor past the end; either way RenderDetail's own nil case is the
+// placeholder.
 func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Message {
 	if sample == nil {
 		return nil
 	}
-	msgs := model.FilterMessages(sample.Messages)
+	msgs := orderedMessages(model, sample)
 	if model.MessagesCursor < 0 || model.MessagesCursor >= len(msgs) {
 		return nil
 	}
@@ -1117,14 +1122,43 @@ func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 	return rows
 }
 
-// filterMessageRows is filterRosterRows' twin for the message pane.
+// filterMessageRows is filterRosterRows' twin for the message pane. sp033
+// T6 additionally reorders: it hands SetMessagesLen (and, through its
+// return value, RenderLog) the pane's own display order — newest-first,
+// row 0 the newest envelope — rather than source.ParseMessages' ascending
+// wire order, so every consumer of MessagesCursor (this file's
+// scrolledMessageSample/markPane, and selectedMessage below) agrees on what
+// index 0 means. See orderedMessages for why the reorder lives here rather
+// than in render/log.go or in tui.Model.
 func filterMessageRows(model *tui.Model, sample *source.MessageSample) []source.Message {
 	if sample == nil {
 		return nil
 	}
-	msgs := model.FilterMessages(sample.Messages)
+	msgs := orderedMessages(model, sample)
 	model.SetMessagesLen(len(msgs))
 	return msgs
+}
+
+// orderedMessages applies the committed filter and puts the result into the
+// message pane's own display order (sp033 T6: newest-first). It is the
+// SINGLE place that reorders, called by both filterMessageRows (what
+// SetMessagesLen bounds and RenderLog renders) and selectedMessage (what the
+// detail pane shows) — a second, independent reorder in either caller would
+// let MessagesCursor mean two different things depending which path read it,
+// exactly the hidden-second-order anti-pattern `## plan` forbids for T6.
+//
+// source.ParseMessages already returns ascending id/time order (oldest
+// first) and this spec does not touch that — reversing a freshly filtered
+// copy on every call is cheaper to reason about than tracking an
+// incremental "prepend to the front" invariant against a sample that is
+// re-fetched whole on every tick.
+func orderedMessages(model *tui.Model, sample *source.MessageSample) []source.Message {
+	msgs := model.FilterMessages(sample.Messages)
+	reversed := make([]source.Message, len(msgs))
+	for i, m := range msgs {
+		reversed[len(msgs)-1-i] = m
+	}
+	return reversed
 }
 
 // scrolledCensusSample applies the roster pane's scroll offset (dropping

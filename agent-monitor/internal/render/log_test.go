@@ -36,15 +36,25 @@ func TestRenderLog_HeaderAndColumns(t *testing.T) {
 	}
 }
 
-func TestRenderLog_NewestLast(t *testing.T) {
+// TestRenderLog_RowsDescendByID is sp033 T6 criterion 1 restated at this
+// package's boundary: RenderLog itself does not sort (it never has), so
+// handed a sample already in the pane's newest-first display order — the
+// shape cmd/agent-monitor's orderedMessages now produces — it must print
+// row 0 as the FIRST data line rather than re-deriving an oldest-first
+// order of its own.
+func TestRenderLog_RowsDescendByID(t *testing.T) {
 	at := time.Now()
-	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+	descending := []source.Message{sampleMessages()[1], sampleMessages()[0]} // fan-out (newer) first
+	sample := &source.MessageSample{Messages: descending, At: at}
 	lines := RenderLog(sample, false, at, 100)
-	// Row order mirrors sample order (ascending id/time): the last data row
-	// is the fan-out (newer) message.
-	last := lines[len(lines)-1]
-	if !strings.Contains(last, "fan-out") {
-		t.Fatalf("last row = %q, want the newer (fan-out) message last", last)
+
+	firstData := lines[2] // header + column-header precede the data rows
+	lastData := lines[len(lines)-1]
+	if !strings.Contains(firstData, "fan-out") {
+		t.Fatalf("first data row = %q, want the newer (fan-out) message first", firstData)
+	}
+	if !strings.Contains(lastData, "delivered") {
+		t.Fatalf("last data row = %q, want the older (delivered) message last", lastData)
 	}
 }
 

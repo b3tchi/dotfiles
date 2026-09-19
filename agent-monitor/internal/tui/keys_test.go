@@ -1596,6 +1596,38 @@ func TestPaging_GIsEnd(t *testing.T) {
 	}
 }
 
+// TestPaging_gIsHome is TestPaging_GIsEnd's twin for sp033 T6's new key:
+// lowercase 'g' is Home's vim spelling, added so Home/g's live-return has
+// the same two-key surface End/G has always had.
+func TestPaging_gIsHome(t *testing.T) {
+	for _, focus := range []Pane{PaneRoster, PaneMessages, PaneDetail} {
+		viaHome := pagingModel()
+		viaHome.Focus = focus
+		viaHome.RosterCursor, viaHome.MessagesCursor = 40, 40
+		viaHome.ScrollDetail(40)
+		viaHome.HandleKey(Key{Special: KeyHome})
+
+		viaG := pagingModel()
+		viaG.Focus = focus
+		viaG.RosterCursor, viaG.MessagesCursor = 40, 40
+		viaG.ScrollDetail(40)
+		viaG.HandleKey(Key{Rune: 'g'})
+
+		if *viaG != *viaHome {
+			t.Errorf("focus %v: g left %+v, Home left %+v", focus, *viaG, *viaHome)
+		}
+	}
+
+	// And it really moved.
+	m := pagingModel()
+	m.Focus = PaneMessages
+	m.MessagesCursor = 40
+	m.HandleKey(Key{Rune: 'g'})
+	if m.MessagesCursor != 0 {
+		t.Errorf("MessagesCursor = %d after g, want 0", m.MessagesCursor)
+	}
+}
+
 // TestPaging_ClampsAtBothEnds covers the empty, single-row and
 // viewport-larger-than-the-list shapes for every key in the set. None of
 // them may produce an index outside [0, len-1] or a scroll outside its own
@@ -1603,7 +1635,7 @@ func TestPaging_GIsEnd(t *testing.T) {
 func TestPaging_ClampsAtBothEnds(t *testing.T) {
 	keys := []Key{
 		{Special: KeyPgUp}, {Special: KeyPgDn},
-		{Special: KeyHome}, {Special: KeyEnd}, {Rune: 'G'},
+		{Special: KeyHome}, {Special: KeyEnd}, {Rune: 'G'}, {Rune: 'g'},
 	}
 
 	t.Run("empty list is a no-op", func(t *testing.T) {
@@ -1844,28 +1876,30 @@ func TestPaging_ViewportZeroDoesNotStepBackwards(t *testing.T) {
 	})
 }
 
-// --- sp032 T6: conditional tail-follow with a pending count ---------------
+// --- sp033 T6: conditional head-follow with a pending count ---------------
 //
 // LIVE is derived, never stored: the message pane is live when its cursor is
-// on the LAST row and its scroll is at the BOTTOM. The tests below pin both
-// halves of the rule the spec refuses to let anyone "fix" into the other —
-// a live pane follows new arrivals, a scrolled-back one does not move AT ALL
-// and reports how many messages it is behind.
+// on ROW 0 and its scroll is at the TOP. sp032 pinned this at the tail; T6
+// moves it to the head because the pane now renders newest-first (row 0 is
+// the newest envelope) — every case below restates one of sp032's
+// tail-follow invariants at the other end, per `## known limitations`. A
+// live pane follows new arrivals landing at row 0, a scrolled-back one does
+// not move AT ALL and reports how many messages it is behind.
 
 // liveMessagePane is the shared setup: a message pane with a real window,
-// some history, focused, and parked at the tail (live).
+// some history, focused, and parked at the head (live).
 func liveMessagePane(t *testing.T, length, viewport int) *Model {
 	t.Helper()
 	m := NewModel()
 	m.Focus = PaneMessages
 	m.SetMessagesViewport(viewport)
 	m.SetMessagesLen(length)
-	m.GoToLast()
-	if m.MessagesCursor != length-1 {
-		t.Fatalf("setup: cursor = %d, want %d (the last row)", m.MessagesCursor, length-1)
+	m.GoToFirst()
+	if m.MessagesCursor != 0 {
+		t.Fatalf("setup: cursor = %d, want 0 (row 0)", m.MessagesCursor)
 	}
-	if want := length - viewport; m.MessagesScroll != want {
-		t.Fatalf("setup: scroll = %d, want %d (the bottom)", m.MessagesScroll, want)
+	if m.MessagesScroll != 0 {
+		t.Fatalf("setup: scroll = %d, want 0 (the top)", m.MessagesScroll)
 	}
 	if m.PendingMessages != 0 {
 		t.Fatalf("setup: PendingMessages = %d, want 0 on a live pane", m.PendingMessages)
@@ -1873,19 +1907,38 @@ func liveMessagePane(t *testing.T, length, viewport int) *Model {
 	return m
 }
 
-// TestTail_FollowsWhileLive is criterion 1: a sample that appends messages
-// moves the cursor onto the NEW last row, and the window follows it, while
-// the pane is live.
-func TestTail_FollowsWhileLive(t *testing.T) {
+// TestOrder_NewestIsRowZero is criterion 1 at the state layer: a freshly
+// sized pane (and, by extension, one just opened) sits with its cursor and
+// its scroll both at row 0 — the position cmd/agent-monitor's
+// orderedMessages puts the newest envelope at — and that position is what
+// messagesLive derives LIVE from.
+func TestOrder_NewestIsRowZero(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneMessages
+	m.SetMessagesViewport(10)
+	m.SetMessagesLen(20)
+	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+		t.Fatalf("cursor/scroll = %d/%d, want 0/0 — row 0 is the newest envelope", m.MessagesCursor, m.MessagesScroll)
+	}
+	if !m.messagesLive() {
+		t.Errorf("a pane parked on row 0 with the scroll at the top must be live")
+	}
+}
+
+// TestOrder_FollowsHeadWhileLive is criterion 2's first half, restating
+// sp032's TestTail_FollowsWhileLive: a sample that grows the list leaves a
+// live pane on row 0 — which IS following, since row 0 is always the newest
+// row by construction and never moves the way the tail's maxIndex did.
+func TestOrder_FollowsHeadWhileLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 
 	m.SetMessagesLen(23)
 
-	if m.MessagesCursor != 22 {
-		t.Errorf("cursor = %d, want 22 (the new last row)", m.MessagesCursor)
+	if m.MessagesCursor != 0 {
+		t.Errorf("cursor = %d, want 0 (row 0 stays the newest)", m.MessagesCursor)
 	}
-	if m.MessagesScroll != 13 {
-		t.Errorf("scroll = %d, want 13 (the new bottom)", m.MessagesScroll)
+	if m.MessagesScroll != 0 {
+		t.Errorf("scroll = %d, want 0 (still at the top)", m.MessagesScroll)
 	}
 	if m.PendingMessages != 0 {
 		t.Errorf("PendingMessages = %d, want 0 — a live pane is never behind", m.PendingMessages)
@@ -1893,22 +1946,23 @@ func TestTail_FollowsWhileLive(t *testing.T) {
 
 	// And it keeps following, sample after sample.
 	m.SetMessagesLen(24)
-	if m.MessagesCursor != 23 || m.MessagesScroll != 14 {
-		t.Errorf("second append: cursor/scroll = %d/%d, want 23/14", m.MessagesCursor, m.MessagesScroll)
+	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+		t.Errorf("second append: cursor/scroll = %d/%d, want 0/0", m.MessagesCursor, m.MessagesScroll)
 	}
 }
 
-// TestTail_FrozenWhenScrolledBack is criterion 2's first half: once the
-// operator has scrolled back AT ALL, several growing samples leave the
-// cursor and the scroll byte-identical. Asserting "unchanged" rather than
-// "still valid" is the point — a re-derive would also leave them in range.
-func TestTail_FrozenWhenScrolledBack(t *testing.T) {
+// TestOrder_FrozenWhenScrolledBack restates sp032's TestTail_FrozenWhenScrolledBack:
+// once the operator has scrolled away from row 0 AT ALL, several growing
+// samples leave the cursor and the scroll byte-identical. Asserting
+// "unchanged" rather than "still valid" is the point — a re-derive would
+// also leave them in range.
+func TestOrder_FrozenWhenScrolledBack(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.ScrollMessages(-5) // scrolled back: no longer live
+	m.ScrollMessages(5) // scrolled toward the oldest: no longer live
 
 	wantCursor, wantScroll := m.MessagesCursor, m.MessagesScroll
 	if wantScroll != 5 {
-		t.Fatalf("setup: scroll = %d, want 5 after a 5-row wheel back", wantScroll)
+		t.Fatalf("setup: scroll = %d, want 5 after a 5-row wheel down", wantScroll)
 	}
 
 	for i := 1; i <= 5; i++ {
@@ -1925,12 +1979,12 @@ func TestTail_FrozenWhenScrolledBack(t *testing.T) {
 	}
 }
 
-// TestTail_PendingCountIncrementsPerAppend is criterion 2's second half plus
-// two edge cases: a sample that appends NOTHING leaves the count alone
-// (unchanged, not reset), and the very first sample — with no previous
-// length to diff against — lands on a live pane and therefore counts
-// nothing.
-func TestTail_PendingCountIncrementsPerAppend(t *testing.T) {
+// TestOrder_PendingCountIncrementsPerAppend restates
+// sp032's TestTail_PendingCountIncrementsPerAppend: a sample that appends
+// NOTHING leaves the count alone (unchanged, not reset), and the very first
+// sample — with no previous length to diff against — lands on a live pane
+// and therefore counts nothing.
+func TestOrder_PendingCountIncrementsPerAppend(t *testing.T) {
 	m := NewModel()
 	m.Focus = PaneMessages
 	m.SetMessagesViewport(5)
@@ -1940,7 +1994,7 @@ func TestTail_PendingCountIncrementsPerAppend(t *testing.T) {
 		t.Fatalf("first sample counted %d pending, want 0", m.PendingMessages)
 	}
 
-	m.GoToFirst() // scroll back to the oldest message: no longer live
+	m.GoToLast() // jump to the oldest message: no longer live
 
 	m.SetMessagesLen(12)
 	if m.PendingMessages != 2 {
@@ -1956,9 +2010,51 @@ func TestTail_PendingCountIncrementsPerAppend(t *testing.T) {
 	}
 }
 
-// TestTail_EndReturnsToLiveAndZeroesCount is criterion 4, driven through the
-// real key surface for both spellings of End.
-func TestTail_EndReturnsToLiveAndZeroesCount(t *testing.T) {
+// TestOrder_HomeReturnsToLiveAndZeroesCount is criterion 4's first half,
+// driven through the real key surface for both spellings of Home — the new
+// live-return key now that the pane renders newest-first (sp032 pinned this
+// same behavior on End/G, at the tail).
+func TestOrder_HomeReturnsToLiveAndZeroesCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  Key
+	}{
+		{name: "Home", key: Key{Special: KeyHome}},
+		{name: "g", key: Key{Rune: 'g'}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := liveMessagePane(t, 20, 10)
+			m.ScrollMessages(5)
+			m.SetMessagesLen(26)
+			if m.PendingMessages != 6 {
+				t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
+			}
+
+			m.HandleKey(tc.key)
+
+			if m.MessagesCursor != 0 {
+				t.Errorf("cursor = %d, want 0 (row 0)", m.MessagesCursor)
+			}
+			if m.MessagesScroll != 0 {
+				t.Errorf("scroll = %d, want 0 (back at the top)", m.MessagesScroll)
+			}
+			if m.PendingMessages != 0 {
+				t.Errorf("PendingMessages = %d, want 0 once the pane is live again", m.PendingMessages)
+			}
+			// And it is genuinely live again, not merely zeroed.
+			m.SetMessagesLen(28)
+			if m.MessagesCursor != 0 {
+				t.Errorf("after returning to live the pane did not follow: cursor = %d, want 0", m.MessagesCursor)
+			}
+		})
+	}
+}
+
+// TestOrder_EndReachesTheOldestAndStaysFrozen is criterion 4's second half:
+// End (and its vim spelling G) is no longer the live key now that the pane
+// renders newest-first — it reaches the OLDEST row, the far end from live,
+// and must not clear whatever count the pane was already carrying.
+func TestOrder_EndReachesTheOldestAndStaysFrozen(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		key  Key
@@ -1968,7 +2064,7 @@ func TestTail_EndReturnsToLiveAndZeroesCount(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := liveMessagePane(t, 20, 10)
-			m.ScrollMessages(-5)
+			m.ScrollMessages(5)
 			m.SetMessagesLen(26)
 			if m.PendingMessages != 6 {
 				t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
@@ -1977,58 +2073,53 @@ func TestTail_EndReturnsToLiveAndZeroesCount(t *testing.T) {
 			m.HandleKey(tc.key)
 
 			if m.MessagesCursor != 25 {
-				t.Errorf("cursor = %d, want 25 (back on the last row)", m.MessagesCursor)
+				t.Errorf("cursor = %d, want 25 (the oldest row)", m.MessagesCursor)
 			}
-			if m.MessagesScroll != 16 {
-				t.Errorf("scroll = %d, want 16 (back at the bottom)", m.MessagesScroll)
-			}
-			if m.PendingMessages != 0 {
-				t.Errorf("PendingMessages = %d, want 0 once the pane is live again", m.PendingMessages)
-			}
-			// And it is genuinely live again, not merely zeroed.
-			m.SetMessagesLen(28)
-			if m.MessagesCursor != 27 {
-				t.Errorf("after returning to live the pane did not follow: cursor = %d, want 27", m.MessagesCursor)
+			if m.PendingMessages != 6 {
+				t.Errorf("PendingMessages = %d, want 6 — reaching the oldest row is not a return to live", m.PendingMessages)
 			}
 		})
 	}
 }
 
-// TestTail_ClickOnLastRowReturnsToLive is criterion 4's mouse half: a click
-// that lands on the list's last row is as much a return to live as End is.
-// A click on the last VISIBLE row of a scrolled-back pane is not.
-func TestTail_ClickOnLastRowReturnsToLive(t *testing.T) {
+// TestOrder_ClickOnRowZeroReturnsToLive restates sp032's
+// TestTail_ClickOnLastRowReturnsToLive: a click that lands on the list's
+// row 0 is as much a return to live as Home is. A click on the first
+// VISIBLE row of a scrolled-back pane is not, unless that row happens to be
+// row 0 itself.
+func TestOrder_ClickOnRowZeroReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.ScrollMessages(-5) // window now shows rows 5..14
+	m.ScrollMessages(5) // window now shows rows 5..14
 	m.SetMessagesLen(24)
 	if m.PendingMessages != 4 {
 		t.Fatalf("setup: PendingMessages = %d, want 4", m.PendingMessages)
 	}
 
-	// The last row of the WINDOW (row 14 of 24) is not the last row of the
-	// list, so this must leave the pane frozen and the count intact.
-	m.ClickPane(PaneMessages, true, 9)
+	// The first row of the WINDOW (row 5 of 24) is not row 0 of the list, so
+	// this must leave the pane frozen and the count intact.
+	m.ClickPane(PaneMessages, true, 0)
 	if m.PendingMessages != 4 {
 		t.Fatalf("a click inside the window zeroed the count: %d, want 4", m.PendingMessages)
 	}
 
-	// Scroll to the bottom and click the last row: live again.
-	m.ScrollMessages(100)
-	m.ClickPane(PaneMessages, true, 9)
-	if m.MessagesCursor != 23 {
-		t.Fatalf("cursor = %d, want 23 (the list's last row)", m.MessagesCursor)
+	// Scroll to the top and click row 0: live again.
+	m.ScrollMessages(-100)
+	m.ClickPane(PaneMessages, true, 0)
+	if m.MessagesCursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (the list's newest row)", m.MessagesCursor)
 	}
 	if m.PendingMessages != 0 {
-		t.Errorf("PendingMessages = %d, want 0 after a click on the last row", m.PendingMessages)
+		t.Errorf("PendingMessages = %d, want 0 after a click on row 0", m.PendingMessages)
 	}
 }
 
-// TestTail_FilterCommitResetsLiveness is criterion 5: a committed filter
-// changes the list's IDENTITY, so a count of "messages appended since you
-// scrolled back" is about a list that no longer exists.
-func TestTail_FilterCommitResetsLiveness(t *testing.T) {
+// TestOrder_FilterCommitResetsLiveness restates sp032's
+// TestTail_FilterCommitResetsLiveness: a committed filter changes the
+// list's IDENTITY, so a count of "messages appended since you scrolled
+// back" is about a list that no longer exists.
+func TestOrder_FilterCommitResetsLiveness(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.ScrollMessages(-5)
+	m.ScrollMessages(5)
 	m.SetMessagesLen(27)
 	if m.PendingMessages != 7 {
 		t.Fatalf("setup: PendingMessages = %d, want 7", m.PendingMessages)
@@ -2050,11 +2141,12 @@ func TestTail_FilterCommitResetsLiveness(t *testing.T) {
 	}
 }
 
-// TestTail_ListShrinkDoesNotGoNegative is the pruned-bus edge case: a sample
-// SMALLER than the last one must not subtract from the count.
-func TestTail_ListShrinkDoesNotGoNegative(t *testing.T) {
+// TestOrder_ListShrinkDoesNotGoNegative is the pruned-bus edge case,
+// restating sp032's TestTail_ListShrinkDoesNotGoNegative: a sample SMALLER
+// than the last one must not subtract from the count.
+func TestOrder_ListShrinkDoesNotGoNegative(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.GoToFirst() // cursor 0, top: not live
+	m.GoToLast() // cursor on the oldest row: not live
 	m.SetMessagesLen(26)
 	if m.PendingMessages != 6 {
 		t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
@@ -2068,7 +2160,7 @@ func TestTail_ListShrinkDoesNotGoNegative(t *testing.T) {
 		t.Errorf("a shrink changed the count: %d, want it still 6", m.PendingMessages)
 	}
 
-	// Shrinking all the way to empty leaves the pane at its (only) end, so
+	// Shrinking all the way to empty leaves the pane at its (only) row, so
 	// it is live again and the count is zero — not negative.
 	m.SetMessagesLen(0)
 	if m.PendingMessages != 0 {
@@ -2076,13 +2168,12 @@ func TestTail_ListShrinkDoesNotGoNegative(t *testing.T) {
 	}
 }
 
-// TestTail_NoViewportNeverFollowsOrCounts is the --once contract. That path
+// TestOrder_NoViewportNeverFollowsOrCounts restates sp032's
+// TestTail_NoViewportNeverFollowsOrCounts, the --once contract. That path
 // reports no viewport at all (renderFrame's height==0 branch), and in that
-// legacy regime scroll IS the cursor: a tail-follow there would move the
-// scroll to the last row and slice every message but the newest out of the
-// frame a pipe receives. Nothing follows and nothing is counted without a
-// window.
-func TestTail_NoViewportNeverFollowsOrCounts(t *testing.T) {
+// legacy regime scroll IS the cursor: nothing follows and nothing is
+// counted without a window, at either end.
+func TestOrder_NoViewportNeverFollowsOrCounts(t *testing.T) {
 	m := NewModel()
 	m.Focus = PaneMessages
 
@@ -2099,98 +2190,100 @@ func TestTail_NoViewportNeverFollowsOrCounts(t *testing.T) {
 	}
 }
 
-// TestTail_WheelBackToTheBottomReturnsToLive pins the half of the invariant
-// the success criteria name no key for: LIVE is DERIVED, so ANY way back to
-// the tail thaws the pane — a wheel included — and not only the two keys
-// criterion 4 lists. Without it the pane could sit on the newest message
-// still advertising a `+N new` that no longer means anything.
+// TestOrder_WheelBackToTheTopReturnsToLive restates sp032's
+// TestTail_WheelBackToTheBottomReturnsToLive: LIVE is DERIVED, so ANY way
+// back to row 0 thaws the pane — a wheel included — and not only the two
+// keys criterion 4 lists.
 //
 // Reaching that state takes a prune: a wheel does not move the cursor, so
-// while the list only GROWS a scrolled-back pane's cursor falls behind the
-// last row and no amount of wheeling restores liveness. A bus that prunes
-// back to where the cursor is leaves exactly the "cursor on the last row,
-// scroll off the bottom" state the wheel can close.
-func TestTail_WheelBackToTheBottomReturnsToLive(t *testing.T) {
+// while the list only GROWS a scrolled-back pane's cursor (pinned at row 0
+// while frozen — see TestOrder_FrozenWhenScrolledBack) never falls further
+// behind the way the tail's did; what moves is the SCROLL, and only a prune
+// that shrinks the list back down closes the gap a partial wheel leaves.
+func TestOrder_WheelBackToTheTopReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.ScrollMessages(-6) // frozen with the cursor still on row 19
+	m.ScrollMessages(6) // frozen with the cursor still on row 0
 	m.SetMessagesLen(28)
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
 	}
 
-	m.SetMessagesLen(20) // the bus pruned back: row 19 is the last row again
+	m.SetMessagesLen(20) // the bus pruned back
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: the prune changed the count: %d, want 8", m.PendingMessages)
 	}
-	if m.MessagesScroll != 4 {
-		t.Fatalf("setup: scroll = %d, want 4 (still off the bottom)", m.MessagesScroll)
+	if m.MessagesScroll != 6 {
+		t.Fatalf("setup: scroll = %d, want 6 (still off the top)", m.MessagesScroll)
 	}
 
-	// Part way back is still frozen — the scroll is not at the bottom yet.
-	m.ScrollMessages(3)
+	// Part way back is still frozen — the scroll is not at the top yet.
+	m.ScrollMessages(-3)
 	if m.PendingMessages != 8 {
 		t.Fatalf("a partial wheel thawed the pane: PendingMessages = %d, want 8", m.PendingMessages)
 	}
 
-	m.ScrollMessages(100)
-	if m.MessagesScroll != 10 {
-		t.Fatalf("scroll = %d, want 10 (the bottom of a 20-row list in a 10-row window)", m.MessagesScroll)
+	m.ScrollMessages(-100)
+	if m.MessagesScroll != 0 {
+		t.Fatalf("scroll = %d, want 0 (the top)", m.MessagesScroll)
 	}
 	if m.PendingMessages != 0 {
-		t.Errorf("PendingMessages = %d after wheeling back to the tail, want 0", m.PendingMessages)
+		t.Errorf("PendingMessages = %d after wheeling back to the top, want 0", m.PendingMessages)
 	}
 
 	// And it follows again.
 	m.SetMessagesLen(22)
-	if m.MessagesCursor != 21 {
-		t.Errorf("the pane did not resume following: cursor = %d, want 21", m.MessagesCursor)
+	if m.MessagesCursor != 0 {
+		t.Errorf("the pane did not resume following: cursor = %d, want 0", m.MessagesCursor)
 	}
 }
 
-// TestTail_CursorDownOntoTheLastRowReturnsToLive is the same invariant
-// through the other motion that can reach the tail: j/down. A reader who
-// scrolled back with the CURSOR (rather than the wheel) walks it forward
-// again, and the pane thaws when the cursor lands on the last row — no key
-// in moveCursor's path knows anything about the count.
-func TestTail_CursorDownOntoTheLastRowReturnsToLive(t *testing.T) {
+// TestOrder_CursorUpOntoRowZeroReturnsToLive is the same invariant through
+// the other motion that can reach the head: k/up, restating sp032's
+// TestTail_CursorDownOntoTheLastRowReturnsToLive. It also demonstrates the
+// task's real (not merely cosmetic) simplification at this end: row 0 never
+// moves as the list grows, so a frozen cursor's distance back to live is
+// fixed at the moment it froze — unlike the tail, where every message that
+// arrived while frozen pushed the target one row further away.
+func TestOrder_CursorUpOntoRowZeroReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.moveCursor(-3) // cursor 16, frozen
+	m.moveCursor(3) // cursor 3, frozen
 	m.SetMessagesLen(22)
 	if m.PendingMessages != 2 {
 		t.Fatalf("setup: PendingMessages = %d, want 2", m.PendingMessages)
 	}
 
 	for i := 0; i < 5; i++ {
-		m.HandleKey(Key{Rune: 'j'})
-		if m.MessagesCursor != 21 && m.PendingMessages == 0 {
+		m.HandleKey(Key{Rune: 'k'})
+		if m.MessagesCursor != 0 && m.PendingMessages == 0 {
 			t.Fatalf("step %d thawed the pane early at cursor %d: PendingMessages = %d",
 				i, m.MessagesCursor, m.PendingMessages)
 		}
 	}
-	if m.MessagesCursor != 21 {
-		t.Fatalf("cursor = %d, want 21 (the last row)", m.MessagesCursor)
+	if m.MessagesCursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (row 0)", m.MessagesCursor)
 	}
 	if m.PendingMessages != 0 {
-		t.Errorf("PendingMessages = %d once the cursor reached the last row, want 0", m.PendingMessages)
+		t.Errorf("PendingMessages = %d once the cursor reached row 0, want 0", m.PendingMessages)
 	}
 }
 
-// TestTail_ResizeIntoLivenessZeroesTheCount is the last motion that can
-// satisfy the live predicate without any input at all: a terminal resize.
+// TestOrder_ResizeIntoLivenessZeroesTheCount restates sp032's
+// TestTail_ResizeIntoLivenessZeroesTheCount: a terminal resize is the last
+// motion that can satisfy the live predicate without any input at all.
 // SetMessagesViewport re-fits the scroll, and a window tall enough to show
-// the whole list puts it at 0 — which IS the bottom. A pane whose cursor is
-// already on the last row is then live, and a `+N new` it kept carrying
-// would be advertising messages that are on screen.
-func TestTail_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
+// the whole list puts it at 0 — which IS the top. A pane whose cursor is
+// already on row 0 is then live, and a `+N new` it kept carrying would be
+// advertising messages that are on screen.
+func TestOrder_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
-	m.ScrollMessages(-6)
+	m.ScrollMessages(6)
 	m.SetMessagesLen(28)
-	m.SetMessagesLen(20) // pruned back: the cursor is the last row again
+	m.SetMessagesLen(20) // pruned back: the cursor is still row 0
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
 	}
-	if m.MessagesScroll != 4 {
-		t.Fatalf("setup: scroll = %d, want 4 (off the bottom)", m.MessagesScroll)
+	if m.MessagesScroll != 6 {
+		t.Fatalf("setup: scroll = %d, want 6 (off the top)", m.MessagesScroll)
 	}
 
 	m.SetMessagesViewport(20) // the terminal grew: the whole list fits
@@ -2203,26 +2296,58 @@ func TestTail_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
 	}
 }
 
-// --- sp032 T8: the message pane opens live at the tail -------------------
-//
-// dotfiles-utob: a session opened showing the OLDEST message and was not
-// live until the operator pressed `G` once, because renderFrame filters (and
-// so calls SetMessagesLen) BEFORE it reports this frame's viewports. The
-// session's first length therefore lands in the windowless regime, where
-// T6's liveness is disabled BY DESIGN — and that design is load-bearing,
-// because --once renders in that same regime and must keep emitting the
-// whole log from the top.
-//
-// So the opening is a separate, explicit motion rather than a loosened gate:
-// OpenMessagesAtTail parks the pane on its newest message, and REFUSES to do
-// so for a pane with no window. cmd/ performs it once per interactive
-// session; nothing performs it on the --once path, which never reports a
-// viewport for it to consume in the first place.
+// TestRoster_OrderUnchanged is the guard sp033 T6's SRE table calls out by
+// name: the order flip and the live-end inversion apply to the MESSAGE pane
+// only. FilterRoster returns rows in the order it received them — no
+// reorder applied — and GoToLast on the roster still means "the last row":
+// there is no live/frozen distinction on that pane for T6 to have inverted.
+func TestRoster_OrderUnchanged(t *testing.T) {
+	rows := []source.Row{
+		{UID: "1", Name: "alpha"},
+		{UID: "2", Name: "beta"},
+		{UID: "3", Name: "gamma"},
+	}
+	m := NewModel()
+	got := m.FilterRoster(rows)
+	if len(got) != len(rows) {
+		t.Fatalf("FilterRoster changed the row count: got %d, want %d", len(got), len(rows))
+	}
+	for i, r := range got {
+		if r.UID != rows[i].UID {
+			t.Fatalf("FilterRoster reordered rows: got %v, want %v", got, rows)
+		}
+	}
 
-// TestStartup_OpenMessagesAtTailParksOnTheNewest is criteria 1 and 2 at the
+	m.Focus = PaneRoster
+	m.SetRosterViewport(2)
+	m.SetRosterLen(len(rows))
+	m.GoToLast()
+	if m.RosterCursor != len(rows)-1 {
+		t.Errorf("RosterCursor = %d after GoToLast, want %d (still the last row — no live end here)", m.RosterCursor, len(rows)-1)
+	}
+}
+
+// --- sp032 T8 (renamed OpenMessagesAtTail -> OpenMessagesAtHead by sp033
+// T6): the message pane opens live -------------------------------------
+//
+// dotfiles-utob: a session opened showing the wrong end and was not live
+// until the operator pressed the live key once, because renderFrame filters
+// (and so calls SetMessagesLen) BEFORE it reports this frame's viewports.
+// The session's first length therefore lands in the windowless regime,
+// where T6's liveness is disabled BY DESIGN — and that design is
+// load-bearing, because --once renders in that same regime and must keep
+// emitting the whole log from row 0.
+//
+// So the opening is a separate, explicit motion rather than a loosened
+// gate: OpenMessagesAtHead parks the pane on its newest message, and
+// REFUSES to do so for a pane with no window. cmd/ performs it once per
+// interactive session; nothing performs it on the --once path, which never
+// reports a viewport for it to consume in the first place.
+
+// TestStartup_OpenMessagesAtHeadParksOnTheNewest is criteria 1 and 2 at the
 // state layer, driven in renderFrame's real call order: the length arrives
 // with no window, the viewport arrives second, and the opening follows it.
-func TestStartup_OpenMessagesAtTailParksOnTheNewest(t *testing.T) {
+func TestStartup_OpenMessagesAtHeadParksOnTheNewest(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(20)
 	m.SetMessagesViewport(5)
@@ -2230,37 +2355,36 @@ func TestStartup_OpenMessagesAtTailParksOnTheNewest(t *testing.T) {
 		t.Fatalf("setup: cursor = %d, want 0 — the pane has not been opened yet", m.MessagesCursor)
 	}
 
-	if !m.OpenMessagesAtTail() {
-		t.Fatalf("OpenMessagesAtTail refused a pane with a 5-row window")
+	if !m.OpenMessagesAtHead() {
+		t.Fatalf("OpenMessagesAtHead refused a pane with a 5-row window")
 	}
 
-	if m.MessagesCursor != 19 {
-		t.Errorf("cursor = %d, want 19 (the newest message)", m.MessagesCursor)
+	if m.MessagesCursor != 0 {
+		t.Errorf("cursor = %d, want 0 (the newest message)", m.MessagesCursor)
 	}
-	if m.MessagesScroll != 15 {
-		t.Errorf("scroll = %d, want 15 (the bottom: 20 rows in a 5-row window)", m.MessagesScroll)
+	if m.MessagesScroll != 0 {
+		t.Errorf("scroll = %d, want 0 (the top)", m.MessagesScroll)
 	}
 	if !m.messagesLive() {
-		t.Errorf("a pane opened at its tail is not live")
+		t.Errorf("a pane opened at its head is not live")
 	}
 	if m.PendingMessages != 0 {
 		t.Errorf("PendingMessages = %d, want 0 — a pane that opens live is not also behind", m.PendingMessages)
 	}
 }
 
-// TestStartup_OpenRefusedWithNoWindow is criterion 3 at the state layer, and
-// the trap this task is written around: maxTop(n, 0) is n-1, so an opening
-// that ignored the window would drag a --once frame's scroll onto its last
-// row and leave a pipe holding one message out of n.
+// TestStartup_OpenRefusedWithNoWindow is criterion 3 at the state layer: a
+// windowless pane must never be touched, since --once renders in that same
+// regime and must keep emitting the whole log from row 0.
 func TestStartup_OpenRefusedWithNoWindow(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(20)
 
-	if m.OpenMessagesAtTail() {
-		t.Fatalf("OpenMessagesAtTail opened a pane with no window — that is the --once regime")
+	if m.OpenMessagesAtHead() {
+		t.Fatalf("OpenMessagesAtHead opened a pane with no window — that is the --once regime")
 	}
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
-		t.Errorf("cursor/scroll = %d/%d, want 0/0 — a windowless pane renders from the top",
+		t.Errorf("cursor/scroll = %d/%d, want 0/0 — a windowless pane renders from row 0",
 			m.MessagesCursor, m.MessagesScroll)
 	}
 	if m.PendingMessages != 0 {
@@ -2271,40 +2395,43 @@ func TestStartup_OpenRefusedWithNoWindow(t *testing.T) {
 	// terminal too short for a single data row must leave the opening for
 	// the resize that gives the pane a row.
 	m.SetMessagesViewport(0)
-	if m.OpenMessagesAtTail() {
-		t.Fatalf("OpenMessagesAtTail opened a pane whose window is 0 rows")
+	if m.OpenMessagesAtHead() {
+		t.Fatalf("OpenMessagesAtHead opened a pane whose window is 0 rows")
 	}
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
 		t.Errorf("cursor/scroll = %d/%d after a 0-row window, want 0/0", m.MessagesCursor, m.MessagesScroll)
 	}
 
 	m.SetMessagesViewport(1)
-	if !m.OpenMessagesAtTail() {
-		t.Fatalf("OpenMessagesAtTail refused a pane with a 1-row window")
+	if !m.OpenMessagesAtHead() {
+		t.Fatalf("OpenMessagesAtHead refused a pane with a 1-row window")
 	}
-	if m.MessagesCursor != 19 || m.MessagesScroll != 19 {
-		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 19/19 (the newest message, alone on screen)",
+	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+		t.Errorf("cursor/scroll = %d/%d in a 1-row window, want 0/0 (the newest message, alone on screen)",
 			m.MessagesCursor, m.MessagesScroll)
 	}
 }
 
 // TestStartup_OpeningTouchesNothingButTheMessagePane is criterion 5 at the
-// state layer: the roster has no newest row to be live on, so it opens where
-// it always did. Asserted as a whole-model comparison, so the opening cannot
-// quietly move the roster, the focus, the filter or the detail pane either.
+// state layer: the roster has no newest row to be live on, so it opens
+// where it always did. Asserted as a whole-model comparison, so the
+// opening cannot quietly move the roster, the focus, the filter or the
+// detail pane either. MessagesCursor/Scroll are seeded away from row 0
+// first so the opening has visible work to do.
 func TestStartup_OpeningTouchesNothingButTheMessagePane(t *testing.T) {
 	m := NewModel()
 	m.SetRosterLen(40)
 	m.SetMessagesLen(20)
 	m.SetRosterViewport(5)
 	m.SetMessagesViewport(5)
+	m.MessagesCursor, m.MessagesScroll = 5, 3
 
 	before := *m
 	want := before
-	want.MessagesCursor = 19
-	want.MessagesScroll = 15
+	want.MessagesCursor = 0
+	want.MessagesScroll = 0
 
-	m.OpenMessagesAtTail()
+	m.OpenMessagesAtHead()
 
 	if *m != want {
 		t.Errorf("the opening changed more than the message pane's position:\n got %+v\nwant %+v", *m, want)
@@ -2315,26 +2442,28 @@ func TestStartup_OpeningTouchesNothingButTheMessagePane(t *testing.T) {
 }
 
 // TestStartup_EmptyAndSingleMessageLogs covers the two degenerate first
-// samples. For both, the tail IS index 0 — so the assertion that matters is
-// the one after it: an opened pane is LIVE, and follows the next sample.
+// samples. For both, the head IS index 0 (as the tail also was, at these
+// lengths) — so the assertion that matters is the one after it: an opened
+// pane is LIVE, and follows the next sample by staying at row 0 rather than
+// advancing onto a moving tail.
 func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 	for _, n := range []int{0, 1} {
 		m := NewModel()
 		m.SetMessagesLen(n)
 		m.SetMessagesViewport(5)
-		if !m.OpenMessagesAtTail() {
-			t.Fatalf("n=%d: OpenMessagesAtTail refused", n)
+		if !m.OpenMessagesAtHead() {
+			t.Fatalf("n=%d: OpenMessagesAtHead refused", n)
 		}
-		if m.MessagesCursor != maxIndex(n) || m.MessagesScroll != 0 {
-			t.Errorf("n=%d: cursor/scroll = %d/%d, want %d/0", n, m.MessagesCursor, m.MessagesScroll, maxIndex(n))
+		if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
+			t.Errorf("n=%d: cursor/scroll = %d/%d, want 0/0", n, m.MessagesCursor, m.MessagesScroll)
 		}
 		if m.PendingMessages != 0 {
 			t.Errorf("n=%d: PendingMessages = %d, want 0", n, m.PendingMessages)
 		}
 
 		m.SetMessagesLen(n + 6) // the bus fills up
-		if want := n + 5; m.MessagesCursor != want {
-			t.Errorf("n=%d: the opened pane did not follow the next sample: cursor = %d, want %d", n, m.MessagesCursor, want)
+		if m.MessagesCursor != 0 {
+			t.Errorf("n=%d: the opened pane did not follow the next sample: cursor = %d, want 0", n, m.MessagesCursor)
 		}
 		if m.PendingMessages != 0 {
 			t.Errorf("n=%d: PendingMessages = %d after following, want 0", n, m.PendingMessages)
@@ -2344,20 +2473,20 @@ func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 
 // TestStartup_OpeningClearsAPendingCountItInherits is the invariant "a live
 // pane is never behind", applied to the one motion that had no
-// clearPendingWhenLive before this task existed.
+// clearPendingWhenLive before sp032 T8 existed.
 func TestStartup_OpeningClearsAPendingCountItInherits(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesViewport(5)
 	m.SetMessagesLen(20)
-	m.ScrollMessages(-9)
+	m.ScrollMessages(9)
 	m.SetMessagesLen(24)
 	if m.PendingMessages == 0 {
 		t.Fatalf("setup: PendingMessages = 0, want a frozen pane carrying a count")
 	}
 
-	m.OpenMessagesAtTail()
+	m.OpenMessagesAtHead()
 
 	if m.PendingMessages != 0 {
-		t.Errorf("PendingMessages = %d after the pane was opened at its tail, want 0", m.PendingMessages)
+		t.Errorf("PendingMessages = %d after the pane was opened at its head, want 0", m.PendingMessages)
 	}
 }

@@ -59,7 +59,7 @@ type Filter struct {
 // Selection lives in the *Cursor fields — the row j/k and the arrows move.
 // *Scroll is FIRST-CLASS STATE alongside it (sp032 T1), not a function of
 // it: ScrollRoster/ScrollMessages move it on their own (the wheel in T3, the
-// frozen tail in T6), SetRosterLen/SetMessagesLen and
+// frozen end in T6/sp033 T6), SetRosterLen/SetMessagesLen and
 // SetRosterViewport/SetMessagesViewport only CLAMP it into range, and cursor
 // motion nudges it by the MINIMUM needed to bring the cursor back inside
 // [scroll, scroll+viewport-1]. A cursor already on screen leaves scroll
@@ -112,11 +112,12 @@ type Model struct {
 	MessagesLen      int
 	MessagesViewport int
 
-	// PendingMessages is how many messages have been appended since the
-	// message pane stopped being LIVE (sp032 T6) — the `+N new` the log
-	// header carries while the pane is frozen on purpose. It is zero
-	// whenever the pane is live, which is the invariant every mutator below
-	// restores rather than a value anyone has to remember to clear.
+	// PendingMessages is how many messages have arrived since the message
+	// pane stopped being LIVE (sp032 T6, inverted for the head by sp033 T6)
+	// — the `+N new` the log header carries while the pane is frozen on
+	// purpose. It is zero whenever the pane is live, which is the invariant
+	// every mutator below restores rather than a value anyone has to
+	// remember to clear.
 	//
 	// It is a plain int, and Model stays a comparable struct: several
 	// fixtures compare whole models with `*m != want`.
@@ -180,7 +181,8 @@ func NewModel() *Model {
 // has to be, because main.go calls this on every sampler tick (every two
 // seconds): a re-derive would drag the scroll back onto the cursor within
 // two seconds of any wheel event, which is the whole premise T3's wheel and
-// T6's frozen tail rest on. The one exception is the legacy viewport <= 0
+// T6's frozen end (tail for the roster, head for messages since sp033 T6)
+// rest on. The one exception is the legacy viewport <= 0
 // regime, where scroll IS the cursor by definition — see scrollAfterClamp.
 func (m *Model) SetRosterLen(n int) {
 	m.RosterLen = n
@@ -189,33 +191,39 @@ func (m *Model) SetRosterLen(n int) {
 }
 
 // SetMessagesLen is SetRosterLen's twin for the message pane, and it is
-// additionally where sp032 T6's CONDITIONAL TAIL-FOLLOW lives: main.go calls
-// this on every sampler tick, so this is the one place a growing sample
-// becomes visible to the model.
+// additionally where sp032 T6's CONDITIONAL TAIL-FOLLOW lives — inverted for
+// the HEAD by sp033 T6, since the pane now renders newest-first (row 0 is
+// the newest envelope): main.go calls this on every sampler tick, so this is
+// the one place a growing sample becomes visible to the model.
 //
-// Live (messagesLive) means the reader is parked on the newest message, and
-// the pane then follows new arrivals onto the new last row. Not live means
-// the reader scrolled back deliberately, and then NOTHING moves — the
-// appended messages are COUNTED into PendingMessages instead, which is what
-// the header's `+N new` reports until End/G (or a click on the last row)
-// returns the pane to live.
+// Live (messagesLive) means the reader is parked on the newest message —
+// row 0 with the scroll at the top — and the pane then STAYS at row 0 as new
+// arrivals land there (row 0 is always the newest row by construction, so
+// "following" costs nothing here the way re-deriving maxIndex/maxTop did at
+// the tail). Not live means the reader scrolled back deliberately, and then
+// NOTHING moves — the appended messages are COUNTED into PendingMessages
+// instead, which is what the header's `+N new` reports until Home/g (or a
+// click on row 0) returns the pane to live.
 //
 // Both halves are a rule rather than a default: unconditional follow would
 // yank a reader off the message they are reading every two seconds, and
 // never following would stop the live view being live (sp032 ## solution,
-// which names both as anti-patterns).
+// which names both as anti-patterns, restated here for the other end).
 //
 // A SHRINKING sample (the bus was pruned) adds nothing — the count can never
 // go negative — and a sample that appends nothing leaves it exactly where it
-// was rather than resetting it.
+// was rather than resetting it. Not-live cursor/scroll stay BYTE-IDENTICAL
+// across a growing sample (sp033 T6 criterion 3) — restated verbatim from
+// sp032 rather than adjusted for the index shift a head-prepend causes,
+// which is the cost `## known limitations` names for this task.
 func (m *Model) SetMessagesLen(n int) {
 	live := m.messagesLive()
 	grown := n - m.MessagesLen
 	m.MessagesLen = n
 
 	if live {
-		m.MessagesCursor = maxIndex(n)
-		m.MessagesScroll = maxTop(n, m.MessagesViewport)
+		m.MessagesCursor = 0
+		m.MessagesScroll = 0
 		m.PendingMessages = 0
 		return
 	}
@@ -227,82 +235,77 @@ func (m *Model) SetMessagesLen(n int) {
 	}
 	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxIndex(n))
 	m.MessagesScroll = scrollAfterClamp(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
-	// A shrink can put the cursor back on the (new) last row — the pane is
-	// live again by derivation, so the count it was carrying is stale.
+	// A shrink can put the cursor back on row 0 — the pane is live again by
+	// derivation, so the count it was carrying is stale.
 	m.clearPendingWhenLive()
 }
 
-// messagesLive derives sp032 T6's LIVE state for the message pane: the
-// cursor is on the LAST row and the scroll is at the BOTTOM. It is derived
-// on every read rather than stored, so no keystroke, wheel event or sample
-// can leave a "live" flag disagreeing with where the pane actually is.
+// messagesLive derives sp033 T6's LIVE state for the message pane: the
+// cursor is on ROW 0 (the newest envelope) and the scroll is at the TOP. It
+// is derived on every read rather than stored, so no keystroke, wheel event
+// or sample can leave a "live" flag disagreeing with where the pane actually
+// is.
 //
 // A pane with no reported viewport is never live, and that is a correctness
 // requirement rather than a convenience. viewport <= 0 is T1's legacy regime
 // where scroll IS the cursor (scrollAfterClamp), and it is what --once
 // reports (renderFrame's height == 0 path never calls SetMessagesViewport).
-// Following the tail there would set the cursor to the last row, drag the
-// scroll onto it, and leave main.go's scrolledMessageSample slicing every
-// message but the newest out of the frame a pipe receives — breaking
-// sp030 T9's contract in a feature that has nothing to say about --once.
+// --once always renders the whole log from row 0 regardless of liveness, so
+// disabling the concept there changes nothing it emits while keeping the
+// invariant simple: PendingMessages stays 0 without a window to be "behind"
+// in.
 //
-// An EMPTY pane is live (maxIndex(0) and maxTop(0, v) are both 0): a pane
-// with nothing in it is trivially at its own end, which is what makes the
-// very first sample follow instead of arriving already `+N` behind.
+// An EMPTY pane is live (cursor and scroll are both 0 by construction): a
+// pane with nothing in it is trivially at its own end, which is what makes
+// the very first sample follow instead of arriving already `+N` behind.
 func (m *Model) messagesLive() bool {
 	if m.MessagesViewport <= 0 {
 		return false
 	}
-	return m.MessagesCursor == maxIndex(m.MessagesLen) &&
-		m.MessagesScroll == maxTop(m.MessagesLen, m.MessagesViewport)
+	return m.MessagesCursor == 0 && m.MessagesScroll == 0
 }
 
 // clearPendingWhenLive restores the invariant "a live pane is never behind".
 // Every mutator that can move the message pane's cursor or scroll ends with
-// it, so returning to the tail zeroes the count no matter WHICH way the
-// reader got there — End/G, a click on the last row, j onto it, a wheel, a
-// page, a resize — rather than only through the keys criterion 4 happens to
-// name.
+// it, so returning to row 0 zeroes the count no matter WHICH way the reader
+// got there — Home/g, a click on row 0, k onto it, a wheel, a page, a resize
+// — rather than only through the keys criterion 4 happens to name.
 func (m *Model) clearPendingWhenLive() {
 	if m.messagesLive() {
 		m.PendingMessages = 0
 	}
 }
 
-// OpenMessagesAtTail is sp032 T8's OPENING: it parks the message pane on its
-// newest message with the scroll at the bottom, which by messagesLive's
-// derivation makes the pane LIVE — so the session's first sample is followed
-// from then on, and clearPendingWhenLive zeroes any count the pane had
-// picked up before it was opened.
+// OpenMessagesAtHead is sp032 T8's OPENING (renamed by sp033 T6, which moved
+// LIVE from the tail to the head): it parks the message pane on its newest
+// message — row 0, scroll at the top — which by messagesLive's derivation
+// makes the pane LIVE — so the session's first sample is followed from then
+// on, and clearPendingWhenLive zeroes any count the pane had picked up
+// before it was opened.
 //
 // It exists as its own motion rather than as a rule inside SetMessagesLen or
 // SetMessagesViewport because of dotfiles-utob's actual cause: renderFrame
 // filters (and so sets the length) BEFORE it reports a viewport, so the
 // session's first length always lands in the windowless regime, where T6
-// disables liveness on purpose. Loosening that gate is the trap — maxTop(n,
-// 0) is n-1, so a windowless pane that followed its tail would leave --once
-// slicing every message but the newest out of the frame a pipe receives
-// (sp030 T9). Reporting the viewport first instead would reorder
-// renderFrame's filter-then-viewport sequence, which sp031 T1 pinned so a
-// resize cannot leave the cursor off-screen. An explicit motion, performed
-// once per INTERACTIVE session by cmd/ and never on the --once path, changes
-// neither.
+// disables liveness on purpose. An explicit motion, performed once per
+// INTERACTIVE session by cmd/ and never on the --once path, sidesteps that
+// regime rather than loosening its gate.
 //
 // It REFUSES a pane with no window and reports so, for the same reason
 // messagesLive does: viewport <= 0 is the regime --once renders in, and a
 // caller that gets false is expected to try again when the pane has a row to
 // show the result in (a terminal too short for a data row is the live case
-// — see cmd/agent-monitor's openMessagesAtTailOnce).
+// — see cmd/agent-monitor's openMessagesAtHeadOnce).
 //
 // An empty log and a one-message log both open at index 0, which is where
 // they already were; what the opening buys there is LIVENESS, so the first
 // real sample arrives followed rather than counted.
-func (m *Model) OpenMessagesAtTail() bool {
+func (m *Model) OpenMessagesAtHead() bool {
 	if m.MessagesViewport <= 0 {
 		return false
 	}
-	m.MessagesCursor = maxIndex(m.MessagesLen)
-	m.MessagesScroll = maxTop(m.MessagesLen, m.MessagesViewport)
+	m.MessagesCursor = 0
+	m.MessagesScroll = 0
 	m.clearPendingWhenLive()
 	return true
 }
@@ -690,9 +693,17 @@ func (m *Model) PageDown() {
 	m.moveCursor(listPage(m.focusedViewport()))
 }
 
-// GoToFirst is Home: the first row of the focused list pane, or the top of
-// the focused detail body. It is a no-op on an empty list — maxIndex(0) is
-// 0, which is where an empty pane's cursor already sits.
+// GoToFirst is Home (and its vim spelling g): row 0 of the focused list
+// pane, or the top of the focused detail body. It is a no-op on an empty
+// list — row 0 is where an empty pane's cursor already sits.
+//
+// sp033 T6 additionally makes this return the message pane to LIVE: row 0
+// with the scroll at the top IS the live predicate (messagesLive) for that
+// pane now that the log renders newest-first, so jumpTo's
+// clearPendingWhenLive zeroes the `+N new` count as a consequence of where
+// the cursor went rather than as a special case keyed on which key was
+// pressed. sp032 pinned this same behavior on GoToLast, at the tail; T6
+// moves it here because it is the destination that changed, not the rule.
 func (m *Model) GoToFirst() {
 	m.jumpTo(0)
 }
@@ -701,11 +712,12 @@ func (m *Model) GoToFirst() {
 // len — len is a slice bound and not a position a cursor may hold. On the
 // detail pane it is the last full page of the body.
 //
-// sp032 T6 additionally makes this return the message pane to LIVE: landing
-// on the last row with the scroll at the bottom IS the live predicate
-// (messagesLive), so jumpTo's clearPendingWhenLive zeroes the `+N new` count
-// as a consequence of where the cursor went rather than as a special case
-// keyed on which key was pressed.
+// On the message pane this now lands on the OLDEST envelope (sp033 T6: the
+// log renders newest-first, so the last row is the far end from live) and
+// deliberately does NOT clear PendingMessages — jumpTo's
+// clearPendingWhenLive is still called unconditionally, but messagesLive is
+// false here for any list longer than one row, so it is a no-op rather than
+// a special case carved out for this key.
 func (m *Model) GoToLast() {
 	m.jumpTo(maxInt)
 }
@@ -882,7 +894,10 @@ func (m *Model) HandleKey(k Key) Outcome {
 		m.PageUp()
 	case k.Special == KeyPgDn:
 		m.PageDown()
-	case k.Special == KeyHome:
+	case k.Special == KeyHome || k.Rune == 'g':
+		// 'g' is sp033 T6's new vim spelling of Home, added to match 'G'
+		// already spelling End (sp032 T5) — and to give Home/g's live-return
+		// (see GoToFirst) the same two-key surface End/G has always had.
 		m.GoToFirst()
 	case k.Special == KeyEnd || k.Rune == 'G':
 		m.GoToLast()
