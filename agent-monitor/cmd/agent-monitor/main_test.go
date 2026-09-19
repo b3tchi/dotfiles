@@ -1160,31 +1160,37 @@ func TestUpdate_BackspaceEditsTheDraft(t *testing.T) {
 	}
 }
 
-// TestUpdate_RKeyForcesARefresh is success criterion 5's `r`: the key still
-// reaches the monitors, not just the model. The stub counts its own
-// invocations on disk, so the assertion is "the census was actually re-read",
-// not "some branch was taken".
+// TestUpdate_RKeyForcesARefresh is success criterion 5's `r`/`R`: both cases
+// still reach the monitors, not just the model — `R` is asserted here too
+// (dotfiles-ng1w.14's audit: HandleKey binds both, but only lowercase had a
+// real-tea.KeyMsg exec-verified case before this task). The stub counts its
+// own invocations on disk, so the assertion is "the census was actually
+// re-read", not "some branch was taken".
 func TestUpdate_RKeyForcesARefresh(t *testing.T) {
-	dir := t.TempDir()
-	counter := filepath.Join(dir, "calls")
-	writeStub(t, dir, "agent-census", "#!/bin/sh\necho x >> "+counter+"\necho '[]'\n")
-	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
+	for _, r := range []rune{'r', 'R'} {
+		t.Run(string(r), func(t *testing.T) {
+			dir := t.TempDir()
+			counter := filepath.Join(dir, "calls")
+			writeStub(t, dir, "agent-census", "#!/bin/sh\necho x >> "+counter+"\necho '[]'\n")
+			writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
 
-	oldPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
-		t.Fatalf("setenv PATH: %v", err)
-	}
-	defer os.Setenv("PATH", oldPath)
+			oldPath := os.Getenv("PATH")
+			if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+				t.Fatalf("setenv PATH: %v", err)
+			}
+			defer os.Setenv("PATH", oldPath)
 
-	s := newTestShell(t)
-	before := countLines(t, counter)
+			s := newTestShell(t)
+			before := countLines(t, counter)
 
-	if _, cmd := s.Update(runeKey('r')); quits(cmd) {
-		t.Fatalf("`r` must not quit")
-	}
+			if _, cmd := s.Update(runeKey(r)); quits(cmd) {
+				t.Fatalf("%q must not quit", r)
+			}
 
-	if after := countLines(t, counter); after <= before {
-		t.Errorf("agent-census invocations: %d before, %d after `r`; want a forced refresh", before, after)
+			if after := countLines(t, counter); after <= before {
+				t.Errorf("agent-census invocations: %d before, %d after %q; want a forced refresh", before, after, r)
+			}
+		})
 	}
 }
 
@@ -2475,6 +2481,26 @@ func TestUpdate_PagingKeysReachTheFocusedPane(t *testing.T) {
 		}
 	})
 
+	t.Run("pgup reverses pgdn on the roster", func(t *testing.T) {
+		// dotfiles-ng1w.14's audit: PgUp had a translateKey case and a
+		// HandleKey arm all along, but every existing real-path test only
+		// drove PgDown positively — PgUp appeared only inside the
+		// swallowed-while-editing table, which proves it does nothing while
+		// a draft is open, never that it pages when one is not.
+		s := newWiredShell(t, 60, 60, 100, 30)
+		settleLayout(s)
+		vp := s.model.RosterViewport
+		if vp < 3 {
+			t.Fatalf("setup: roster viewport = %d, want a pageable pane", vp)
+		}
+		s.Update(key(tea.KeyEnd))
+		last := s.model.RosterCursor
+		s.Update(key(tea.KeyPgUp))
+		if want := last - (vp - 1); s.model.RosterCursor != want {
+			t.Errorf("RosterCursor = %d after PgUp from %d with viewport %d, want %d", s.model.RosterCursor, last, vp, want)
+		}
+	})
+
 	t.Run("end then home walk the roster to its ends", func(t *testing.T) {
 		s := newWiredShell(t, 60, 60, 100, 30)
 		settleLayout(s)
@@ -3594,6 +3620,97 @@ func TestUpdate_CtrlSKeyReachesTheComposer(t *testing.T) {
 
 	if s.model.Composing {
 		t.Fatalf("ctrl+s through a real keypress must close the composer")
+	}
+}
+
+// TestUpdate_ComposingEnterInsertsNewlineThroughTheRealPath is sp033 T8
+// criterion 2's divergence from the filter draft, driven through translateKey
+// rather than a direct tui.Key (dotfiles-ng1w.14's audit): tui's own
+// TestComposer_EnterInsertsNewline pins the model-layer behaviour, but every
+// existing main_test.go coverage of a real tea.KeyEnter while Composing
+// stopped at "does not close" (TestFocus_TabSkipsClosedComposer never sends
+// Enter) without proving the newline actually lands in the draft that gets
+// sent.
+func TestUpdate_ComposingEnterInsertsNewlineThroughTheRealPath(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+
+	for _, r := range "line1" {
+		s.Update(runeKey(r))
+	}
+	s.Update(key(tea.KeyEnter))
+	for _, r := range "line2" {
+		s.Update(runeKey(r))
+	}
+	if !s.model.Composing {
+		t.Fatalf("enter through the real path must not commit or close the composer")
+	}
+
+	outcome := s.model.HandleKey(tui.Key{Rune: 0x13}) // read back what the real path built
+	if outcome.Send == nil {
+		t.Fatalf("expected ctrl+s to yield a SendRequest")
+	}
+	if outcome.Send.Body != "line1\nline2" {
+		t.Fatalf("got draft %q, want %q — enter through the real path must insert a newline, not commit", outcome.Send.Body, "line1\nline2")
+	}
+}
+
+// TestUpdate_ComposingBackspaceEditsTheDraftThroughTheRealPath is
+// handleComposingKey's Backspace arm, reached through a real tea.KeyMsg
+// rather than a direct tui.Key construction — no existing test, model-layer
+// or main_test.go, drives Backspace while Composing at all. The draft is
+// unexported, so — as every other test in this file that needs to read it —
+// the body is observed by committing with a real ctrl+s and inspecting the
+// resulting SendRequest's Body.
+func TestUpdate_ComposingBackspaceEditsTheDraftThroughTheRealPath(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+
+	for _, r := range "hills" {
+		s.Update(runeKey(r))
+	}
+	s.Update(key(tea.KeyBackspace))
+	s.Update(key(tea.KeyBackspace))
+
+	outcome := s.model.HandleKey(tui.Key{Rune: 0x13}) // read back what the real path built
+	if outcome.Send == nil {
+		t.Fatalf("expected ctrl+s to yield a SendRequest")
+	}
+	if outcome.Send.Body != "hil" {
+		t.Fatalf("got draft %q after two real backspaces, want %q", outcome.Send.Body, "hil")
+	}
+}
+
+// TestUpdate_ComposingPagingKeysSwallowedThroughTheRealPath restates
+// tui's own TestComposer_PagingKeysSwallowed through translateKey: a real
+// PgUp/PgDn/Home/End keypress while Composing must not move the pane it was
+// opened over, matching handleEditingKey's identical rule for the filter
+// draft (TestUpdate_PagingKeysReachTheFocusedPane's "swallowed by an open
+// filter draft" subtest) — sp033's ## plan names this rule for the composer
+// explicitly rather than leaving it to the default arm.
+func TestUpdate_ComposingPagingKeysSwallowedThroughTheRealPath(t *testing.T) {
+	s := newComposerReadyShell(t, 80, 40)
+	before := s.model.MessagesCursor
+
+	s.Update(runeKey('a'))
+	if !s.model.Composing {
+		t.Fatalf("setup: composer did not open")
+	}
+
+	for _, k := range []tea.KeyMsg{key(tea.KeyPgUp), key(tea.KeyPgDown), key(tea.KeyHome), key(tea.KeyEnd)} {
+		s.Update(k)
+		if s.model.MessagesCursor != before {
+			t.Fatalf("key %v moved MessagesCursor %d -> %d while composing", k, before, s.model.MessagesCursor)
+		}
+		if !s.model.Composing {
+			t.Fatalf("key %v closed the composer", k)
+		}
 	}
 }
 
