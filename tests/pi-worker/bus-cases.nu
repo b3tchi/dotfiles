@@ -2952,6 +2952,155 @@ def main [repo: string, big: string] {
         rm -rf $root; rm -rf $repo; rm -rf $sandbox
     })
 
+    # ------------------------------------------- whoami --label: look up a named party (dotfiles-ng1w.11)
+    #
+    # `--as` was meant to serve an operator whose bus label deliberately isn't
+    # their OS username, but no verb could resolve an arbitrary label — only
+    # `^id -un`. `--label` gives `whoami` that lookup mode, reusing the exact
+    # same registry read (`project-addresses`, filtered to `kind: person`) and
+    # the exact same refusals as the no-flag form. Omitting `--label` must
+    # stay byte-identical to the pre-existing behaviour above.
+
+    (run-case "whoami/--label answers the named party instead of the OS user" {
+        let repo = (make-repo "whoami-label-named")
+        let root = (make-runtime "whoami-label-named")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let party = (do { cd $repo; ^$nu.current-exe $script register --label "operator" | complete } | get stdout | from json)
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "operator" --json | complete })
+            assert-eq $out.exit_code 0 $"whoami --label failed: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.label "operator" "the label named by --label, not the OS user"
+            assert-eq $answer.address $party.address "the address `register` claimed under that label"
+            assert-eq $answer.kind "person" "the kind the registry recorded"
+            assert-eq $answer.registered true "a `kind: person` party holds this exact label"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label pins `user` as the OS user asking, not the party named" {
+        # Design decision (dotfiles-ng1w.11): `user` always answers "who is
+        # asking" (`id -un`), and `label`/`address`/`kind`/`registered` answer
+        # "who is being asked about". The two fields can disagree once
+        # --label names someone other than the OS user — that disagreement is
+        # the point, not a bug, since a session asking on someone else's
+        # behalf still ran as itself.
+        let repo = (make-repo "whoami-label-user-field")
+        let root = (make-runtime "whoami-label-user-field")
+        let script = (worker-script $env.FILE_PWD)
+        let os_user = (^id -un | str trim)
+        with-runtime $root {
+            do { cd $repo; ^$nu.current-exe $script register --label "someone-else" | complete }
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "someone-else" --json | complete })
+            assert-eq $out.exit_code 0 $"whoami --label failed: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.user $os_user "`user` reports the OS user asking, unaffected by --label"
+            assert-eq $answer.label "someone-else" "`label` reports the party being asked about"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label nobody holds is a clean negative, not a refusal" {
+        let repo = (make-repo "whoami-label-unregistered")
+        let root = (make-runtime "whoami-label-unregistered")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "nobody" --json | complete })
+            assert-eq $out.exit_code 0 $"whoami --label must answer, not refuse, for an unheld label: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.registered false "nobody registered under this label"
+            assert-eq $answer.address null "no address to report"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label held by a non-person kind does not register" {
+        # A worker is not an operator: `--label` naming a party that exists
+        # but isn't `kind: person` must answer `registered: false`, same as
+        # the no-flag form's own worker-same-name case.
+        let repo = (make-repo "whoami-label-worker-kind")
+        let root = (make-runtime "whoami-label-worker-kind")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let worker = (do { cd $repo; ^$nu.current-exe $script register --label "impl-1" --role "impl" --kind "worker" | complete })
+            assert-eq $worker.exit_code 0 $"claiming the worker-kind party failed: ($worker.stderr)"
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "impl-1" --json | complete })
+            assert-eq $out.exit_code 0 $"whoami --label failed: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.registered false "a worker wearing the named label is not a person"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label two person parties under one label are refused by name" {
+        let repo = (make-repo "whoami-label-two-persons")
+        let root = (make-runtime "whoami-label-two-persons")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            do { cd $repo; claim-address $repo "shared-label" --role "person" --kind "person" }
+            do { cd $repo; claim-address $repo "shared-label" --role "person" --kind "person" }
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "shared-label" --json | complete })
+            assert-true ($out.exit_code != 0) "two `kind: person` parties under one label is an ambiguity, not a pick"
+            assert-true ($out.stderr | str contains "shared-label") "the refusal names the label"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label a tombstoned person does not register" {
+        let repo = (make-repo "whoami-label-tombstoned")
+        let root = (make-runtime "whoami-label-tombstoned")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            do { cd $repo; ^$nu.current-exe $script register --label "retiree" | complete }
+            let released = (do { cd $repo; ^$nu.current-exe $script unregister --label "retiree" | complete })
+            assert-eq $released.exit_code 0 $"unregister failed: ($released.stderr)"
+
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "retiree" --json | complete })
+            assert-eq $out.exit_code 0 $"whoami --label failed: ($out.stderr)"
+            let answer = ($out.stdout | from json)
+
+            assert-eq $answer.registered false "a tombstone is display-only and cannot resurrect a claim"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label empty string is refused by name, not a silent fallback" {
+        # A typo that empties --label must not quietly answer about the OS
+        # user instead — that would answer about the wrong party. Refuse by
+        # name, matching every other project-scoped refusal here.
+        let repo = (make-repo "whoami-label-empty")
+        let root = (make-runtime "whoami-label-empty")
+        let script = (worker-script $env.FILE_PWD)
+        with-runtime $root {
+            let out = (do { cd $repo; ^$nu.current-exe $script whoami --label "" --json | complete })
+            assert-true ($out.exit_code != 0) "an empty --label must be refused, not treated as omitted"
+            assert-true ($out.stderr | str contains "whoami") "the refusal names the verb"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "whoami/--label outside a git repository is refused by name" {
+        let root = (make-runtime "whoami-label-no-repo")
+        let script = (worker-script $env.FILE_PWD)
+        let non_repo = ([(fixture-base) $"whoami-label-not-a-repo-(random chars --length 6)"] | path join)
+        rm -rf $non_repo
+        mkdir $non_repo
+        with-runtime $root {
+            let out = (do { cd $non_repo; ^$nu.current-exe $script whoami --label "anyone" --json | complete })
+            assert-true ($out.exit_code != 0) "whoami is project-scoped, so no project means no answer, --label or not"
+            assert-true ($out.stderr | str contains "whoami") "the refusal names the verb"
+        }
+        rm -rf $root; rm -rf $non_repo
+    })
+
     # ------------------------------------------- raw addresses beside rendered labels (sp033 T1)
     #
     # `bus-messages` has always resolved `from`/`to` through `render-address`

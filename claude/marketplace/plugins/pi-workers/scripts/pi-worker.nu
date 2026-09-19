@@ -5760,9 +5760,14 @@ def usage []: nothing -> string {
         "                                       go, the tombstone keeps history legible."
         "                                       --label defaults to `id -un`, same as"
         "                                       register"
-        "  whoami   [--json]                     which party the OS user (`id -un`) is;"
+        "  whoami   [--json] [--label]           which party the OS user (`id -un`) is;"
         "                                       registered: false is a clean answer, not"
-        "                                       a refusal, when nobody registered"
+        "                                       a refusal, when nobody registered."
+        "                                       --label answers about that named party"
+        "                                       instead — `user` still reports the OS"
+        "                                       user asking, not the party named. An"
+        "                                       empty --label is refused, never a silent"
+        "                                       fallback to the OS user"
         "  status   <uid>                        one worker's state, from the bus"
         "  liveness <uid> [--socket]             live | exited | unknown, from tmux"
         "  inspect  <uid>                        identity, last result, resume command"
@@ -6294,7 +6299,8 @@ def "main unregister" [--label: string = ""] {
     {label: $label, released: true, address: $address} | to json | print
 }
 
-# Which party the OS user is (sp033 T2, dotfiles-ng1w.2).
+# Which party the OS user is, or (dotfiles-ng1w.11) a NAMED party, is
+# (sp033 T2, dotfiles-ng1w.2).
 #
 # The registry lookup lives here, in the module that owns the layout, and
 # never in Go — `agent-monitor` re-deriving this from `$XDG_RUNTIME_DIR` is
@@ -6309,20 +6315,35 @@ def "main unregister" [--label: string = ""] {
 # are absent because nobody is here, not because something failed. Two
 # `kind: person` addresses sharing the label is refused by name, matching
 # `to-address`'s own rule, rather than picked between.
-def "main whoami" [--json] {
+#
+# `--label` (dotfiles-ng1w.11) answers about a NAMED party instead of the OS
+# user — the lookup mode `--as` needs to resolve a bus label that deliberately
+# isn't the caller's username. It reuses this exact same registry read and
+# every refusal above unchanged; only which label is matched against changes.
+# `user` always stays `id -un` — who is ASKING — while `label`/`address`/
+# `kind`/`registered` answer who is being asked about; the two disagree
+# exactly when `--label` names someone other than the caller, and that
+# disagreement is the useful signal, not a bug. `--label ""` is refused by
+# name rather than silently falling back to the OS user: a typo that empties
+# the flag must not quietly answer about the wrong party.
+def "main whoami" [--json, --label: string] {
     let repo = (current-repo)
     if ($repo | is-empty) {
         error make {msg: "whoami refused: not inside a git repository, and a bus is scoped to one project"}
     }
     let user = (os-username "whoami")
-    let candidates = (project-addresses $repo | where name == $user and kind == "person")
+    if $label != null and ($label | is-empty) {
+        error make {msg: "whoami refused: --label was empty; name the party you mean, or omit --label to ask about the OS user"}
+    }
+    let target = if $label == null { $user } else { $label }
+    let candidates = (project-addresses $repo | where name == $target and kind == "person")
     let result = if ($candidates | length) == 0 {
-        {user: $user, label: $user, address: null, kind: null, registered: false}
+        {user: $user, label: $target, address: null, kind: null, registered: false}
     } else if ($candidates | length) == 1 {
         let party = ($candidates | first)
-        {user: $user, label: $user, address: $party.address, kind: $party.kind, registered: true}
+        {user: $user, label: $target, address: $party.address, kind: $party.kind, registered: true}
     } else {
-        error make {msg: $"'($user)' is worn by ($candidates | length) `kind: person` addresses in this project \(($candidates | get address | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
+        error make {msg: $"'($target)' is worn by ($candidates | length) `kind: person` addresses in this project \(($candidates | get address | str join ', ')): a label is a display name, not an address, and answering with the first one is the misdelivery dotfiles-bg65 produced. Name the address you mean"}
     }
     if $json {
         $result | to json | print
