@@ -90,17 +90,18 @@ const (
 func main() {
 	project := flag.String("project", "", "restrict the roster to one project")
 	once := flag.Bool("once", false, "render one frame to stdout and exit 0: no raw mode, no alternate screen, so it composes in a pipe")
+	as := flag.String("as", "", "override the resolved identity's displayed label; the address still comes from pi-worker whoami's own answer, never a second registry lookup")
 	flag.Parse()
 
 	if *once {
-		if err := runOnce(os.Stdout, *project); err != nil {
+		if err := runOnce(os.Stdout, *project, *as); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	if err := interactiveExitError(runInteractive(*project)); err != nil {
+	if err := interactiveExitError(runInteractive(*project, *as)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -128,7 +129,16 @@ func interactiveExitError(err error) error {
 // --once has no key input, so nothing ever commits an interactive filter,
 // but --project is a startup argument, not a keystroke, and applies here
 // exactly as it does in runInteractive.
-func runOnce(w io.Writer, project string) error {
+//
+// as is --as's value (sp033 T4 criterion 5: --once resolves identity too, so
+// a piped frame marks the same rows an interactive session would). It is
+// VARIADIC, not a third required parameter, for the same reason RenderLog's
+// pending count is (internal/render/log.go): every pre-T4 call in this
+// package's tests passes exactly two arguments, and that byte-identical call
+// shape is itself part of criterion 3's regression coverage — rewriting
+// every one of them to pass "" would touch dozens of unrelated tests to say
+// nothing new.
+func runOnce(w io.Writer, project string, as ...string) error {
 	if err := source.Available(); err != nil {
 		return err
 	}
@@ -144,6 +154,8 @@ func runOnce(w io.Writer, project string) error {
 	msgMonitor := source.NewMessagesMonitor(source.NewMessagesSampler())
 	msgMonitor.Tick(ctx)
 
+	identity := resolveIdentity(ctx, firstOrEmpty(as))
+
 	// --once has no key input, so nothing ever filters or scrolls a frame
 	// it renders via a keystroke — a fresh, untouched Model is exactly "no
 	// interactive filter, no scroll, top of the list". An interactive
@@ -154,11 +166,37 @@ func runOnce(w io.Writer, project string) error {
 	// directly, since it is not something a key ever commits.
 	model := tui.NewModel()
 	model.Project = project
-	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0)
+	model.HasIdentity = identity.Registered
+	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0, identity)
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
 	return nil
+}
+
+// firstOrEmpty reads runOnce's variadic --as value: no argument is every
+// pre-T4 call and means no override, exactly like RenderLog's firstOrZero.
+func firstOrEmpty(vals []string) string {
+	if len(vals) == 0 {
+		return ""
+	}
+	return vals[0]
+}
+
+// resolveIdentity execs `pi-worker whoami --json` once and reports, on
+// stderr, the one case criterion 3's "panes render exactly as today" cannot
+// itself say out loud: an operator who passed --as but whose whoami answer
+// came back unregistered gets no identity (edge case 4) — the escape hatch
+// renames a resolved identity, it does not manufacture one, so this is
+// exactly a `--as` given with nothing to override. The note is informational
+// only: it never changes the exit code, and it never touches a pane, so
+// criterion 3's byte-identical frame holds regardless of whether it prints.
+func resolveIdentity(ctx context.Context, as string) source.Identity {
+	identity := source.ResolveIdentity(ctx, source.RealExec, as)
+	if as != "" && !identity.Registered {
+		fmt.Fprintf(os.Stderr, "agent-monitor: --as %q: no identity resolved (not registered)\n", as)
+	}
+	return identity
 }
 
 // rosterTickMsg and messagesTickMsg are what a sampler goroutine delivers
@@ -184,6 +222,12 @@ type shell struct {
 	census *source.Monitor
 	msgs   *source.MessagesMonitor
 
+	// identity is who ResolveIdentity said the operator is, resolved ONCE at
+	// startup (runInteractive) and never re-derived on a tick — see
+	// source.Identity's doc for why a user who registers mid-session stays
+	// unresolved until the monitor restarts.
+	identity source.Identity
+
 	// width and height come from tea.WindowSizeMsg — term.GetSize is gone
 	// from the interactive path. width starts at the same 80-column fallback
 	// terminalWidth() uses, so a frame rendered before the first size message
@@ -204,8 +248,23 @@ type shell struct {
 	opened bool
 }
 
-func newShell(ctx context.Context, model *tui.Model, census *source.Monitor, msgs *source.MessagesMonitor) *shell {
-	return &shell{ctx: ctx, model: model, census: census, msgs: msgs, width: 80, now: time.Now}
+// identity is VARIADIC for the same reason runOnce's --as and RenderLog's
+// pending count are: every pre-T4 call in this package's tests passes
+// exactly four arguments, and none of them means to say anything about
+// identity — the zero source.Identity{} (Registered false) is exactly what
+// they get, and exactly what leaves the header byte-identical (criterion 3).
+func newShell(ctx context.Context, model *tui.Model, census *source.Monitor, msgs *source.MessagesMonitor, identity ...source.Identity) *shell {
+	return &shell{ctx: ctx, model: model, census: census, msgs: msgs, identity: firstIdentityOrZero(identity), width: 80, now: time.Now}
+}
+
+// firstIdentityOrZero reads newShell's/buildFrame's/renderFrame's variadic
+// identity argument: no value means no override, exactly like firstOrZero
+// (RenderLog's pending count) and firstOrEmpty (runOnce's --as).
+func firstIdentityOrZero(vals []source.Identity) source.Identity {
+	if len(vals) == 0 {
+		return source.Identity{}
+	}
+	return vals[0]
 }
 
 // Init has nothing to start: both samplers are ordinary goroutines started in
@@ -260,7 +319,7 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 		return
 	}
 
-	_, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	_, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
 	target, isData, offset := hitTest(layout, msg.Y)
 
 	switch msg.Button {
@@ -308,7 +367,7 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 // the output mapping now, so the cause is gone and the workaround goes with
 // it rather than being carried forward as a superstition.
 func (s *shell) View() string {
-	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
 	// sp032 T8: this session's FIRST frame opens the message pane at its
 	// live end (dotfiles-utob — a monitor that opened on the wrong end, and
 	// since T6 opens already `+N` behind, contradicts the conditional
@@ -324,7 +383,7 @@ func (s *shell) View() string {
 	// nothing on the --once path pays for it at all: runOnce calls buildFrame
 	// directly and never constructs a shell.
 	if s.openMessagesAtHeadOnce() {
-		lines, _ = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+		lines, _ = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -421,8 +480,10 @@ func programOptions() []tea.ProgramOption {
 // runInteractive drives two samplers (roster + messages) and a bubbletea
 // program over a tui.Model, returning the program's error. project is
 // --project's value (sp031 T3), set on the model once here and never touched
-// again — no key mutates it, unlike the interactive `/` filter.
-func runInteractive(project string) error {
+// again — no key mutates it, unlike the interactive `/` filter. as is
+// --as's value (sp033 T4), resolved into an identity once, here, before the
+// program starts — never re-resolved on a tick, per source.Identity's doc.
+func runInteractive(project string, as string) error {
 	// adr0014 guard 1, fail fast on unrecoverable setup: checked once, here,
 	// before any loop starts. A missing dependency is not something a retry
 	// fixes, so agent-monitor says so once and exits — never an empty UI
@@ -449,8 +510,10 @@ func runInteractive(project string) error {
 	// exec away.
 	censusMonitor.Refresh(ctx)
 	msgMonitor.Tick(ctx)
+	identity := resolveIdentity(ctx, as)
+	model.HasIdentity = identity.Registered
 
-	p := tea.NewProgram(newShell(ctx, model, censusMonitor, msgMonitor), programOptions()...)
+	p := tea.NewProgram(newShell(ctx, model, censusMonitor, msgMonitor, identity), programOptions()...)
 
 	// The samplers keep their own goroutines and source.RunLoop /
 	// source.RunMessagesLoop keep adr0014's three guards verbatim — they are
@@ -486,8 +549,8 @@ func runInteractive(project string) error {
 // *source.Monitor's last sample is unexported and only settable by execing
 // a real or stubbed binary — renderFrame takes samples directly so a test
 // can hand-build one).
-func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int) ([]string, frameLayout) {
-	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height)
+func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int, identity ...source.Identity) ([]string, frameLayout) {
+	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height, identity...)
 }
 
 // renderFrame stacks the roster pane, the message pane and (when it fits)
@@ -509,7 +572,7 @@ func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *sou
 // same paneBudgets/fitPanes call that trimmed roster/log — never a second
 // arithmetic on height — and it is the ONLY thing a mouse handler consults to
 // turn a screen row into (pane, row); see hitTest.
-func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int) ([]string, frameLayout) {
+func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int, identity ...source.Identity) ([]string, frameLayout) {
 	// Order matters, and is the whole point of this arrangement (sp031 T1's
 	// binding criterion: a resized terminal cannot leave the cursor
 	// off-screen). Filter FIRST — that fixes each pane's row count and, via
@@ -560,6 +623,16 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// construction (nothing counts without a reported viewport, and
 	// height == 0 never reports one), so that frame's bytes are unchanged.
 	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, model.PendingMessages)
+	// sp033 T4 criterion 4: the resolved identity is named once in the
+	// message pane header, so the operator can see which party the monitor
+	// thinks they are. This is a post-processing step on RenderLog's output,
+	// exactly like markPane/withZoomIndicator below — render/ stays free of
+	// anything but the sample it was handed, and a zero source.Identity{}
+	// (every pre-T4 caller, and every unregistered/refused/missing-binary
+	// case) leaves the header untouched, which is what keeps criterion 3's
+	// byte-identical frame true without this file special-casing "no
+	// identity" as a second code path.
+	log = withIdentityHeader(log, firstIdentityOrZero(identity), width)
 
 	// fitPanes re-derives the same budgets from the rendered line counts and
 	// does the actual trimming. The two derivations agree: a pane whose
@@ -957,6 +1030,23 @@ func detailSelectionKey(msg *source.Message) string {
 // line still fits the width. render.TruncateCells is used rather than a
 // local rune count because a header can carry wide runes, and the cell
 // accounting is a load-bearing rule this file must not fork.
+// withIdentityHeader appends "— you are <label>" to the message pane's
+// header line when identity.Registered, and leaves lines untouched
+// otherwise — the zero source.Identity{} is exactly criterion 3's "no
+// identity" case, and this function is the one place that turns Registered
+// into text so nothing else has to special-case it. TruncateCells is the
+// same cell-accounting withZoomIndicator uses, so a narrow terminal trims the
+// suffix rather than letting the line exceed width.
+func withIdentityHeader(lines []string, identity source.Identity, width int) []string {
+	if len(lines) == 0 || !identity.Registered {
+		return lines
+	}
+	out := make([]string, len(lines))
+	copy(out, lines)
+	out[0] = render.TruncateCells(out[0]+fmt.Sprintf(" — you are %s", identity.Label), width)
+	return out
+}
+
 func withZoomIndicator(header string, width int) string {
 	const room = len(zoomIndicator) + 1 // the marker plus its separating space
 	if width <= room {

@@ -3158,3 +3158,118 @@ func TestRunOnce_StillRendersNewestFirst(t *testing.T) {
 		t.Errorf("--once emitted an ESC byte: %q", out)
 	}
 }
+
+// writeWhoamiStub drops a `pi-worker` stand-in that dispatches on argv[1]:
+// `whoami` gets whoamiJSON, anything else (`messages`) gets an empty bus.
+// This is separate from writeStub's plain `echo '[]'` pi-worker stub used
+// throughout this file — those exist to answer `messages --json` for a
+// pane's data and are deliberately untouched by this task (sp033 T4
+// criterion 3: an unparseable `whoami` answer is exactly the "no identity"
+// degradation this file's own ResolveIdentity tests already pin, so those
+// stubs staying as they are is the regression check, not a gap).
+func writeWhoamiStub(t *testing.T, dir, whoamiJSON string) {
+	t.Helper()
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\n"+
+		"if [ \"$1\" = \"whoami\" ]; then\n"+
+		"  echo '"+whoamiJSON+"'\n"+
+		"else\n"+
+		"  echo '[]'\n"+
+		"fi\n")
+}
+
+// TestMain_HeaderNamesTheResolvedParty is sp033 T4 criterion 4: a
+// registered identity is named once in the message pane header, so the
+// operator can see which party the monitor thinks they are.
+func TestMain_HeaderNamesTheResolvedParty(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":"aABCDEFGHJKMNPQRSTVWXYZ012","kind":"person","registered":true}`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "jan") {
+		t.Fatalf("header does not name the resolved party %q:\n%s", "jan", out)
+	}
+}
+
+// TestMain_UnregisteredIdentityLeavesHeaderUnchanged is criterion 3: no
+// identity is exactly the frame this pane rendered before T4 — no "no
+// identity" text either, since that would still be a byte change this
+// criterion forbids.
+func TestMain_UnregisteredIdentityLeavesHeaderUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":null,"kind":null,"registered":false}`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var withIdentity bytes.Buffer
+	if err := runOnce(&withIdentity, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+
+	dir2 := t.TempDir()
+	writeStub(t, dir2, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir2, "pi-worker", "#!/bin/sh\necho '[]'\n")
+	t.Setenv("PATH", dir2+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var withoutWhoami bytes.Buffer
+	if err := runOnce(&withoutWhoami, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+
+	if withIdentity.String() != withoutWhoami.String() {
+		t.Fatalf("an unregistered whoami answer changed the frame:\nunregistered: %q\nno-whoami-support: %q", withIdentity.String(), withoutWhoami.String())
+	}
+}
+
+// TestMain_AsOverridesTheDisplayedLabel is criterion 2: --as renames the
+// label the header shows without needing a second, Go-side registry lookup —
+// the address ResolveIdentity used is still whoami's own answer.
+func TestMain_AsOverridesTheDisplayedLabel(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":"aABCDEFGHJKMNPQRSTVWXYZ012","kind":"person","registered":true}`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, "", "orchestrator"); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "orchestrator") {
+		t.Fatalf("header does not carry --as's override label:\n%s", out)
+	}
+	if strings.Contains(out, "you are jan") {
+		t.Fatalf("header still names the un-overridden label:\n%s", out)
+	}
+}
+
+// TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel pins main.go's
+// other half of "identity wiring" (files_touched): tui.Model.HasIdentity is
+// what OpenComposer (sp033 T8) gates on, and it has no per-keystroke path —
+// cmd/ is the only place that ever sets it, exactly like Project. runOnce
+// builds its own throwaway Model, so this drives it through buildFrame
+// directly rather than reaching into runInteractive's program.
+func TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":"aABCDEFGHJKMNPQRSTVWXYZ012","kind":"person","registered":true}`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	model := tui.NewModel()
+	identity := resolveIdentity(context.Background(), "")
+	model.HasIdentity = identity.Registered
+
+	if !model.HasIdentity {
+		t.Fatalf("a registered whoami answer must set HasIdentity, got identity=%+v", identity)
+	}
+	if ok, reason := model.OpenComposer("aSOMEADDRESS0123456789ABCDE"); !ok {
+		t.Fatalf("OpenComposer refused despite a resolved identity: %s", reason)
+	}
+}
