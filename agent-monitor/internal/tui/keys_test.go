@@ -2943,3 +2943,37 @@ func TestForYou_ReturnToLiveZeroesTheCount(t *testing.T) {
 		t.Errorf("ForYouCount = %d, want 0 once the pane is live again", m.ForYouCount)
 	}
 }
+
+// TestForYou_FilterCommitResetsTheCount restates
+// TestOrder_FilterCommitResetsLiveness for ForYouCount: committing a filter
+// changes the message list's IDENTITY (sp032 T6 criterion 5), so a stale
+// for-you count is exactly as wrong as a stale PendingMessages one — a
+// filtered-out for-you row must not keep being counted (## edge_cases).
+// This is a DIRECT ASSIGNMENT site in handleEditingKey's KeyEnter arm, not
+// one that goes through clearPendingWhenLive, which is why it needs its own
+// case rather than being covered by TestForYou_ReturnToLiveZeroesTheCount.
+func TestForYou_FilterCommitResetsTheCount(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(5)
+	m.SetMessagesLen(27)
+	m.AddForYouArrivals(4)
+	if m.ForYouCount != 4 {
+		t.Fatalf("setup: ForYouCount = %d, want 4", m.ForYouCount)
+	}
+
+	m.HandleKey(Key{Rune: '/'})
+	m.HandleKey(Key{Rune: 'a'})
+	m.HandleKey(Key{Special: KeyEnter})
+
+	if m.ForYouCount != 0 {
+		t.Fatalf("committing a filter left ForYouCount = %d, want 0 (stale count survives filter change)", m.ForYouCount)
+	}
+
+	// The next sample re-evaluates from scratch against the new list rather
+	// than resuming the old count.
+	m.SetMessagesLen(6)
+	m.AddForYouArrivals(0)
+	if m.ForYouCount != 0 {
+		t.Errorf("the filtered sample resurrected a count: %d, want 0", m.ForYouCount)
+	}
+}

@@ -1118,8 +1118,14 @@ func (m *Model) handleEditingKey(k Key) Outcome {
 		// list's IDENTITY, so "N messages appended since you scrolled back"
 		// is a count about a list that no longer exists. Liveness itself is
 		// re-derived by the next SetMessagesLen against the filtered
-		// length; only the stale count has to be dropped here.
+		// length; only the stale counts have to be dropped here. ForYouCount
+		// is PendingMessages' twin (sp033 T7) and is exactly as stale for
+		// exactly the same reason — a filtered-out for-you row must not
+		// keep being counted (## edge_cases), so this direct assignment
+		// site needs both, the same as SetMessagesLen's live branch and
+		// clearPendingWhenLive already twin them.
 		m.PendingMessages = 0
+		m.ForYouCount = 0
 	case KeyBackspace:
 		if r := []rune(m.draft); len(r) > 0 {
 			m.draft = string(r[:len(r)-1])
