@@ -19,6 +19,8 @@ sections when status flips.
 
 ## spec
 
+- [[sp037|infinifu-lifecycle-drives-pi-worker]]
+
 ## ready
 
 
