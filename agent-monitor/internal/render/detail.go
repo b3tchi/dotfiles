@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"agent-monitor/internal/source"
 )
@@ -61,11 +60,12 @@ func RenderDetail(msg *source.Message, width, height int) []string {
 
 // detailAddressLines renders the selected envelope's own FromAddress and
 // ToAddresses (sp033 T1's fields) in full — never elided by shortAddress,
-// which exists only for the log's width budget (log.go). This is the fix
-// for sp035: two threads whose participants share LABELS (adr0034 mints a
-// fresh, never-reused address per registration, so a re-registered session
-// wears an old label) were indistinguishable everywhere, including here,
-// because the header above renders labels only. The addresses come
+// which exists only for the log's width budget (log.go). sp035 put both
+// addresses on one line (or a block) below the header, which left the
+// operator matching an address to a label BY POSITION — unworkable once a
+// second recipient was in play. sp036 T4 fixes that by construction: ONE
+// LINE PER PARTY, each line pairing that party's own label with its own
+// full address, so there is nothing left to match. The addresses come
 // straight from the envelope's own fields and are never re-derived from a
 // label (adr0034) — this pane is the view an operator copies an address
 // from, so unlike the header it is never truncated, only wrapped.
@@ -75,19 +75,48 @@ func RenderDetail(msg *source.Message, width, height int) []string {
 // address line at all — never an empty line, never a dash-filled
 // placeholder — so the header's shape is unchanged for old data. A message
 // with only one side populated (e.g. FromAddress set, ToAddresses empty)
-// renders that side alone, without a dangling "→" or an orDash placeholder
-// for the missing side.
+// renders that side alone: no line is manufactured for the side that has no
+// addresses at all.
+//
+// A malformed envelope whose To is longer than ToAddresses (or vice versa)
+// still renders one line per party that HAS an address; a party beyond the
+// shorter slice's length renders its label alone rather than being paired
+// with another party's address — pairing is by index into the two envelope
+// fields directly, never by re-deriving one side from the other.
 func detailAddressLines(msg source.Message, width int) []string {
-	var raw string
-	switch {
-	case msg.FromAddress != "" && len(msg.ToAddresses) > 0:
-		raw = fmt.Sprintf("%s → %s", msg.FromAddress, strings.Join(msg.ToAddresses, ","))
-	case msg.FromAddress != "":
-		raw = msg.FromAddress
-	case len(msg.ToAddresses) > 0:
-		raw = strings.Join(msg.ToAddresses, ",")
-	default:
-		return nil
+	var lines []string
+	if msg.FromAddress != "" {
+		lines = append(lines, addressPartyLine(msg.From, msg.FromAddress, width)...)
+	}
+	if len(msg.ToAddresses) > 0 {
+		n := len(msg.To)
+		if len(msg.ToAddresses) > n {
+			n = len(msg.ToAddresses)
+		}
+		for i := 0; i < n; i++ {
+			var label, addr string
+			if i < len(msg.To) {
+				label = msg.To[i]
+			}
+			if i < len(msg.ToAddresses) {
+				addr = msg.ToAddresses[i]
+			}
+			lines = append(lines, addressPartyLine(label, addr, width)...)
+		}
+	}
+	return lines
+}
+
+// addressPartyLine formats one party's own line: its label paired with its
+// own full address, or the bare label (orDash'd, matching the header's
+// treatment of a missing name) when no address is available for it — the
+// length-mismatch edge case. The whole line goes through neutralize before
+// wrapCells, exactly like every other cell this package renders: a hostile
+// label is exactly as foreign a byte source as a hostile address.
+func addressPartyLine(label, addr string, width int) []string {
+	raw := orDash(label)
+	if addr != "" {
+		raw = fmt.Sprintf("%s: %s", raw, addr)
 	}
 	return wrapCells(neutralize(raw), width)
 }

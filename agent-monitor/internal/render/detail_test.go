@@ -417,18 +417,24 @@ func TestRenderDetail_MultiRecipientShowsEveryAddress(t *testing.T) {
 }
 
 // TestRenderDetail_FromAddressOnly_NoDanglingArrow is the edge_cases entry:
-// FromAddress set, ToAddresses empty, renders the from-address alone —
-// never a dangling "→" and never an orDash placeholder for the missing
-// side.
+// FromAddress set, ToAddresses empty, renders the from-address alone, paired
+// with the From label on its own line — never a dangling "→" and never a
+// manufactured line for the side that has no addresses at all.
 func TestRenderDetail_FromAddressOnly_NoDanglingArrow(t *testing.T) {
 	fromAddr := addrPrefix11 + strings.Repeat("5", 16)
 	msg := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, nil, "hello")
 	lines := RenderDetail(msg, 80, 20)
 	if len(lines) != 3 {
-		t.Fatalf("got %d lines %q, want header + address line + one body line", len(lines), lines)
+		t.Fatalf("got %d lines %q, want header + one address line (from only) + one body line", len(lines), lines)
 	}
-	if lines[1] != fromAddr {
-		t.Fatalf("address line = %q, want exactly the bare from-address %q (no arrow, no placeholder)", lines[1], fromAddr)
+	if !strings.Contains(lines[1], "peer-1") || !strings.Contains(lines[1], fromAddr) {
+		t.Fatalf("address line = %q, want it to pair the from label %q with the from-address %q", lines[1], "peer-1", fromAddr)
+	}
+	if strings.Contains(lines[1], "→") {
+		t.Fatalf("address line = %q, want no dangling arrow", lines[1])
+	}
+	if strings.Contains(lines[1], "peer-2") {
+		t.Fatalf("address line = %q, want no manufactured line for the addressless recipient", lines[1])
 	}
 	if lines[2] != "hello" {
 		t.Fatalf("body line = %q, want %q", lines[2], "hello")
@@ -452,67 +458,98 @@ func fortyKeyJSONContent() string {
 	return b.String()
 }
 
-// TestRenderDetail_AddressLineCountsAgainstHeightBudget is edge_cases entry
-// 4: "the detail pane's height budget already truncates; the address line
-// is subject to the same budget and must not push the body out silently."
-// It compares an ADDRESSED envelope against the same body without
-// addresses, both clamped to the same small height: the addressed pane
-// must still obey the height budget exactly (never height+1 lines), and
-// its truncation indicator must report exactly one more hidden line than
-// the addressless pane's — the one line the address itself spent, not a
-// line silently dropped from the body underneath it.
-//
-// This catches a clamp-then-splice bug that TestRenderDetail_
-// HeightPositive_TruncationUnchanged structurally cannot: that test's
-// fixture carries no addresses, so a clamp that only ever sees the
-// header+body and appends the address line afterward passes it clean
-// while overrunning the real budget by one line.
-func TestRenderDetail_AddressLineCountsAgainstHeightBudget(t *testing.T) {
-	content := fortyKeyJSONContent()
-	fromAddr := addrPrefix11 + strings.Repeat("A", 16)
-	toAddr := addrPrefix11 + strings.Repeat("B", 16)
+// --- sp036 T4: one party per line, addresses paired inline -----------------
 
-	addressed := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, []string{toAddr}, content)
-	addressless := detailMsg("message", "peer-1", []string{"peer-2"}, content)
-
-	fullAddressed := RenderDetail(addressed, 80, 0)
-	fullAddressless := RenderDetail(addressless, 80, 0)
-	if len(fullAddressed) != len(fullAddressless)+1 {
-		t.Fatalf("setup: unclamped addressed=%d lines, addressless=%d lines, want exactly one more (the address line)", len(fullAddressed), len(fullAddressless))
+// TestRenderDetail_OnePartyPerLine is the task's primary success criterion:
+// a two-party envelope produces exactly one line per party — a From line and
+// a To line — each containing that party's own label AND its own address,
+// and NEITHER other party's address (the position-matching defect this task
+// replaces).
+func TestRenderDetail_OnePartyPerLine(t *testing.T) {
+	fromAddr := addrPrefix11 + strings.Repeat("1", 16)
+	toAddr := addrPrefix11 + strings.Repeat("2", 16)
+	msg := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, []string{toAddr}, `"ping"`)
+	lines := RenderDetail(msg, 80, 20)
+	if len(lines) < 3 {
+		t.Fatalf("got %d lines %q, want header + From line + To line + body", len(lines), lines)
 	}
-
-	const height = 5
-	gotAddressed := RenderDetail(addressed, 80, height)
-	gotAddressless := RenderDetail(addressless, 80, height)
-
-	if len(gotAddressed) != height {
-		t.Fatalf("got %d lines, want exactly height=%d (the address line must count against the budget, not extend it)", len(gotAddressed), height)
+	fromLine, toLine := lines[1], lines[2]
+	if !strings.Contains(fromLine, "peer-1") || !strings.Contains(fromLine, fromAddr) {
+		t.Fatalf("from line %q, want it to contain label %q and its own address %q", fromLine, "peer-1", fromAddr)
 	}
-	if len(gotAddressless) != height {
-		t.Fatalf("setup: addressless got %d lines, want height=%d", len(gotAddressless), height)
+	if strings.Contains(fromLine, toAddr) {
+		t.Fatalf("from line %q, want it NOT to contain the to-address %q (no position-matching)", fromLine, toAddr)
 	}
-
-	remainingAddressed := len(fullAddressed) - (height - 1)
-	remainingAddressless := len(fullAddressless) - (height - 1)
-	if remainingAddressed != remainingAddressless+1 {
-		t.Fatalf("addressed hides %d lines, addressless hides %d, want exactly one more hidden for the addressed pane", remainingAddressed, remainingAddressless)
+	if !strings.Contains(toLine, "peer-2") || !strings.Contains(toLine, toAddr) {
+		t.Fatalf("to line %q, want it to contain label %q and its own address %q", toLine, "peer-2", toAddr)
 	}
-
-	wantIndicator := truncateCells(neutralize(fmt.Sprintf(truncationIndicatorFmt, remainingAddressed)), 80)
-	if got := gotAddressed[len(gotAddressed)-1]; got != wantIndicator {
-		t.Fatalf("indicator = %q, want %q (one more hidden line than the addressless pane's %q)", got, wantIndicator, gotAddressless[len(gotAddressless)-1])
+	if strings.Contains(toLine, fromAddr) {
+		t.Fatalf("to line %q, want it NOT to contain the from-address %q (no position-matching)", toLine, fromAddr)
 	}
 }
 
-// TestRenderDetail_NarrowWidth_AddressFullyRecoverable is edge_cases entry
-// 2: "a narrow pane wraps an address across lines by display cells rather
-// than truncating it into something un-copyable — or truncates with the
-// existing visible indicator; whichever, the choice is asserted, not
-// incidental." This pins the wrap choice directly: at widths narrower than
-// the address itself, the full 27-character address must still be
-// recoverable by concatenating the rendered lines, proving the pane wraps
-// rather than truncates it away.
-func TestRenderDetail_NarrowWidth_AddressFullyRecoverable(t *testing.T) {
+// TestRenderDetail_MappingSurvivesMultiRecipient is the test_plan's named
+// defence against off-by-one pairing: three recipients whose addresses share
+// their first eleven characters (the millisecond-timestamp segment
+// same-millisecond ULIDs share, adr0034). Each recipient's line must carry
+// ITS OWN address and none of the other two — an off-by-one or
+// head-truncating implementation fails this.
+func TestRenderDetail_MappingSurvivesMultiRecipient(t *testing.T) {
+	addr1 := addrPrefix11 + strings.Repeat("1", 16)
+	addr2 := addrPrefix11 + strings.Repeat("2", 16)
+	addr3 := addrPrefix11 + strings.Repeat("3", 16)
+	msg := detailMsgAddr("message", "peer-1", []string{"r1", "r2", "r3"}, "", []string{addr1, addr2, addr3}, `"fan-out"`)
+	lines := RenderDetail(msg, 80, 20)
+	if len(lines) < 4 {
+		t.Fatalf("got %d lines %q, want header + 3 recipient lines + body", len(lines), lines)
+	}
+	want := map[string]string{"r1": addr1, "r2": addr2, "r3": addr3}
+	for i, label := range []string{"r1", "r2", "r3"} {
+		line := lines[1+i]
+		if !strings.Contains(line, label) {
+			t.Fatalf("line %d = %q, want it to contain label %q", i, line, label)
+		}
+		if !strings.Contains(line, want[label]) {
+			t.Fatalf("line %d = %q, want it to contain %q's own address %q", i, line, label, want[label])
+		}
+		for other, otherAddr := range want {
+			if other != label && strings.Contains(line, otherAddr) {
+				t.Fatalf("line %d = %q, want it NOT to contain %q's address %q", i, line, other, otherAddr)
+			}
+		}
+	}
+}
+
+// TestRenderDetail_LengthMismatchRendersLabelAlone is the safety edge case:
+// a malformed envelope where To is longer than ToAddresses. The recipient
+// beyond ToAddresses' length must render its label alone, never paired with
+// another recipient's address, and must not crash.
+func TestRenderDetail_LengthMismatchRendersLabelAlone(t *testing.T) {
+	addr1 := addrPrefix11 + strings.Repeat("1", 16)
+	msg := detailMsgAddr("message", "peer-1", []string{"r1", "r2"}, "", []string{addr1}, `"fan-out"`)
+	lines := RenderDetail(msg, 80, 20)
+	if len(lines) < 3 {
+		t.Fatalf("got %d lines %q, want header + 2 recipient lines + body", len(lines), lines)
+	}
+	r1Line, r2Line := lines[1], lines[2]
+	if !strings.Contains(r1Line, "r1") || !strings.Contains(r1Line, addr1) {
+		t.Fatalf("r1 line %q, want label r1 paired with its own address %q", r1Line, addr1)
+	}
+	if !strings.Contains(r2Line, "r2") {
+		t.Fatalf("r2 line %q, want label r2 present", r2Line)
+	}
+	if strings.Contains(r2Line, addr1) {
+		t.Fatalf("r2 line %q, want it NOT paired with r1's address %q (length mismatch must not misassign)", r2Line, addr1)
+	}
+}
+
+// TestRenderDetail_StillFullyRecoverableAtWidth20And12 is carried from
+// sp035 T3's audit (there: TestRenderDetail_NarrowWidth_AddressFullyRecoverable)
+// and re-asserted against the new one-line-per-party layout: at widths
+// narrower than the address itself, the full 27-character address must
+// still be recoverable by concatenating the rendered lines — wrapped, never
+// truncated away.
+func TestRenderDetail_StillFullyRecoverableAtWidth20And12(t *testing.T) {
 	addr := addrPrefix11 + strings.Repeat("Z", 16)
 	if len(addr) != 27 {
 		t.Fatalf("setup: fixture address must be 27 chars, got %d", len(addr))
@@ -529,5 +566,58 @@ func TestRenderDetail_NarrowWidth_AddressFullyRecoverable(t *testing.T) {
 		if !strings.Contains(joined, addr) {
 			t.Fatalf("width=%d: joined %q, want the full 27-character address recoverable (wrapped, not truncated away)", width, joined)
 		}
+	}
+}
+
+// TestRenderDetail_AddressLinesStillCountAgainstHeightBudget is carried from
+// sp035 T3's audit (there: TestRenderDetail_AddressLineCountsAgainstHeightBudget)
+// and re-asserted against the new layout, where a single-recipient envelope
+// now spends TWO lines on addresses (one From line, one To line) rather than
+// one combined line. The addressed pane must still obey the height budget
+// exactly (never height+N lines), and its truncation indicator must report
+// exactly wantExtraLines more hidden lines than the addressless pane's —
+// the lines the address section itself spent, not lines silently dropped
+// from the body underneath it.
+//
+// This catches a clamp-then-splice bug that TestRenderDetail_
+// HeightPositive_TruncationUnchanged structurally cannot: that test's
+// fixture carries no addresses, so a clamp that only ever sees the
+// header+body and appends the address lines afterward passes it clean while
+// overrunning the real budget.
+func TestRenderDetail_AddressLinesStillCountAgainstHeightBudget(t *testing.T) {
+	content := fortyKeyJSONContent()
+	fromAddr := addrPrefix11 + strings.Repeat("A", 16)
+	toAddr := addrPrefix11 + strings.Repeat("B", 16)
+
+	addressed := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, []string{toAddr}, content)
+	addressless := detailMsg("message", "peer-1", []string{"peer-2"}, content)
+
+	fullAddressed := RenderDetail(addressed, 80, 0)
+	fullAddressless := RenderDetail(addressless, 80, 0)
+	const wantExtraLines = 2 // one line for From, one line for the single To
+	if len(fullAddressed) != len(fullAddressless)+wantExtraLines {
+		t.Fatalf("setup: unclamped addressed=%d lines, addressless=%d lines, want exactly %d more (one line per party)", len(fullAddressed), len(fullAddressless), wantExtraLines)
+	}
+
+	const height = 5
+	gotAddressed := RenderDetail(addressed, 80, height)
+	gotAddressless := RenderDetail(addressless, 80, height)
+
+	if len(gotAddressed) != height {
+		t.Fatalf("got %d lines, want exactly height=%d (the address lines must count against the budget, not extend it)", len(gotAddressed), height)
+	}
+	if len(gotAddressless) != height {
+		t.Fatalf("setup: addressless got %d lines, want height=%d", len(gotAddressless), height)
+	}
+
+	remainingAddressed := len(fullAddressed) - (height - 1)
+	remainingAddressless := len(fullAddressless) - (height - 1)
+	if remainingAddressed != remainingAddressless+wantExtraLines {
+		t.Fatalf("addressed hides %d lines, addressless hides %d, want exactly %d more hidden for the addressed pane", remainingAddressed, remainingAddressless, wantExtraLines)
+	}
+
+	wantIndicator := truncateCells(neutralize(fmt.Sprintf(truncationIndicatorFmt, remainingAddressed)), 80)
+	if got := gotAddressed[len(gotAddressed)-1]; got != wantIndicator {
+		t.Fatalf("indicator = %q, want %q (more hidden than the addressless pane's %q)", got, wantIndicator, gotAddressless[len(gotAddressless)-1])
 	}
 }
