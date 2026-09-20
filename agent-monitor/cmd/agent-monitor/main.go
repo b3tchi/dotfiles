@@ -423,8 +423,36 @@ func (s *shell) expandedFn() func(string) bool {
 	return func(key string) bool { return s.expansion[key] }
 }
 
+// isThreaded is the SINGLE authority for "does the message pane render
+// threaded right now" (dotfiles-1t00.6 gap 2, rev-dotfiles-1t00-6 rejection
+// #1): height<=0 always means flat — "a pipe has no cursor and nothing to
+// expand" (## plan) — regardless of model.Threaded's own value, no matter who
+// is asking. Before this fix, renderFrame and currentThreadsAndRows each
+// restated `height > 0 && model.Threaded` as their own literal expression;
+// they agreed only by coincidence. shell.height documents itself as starting
+// at 0 (see shell's own doc, and a real terminal can legitimately report a 0
+// height too), so there is a real window — before the first
+// tea.WindowSizeMsg, or on a 0-height report — where the two calls would
+// silently diverge: renderFrame renders (and SetMessagesLen clamps the
+// cursor into) one row list while Update resolves the SAME cursor against a
+// different one. Every reader of "is this render threaded" — production or
+// test — calls this, never re-derives the condition inline.
+func isThreaded(model *tui.Model, height int) bool {
+	return height > 0 && model.Threaded
+}
+
+// threaded is shell's own copy of isThreaded, over its CURRENT width/height
+// and model — what currentThreadsAndRows (and so applyThreadOutcome,
+// selectedMessageID, restoreSelectionByID: everything that resolves "what
+// row is the cursor on right now" between keystrokes) consults, so it can
+// never disagree with the SAME frame's renderFrame call (buildFrame's own
+// s.height, s.model) about which row list is in play.
+func (s *shell) threaded() bool {
+	return isThreaded(s.model, s.height)
+}
+
 // currentThreadsAndRows recomputes the message pane's CURRENT threads and row
-// list off the shell's last sample, model.Threaded and s.expansion — the same
+// list off the shell's last sample, s.threaded() and s.expansion — the same
 // inputs filterMessageRows renders from, but read-only: it calls neither
 // SetMessagesLen nor SetMessageCount nor AddForYouArrivals, because it exists
 // for Update to resolve "what row is the cursor on right now" between
@@ -438,7 +466,7 @@ func (s *shell) currentThreadsAndRows() ([]render.Thread, []render.LogRow) {
 		return nil, nil
 	}
 	msgs := orderedMessages(s.model, sample)
-	if !s.model.Threaded {
+	if !s.threaded() {
 		rows, _ := buildMessageRows(msgs, false, nil)
 		return nil, rows
 	}
@@ -992,9 +1020,10 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	rosterRows := filterRosterRows(model, censusSample)
 	// dotfiles-1t00.6: --once (height<=0) always renders FLAT regardless of
 	// model.Threaded — "a pipe has no cursor and nothing to expand" (## plan)
-	// — so the decision has to live here rather than reading model.Threaded
-	// on its own, which is otherwise the only signal either path would read.
-	threaded := height > 0 && model.Threaded
+	// — via isThreaded, the single authority shell.threaded() also consults
+	// (gap 2, rev-dotfiles-1t00-6 rejection #1): two independent
+	// `height > 0 && model.Threaded` expressions agreed only by coincidence.
+	threaded := isThreaded(model, height)
 	msgRows, msgThreads := filterMessageRows(model, msgSample, resolvedIdentity, threaded, expanded)
 	rosterLines := paneLines(censusSample != nil, len(rosterRows))
 	logLines := paneLines(msgSample != nil, len(msgRows))

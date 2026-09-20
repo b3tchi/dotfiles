@@ -4739,6 +4739,77 @@ func TestShell_SelectedMessageOnThreadRowIsNewest(t *testing.T) {
 	}
 }
 
+// TestShell_ReplyFromThreadRowAddressesNewestMember is criterion 3's THIRD
+// consumer (rev-dotfiles-1t00-6 rejection #1, gap 1): the detail pane and
+// selectedMessage's own newest-member contract were pinned by
+// TestShell_SelectedMessageOnThreadRowIsNewest, but nothing exercised
+// tryOpenComposer (`a`) on a THREADED shell — every other ComposeTo
+// assertion in this file sits on a flat fixture. A mutant that reverted
+// tryOpenComposer back to the pre-Task-6 flat-list selection survived the
+// whole suite as a result.
+//
+// The cursor is deliberately parked on thread B's own row — row 3 of the
+// 4-row expanded list — rather than row 0: on this fixture rows 0-2 name the
+// SAME envelope under both the threaded row list and the pre-task flat one
+// (thread A's own row and its two children are, respectively, m3, m3 and
+// m1 — coincidentally what a flat cursor at those same indices would also
+// select), so a test anchored there could not tell the fixed code from the
+// reverted mutant. Row 3 is where the two lists disagree: threaded row 3 is
+// thread B (m2), while the flat list at index 3 doesn't exist at all (it has
+// only 3 entries) — so the mutant resolves nil (no recipient) instead of
+// worker-b's address.
+func TestShell_ReplyFromThreadRowAddressesNewestMember(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.model.HasIdentity = true
+	s.View()
+
+	s.Update(key(tea.KeyRight)) // expand thread A
+	s.View()                    // MessagesLen -> 4
+
+	for i := 0; i < 3; i++ {
+		s.Update(runeKey('j'))
+	}
+	if s.model.MessagesCursor != 3 {
+		t.Fatalf("setup: cursor = %d after 3x j, want 3 (thread B's own row)", s.model.MessagesCursor)
+	}
+
+	s.Update(runeKey('a'))
+
+	if !s.model.Composing {
+		t.Fatalf("`a` did not open the composer from thread B's own row")
+	}
+	if s.model.ComposeTo != "aWORKERB0000000000000000002" {
+		t.Fatalf("ComposeTo = %q, want thread B's newest (only) member's address %q", s.model.ComposeTo, "aWORKERB0000000000000000002")
+	}
+}
+
+// TestShell_ThreadedDecisionAgreesAtHeightZero pins gap 2's fix
+// (rev-dotfiles-1t00-6 rejection #1): before isThreaded became the single
+// authority both renderFrame and currentThreadsAndRows consult, renderFrame
+// gated the threaded decision on `height > 0 && model.Threaded` while
+// currentThreadsAndRows read model.Threaded UNGATED — reachable before the
+// first tea.WindowSizeMsg (shell.height starts at 0) or on a terminal that
+// reports a 0 height. At height 0 the two must now resolve the SAME row
+// list — the rendered count (SetMessagesLen, via a real render) and
+// currentMessageRows' own count — and both must be the FLAT count (3
+// messages), never the threaded one (2 threads), since height<=0 forces flat
+// regardless of model.Threaded's true value.
+func TestShell_ThreadedDecisionAgreesAtHeightZero(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 0})
+
+	s.View() // renders through renderFrame at height 0; sets MessagesLen
+
+	rendered := s.model.MessagesLen
+	live := len(s.currentMessageRows())
+	if rendered != live {
+		t.Fatalf("renderFrame's rendered row count (%d) disagrees with currentMessageRows' (%d) at height 0 — two authorities for the threaded decision", rendered, live)
+	}
+	if rendered != 3 {
+		t.Fatalf("MessagesLen = %d at height 0, want 3 (flat) — height<=0 must force flat even though model.Threaded is true", rendered)
+	}
+}
+
 // TestShell_CollapseKeepsCursorOnThreadRow is the test_plan's named case,
 // combined with the CARRIED FORWARD FROM TASK 5's AUDIT gate (dotfiles-
 // 1t00.5, relocated to this task's own notes): KeyLeft on a CHILD row must
