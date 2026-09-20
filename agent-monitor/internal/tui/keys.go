@@ -131,6 +131,16 @@ type Model struct {
 	MessagesLen      int
 	MessagesViewport int
 
+	// Threaded is dotfiles-1t00 Task 5's view mode: true groups the message
+	// pane into threads (Task 2's row flattening, wired into the pane by
+	// Task 6), false is the flat, chronological list ft016 has always shown.
+	// `t` toggles it from either pane — it is a VIEW mode, not a pane action,
+	// so it is not gated on Focus the way l/h/space are (see HandleKey) — and
+	// a session opens THREADED (NewModel), per sp034 ## solution. It is a
+	// plain bool so Model stays comparable; the expansion SET this mode needs
+	// lives in cmd/, never here (see Outcome.Thread).
+	Threaded bool
+
 	// MessagesCount is PendingMessages'/ForYouCount's growth reference —
 	// the sample's actual MESSAGE count, as opposed to MessagesLen, which
 	// (from the threaded pane onward) is the RENDERED ROW count. Before
@@ -219,7 +229,7 @@ type Model struct {
 // empty (length 0, scroll 0) until the first sample sets a real length, and
 // the detail pane visible (sp031 T5: present by default).
 func NewModel() *Model {
-	return &Model{Focus: PaneRoster, DetailVisible: true}
+	return &Model{Focus: PaneRoster, DetailVisible: true, Threaded: true}
 }
 
 // SetRosterLen records the roster's current row count (after filtering,
@@ -730,6 +740,15 @@ func (m *Model) zoomDetail() {
 	m.Focus = PaneDetail
 }
 
+// canToggleThread guards l/h/KeyLeft/KeyRight/space (dotfiles-1t00 Task 5):
+// expansion intent only makes sense when the message pane is focused, the
+// view is threaded, and there is at least one row to act on — the last
+// clause is the edge case that makes space on an empty message list a plain
+// no-op rather than an Outcome naming a key that does not exist.
+func (m *Model) canToggleThread() bool {
+	return m.Focus == PaneMessages && m.Threaded && m.MessagesLen > 0
+}
+
 // hideDetail is `d`'s off direction. It clears the zoom and moves focus off
 // the pane, which is what keeps "hidden but focused" and "hidden but zoomed"
 // from being representable (criterion 5 + its edge case). Focus goes to
@@ -1092,7 +1111,30 @@ type Outcome struct {
 	// criterion 3): the caller (T9) dispatches it as a tea.Cmd. Nil for
 	// every other key, including a whitespace-only ctrl+s (criterion 5).
 	Send *SendRequest
+
+	// Thread is dotfiles-1t00 Task 5's expansion signal: what l/h/KeyLeft/
+	// KeyRight/space ask the caller to do about the message pane's CURRENT
+	// selection — expand, collapse or toggle. HandleKey has no expansion set
+	// to mutate (Model must stay comparable — see Threaded's doc) and no row
+	// list either (that is Task 2's render.LogRow, which cmd/ holds), so it
+	// cannot say WHICH thread key is meant, only the INTENT: it is cmd/'s
+	// Task 6 that resolves the message pane's current cursor row to a key —
+	// on a child row, that child's own thread key, so the cursor can climb
+	// out of an expansion it is standing inside — and applies the intent to
+	// the set it owns. The same caller-acts-on-a-signal shape sp033 T8 used
+	// for Send above. Zero value ThreadNone for every other key.
+	Thread ThreadIntent
 }
+
+// ThreadIntent is Outcome.Thread's vocabulary (dotfiles-1t00 Task 5).
+type ThreadIntent int
+
+const (
+	ThreadNone ThreadIntent = iota
+	ThreadExpand
+	ThreadCollapse
+	ThreadToggle
+)
 
 // HandleKey drives ft016's key surface: `q`/Ctrl-C quit, `r` forces a
 // refresh, `tab` moves focus, `/` opens filter editing, arrows/jk move the
@@ -1143,6 +1185,17 @@ func (m *Model) HandleKey(k Key) Outcome {
 	case k.Rune == '/':
 		m.Editing = true
 		m.draft = ""
+	case k.Rune == 't' || k.Rune == 'T':
+		// dotfiles-1t00 Task 5: a view mode, not a pane action, so it is
+		// deliberately NOT gated on m.Focus (unlike l/h/space below) — 't'
+		// while the roster has focus still flips Threaded, moving no cursor.
+		m.Threaded = !m.Threaded
+	case (k.Rune == 'l' || k.Special == KeyRight) && m.canToggleThread():
+		return Outcome{Thread: ThreadExpand}
+	case (k.Rune == 'h' || k.Special == KeyLeft) && m.canToggleThread():
+		return Outcome{Thread: ThreadCollapse}
+	case k.Rune == ' ' && m.canToggleThread():
+		return Outcome{Thread: ThreadToggle}
 	case k.Special == KeyUp || k.Rune == 'k':
 		m.moveCursor(-1)
 	case k.Special == KeyDown || k.Rune == 'j':

@@ -3278,3 +3278,207 @@ func TestModel_StaysComparable(t *testing.T) {
 		t.Fatalf("mutating m did not change the comparable snapshot — the test is not exercising anything")
 	}
 }
+
+// dotfiles-1t00 Task 5: the key surface for the mode toggle (`t`) and the
+// expansion signals (l/h/KeyLeft/KeyRight/space). HandleKey mutates no
+// expansion set — it only reports intent on Outcome.Thread — so every test
+// here checks either Model.Threaded (the mode) or Outcome.Thread (the
+// signal), never a set that does not exist at this layer (cmd/'s Task 6).
+
+// TestNewModel_OpensThreaded pins sp034 ## solution's "a session opens
+// THREADED" as a fact about construction, not merely as something the first
+// `t` press happens to produce.
+func TestNewModel_OpensThreaded(t *testing.T) {
+	m := NewModel()
+	if !m.Threaded {
+		t.Fatalf("NewModel().Threaded = false, want true")
+	}
+}
+
+// TestThread_TTogglesModeFromEitherPaneWithoutMovingCursor is the edge case
+// naming 't' a VIEW mode rather than a pane action: it flips Threaded
+// regardless of which pane has focus, and moves neither pane's cursor.
+func TestThread_TTogglesModeFromEitherPaneWithoutMovingCursor(t *testing.T) {
+	for _, focus := range []Pane{PaneRoster, PaneMessages, PaneDetail} {
+		m := NewModel()
+		m.Focus = focus
+		m.SetRosterLen(5)
+		m.SetMessagesLen(5)
+		m.RosterCursor = 2
+		m.MessagesCursor = 2
+		want := !m.Threaded
+
+		out := m.HandleKey(Key{Rune: 't'})
+
+		if out != (Outcome{}) {
+			t.Errorf("focus %v: 't' outcome = %+v, want the zero Outcome", focus, out)
+		}
+		if m.Threaded != want {
+			t.Errorf("focus %v: Threaded = %v, want %v", focus, m.Threaded, want)
+		}
+		if m.RosterCursor != 2 || m.MessagesCursor != 2 {
+			t.Errorf("focus %v: a cursor moved: roster=%d messages=%d, want both unchanged at 2", focus, m.RosterCursor, m.MessagesCursor)
+		}
+	}
+}
+
+// TestKeys_TIsTextWhileComposing is the test plan's named case: while a
+// reply draft is open, 't' must not toggle Threaded — it belongs to the
+// draft, exactly like every other rune Composing already swallows (q, d, /,
+// G, ...).
+func TestKeys_TIsTextWhileComposing(t *testing.T) {
+	m := NewModel()
+	m.HasIdentity = true
+	if opened, reason := m.OpenComposer("bob@x"); !opened {
+		t.Fatalf("setup: OpenComposer refused: %s", reason)
+	}
+	wantThreaded := m.Threaded
+
+	out := m.HandleKey(Key{Rune: 't'})
+
+	if out != (Outcome{}) {
+		t.Fatalf("'t' while composing produced outcome %+v, want the zero Outcome", out)
+	}
+	if m.Threaded != wantThreaded {
+		t.Fatalf("Threaded flipped to %v while composing; 't' must be draft text, not a mode toggle", m.Threaded)
+	}
+	if m.ComposeDraft() != "t" {
+		t.Fatalf("compose draft = %q, want %q", m.ComposeDraft(), "t")
+	}
+}
+
+// TestKeys_SpaceIsTextWhileFiltering is the test plan's named case: while a
+// filter draft is open, space stays ordinary query text — the same rule
+// TestFilter_QWhileEditingIsTextNotQuit already pins for 'q', extended here
+// to the new binding rather than carving out an exception for it.
+func TestKeys_SpaceIsTextWhileFiltering(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneMessages
+	m.SetMessagesLen(5)
+	m.HandleKey(Key{Rune: '/'})
+
+	out := m.HandleKey(Key{Rune: ' '})
+
+	if out != (Outcome{}) {
+		t.Fatalf("space while editing produced outcome %+v, want the zero Outcome", out)
+	}
+	if m.FilterDraft() != " " {
+		t.Fatalf("filter draft = %q, want a literal space", m.FilterDraft())
+	}
+	if !m.Editing {
+		t.Fatalf("Editing = false, a space must not close the draft")
+	}
+}
+
+// TestThread_ExpandCollapseToggleRequireMessagesFocusAndThreaded asserts the
+// shared guard on l/h/KeyLeft/KeyRight/space (canToggleThread): each is a
+// no-op — Outcome.Thread stays ThreadNone — unless the message pane has
+// focus, the model is threaded, and there is at least one row.
+func TestThread_ExpandCollapseToggleRequireMessagesFocusAndThreaded(t *testing.T) {
+	keys := []struct {
+		name string
+		key  Key
+	}{
+		{"l", Key{Rune: 'l'}},
+		{"KeyRight", Key{Special: KeyRight}},
+		{"h", Key{Rune: 'h'}},
+		{"KeyLeft", Key{Special: KeyLeft}},
+		{"space", Key{Rune: ' '}},
+	}
+
+	for _, k := range keys {
+		t.Run(k.name+"/roster focused", func(t *testing.T) {
+			m := NewModel()
+			m.Focus = PaneRoster
+			m.SetMessagesLen(5)
+			if out := m.HandleKey(k.key); out.Thread != ThreadNone {
+				t.Errorf("Thread = %v with roster focused, want ThreadNone", out.Thread)
+			}
+		})
+		t.Run(k.name+"/flat mode", func(t *testing.T) {
+			m := NewModel()
+			m.Focus = PaneMessages
+			m.Threaded = false
+			m.SetMessagesLen(5)
+			if out := m.HandleKey(k.key); out.Thread != ThreadNone {
+				t.Errorf("Thread = %v in flat mode, want ThreadNone", out.Thread)
+			}
+		})
+		t.Run(k.name+"/empty list", func(t *testing.T) {
+			m := NewModel()
+			m.Focus = PaneMessages
+			// SetMessagesLen intentionally not called: MessagesLen stays 0
+			// (edge case: "space on an empty message list is a no-op, not an
+			// outcome with an empty key").
+			if out := m.HandleKey(k.key); out.Thread != ThreadNone {
+				t.Errorf("Thread = %v on an empty list, want ThreadNone", out.Thread)
+			}
+		})
+	}
+}
+
+// TestThread_ExpandCollapseToggleFireWhenGuardsAreSatisfied is
+// canToggleThread's positive case, twinning the negative table above: with
+// the message pane focused, the model threaded and a non-empty list, each
+// binding reports its own distinct intent.
+func TestThread_ExpandCollapseToggleFireWhenGuardsAreSatisfied(t *testing.T) {
+	cases := []struct {
+		name string
+		key  Key
+		want ThreadIntent
+	}{
+		{"l expands", Key{Rune: 'l'}, ThreadExpand},
+		{"KeyRight expands", Key{Special: KeyRight}, ThreadExpand},
+		{"h collapses", Key{Rune: 'h'}, ThreadCollapse},
+		{"KeyLeft collapses", Key{Special: KeyLeft}, ThreadCollapse},
+		{"space toggles", Key{Rune: ' '}, ThreadToggle},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel()
+			m.Focus = PaneMessages
+			m.SetMessagesLen(5)
+
+			if out := m.HandleKey(tc.key); out.Thread != tc.want {
+				t.Errorf("Thread = %v, want %v", out.Thread, tc.want)
+			}
+		})
+	}
+}
+
+// TestThread_ExpandRepeatedIsIdempotentAtTheSignalLevel is the edge case
+// "KeyRight on an already-expanded thread is idempotent": HandleKey holds no
+// expansion set to consult, so idempotence at this layer means the SAME
+// intent fires every time, letting cmd/'s set-insertion (Task 6) supply the
+// actual idempotence.
+func TestThread_ExpandRepeatedIsIdempotentAtTheSignalLevel(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneMessages
+	m.SetMessagesLen(5)
+
+	first := m.HandleKey(Key{Special: KeyRight})
+	second := m.HandleKey(Key{Special: KeyRight})
+	if first.Thread != ThreadExpand || second.Thread != ThreadExpand {
+		t.Fatalf("repeated KeyRight = %v, then %v, want ThreadExpand both times", first.Thread, second.Thread)
+	}
+}
+
+// TestKeys_CollapseFromChildRowTargetsItsThread guards against a HandleKey
+// that special-cases collapse by CURSOR POSITION. Model holds no row kind —
+// thread row vs. child row is Task 2's render.LogRow, which cmd/ owns
+// (Task 6) — so HandleKey's job is to report the SAME bare collapse intent
+// regardless of where the cursor sits; only cmd/'s later resolution can turn
+// "cursor on a child row" into "that child's own thread key".
+func TestKeys_CollapseFromChildRowTargetsItsThread(t *testing.T) {
+	for _, cursor := range []int{0, 1, 4, 9} {
+		m := NewModel()
+		m.Focus = PaneMessages
+		m.SetMessagesLen(10)
+		m.MessagesCursor = cursor
+
+		if out := m.HandleKey(Key{Special: KeyLeft}); out.Thread != ThreadCollapse {
+			t.Errorf("cursor %d: Thread = %v, want ThreadCollapse", cursor, out.Thread)
+		}
+	}
+}

@@ -4416,3 +4416,195 @@ func TestView_SuccessfulSendNoticeIsInvisible(t *testing.T) {
 		t.Fatalf("a closed composer must not render, even with a pending sendNotice:\n%s", view)
 	}
 }
+
+// dotfiles-1t00 Task 5: the mode toggle and expansion signals, driven
+// through the REAL dispatch path — translateKey into shell.Update — per
+// adr0036 and this task's own success criterion 5. A Model-level call alone
+// cannot see a missing translateKey arm; these tests exercise the arm that
+// already exists (translateKey has decoded KeyLeft/KeyRight and every
+// printable rune since before this task) reaching tui.Model.HandleKey with
+// the new bindings live.
+
+// TestKeys_RealKeypressExpandsAndCollapses is the test plan's named case:
+// tea.KeyMsg{Type: tea.KeyRight} and a real "l" rune both reach
+// HandleKey's ThreadExpand branch, and their mirrors (KeyLeft/"h") reach
+// ThreadCollapse — through translateKey, not a bare tui.Key literal.
+func TestKeys_RealKeypressExpandsAndCollapses(t *testing.T) {
+	newReady := func(t *testing.T) *shell {
+		t.Helper()
+		s := newTestShell(t)
+		s.model.Focus = tui.PaneMessages
+		s.model.SetMessagesLen(5)
+		return s
+	}
+
+	cases := []struct {
+		name string
+		msg  tea.KeyMsg
+		want tui.ThreadIntent
+	}{
+		{"KeyRight expands", key(tea.KeyRight), tui.ThreadExpand},
+		{"l expands", runeKey('l'), tui.ThreadExpand},
+		{"KeyLeft collapses", key(tea.KeyLeft), tui.ThreadCollapse},
+		{"h collapses", runeKey('h'), tui.ThreadCollapse},
+		{"space toggles", tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}, tui.ThreadToggle},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newReady(t)
+			for _, k := range translateKey(tc.msg) {
+				out := s.model.HandleKey(k)
+				if out.Thread == tc.want {
+					return
+				}
+			}
+			t.Fatalf("no translated key produced Thread = %v", tc.want)
+		})
+	}
+}
+
+// TestKeys_RealKeypressTogglesThreadedMode is the same real-dispatch
+// requirement for `t`: a real "t" rune, through translateKey and
+// shell.Update, flips Model.Threaded.
+func TestKeys_RealKeypressTogglesThreadedMode(t *testing.T) {
+	s := newTestShell(t)
+	want := !s.model.Threaded
+
+	s.Update(runeKey('t'))
+
+	if s.model.Threaded != want {
+		t.Fatalf("Threaded = %v after a real 't' keypress, want %v", s.model.Threaded, want)
+	}
+}
+
+// TestKeys_ExistingBindingsUnchanged is this task's success criterion 4,
+// driven through the real dispatch path with the message pane focused and
+// Threaded true — the EXACT configuration under which l/h/space are live —
+// so a guard that was accidentally widened to also catch one of these keys
+// (rather than only l/h/KeyLeft/KeyRight/space) shows up here. `a`/ctrl+s
+// are not repeated in this table: they are letters unrelated to the new
+// bindings (no shadow risk) and already covered exhaustively by the
+// TestComposer_* suite above.
+func TestKeys_ExistingBindingsUnchanged(t *testing.T) {
+	ready := func(t *testing.T) *shell {
+		t.Helper()
+		s := newTestShell(t)
+		s.model.SetRosterLen(5)
+		s.model.SetMessagesLen(5)
+		s.model.Focus = tui.PaneMessages
+		s.model.Threaded = true
+		return s
+	}
+
+	cases := []struct {
+		name     string
+		msg      tea.KeyMsg
+		wantQuit bool
+		check    func(t *testing.T, m *tui.Model)
+	}{
+		{name: "q quits", msg: runeKey('q'), wantQuit: true},
+		{name: "Q quits", msg: runeKey('Q'), wantQuit: true},
+		{name: "ctrl+c quits", msg: key(tea.KeyCtrlC), wantQuit: true},
+		{name: "d hides the detail pane", msg: runeKey('d'), check: func(t *testing.T, m *tui.Model) {
+			if m.DetailVisible {
+				t.Errorf("DetailVisible = true, want false after `d`")
+			}
+		}},
+		{name: "tab cycles focus off messages", msg: key(tea.KeyTab), check: func(t *testing.T, m *tui.Model) {
+			if m.Focus != tui.PaneDetail {
+				t.Errorf("Focus = %v, want PaneDetail", m.Focus)
+			}
+		}},
+		{name: "slash opens the filter draft", msg: runeKey('/'), check: func(t *testing.T, m *tui.Model) {
+			if !m.Editing {
+				t.Errorf("Editing = false, want true after `/`")
+			}
+		}},
+		{name: "j moves the cursor down", msg: runeKey('j'), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 1 {
+				t.Errorf("MessagesCursor = %d, want 1", m.MessagesCursor)
+			}
+		}},
+		{name: "down arrow moves the cursor down", msg: key(tea.KeyDown), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 1 {
+				t.Errorf("MessagesCursor = %d, want 1", m.MessagesCursor)
+			}
+		}},
+		{name: "g goes to the first row", msg: runeKey('g'), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 0 {
+				t.Errorf("MessagesCursor = %d, want 0", m.MessagesCursor)
+			}
+		}},
+		{name: "Home goes to the first row", msg: key(tea.KeyHome), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 0 {
+				t.Errorf("MessagesCursor = %d, want 0", m.MessagesCursor)
+			}
+		}},
+		{name: "G goes to the last row", msg: runeKey('G'), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 4 {
+				t.Errorf("MessagesCursor = %d, want 4", m.MessagesCursor)
+			}
+		}},
+		{name: "End goes to the last row", msg: key(tea.KeyEnd), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 4 {
+				t.Errorf("MessagesCursor = %d, want 4", m.MessagesCursor)
+			}
+		}},
+		{name: "PgDn advances the message cursor", msg: key(tea.KeyPgDown), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor == 0 {
+				t.Errorf("MessagesCursor = 0 after PgDn, want it to advance")
+			}
+		}},
+		{name: "PgUp is a no-op at the top", msg: key(tea.KeyPgUp), check: func(t *testing.T, m *tui.Model) {
+			if m.MessagesCursor != 0 {
+				t.Errorf("MessagesCursor = %d, want 0", m.MessagesCursor)
+			}
+		}},
+		{name: "enter zooms the detail pane", msg: key(tea.KeyEnter), check: func(t *testing.T, m *tui.Model) {
+			if !m.DetailZoom {
+				t.Errorf("DetailZoom = false, want true after enter")
+			}
+		}},
+		{name: "o zooms the detail pane", msg: runeKey('o'), check: func(t *testing.T, m *tui.Model) {
+			if !m.DetailZoom {
+				t.Errorf("DetailZoom = false, want true after `o`")
+			}
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ready(t)
+			_, cmd := s.Update(tc.msg)
+			if got := quits(cmd); got != tc.wantQuit {
+				t.Fatalf("quit = %v, want %v", got, tc.wantQuit)
+			}
+			if tc.check != nil {
+				tc.check(t, s.model)
+			}
+		})
+	}
+}
+
+// TestKeys_EscStillExitsZoomWithMessagesFocusedAndThreaded rounds out the
+// unchanged-bindings check with the one existing binding that needs two
+// keystrokes to observe: esc still leaves the detail zoom in the exact
+// configuration (messages focused, threaded) where the new bindings are
+// live.
+func TestKeys_EscStillExitsZoomWithMessagesFocusedAndThreaded(t *testing.T) {
+	s := newTestShell(t)
+	s.model.SetMessagesLen(5)
+	s.model.Focus = tui.PaneMessages
+	s.model.Threaded = true
+
+	s.Update(key(tea.KeyEnter))
+	if !s.model.DetailZoom {
+		t.Fatalf("setup: enter did not zoom the detail pane")
+	}
+
+	s.Update(key(tea.KeyEsc))
+	if s.model.DetailZoom {
+		t.Fatalf("esc did not exit the zoom")
+	}
+}
