@@ -1093,23 +1093,27 @@ func TestRenderThreadLog_HeaderCarriesPendingForYouAndIdentity(t *testing.T) {
 // --- dotfiles-br55 / dotfiles-qm4h Task 1: pad neutralises every grid cell -
 
 // TestRenderLog_HostileLabelIsNeutralisedInFlatGrid is the dotfiles-br55
-// fixture verbatim: a message whose From/To carry a live ESC. Before this
-// task, msgCellFor's From/To path (orDash(shortAddress(m.From)) /
-// toCellShort(m.To)) reached the terminal with no neutralize() anywhere —
-// only SUBJECT, via DeriveSubject, was ever cleaned. Every rendered line
-// must now be free of the raw ESC byte, not just the SUBJECT column's.
+// fixture, extended per rejection #1 gap 2: a message whose From/To carry
+// ESC, DEL (0x7f), a C1 byte, and a bare TAB — not just 0x1b, since DEL/C1
+// are the classes a neutralise-after-measure pad can smuggle through while
+// still landing on the RIGHT total width by accident (see
+// TestPad_DELAndC1DivergeFromRawWidth). Before this task, msgCellFor's
+// From/To path (orDash(shortAddress(m.From)) / toCellShort(m.To)) reached
+// the terminal with no neutralize() anywhere — only SUBJECT, via
+// DeriveSubject, was ever cleaned. Every rendered line must now be free of
+// every byte class neutralize strips, not just the SUBJECT column's.
 func TestRenderLog_HostileLabelIsNeutralisedInFlatGrid(t *testing.T) {
 	hostile := source.Message{
 		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
-		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		From: "w\x1b[31m\x7fa", To: []string{"j\x1b[0m\u009dx\tD"}, Kind: "message",
 		Content: json.RawMessage(`"harmless content"`),
 	}
 	sample := &source.MessageSample{Messages: []source.Message{hostile}, At: time.Now()}
 	lines := RenderLog(sample, false, time.Now(), 100)
 
 	for i, l := range lines {
-		if strings.ContainsRune(l, 0x1b) {
-			t.Errorf("line %d still carries an ESC byte: %q", i, l)
+		if hasStrippedControlByte(l) {
+			t.Errorf("line %d still carries a byte neutralize should have stripped: %q", i, l)
 		}
 	}
 	if !strings.Contains(lines[len(lines)-1], "harmless content") {
@@ -1126,17 +1130,21 @@ func TestRenderLog_HostileLabelIsNeutralisedInFlatGrid(t *testing.T) {
 // Both messages share the SAME hostile From/To pair so the label survives
 // participantLabels' first-message-wins race regardless of which message it
 // picks, and both hit the SAME cells br55 proved leaky on branch dec4f10a.
+// Rejection #1 gap 2: the label mixes ESC, DEL and a C1 byte, not just
+// 0x1b — see TestPad_DELAndC1DivergeFromRawWidth for why those classes are
+// the ones a neutralise-after-measure pad can hide behind a coincidentally
+// correct width.
 func TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow(t *testing.T) {
 	older := source.Message{
 		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
-		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		From: "w\x1b[31m\x7fa", To: []string{"j\x1b[0m\u009dx"}, Kind: "message",
 		Content:     json.RawMessage(`"harmless-older"`),
 		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
 		ToAddresses: []string{identityAddr},
 	}
 	newer := source.Message{
 		At: "2026-09-12T12:05:00.000000Z", ID: "a2",
-		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		From: "w\x1b[31m\x7fa", To: []string{"j\x1b[0m\u009dx"}, Kind: "message",
 		Content:     json.RawMessage(`"harmless-newer"`),
 		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
 		ToAddresses: []string{identityAddr},
@@ -1146,7 +1154,7 @@ func TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow(t *t
 		t.Fatalf("fixture drift: want one thread, got %d", len(threads))
 	}
 	th := threads[0]
-	if !strings.ContainsRune(strings.Join(th.Participants, ""), 0x1b) {
+	if !hasStrippedControlByte(strings.Join(th.Participants, "")) {
 		t.Fatalf("fixture drift: Participants lost the hostile label before rendering: %+v", th.Participants)
 	}
 	rows := ThreadRows(threads, func(string) bool { return true })
@@ -1155,11 +1163,11 @@ func TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow(t *t
 	}
 
 	threadLine := RenderThreadRow(rows[0], th, 80, "")
-	if strings.ContainsRune(threadLine, 0x1b) {
-		t.Errorf("thread row (PARTICIPANTS) still carries an ESC byte: %q", threadLine)
+	if hasStrippedControlByte(threadLine) {
+		t.Errorf("thread row (PARTICIPANTS) still carries a byte neutralize should have stripped: %q", threadLine)
 	}
 	childLine := RenderThreadRow(rows[1], th, 80, "")
-	if strings.ContainsRune(childLine, 0x1b) {
+	if hasStrippedControlByte(childLine) {
 		t.Errorf("child row (indented FROM) still carries an ESC byte: %q", childLine)
 	}
 }

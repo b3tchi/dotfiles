@@ -494,6 +494,76 @@ func TestPad_NeutralisesBeforeMeasuring(t *testing.T) {
 	}
 }
 
+// hasStrippedControlByte mirrors neutralize's own predicate (subject.go) so
+// a grid-level test can assert "nothing neutralize would have removed
+// survived rendering" without hardcoding just the ESC byte dotfiles-br55
+// happened to reproduce with. Rejection #1 gap 2: a test that only ever
+// tries 0x1b proves nothing about DEL (0x7f) or the C1 range (0x80-0x9f),
+// which runeWidth (unlike neutralize) does NOT treat as zero-width — see
+// TestPad_DELAndC1DivergeFromRawWidth below for why that distinction is the
+// one a neutralise-after-measure pad cannot survive. Shared by this file
+// and log_test.go; both are package render.
+func hasStrippedControlByte(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPad_DELAndC1DivergeFromRawWidth is rejection #1 gap 1:
+// TestPad_NeutralisesBeforeMeasuring above uses ESC alone, and ESC's
+// runeWidth is 0 whether or not it has been neutralised yet — raw width and
+// neutralised width are IDENTICAL for pure C0, so that test cannot tell a
+// correct pad from a neutralise-after-measure one; both land on the same
+// number by accident. DEL (0x7f) and the C1 range (0x80-0x9f) break that
+// accident: neutralize strips all three classes, but runeWidth only
+// special-cases r < 0x20 — DEL and C1 fall through to the default case and
+// count as width 1. A pad that measures the RAW string first therefore
+// computes a width that INCLUDES these bytes, pads to fill that budget, and
+// only then loses them for free when neutralize finally runs — landing
+// SHORT of the declared width by exactly the number of DEL/C1 bytes
+// removed. Every fixture here stays inside pad's PADDING branch (raw width
+// well under 12), which is where the rejection's differential dump found
+// the divergence; neutralising FIRST is the only order where "how much do I
+// pad" and "what actually reaches the terminal" agree.
+func TestPad_DELAndC1DivergeFromRawWidth(t *testing.T) {
+	cases := []string{
+		"w\x7fa",             // DEL
+		"w\u009da",           // C1 (0x9d)
+		"w\u0085a",           // C1 (0x85)
+		"a\x7f\u009b\u009da", // DEL + two C1 bytes in one cell
+	}
+	for _, s := range cases {
+		got := pad(s, 12)
+		if w := displayWidth(got); w != 12 {
+			t.Errorf("pad(%q, 12) = %q, display width %d, want exactly 12", s, got, w)
+		}
+		if hasStrippedControlByte(got) {
+			t.Errorf("pad(%q, 12) = %q, still carries a byte neutralize should have stripped", s, got)
+		}
+	}
+}
+
+// TestPad_TabIsNeutralised pins a genuine, intended behaviour change rather
+// than a silent regression: TAB (0x09) is C0, so runeWidth reports it as
+// zero-width exactly like ESC — but a terminal actually expands a raw TAB
+// to the next 8-cell stop, the same accounting lie ESC tells. Before this
+// task pad never neutralised at all, so "tabs\tnope" rendered with a live
+// TAB byte that happened to measure the same either way (TAB, like ESC, is
+// zero-width on BOTH sides of neutralize — see the doc above). This is the
+// one benign fixture in a full pad differential that changes byte-for-byte
+// after this fix, and it is fixed correctly: the TAB is gone, not replaced
+// with a guess, and the rest of the padding is unaffected.
+func TestPad_TabIsNeutralised(t *testing.T) {
+	got := pad("tabs\tnope", 12)
+	want := "tabsnope    "
+	if got != want {
+		t.Fatalf("pad(%q, 12) = %q, want %q", "tabs\tnope", got, want)
+	}
+}
+
 // TestPad_EscapesOnlyCellPadsToWidthNeverNegative is the test_plan's
 // "escapes-only" edge case: a cell that is NOTHING but control bytes must
 // collapse to empty and then pad out to width — never truncate a
@@ -537,21 +607,23 @@ func TestPad_BenignOutputUnchanged(t *testing.T) {
 // case: a census row is untrusted input exactly like a message envelope
 // (both are worker-supplied), so a hostile byte in ANY roster column — not
 // just the ones dotfiles-br55 named on the message pane — must not reach
-// the terminal.
+// the terminal. Rejection #1 gap 2: every column here mixes ESC with DEL
+// (0x7f), a C1 byte (0x9d) and a bare TAB (0x09), not just 0x1b, so this
+// grid is proven clean of every class neutralize strips, end to end.
 func TestRender_HostileRosterCellIsNeutralised(t *testing.T) {
 	at := time.Now()
 	rows := []source.Row{
 		{
-			Project: "w\x1b[31ma", Runtime: "j\x1b[0mx", Role: "peer",
+			Project: "w\x1b[31m\x7fa", Runtime: "j\x1b[0m\u009dx", Role: "peer",
 			State: "running", Status: "idle", Bucket: "idle",
-			Name: "peer-\x1b[2Jhostile",
+			Name: "peer-\x1b[2J\x7f\u0085\thostile",
 		},
 	}
 	sample := &source.Sample{Rows: rows, At: at}
 	lines := Render(sample, false, at, 100)
 	for i, l := range lines {
-		if strings.ContainsRune(l, 0x1b) {
-			t.Errorf("line %d still carries an ESC byte: %q", i, l)
+		if hasStrippedControlByte(l) {
+			t.Errorf("line %d still carries a byte neutralize should have stripped: %q", i, l)
 		}
 	}
 }
