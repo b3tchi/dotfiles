@@ -434,3 +434,100 @@ func TestRenderDetail_FromAddressOnly_NoDanglingArrow(t *testing.T) {
 		t.Fatalf("body line = %q, want %q", lines[2], "hello")
 	}
 }
+
+// fortyKeyJSONContent is the same 40-key object TestRenderDetail_HeightZero_
+// NoClampNoIndicator and TestRenderDetail_HeightPositive_TruncationUnchanged
+// use: 42 body lines (opening brace, 40 keys, closing brace) once indented,
+// long enough that a small height budget must actually clamp.
+func fortyKeyJSONContent() string {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < 40; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"k%02d":"v%02d"`, i, i)
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// TestRenderDetail_AddressLineCountsAgainstHeightBudget is edge_cases entry
+// 4: "the detail pane's height budget already truncates; the address line
+// is subject to the same budget and must not push the body out silently."
+// It compares an ADDRESSED envelope against the same body without
+// addresses, both clamped to the same small height: the addressed pane
+// must still obey the height budget exactly (never height+1 lines), and
+// its truncation indicator must report exactly one more hidden line than
+// the addressless pane's — the one line the address itself spent, not a
+// line silently dropped from the body underneath it.
+//
+// This catches a clamp-then-splice bug that TestRenderDetail_
+// HeightPositive_TruncationUnchanged structurally cannot: that test's
+// fixture carries no addresses, so a clamp that only ever sees the
+// header+body and appends the address line afterward passes it clean
+// while overrunning the real budget by one line.
+func TestRenderDetail_AddressLineCountsAgainstHeightBudget(t *testing.T) {
+	content := fortyKeyJSONContent()
+	fromAddr := addrPrefix11 + strings.Repeat("A", 16)
+	toAddr := addrPrefix11 + strings.Repeat("B", 16)
+
+	addressed := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, []string{toAddr}, content)
+	addressless := detailMsg("message", "peer-1", []string{"peer-2"}, content)
+
+	fullAddressed := RenderDetail(addressed, 80, 0)
+	fullAddressless := RenderDetail(addressless, 80, 0)
+	if len(fullAddressed) != len(fullAddressless)+1 {
+		t.Fatalf("setup: unclamped addressed=%d lines, addressless=%d lines, want exactly one more (the address line)", len(fullAddressed), len(fullAddressless))
+	}
+
+	const height = 5
+	gotAddressed := RenderDetail(addressed, 80, height)
+	gotAddressless := RenderDetail(addressless, 80, height)
+
+	if len(gotAddressed) != height {
+		t.Fatalf("got %d lines, want exactly height=%d (the address line must count against the budget, not extend it)", len(gotAddressed), height)
+	}
+	if len(gotAddressless) != height {
+		t.Fatalf("setup: addressless got %d lines, want height=%d", len(gotAddressless), height)
+	}
+
+	remainingAddressed := len(fullAddressed) - (height - 1)
+	remainingAddressless := len(fullAddressless) - (height - 1)
+	if remainingAddressed != remainingAddressless+1 {
+		t.Fatalf("addressed hides %d lines, addressless hides %d, want exactly one more hidden for the addressed pane", remainingAddressed, remainingAddressless)
+	}
+
+	wantIndicator := truncateCells(neutralize(fmt.Sprintf(truncationIndicatorFmt, remainingAddressed)), 80)
+	if got := gotAddressed[len(gotAddressed)-1]; got != wantIndicator {
+		t.Fatalf("indicator = %q, want %q (one more hidden line than the addressless pane's %q)", got, wantIndicator, gotAddressless[len(gotAddressless)-1])
+	}
+}
+
+// TestRenderDetail_NarrowWidth_AddressFullyRecoverable is edge_cases entry
+// 2: "a narrow pane wraps an address across lines by display cells rather
+// than truncating it into something un-copyable — or truncates with the
+// existing visible indicator; whichever, the choice is asserted, not
+// incidental." This pins the wrap choice directly: at widths narrower than
+// the address itself, the full 27-character address must still be
+// recoverable by concatenating the rendered lines, proving the pane wraps
+// rather than truncates it away.
+func TestRenderDetail_NarrowWidth_AddressFullyRecoverable(t *testing.T) {
+	addr := addrPrefix11 + strings.Repeat("Z", 16)
+	if len(addr) != 27 {
+		t.Fatalf("setup: fixture address must be 27 chars, got %d", len(addr))
+	}
+	msg := detailMsgAddr("message", "peer-1", []string{"peer-2"}, addr, nil, "hi")
+	for _, width := range []int{20, 12} {
+		lines := RenderDetail(msg, width, 20)
+		for _, l := range lines {
+			if w := displayWidth(l); w > width {
+				t.Fatalf("width=%d: line %q is %d cells wide, want <= %d", width, l, w, width)
+			}
+		}
+		joined := strings.Join(lines[1:], "")
+		if !strings.Contains(joined, addr) {
+			t.Fatalf("width=%d: joined %q, want the full 27-character address recoverable (wrapped, not truncated away)", width, joined)
+		}
+	}
+}
