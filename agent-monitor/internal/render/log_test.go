@@ -1089,3 +1089,77 @@ func TestRenderThreadLog_HeaderCarriesPendingForYouAndIdentity(t *testing.T) {
 		}
 	}
 }
+
+// --- dotfiles-br55 / dotfiles-qm4h Task 1: pad neutralises every grid cell -
+
+// TestRenderLog_HostileLabelIsNeutralisedInFlatGrid is the dotfiles-br55
+// fixture verbatim: a message whose From/To carry a live ESC. Before this
+// task, msgCellFor's From/To path (orDash(shortAddress(m.From)) /
+// toCellShort(m.To)) reached the terminal with no neutralize() anywhere —
+// only SUBJECT, via DeriveSubject, was ever cleaned. Every rendered line
+// must now be free of the raw ESC byte, not just the SUBJECT column's.
+func TestRenderLog_HostileLabelIsNeutralisedInFlatGrid(t *testing.T) {
+	hostile := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		Content: json.RawMessage(`"harmless content"`),
+	}
+	sample := &source.MessageSample{Messages: []source.Message{hostile}, At: time.Now()}
+	lines := RenderLog(sample, false, time.Now(), 100)
+
+	for i, l := range lines {
+		if strings.ContainsRune(l, 0x1b) {
+			t.Errorf("line %d still carries an ESC byte: %q", i, l)
+		}
+	}
+	if !strings.Contains(lines[len(lines)-1], "harmless content") {
+		t.Fatalf("row should still render its SUBJECT, not just lose the hostile label: %q", lines[len(lines)-1])
+	}
+}
+
+// TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow is
+// the thread-grid twin of the flat-grid test above, and the other two cells
+// dotfiles-br55 named: the thread row's PARTICIPANTS (thread.Participants,
+// sp034 Task 1's participantLabels, carried verbatim into
+// threadParticipantsCell) and a child row's indented FROM
+// (threadParticipantIndent + orDash(shortAddress(row.Message.From))).
+// Both messages share the SAME hostile From/To pair so the label survives
+// participantLabels' first-message-wins race regardless of which message it
+// picks, and both hit the SAME cells br55 proved leaky on branch dec4f10a.
+func TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow(t *testing.T) {
+	older := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		Content:     json.RawMessage(`"harmless-older"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
+		ToAddresses: []string{identityAddr},
+	}
+	newer := source.Message{
+		At: "2026-09-12T12:05:00.000000Z", ID: "a2",
+		From: "w\x1b[31ma", To: []string{"j\x1b[0mx"}, Kind: "message",
+		Content:     json.RawMessage(`"harmless-newer"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
+		ToAddresses: []string{identityAddr},
+	}
+	threads := Threads([]source.Message{older, newer})
+	if len(threads) != 1 {
+		t.Fatalf("fixture drift: want one thread, got %d", len(threads))
+	}
+	th := threads[0]
+	if !strings.ContainsRune(strings.Join(th.Participants, ""), 0x1b) {
+		t.Fatalf("fixture drift: Participants lost the hostile label before rendering: %+v", th.Participants)
+	}
+	rows := ThreadRows(threads, func(string) bool { return true })
+	if len(rows) != 2 || rows[0].Kind != KindThread || rows[1].Kind != KindMessage {
+		t.Fatalf("fixture drift: want thread row + one child row, got %+v", rows)
+	}
+
+	threadLine := RenderThreadRow(rows[0], th, 80, "")
+	if strings.ContainsRune(threadLine, 0x1b) {
+		t.Errorf("thread row (PARTICIPANTS) still carries an ESC byte: %q", threadLine)
+	}
+	childLine := RenderThreadRow(rows[1], th, 80, "")
+	if strings.ContainsRune(childLine, 0x1b) {
+		t.Errorf("child row (indented FROM) still carries an ESC byte: %q", childLine)
+	}
+}

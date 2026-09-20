@@ -161,7 +161,20 @@ func orDash(s string) string {
 // must be bounded by its actual terminal width, not by how many runes it
 // takes to encode that width, or a wide-character cell could overrun its
 // column and the line's declared width with it.
+//
+// pad is the ONLY function that writes a grid cell — every row/header in
+// the roster grid, the flat log grid and the thread grid goes through here
+// (dotfiles-br55). It neutralises s FIRST, before displayWidth/truncateCells
+// measure it, so no C0/DEL/C1 byte (an ESC included) can reach the terminal
+// from ANY column, not just SUBJECT (which DeriveSubject already
+// neutralises before calling here — neutralize is idempotent, so that is a
+// no-op second pass). Neutralising first also fixes the width-accounting
+// half of the same defect: runeWidth reports 0 for r < 0x20, so measuring
+// before neutralising would let an escape reach the terminal while
+// consuming no width budget. Neutralise → measure → truncate, in that
+// order, always.
 func pad(s string, width int) string {
+	s = neutralize(s)
 	w := displayWidth(s)
 	if w > width {
 		return truncateCells(s, width)

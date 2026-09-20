@@ -467,3 +467,91 @@ func TestRender_FilterQueryWiderThanTerminalNeverOverflows(t *testing.T) {
 		t.Fatalf("header dropped the tail the operator typed last: %q", header)
 	}
 }
+
+// --- dotfiles-br55 / dotfiles-qm4h Task 1: pad neutralises every grid cell -
+
+// TestPad_NeutralisesBeforeMeasuring is the test_plan's named ordering test.
+// "\x1b[31mAB" contains a live ESC (0x1b) whose OWN accounting is free —
+// runeWidth reports 0 for r < 0x20 — while the rest of the escape sequence's
+// bytes ("[31m") are ordinary printable runes that DO cost width, because
+// pad has no ANSI parser and cannot tell a CSI payload from real text. That
+// asymmetry is exactly what lets a neutralise-AFTER-measure/truncate
+// implementation slip an ESC byte past truncateCells: measuring and
+// truncating the RAW string first hands truncateCells the ESC as a
+// zero-cost passenger it carries along into the truncated result, and only
+// neutralising the FINAL string afterwards would have caught it — a bug
+// this pad already does not have, but a wrong "measure first" ordering
+// would reproduce. Correct behaviour: neutralize(s) first gives "[31mAB"
+// (6 cells), which truncateCells then cuts to "[31…" at width 4 — exactly
+// width cells, with no ESC anywhere in the result.
+func TestPad_NeutralisesBeforeMeasuring(t *testing.T) {
+	got := pad("\x1b[31mAB", 4)
+	if w := displayWidth(got); w != 4 {
+		t.Fatalf("pad(%q, 4) = %q, display width %d, want exactly 4", "\x1b[31mAB", got, w)
+	}
+	if strings.ContainsRune(got, 0x1b) {
+		t.Fatalf("pad(%q, 4) = %q, still carries an ESC (0x1b) byte", "\x1b[31mAB", got)
+	}
+}
+
+// TestPad_EscapesOnlyCellPadsToWidthNeverNegative is the test_plan's
+// "escapes-only" edge case: a cell that is NOTHING but control bytes must
+// collapse to empty and then pad out to width — never truncate a
+// zero-length string to a negative width, and never leave any of those
+// bytes in the output.
+func TestPad_EscapesOnlyCellPadsToWidthNeverNegative(t *testing.T) {
+	// ESC, BEL, ESC: every byte here is a C0 control character (< 0x20),
+	// unlike a full CSI sequence such as "\x1b[31m" whose "[31m" payload is
+	// ordinary printable text that neutralize leaves alone. This cell has
+	// nothing left once neutralised.
+	got := pad("\x1b\x07\x1b", 5)
+	if got != "     " {
+		t.Fatalf("pad of an escapes-only cell = %q, want 5 spaces", got)
+	}
+}
+
+// TestPad_BenignOutputUnchanged is the test_plan's byte-identity table:
+// neutralize removes nothing from text that carries no C0/DEL/C1 bytes, so
+// every one of these representative cells must render exactly as pad
+// produced it before this task touched the function.
+func TestPad_BenignOutputUnchanged(t *testing.T) {
+	cases := []struct {
+		s     string
+		width int
+		want  string
+	}{
+		{"hello", 8, "hello   "},
+		{"", 4, "    "},
+		{"exact", 5, "exact"},
+		{"toolongvalue", 6, "toolo…"},
+		{"工程项目服务平台", 9, "工程项目…"},
+	}
+	for _, c := range cases {
+		if got := pad(c.s, c.width); got != c.want {
+			t.Errorf("pad(%q, %d) = %q, want %q", c.s, c.width, got, c.want)
+		}
+	}
+}
+
+// TestRender_HostileRosterCellIsNeutralised is the test_plan's roster-grid
+// case: a census row is untrusted input exactly like a message envelope
+// (both are worker-supplied), so a hostile byte in ANY roster column — not
+// just the ones dotfiles-br55 named on the message pane — must not reach
+// the terminal.
+func TestRender_HostileRosterCellIsNeutralised(t *testing.T) {
+	at := time.Now()
+	rows := []source.Row{
+		{
+			Project: "w\x1b[31ma", Runtime: "j\x1b[0mx", Role: "peer",
+			State: "running", Status: "idle", Bucket: "idle",
+			Name: "peer-\x1b[2Jhostile",
+		},
+	}
+	sample := &source.Sample{Rows: rows, At: at}
+	lines := Render(sample, false, at, 100)
+	for i, l := range lines {
+		if strings.ContainsRune(l, 0x1b) {
+			t.Errorf("line %d still carries an ESC byte: %q", i, l)
+		}
+	}
+}
