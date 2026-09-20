@@ -242,7 +242,11 @@ func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time, sig 
 		// ToAddresses against.
 		forYou = 0
 	}
-	return withCountSegments(base, filterSegment(sig, width), sig.Pending, forYou, width)
+	// dotfiles-jw73 rejection #2: the filter text is budgeted against the room
+	// the COUNTS will leave behind, not against the full width. Budgeting it in
+	// isolation and appending the counts afterwards is what overflowed — each
+	// part fitted alone and their sum did not.
+	return withCountSegments(base, filterSegment(sig, filterBudget(width, sig.Pending, forYou)), sig.Pending, forYou, width)
 }
 
 // filterSegment turns LogSignals' filter fields into the header's optional
@@ -290,16 +294,11 @@ func withCountSegments(base string, filter string, pending, forYou int, width in
 	if filter != "" {
 		parts = append(parts, filter)
 	}
-	if pending > 0 {
-		parts = append(parts, fmt.Sprintf("+%d new", pending))
-	}
-	if forYou > 0 {
-		parts = append(parts, fmt.Sprintf("%d for you", forYou))
-	}
+	parts = append(parts, countParts(pending, forYou)...)
 	if len(parts) == 0 {
 		return base
 	}
-	segment := "  " + strings.Join(parts, ", ")
+	segment := segmentGap + strings.Join(parts, segmentJoin)
 	if width <= 0 || displayWidth(base)+displayWidth(segment) <= width {
 		// width <= 0 is this package's "do not clamp" convention, the same
 		// one paneBudgets and RenderDetail use.
@@ -308,7 +307,63 @@ func withCountSegments(base string, filter string, pending, forYou int, width in
 	if room := width - displayWidth(segment); room > 0 {
 		return truncateCells(base, room) + segment
 	}
-	return strings.TrimLeft(segment, " ")
+	// Last resort: the segment alone is wider than the terminal. Clamping
+	// here is what makes "no header line exceeds width" an invariant of this
+	// function rather than a property of whatever its callers happened to
+	// pass — dotfiles-jw73 rejection #2 was exactly this branch returning an
+	// assembled segment verbatim. `filterBudget` above should normally keep
+	// us out of it; this is the floor under that, not a substitute for it.
+	return truncateCells(strings.TrimLeft(segment, " "), width)
+}
+
+// segmentGap separates the header's base from its first segment; segmentJoin
+// separates segments from each other. Named because `filterBudget` has to
+// reserve exactly what the assembly above will spend.
+const (
+	segmentGap  = "  "
+	segmentJoin = ", "
+)
+
+// countParts renders sp032 T6's `+N new` and sp033 T7's `N for you`. Split
+// out of withCountSegments so that the count text has ONE definition: the
+// assembly and the budget that reserves room for it cannot drift into
+// disagreeing about how wide it is.
+func countParts(pending, forYou int) []string {
+	var parts []string
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("+%d new", pending))
+	}
+	if forYou > 0 {
+		parts = append(parts, fmt.Sprintf("%d for you", forYou))
+	}
+	return parts
+}
+
+// filterBudget is the width the FILTER segment may occupy, given the counts
+// that will be appended after it and the gap that precedes the whole
+// segment. Without this the filter is bounded against the full render width
+// and the counts push the assembled header past it (dotfiles-jw73 rejection
+// #2: a 70-cell draft plus both counts produced a 79-cell header against a
+// 60-cell budget).
+//
+// Returns width unchanged when width <= 0 — this package's "do not clamp"
+// convention has to survive the reservation, or a caller asking for no
+// clamping would get a 1-cell filter instead.
+func filterBudget(width, pending, forYou int) int {
+	if width <= 0 {
+		return width
+	}
+	reserved := displayWidth(segmentGap)
+	if counts := countParts(pending, forYou); len(counts) > 0 {
+		// The counts themselves plus the separator that will join them to
+		// the filter segment ahead of them.
+		reserved += displayWidth(segmentJoin + strings.Join(counts, segmentJoin))
+	}
+	budget := width - reserved
+	if budget < 1 {
+		budget = 1
+	}
+	return budget
 }
 
 func msgColumnHeaderLine(cols []msgColumn, widths map[msgColumn]int) string {

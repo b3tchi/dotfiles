@@ -616,3 +616,76 @@ func TestFilterHeader_SegmentKeepsTheWidthBudget(t *testing.T) {
 		}
 	}
 }
+
+// dotfiles-jw73 rejection #2. The filter segment and the count segments were
+// each bounded correctly in isolation and overflowed together: the filter was
+// budgeted against the full render width, then `+N new` / `N for you` were
+// appended on top of an already-full line. The reviewer's repro produced a
+// 79-cell header against a 60-cell budget, and every narrower width was worse.
+//
+// This is the combination the earlier width test missed — it used a short
+// filter and a single count at widths with enough slack for the base to
+// absorb, so the sum never exceeded the budget.
+func TestRenderLog_FilterAndBothCountsNeverExceedWidth(t *testing.T) {
+	sample := &source.MessageSample{Messages: sampleMessages(), At: time.Now()}
+	long := "a-very-long-filter-draft-that-nobody-would-type-but-tail-marker-XYZ"
+
+	for _, editing := range []bool{true, false} {
+		for _, width := range []int{15, 20, 25, 30, 40, 60, 80} {
+			sig := LogSignals{Pending: 9, ForYou: 3, Identity: identityAddr}
+			if editing {
+				sig.FilterEditing = true
+				sig.FilterDraft = long
+			} else {
+				sig.FilterQuery = long
+			}
+			for _, line := range RenderLog(sample, false, time.Now(), width, sig) {
+				if got := displayWidth(line); got > width {
+					t.Errorf("editing=%v width=%d: line is %d cells, over budget: %q",
+						editing, width, got, line)
+				}
+			}
+		}
+	}
+}
+
+// The counts are short and fixed; the filter is the variable-length part, so
+// the filter is what shrinks. Both counts must survive a draft long enough to
+// have consumed the whole line under the old budgeting — losing the doorbell
+// count to a long filter would trade one invisible signal for another.
+func TestRenderLog_CountsSurviveALongFilter(t *testing.T) {
+	header := RenderLog(&source.MessageSample{Messages: sampleMessages(), At: time.Now()}, false, time.Now(), 80, LogSignals{
+		FilterEditing: true,
+		FilterDraft:   strings.Repeat("x", 200),
+		Pending:       9,
+		ForYou:        3,
+		Identity:      identityAddr,
+	})[0]
+
+	for _, want := range []string{"+9 new", "3 for you"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("header lost %q to a long filter: %q", want, header)
+		}
+	}
+	if displayWidth(header) > 80 {
+		t.Errorf("header is %d cells, over 80: %q", displayWidth(header), header)
+	}
+}
+
+// truncateHeadCells keeps the TAIL, which is where the operator is typing.
+// A draft truncated from the other end would show them the beginning of a
+// query they have stopped looking at and hide the characters they just
+// pressed.
+func TestRenderLog_LongDraftKeepsTheTypedTail(t *testing.T) {
+	header := RenderLog(&source.MessageSample{Messages: sampleMessages(), At: time.Now()}, false, time.Now(), 60, LogSignals{
+		FilterEditing: true,
+		FilterDraft:   "prefix-nobody-is-looking-at-anymore-but-tail-marker-XYZ",
+		Pending:       9,
+		ForYou:        3,
+		Identity:      identityAddr,
+	})[0]
+
+	if !strings.Contains(header, "XYZ") {
+		t.Errorf("the tail the operator just typed is missing: %q", header)
+	}
+}
