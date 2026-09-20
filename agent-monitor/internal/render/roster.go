@@ -234,22 +234,51 @@ func rowAge(r source.Row, now time.Time, fallback string) string {
 	return ageString(now, at)
 }
 
+// RosterSignals bundles the per-frame filter state Render's header needs to
+// echo (dotfiles-jw73 rejection #1): tui.Model has ONE committed
+// Filter/draft, and FilterRoster (internal/tui/keys.go) applies it to
+// roster rows exactly like FilterMessages applies it to the message list —
+// so the roster's reduced view is exactly as silent as the message pane's
+// was before this task's first pass, and needs the identical indicator.
+// Deliberately its own small type rather than reusing render/log.go's
+// LogSignals: LogSignals also carries Pending/ForYou/Identity, which mean
+// nothing to a roster row, and a caller passing them here by mistake would
+// silently do nothing rather than fail to compile.
+//
+// It is VARIADIC for the same reason LogSignals is: the byte-identical
+// output of every pre-existing 4-argument Render call is a success
+// criterion, and leaving that call shape untouched is what keeps it honest
+// rather than re-asserting it by hand.
+type RosterSignals struct {
+	FilterQuery   string
+	FilterDraft   string
+	FilterEditing bool
+}
+
+func firstRosterSignalOrZero(vals []RosterSignals) RosterSignals {
+	if len(vals) == 0 {
+		return RosterSignals{}
+	}
+	return vals[0]
+}
+
 // Render turns one sample into terminal lines, at the given width, as of
 // `now` (passed in rather than read from time.Now so rendering is
 // deterministic and testable). stale marks a sample whose last refresh
 // attempt failed — the header says so, the rows still show the last good
 // frame, and nothing is blanked.
-func Render(sample *source.Sample, stale bool, now time.Time, width int) []string {
+func Render(sample *source.Sample, stale bool, now time.Time, width int, signals ...RosterSignals) []string {
 	if sample == nil {
 		return []string{"agents — waiting for first sample"}
 	}
 
+	sig := firstRosterSignalOrZero(signals)
 	cols := fitColumns(width)
 	widths := effectiveWidths(cols, width)
 	age := ageString(now, sample.At)
 
 	var lines []string
-	lines = append(lines, truncateToWidth(headerLine(sample, stale, age), width))
+	lines = append(lines, truncateToWidth(withRosterFilterSegment(headerLine(sample, stale, age), sig, width), width))
 	lines = append(lines, columnHeaderLine(cols, widths))
 
 	if len(sample.Rows) == 0 {
@@ -280,6 +309,35 @@ func truncateToWidth(s string, width int) string {
 		return string(r[:width])
 	}
 	return string(r[:width-1]) + "…"
+}
+
+// withRosterFilterSegment appends the roster's own filter segment to its
+// header line, squeezing exactly the way log.go's withCountSegments does
+// for the message pane: rosterFilterSegment already bounds the segment
+// itself to at most `width` cells, so when base+segment together overrun,
+// the BASE is what gets elided (or dropped entirely) — never the segment,
+// which is where the operator's own typing lives.
+func withRosterFilterSegment(base string, sig RosterSignals, width int) string {
+	segment := rosterFilterSegment(sig, width)
+	if segment == "" {
+		return base
+	}
+	joiner := "  "
+	full := base + joiner + segment
+	if width <= 0 || displayWidth(full) <= width {
+		return full
+	}
+	if room := width - displayWidth(joiner) - displayWidth(segment); room > 0 {
+		return truncateCells(base, room) + joiner + segment
+	}
+	return segment
+}
+
+// rosterFilterSegment is RosterSignals' entry into filter.go's shared
+// buildFilterSegment — see LogSignals' filterSegment (log.go) for why the
+// two panes each keep their own small signal type but share the text.
+func rosterFilterSegment(sig RosterSignals, width int) string {
+	return buildFilterSegment(sig.FilterQuery, sig.FilterDraft, sig.FilterEditing, width)
 }
 
 func headerLine(sample *source.Sample, stale bool, age string) string {

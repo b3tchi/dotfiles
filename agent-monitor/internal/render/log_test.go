@@ -554,6 +554,48 @@ func TestFilterHeader_ByteIdenticalWhenInactive(t *testing.T) {
 	}
 }
 
+// TestFilterHeader_QueryWiderThanTerminalNeverOverflows is dotfiles-jw73
+// rejection #1's reproduction: a 70-character committed query at width 40
+// must not blow the header past width — withCountSegments' overflow branch
+// returns an overlong segment verbatim, so the query itself has to be
+// cell-truncated before it ever reaches that function. The TAIL survives
+// (the operator typed it last), not the head.
+func TestFilterHeader_QueryWiderThanTerminalNeverOverflows(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	long := strings.Repeat("x", 60) + "-tail-end"
+	header := RenderLog(sample, false, now, 40, LogSignals{FilterQuery: long})[0]
+	if got := displayWidth(header); got > 40 {
+		t.Fatalf("header is %d cells wide at width 40: %q", got, header)
+	}
+	if !strings.Contains(header, "tail-end") {
+		t.Fatalf("header dropped the tail the operator typed last: %q", header)
+	}
+}
+
+// TestFilterHeader_DraftWiderThanTerminalNeverOverflows is the editing-mode
+// twin: a draft wider than the terminal must not overflow either, and the
+// text kept is the tail nearest the cursor.
+func TestFilterHeader_DraftWiderThanTerminalNeverOverflows(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	long := strings.Repeat("y", 60) + "-cursor-here"
+	header := RenderLog(sample, false, now, 40, LogSignals{FilterEditing: true, FilterDraft: long})[0]
+	if got := displayWidth(header); got > 40 {
+		t.Fatalf("header is %d cells wide at width 40: %q", got, header)
+	}
+	if !strings.Contains(header, "cursor-here") {
+		t.Fatalf("header dropped the text nearest the cursor: %q", header)
+	}
+	if !strings.HasSuffix(header, filterCursor) {
+		t.Fatalf("header = %q, want it to still end with the cursor marker", header)
+	}
+}
+
 // TestFilterHeader_SegmentKeepsTheWidthBudget mirrors
 // TestRenderLog_PendingSegmentKeepsTheWidthBudget: the filter segment is
 // subject to the same width-fit rule as every other header segment.

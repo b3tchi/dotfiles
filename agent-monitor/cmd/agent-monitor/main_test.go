@@ -540,8 +540,38 @@ func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
 	// the filter (not --project) were applied, "peer-one" would appear
 	// twice (once per project). Exactly one occurrence proves both
 	// predicates narrowed the result, not just the filter alone.
-	if got := countOccurrences(lines, "peer-one"); got != 1 {
+	//
+	// lines[0] is excluded: it is the roster's own header, which now
+	// legitimately echoes the committed query text ("filter: peer-one",
+	// dotfiles-jw73) — a second, header-only match that would otherwise be
+	// miscounted as a second DATA row.
+	if got := countOccurrences(lines[1:], "peer-one"); got != 1 {
 		t.Fatalf("expected exactly 1 peer-one row (dotfiles only, --project excludes the copacks one), got %d in %v", got, lines)
+	}
+}
+
+// TestRenderFrame_CommittedFilterShownInRosterHeader is dotfiles-jw73
+// rejection #1: FilterRoster applies the SAME committed filter as
+// FilterMessages, so the roster's own header must carry the same
+// indicator, wired through renderFrame exactly like the message pane's.
+func TestRenderFrame_CommittedFilterShownInRosterHeader(t *testing.T) {
+	roster := wideRoster(5)
+	msgs := wideMessages(5)
+
+	model := tui.NewModel()
+	model.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "agent00" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+	model.HandleKey(tui.Key{Special: tui.KeyEnter})
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	// lines[0] is the ROSTER's own header (it stacks first) — asserting on
+	// it specifically, not on the whole frame, distinguishes this from the
+	// message pane's already-wired indicator so the test cannot pass
+	// merely because the OTHER pane shows the filter.
+	if !strings.Contains(lines[0], "filter: agent00") {
+		t.Fatalf("expected the roster header (line 0) to show the committed filter, got %q", lines[0])
 	}
 }
 

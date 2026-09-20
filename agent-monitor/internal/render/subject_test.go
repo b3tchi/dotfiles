@@ -213,3 +213,50 @@ func TestDeriveSubject_EmptyContent(t *testing.T) {
 		t.Fatalf("got %q, want empty", got)
 	}
 }
+
+// TestTruncateHeadCells_KeepsTheTailNotTheHead is dotfiles-jw73 rejection
+// #1's fix: truncateCells (above) drops from the back and keeps the head,
+// which is right for a subject line but wrong for a filter draft — an
+// operator types at the END, so the characters worth keeping under a
+// squeeze are the ones nearest the cursor, not the ones typed first.
+// truncateHeadCells is that mirror: drop from the FRONT, keep the tail, put
+// the ellipsis first.
+func TestTruncateHeadCells_KeepsTheTailNotTheHead(t *testing.T) {
+	got := truncateHeadCells("claude-main-worker-7", 10)
+	if got != "…-worker-7" {
+		t.Fatalf("got %q, want the tail kept with a leading ellipsis", got)
+	}
+	if w := displayWidth(got); w > 10 {
+		t.Fatalf("got %q, %d cells wide, want <= 10", got, w)
+	}
+}
+
+func TestTruncateHeadCells_FitsExactlyNoTruncation(t *testing.T) {
+	if got := truncateHeadCells("hi", 5); got != "hi" {
+		t.Fatalf("got %q, want %q (no ellipsis when it already fits)", got, "hi")
+	}
+}
+
+func TestTruncateHeadCells_WidthOneIsJustTheEllipsis(t *testing.T) {
+	if got := truncateHeadCells("overflowing", 1); got != "…" {
+		t.Fatalf("got %q, want just the ellipsis at width 1", got)
+	}
+}
+
+func TestTruncateHeadCells_ZeroOrNegativeWidthIsEmpty(t *testing.T) {
+	for _, w := range []int{0, -1} {
+		if got := truncateHeadCells("anything", w); got != "" {
+			t.Fatalf("width=%d: got %q, want empty", w, got)
+		}
+	}
+}
+
+func TestTruncateHeadCells_CJK_TruncatesOnCellBoundary(t *testing.T) {
+	got := truncateHeadCells("filter日本語query", 8)
+	if w := displayWidth(got); w > 8 {
+		t.Fatalf("got %q, %d cells wide, want <= 8", got, w)
+	}
+	if !strings.HasSuffix(got, "query") {
+		t.Fatalf("got %q, want the tail (%q) kept", got, "query")
+	}
+}

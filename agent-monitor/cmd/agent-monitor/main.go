@@ -812,7 +812,15 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 		model.SetMessagesViewport(viewportRows(min(logLines, logBudget)))
 	}
 
-	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width)
+	// FilterRoster applies the SAME committed Filter/draft FilterMessages
+	// does (dotfiles-jw73 rejection #1) — a reduced roster was exactly as
+	// silent as a reduced message list, so the roster's header gets the
+	// identical signals the message header gets below.
+	roster := render.Render(scrolledCensusSample(censusSample, rosterRows, model.RosterScroll), censusStale, now, width, render.RosterSignals{
+		FilterQuery:   model.Filter.Query,
+		FilterDraft:   model.FilterDraft(),
+		FilterEditing: model.Editing,
+	})
 	// model.PendingMessages is sp032 T6's counter (inverted to the head by
 	// sp033 T6), and it is passed here rather than folded into the header by
 	// this file because render/ owns every byte of a pane's content — the

@@ -242,32 +242,14 @@ func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time, sig 
 		// ToAddresses against.
 		forYou = 0
 	}
-	return withCountSegments(base, filterSegment(sig), sig.Pending, forYou, width)
+	return withCountSegments(base, filterSegment(sig, width), sig.Pending, forYou, width)
 }
 
-// filterCursor is the filter draft's trailing cursor marker — the same
-// glyph cmd/agent-monitor's composerBodyLines appends to an in-progress
-// reply, kept here as its own literal since this package renders no code
-// shared with cmd/.
-const filterCursor = "▏"
-
 // filterSegment turns LogSignals' filter fields into the header's optional
-// filter segment (dotfiles-jw73). Editing wins over a committed query even
-// when both are set: the composer's region never shows anything but the
-// current draft either, and mirroring that (rather than inventing a second
-// shape that shows both) is requirement 5. Neither non-empty draft/query nor
-// FilterEditing returns "", the byte-identical case requirement 4 pins —
-// deliberately never keyed on a Set-style bool, since a committed empty
-// query (Filter{Set: true, Query: ""}) is the documented "cleared" state and
-// must render exactly like no filter was ever committed.
-func filterSegment(sig LogSignals) string {
-	if sig.FilterEditing {
-		return "editing filter: " + sig.FilterDraft + filterCursor
-	}
-	if sig.FilterQuery != "" {
-		return "filter: " + sig.FilterQuery
-	}
-	return ""
+// filter segment via filter.go's buildFilterSegment — shared with roster.go,
+// since both panes are filtered by the SAME committed Filter/draft.
+func filterSegment(sig LogSignals, width int) string {
+	return buildFilterSegment(sig.FilterQuery, sig.FilterDraft, sig.FilterEditing, width)
 }
 
 // firstSignalOrZero reads RenderLog's variadic signals argument. No value is

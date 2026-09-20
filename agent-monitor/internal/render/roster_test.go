@@ -389,3 +389,81 @@ func TestRender_AgeIgnoresAnUnparseableStamp(t *testing.T) {
 		t.Errorf("row age = %q, want the sample's own 1m", lines[2])
 	}
 }
+
+// --- dotfiles-jw73 rejection #1: FilterRoster is the SAME committed filter
+// as the message pane's — tui.Model has one Filter, not two (keys.go:838)
+// — so a reduced roster was exactly as silent as a reduced message list
+// was before this task's first pass, and needs the identical indicator. ---
+
+// TestRender_CommittedFilterShownInHeader is requirement 2 for the roster:
+// a non-empty committed query renders in the roster's own header line.
+func TestRender_CommittedFilterShownInHeader(t *testing.T) {
+	at := time.Now()
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+
+	got := Render(sample, false, at, 100, RosterSignals{FilterQuery: "peer-2"})[0]
+	if !strings.Contains(got, "filter: peer-2") {
+		t.Fatalf("header = %q, want it to carry the committed filter", got)
+	}
+}
+
+// TestRender_EmptyQueryKeysOnContentNotSet is the same Set-vs-content
+// distinction the message pane's header enforces: LogSignals carries no
+// Set bool, only the query string, so an empty FilterQuery must never add
+// a segment.
+func TestRender_EmptyQueryKeysOnContentNotSet(t *testing.T) {
+	at := time.Now()
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+	base := Render(sample, false, at, 100)[0]
+
+	if got := Render(sample, false, at, 100, RosterSignals{FilterQuery: ""})[0]; got != base {
+		t.Errorf("empty FilterQuery changed the header: %q, want %q", got, base)
+	}
+}
+
+// TestRender_EditingShowsDraftWithCursor is requirement 1 for the roster:
+// the roster is filtered by the SAME draft the message pane echoes, so it
+// needs the same echo — including the trailing cursor on an empty draft.
+func TestRender_EditingShowsDraftWithCursor(t *testing.T) {
+	at := time.Now()
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+
+	got := Render(sample, false, at, 100, RosterSignals{FilterEditing: true, FilterDraft: "pe"})[0]
+	if !strings.Contains(got, "editing filter: pe"+filterCursor) {
+		t.Fatalf("header = %q, want the draft echoed with a trailing cursor", got)
+	}
+}
+
+// TestRender_ByteIdenticalWhenFilterInactive is the regression anchor: every
+// existing 4-arg call (and any zero-value RosterSignals) renders the exact
+// byte-identical header as before this task.
+func TestRender_ByteIdenticalWhenFilterInactive(t *testing.T) {
+	at := time.Now()
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+
+	omitted := Render(sample, false, at, 100)
+	explicit := Render(sample, false, at, 100, RosterSignals{})
+	if omitted[0] != explicit[0] {
+		t.Fatalf("4-arg and explicit-zero calls differ: %q vs %q", omitted[0], explicit[0])
+	}
+	if strings.Contains(omitted[0], "filter") {
+		t.Fatalf("an inactive filter leaked a segment into the header: %q", omitted[0])
+	}
+}
+
+// TestRender_FilterQueryWiderThanTerminalNeverOverflows mirrors the message
+// pane's overflow fix: the roster's own header must never exceed width
+// either, and keeps the tail.
+func TestRender_FilterQueryWiderThanTerminalNeverOverflows(t *testing.T) {
+	at := time.Now()
+	sample := &source.Sample{Rows: sampleRows(), At: at}
+
+	long := strings.Repeat("x", 60) + "-tail-end"
+	header := Render(sample, false, at, 40, RosterSignals{FilterQuery: long})[0]
+	if got := displayWidth(header); got > 40 {
+		t.Fatalf("header is %d cells wide at width 40: %q", got, header)
+	}
+	if !strings.Contains(header, "tail-end") {
+		t.Fatalf("header dropped the tail the operator typed last: %q", header)
+	}
+}

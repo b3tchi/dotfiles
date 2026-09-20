@@ -152,6 +152,42 @@ func truncateCells(s string, width int) string {
 	return string(out) + "…"
 }
 
+// truncateHeadCells is truncateCells' mirror (dotfiles-jw73 rejection #1):
+// it bounds s to width display cells by dropping from the FRONT and keeping
+// the tail, ellipsis first. Used for a filter draft/query, where the
+// operator is typing at the END of the text — the characters worth keeping
+// under a squeeze are the ones nearest the cursor, not the ones typed
+// first, exactly the reason composerBodyLines (cmd/agent-monitor/main.go)
+// already keeps a multi-line draft's TAIL rather than its head.
+func truncateHeadCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	total := 0
+	for _, r := range runes {
+		total += runeWidth(r)
+	}
+	if total <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	budget := width - 1 // reserve one cell for the ellipsis
+	used := 0
+	start := len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := runeWidth(runes[i])
+		if used+w > budget {
+			break
+		}
+		used += w
+		start = i
+	}
+	return "…" + string(runes[start:])
+}
+
 // displayWidth is truncateCells's own width accounting, exported (within the
 // package) for tests to verify a result never exceeds its declared budget.
 func displayWidth(s string) int {
