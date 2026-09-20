@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -669,6 +670,225 @@ func TestRenderLog_CountsSurviveALongFilter(t *testing.T) {
 	}
 	if displayWidth(header) > 80 {
 		t.Errorf("header is %d cells, over 80: %q", displayWidth(header), header)
+	}
+}
+
+// --- sp034 Task 3: thread and child rows on one column grid ----------------
+
+// threadFixture builds a two-message thread ("worker-a" <-> the identity
+// address) where the NEWEST message ("a2", the operator's own reply) is NOT
+// addressed to the identity, and the OLDER message ("a1") is. This is the
+// fixture TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe needs: a mark
+// computed from row.Message (the newest member) alone would miss it.
+//
+// Returns the thread and its rows in ThreadRows' own order: rows[0] is the
+// thread row, rows[1] the newest child (the operator's own sent message,
+// "a2"), rows[2] the older child (the for-you message, "a1").
+func threadFixture() (Thread, []LogRow) {
+	older := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+		From: "worker-a", To: []string{"jan"}, Kind: "message",
+		Content:     json.RawMessage(`"distinctive-older-subject"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
+		ToAddresses: []string{identityAddr},
+	}
+	newest := source.Message{
+		At: "2026-09-12T12:05:00.000000Z", ID: "a2",
+		From: "jan", To: []string{"worker-a"}, Kind: "message",
+		Content:     json.RawMessage(`"distinctive-newest-subject"`),
+		FromAddress: identityAddr,
+		ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERA"},
+	}
+	threads := Threads([]source.Message{older, newest})
+	if len(threads) != 1 {
+		panic(fmt.Sprintf("fixture drift: want one thread, got %d", len(threads)))
+	}
+	th := threads[0]
+	rows := ThreadRows(threads, func(string) bool { return true })
+	if len(rows) != 3 || rows[0].Kind != KindThread || rows[1].Kind != KindMessage || rows[2].Kind != KindMessage {
+		panic(fmt.Sprintf("fixture drift: unexpected row shape %+v", rows))
+	}
+	if rows[1].Message.ID != "a2" || rows[2].Message.ID != "a1" {
+		panic(fmt.Sprintf("fixture drift: unexpected child order %+v", rows))
+	}
+	return th, rows
+}
+
+// TestRenderLog_ThreadRowGridMatchesChildGrid is the test_plan's named case:
+// SUBJECT must start at the same column INDEX on a thread row and a child
+// row, computed from the rendered strings rather than a hardcoded literal —
+// a hardcoded index would pass even if the two rows silently used different
+// column sets.
+func TestRenderLog_ThreadRowGridMatchesChildGrid(t *testing.T) {
+	th, rows := threadFixture()
+	threadRow, childRow := rows[0], rows[1]
+
+	threadLine := RenderThreadRow(threadRow, th, 80, "")
+	childLine := RenderThreadRow(childRow, th, 80, "")
+
+	idxThread := strings.Index(threadLine, "distinctive-newest-subject")
+	idxChild := strings.Index(childLine, "distinctive-newest-subject")
+	if idxThread < 0 {
+		t.Fatalf("thread row lost its SUBJECT: %q", threadLine)
+	}
+	if idxChild < 0 {
+		t.Fatalf("child row lost its SUBJECT: %q", childLine)
+	}
+	if idxThread != idxChild {
+		t.Fatalf("SUBJECT starts at different columns: thread=%d child=%d\nthread: %q\nchild:  %q",
+			idxThread, idxChild, threadLine, childLine)
+	}
+}
+
+// TestRenderLog_ChildRowOmitsRecipient is the test_plan's named case: a
+// child row's message has a distinctive recipient, and that recipient's
+// label/address must appear nowhere in the rendered line — the recipient is
+// implicit in the thread's own participant pair (## plan).
+func TestRenderLog_ChildRowOmitsRecipient(t *testing.T) {
+	th, rows := threadFixture()
+	line := RenderThreadRow(rows[1], th, 80, "")
+
+	if strings.Contains(line, "worker-a") {
+		t.Errorf("child row rendered its recipient label: %q", line)
+	}
+	if strings.Contains(line, "WORKERA") {
+		t.Errorf("child row rendered its recipient's raw address: %q", line)
+	}
+}
+
+// TestRenderLog_GlyphReflectsExpansion is criterion 1: ">" collapsed, "v"
+// expanded, on a thread row.
+func TestRenderLog_GlyphReflectsExpansion(t *testing.T) {
+	_, rows := threadFixture()
+	threadRow := rows[0]
+
+	collapsed := threadRow
+	collapsed.Expanded = false
+	if got := threadGlyphCell(collapsed); got != ">" {
+		t.Errorf("collapsed glyph = %q, want %q", got, ">")
+	}
+
+	expanded := threadRow
+	expanded.Expanded = true
+	if got := threadGlyphCell(expanded); got != "v" {
+		t.Errorf("expanded glyph = %q, want %q", got, "v")
+	}
+
+	if got := threadGlyphCell(LogRow{Kind: KindMessage}); got != "" {
+		t.Errorf("child row glyph = %q, want blank", got)
+	}
+}
+
+// TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe is the test_plan's
+// named case: the thread's only for-you message is NOT the newest member,
+// so a thread row whose mark were computed from row.Message alone (the
+// newest) would wrongly render unmarked.
+func TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe(t *testing.T) {
+	th, rows := threadFixture()
+	threadRow, newestChildRow, olderChildRow := rows[0], rows[1], rows[2]
+
+	threadLine := RenderThreadRow(threadRow, th, 80, identityAddr)
+	if !strings.HasPrefix(threadLine, markCell) {
+		t.Errorf("thread row with a buried for-you member missing its mark: %q", threadLine)
+	}
+
+	// The newest member itself is the operator's own sent message — never
+	// for-you — so its own child row must NOT carry the mark, even though
+	// the thread row (aggregating every member) does.
+	newestChildLine := RenderThreadRow(newestChildRow, th, 80, identityAddr)
+	if strings.HasPrefix(newestChildLine, markCell) {
+		t.Errorf("child row for the operator's own sent message wrongly marked: %q", newestChildLine)
+	}
+
+	// The older child row IS the for-you message and must carry its own mark.
+	olderChildLine := RenderThreadRow(olderChildRow, th, 80, identityAddr)
+	if !strings.HasPrefix(olderChildLine, markCell) {
+		t.Errorf("child row for the for-you message missing its mark: %q", olderChildLine)
+	}
+}
+
+// TestRenderLog_NarrowWidthDropsParticipantsKeepsGlyphAndSubject is the
+// test_plan's named case: at 24/32/40 cells no rendered line exceeds width,
+// and the glyph and SUBJECT survive even once PARTICIPANTS has dropped.
+func TestRenderLog_NarrowWidthDropsParticipantsKeepsGlyphAndSubject(t *testing.T) {
+	th, rows := threadFixture()
+	threadRow, childRow := rows[0], rows[1]
+
+	for _, width := range []int{24, 32, 40} {
+		for _, row := range []LogRow{threadRow, childRow} {
+			line := RenderThreadRow(row, th, width, identityAddr)
+			if got := displayWidth(line); got > width {
+				t.Errorf("width=%d kind=%v: line is %d cells wide: %q", width, row.Kind, got, line)
+			}
+		}
+
+		// The glyph survives even at the narrowest width tested — a
+		// collapsed list whose expansion state is invisible cannot be
+		// navigated.
+		collapsed := threadRow
+		collapsed.Expanded = false
+		line := RenderThreadRow(collapsed, th, width, identityAddr)
+		if !strings.Contains(line, ">") {
+			t.Errorf("width=%d: collapsed glyph dropped: %q", width, line)
+		}
+	}
+
+	// At the narrowest tested width, PARTICIPANTS has actually dropped —
+	// otherwise this test would not be exercising the drop path at all.
+	cols := fitThreadColumns(24, true)
+	for _, c := range cols {
+		if c == threadColParticipants {
+			t.Fatalf("fixture drift: PARTICIPANTS still fits at width 24: %v", cols)
+		}
+	}
+}
+
+// TestRenderLog_ThreadRowNeutralisesControlBytes is the test_plan's named
+// case: an envelope carrying \x1b[2J renders with no 0x1b byte, on both row
+// kinds — this pane renders other agents' bytes.
+func TestRenderLog_ThreadRowNeutralisesControlBytes(t *testing.T) {
+	hostile := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
+		From: "worker-a", To: []string{"jan"}, Kind: "message",
+		Content:     json.RawMessage(`"\u001b[2Jclear the screen"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
+		ToAddresses: []string{identityAddr},
+	}
+	threads := Threads([]source.Message{hostile})
+	rows := ThreadRows(threads, func(string) bool { return true })
+
+	for _, row := range rows {
+		line := RenderThreadRow(row, threads[0], 80, identityAddr)
+		if strings.ContainsRune(line, 0x1b) {
+			t.Errorf("kind=%v: rendered line still carries an ESC byte: %q", row.Kind, line)
+		}
+	}
+}
+
+// TestRenderLog_FlatOutputUnchanged pins RenderLog's flat output to the
+// exact bytes it rendered before Task 3 touched this file — the golden
+// frame the test_plan names. It is the byte-identity half of criterion 5;
+// TestRenderLog_HeaderAndColumns etc. above it stay untouched as the
+// existing-assertion half.
+func TestRenderLog_FlatOutputUnchanged(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	want := []string{
+		"messages — updated 30s ago",
+		"TIME     FROM         TO               SUBJECT              ",
+		"12:00:00 r2           brainstorm-1     Say the single word:…",
+		"12:01:00 smoke-opera… peer-1,peer-2    fan-out              ",
+	}
+	got := RenderLog(sample, false, now, 60)
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines, want %d:\n%q\nwant:\n%q", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 

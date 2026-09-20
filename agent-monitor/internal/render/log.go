@@ -11,6 +11,7 @@ package render
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -482,4 +483,268 @@ func toCellShort(to []string) string {
 		short = append(short, shortAddress(a))
 	}
 	return strings.Join(short, ",")
+}
+
+// --- sp034 Task 3: thread and child rows on one column grid ----------------
+//
+// threadColumn is the ONE grid shared by a thread's own summary row (Task
+// 2's KindThread LogRow) and its child rows (KindMessage): "[mark] glyph
+// TIME PARTICIPANTS N SUBJECT". A thread row and a child row are laid out by
+// exactly this same column set, at the same widths, so SUBJECT starts at
+// the same cell on both (## plan: "Row grid is ONE grid" — two grids would
+// drift the moment a column drops on a narrow terminal). Only the CONTENT
+// each cell renders differs by row Kind; see threadCellFor.
+//
+// This is a separate enum/machinery from msgColumn's flat grid on purpose:
+// the flat renderer (RenderLog above) must stay byte-identical, so nothing
+// here is wired into fitMsgColumns, msgCellFor or RenderLog's loop.
+type threadColumn int
+
+const (
+	// threadColMark mirrors msgColMark: sp033 T7's row marker, present only
+	// when a caller supplies a non-empty identity, and never a drop
+	// candidate for the same reason msgColMark never is (criterion 4: a
+	// for-you conversation must stay findable after every other column has
+	// dropped).
+	threadColMark threadColumn = iota
+	// threadColGlyph is Task 3's own column: ">" collapsed, "v" expanded, on
+	// a thread row; blank on a child row. Never a drop candidate — the named
+	// edge case is that a list whose expansion state is invisible cannot be
+	// navigated, so the glyph survives exactly as far as the mark does.
+	threadColGlyph
+	// threadColTime mirrors msgColTime: both row kinds carry TIME.
+	threadColTime
+	// threadColParticipants carries "a <> b" on a thread row and a
+	// two-cell-indented FROM on a child row (## plan: the participants
+	// column is spent differently per kind, not a different column). It is
+	// this grid's droppable column, exactly the role msgColTo plays in the
+	// flat grid's drop order.
+	threadColParticipants
+	// threadColCount carries the thread's member count on a thread row and
+	// is blank on a child row. Clamped, never a drop candidate: a count
+	// column that disappeared would look like the thread lost its count
+	// rather than the terminal ran out of room.
+	threadColCount
+	// threadColSubject mirrors msgColSubject: the never-dropped floor,
+	// derived through the existing DeriveSubject on both row kinds.
+	threadColSubject
+)
+
+var threadColumnHeader = map[threadColumn]string{
+	threadColMark:         "",
+	threadColGlyph:        "",
+	threadColTime:         "TIME",
+	threadColParticipants: "PARTICIPANTS",
+	threadColCount:        "N",
+	threadColSubject:      "SUBJECT",
+}
+
+// threadFixedWidth is threadColumn's counterpart to msgFixedWidth: the
+// declared width of every column except SUBJECT. threadCountWidth is sized
+// to "999+" (edge case: a count of 999+ does not widen the grid; the column
+// clamps rather than grows).
+var threadFixedWidth = map[threadColumn]int{
+	threadColMark:         1,
+	threadColGlyph:        1,
+	threadColTime:         8, // "15:04:05"
+	threadColParticipants: 20,
+	threadColCount:        4, // "999+"
+}
+
+// threadDropOrder is this grid's drop priority when the terminal is too
+// narrow for both fixed columns plus SUBJECT's floor: PARTICIPANTS drops
+// first (mirroring msgColTo dropping first in the flat grid), then TIME.
+// Mark, glyph, count and SUBJECT are never drop candidates.
+var threadDropOrder = []threadColumn{threadColParticipants, threadColTime}
+
+// fitThreadColumns is fitMsgColumns' counterpart for the thread grid: the
+// fixed columns (in display order: [Mark,] Glyph, Time, Participants,
+// Count) that fit alongside SUBJECT's floor at the given width, dropping
+// from threadDropOrder until they do.
+func fitThreadColumns(width int, hasIdentity bool) []threadColumn {
+	cols := []threadColumn{threadColGlyph, threadColTime, threadColParticipants, threadColCount}
+	if hasIdentity {
+		cols = append([]threadColumn{threadColMark}, cols...)
+	}
+	for len(cols) > 0 && threadFixedLineWidth(cols)+1+minSubjectWidth > width {
+		dropped := false
+		for _, d := range threadDropOrder {
+			if idx := indexOfThreadCol(cols, d); idx >= 0 {
+				cols = append(cols[:idx], cols[idx+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			break
+		}
+	}
+	return cols
+}
+
+func threadFixedLineWidth(cols []threadColumn) int {
+	w := 0
+	for i, c := range cols {
+		if i > 0 {
+			w++ // single-space separator
+		}
+		w += threadFixedWidth[c]
+	}
+	return w
+}
+
+func indexOfThreadCol(cols []threadColumn, target threadColumn) int {
+	for i, c := range cols {
+		if c == target {
+			return i
+		}
+	}
+	return -1
+}
+
+// threadSubjectWidth is subjectWidth's counterpart for the thread grid.
+func threadSubjectWidth(width int, cols []threadColumn) int {
+	used := threadFixedLineWidth(cols)
+	if len(cols) > 0 {
+		used++ // separator before SUBJECT
+	}
+	w := width - used
+	if w < minSubjectWidth {
+		w = minSubjectWidth
+	}
+	return w
+}
+
+// ThreadColumnHeaderLine renders this grid's column header at the given
+// width/identity — the thread-mode counterpart of msgColumnHeaderLine.
+func ThreadColumnHeaderLine(width int, hasIdentity bool) string {
+	cols := fitThreadColumns(width, hasIdentity)
+	subjW := threadSubjectWidth(width, cols)
+	widths := map[threadColumn]int{threadColSubject: subjW}
+	for _, c := range cols {
+		widths[c] = threadFixedWidth[c]
+	}
+	allCols := append(append([]threadColumn{}, cols...), threadColSubject)
+
+	parts := make([]string, 0, len(allCols))
+	for _, c := range allCols {
+		parts = append(parts, pad(threadColumnHeader[c], widths[c]))
+	}
+	return join(parts)
+}
+
+// threadParticipantIndent is how far a child row's FROM is indented inside
+// the shared participants column (criterion 2: "FROM indented by two cells
+// inside the participants column").
+const threadParticipantIndent = "  "
+
+// threadCountClamp is the count this grid's N column stops growing text for
+// (edge case: a count of 999+ does not widen the grid).
+const threadCountClamp = 999
+
+// RenderThreadRow renders one row of the pane's threaded row list — a
+// thread's own summary row or one of its child rows (sp034 Task 2's
+// LogRow) — on threadColumn's ONE grid. thread is the Thread that owns row
+// (looked up by row.Key), supplying PARTICIPANTS and the full member list a
+// thread row's for-you mark is computed over — data LogRow itself does not
+// carry, since a KindThread row's own Message field is only its NEWEST
+// member (Task 2's doc). RenderThreadRow establishes no order and re-sorts
+// nothing; it renders exactly the one row it is given.
+func RenderThreadRow(row LogRow, thread Thread, width int, identity string) string {
+	hasIdentity := identity != ""
+	cols := fitThreadColumns(width, hasIdentity)
+	subjW := threadSubjectWidth(width, cols)
+	widths := map[threadColumn]int{threadColSubject: subjW}
+	for _, c := range cols {
+		widths[c] = threadFixedWidth[c]
+	}
+	allCols := append(append([]threadColumn{}, cols...), threadColSubject)
+
+	parts := make([]string, 0, len(allCols))
+	for _, c := range allCols {
+		parts = append(parts, pad(threadCellFor(c, row, thread, widths[c], identity), widths[c]))
+	}
+	return join(parts)
+}
+
+func threadCellFor(c threadColumn, row LogRow, thread Thread, width int, identity string) string {
+	switch c {
+	case threadColMark:
+		return threadMarkCell(row, thread, identity)
+	case threadColGlyph:
+		return threadGlyphCell(row)
+	case threadColTime:
+		return timeCell(row.Message.At)
+	case threadColParticipants:
+		return threadParticipantsCell(row, thread)
+	case threadColCount:
+		return threadCountCell(row)
+	case threadColSubject:
+		return DeriveSubject(row.Message.Kind, row.Message.Content, width)
+	default:
+		return ""
+	}
+}
+
+// threadMarkCell is criterion 3: a thread row carries the mark when ANY
+// member of its thread is addressed to identity (thread.Messages, not just
+// row.Message — the thread row's own Message is only the newest member, so
+// a for-you message buried earlier in the thread would be invisible to a
+// mark computed from row.Message alone). A child row carries the mark only
+// when its own single message is — the existing ADDRESS comparison,
+// forYouRow, unchanged from sp033 T7.
+func threadMarkCell(row LogRow, thread Thread, identity string) string {
+	if identity == "" {
+		return ""
+	}
+	if row.Kind == KindMessage {
+		if forYouRow(row.Message, identity) {
+			return markCell
+		}
+		return ""
+	}
+	for _, m := range thread.Messages {
+		if forYouRow(m, identity) {
+			return markCell
+		}
+	}
+	return ""
+}
+
+// threadGlyphCell is criterion 1: ">" collapsed, "v" expanded, on a thread
+// row; blank on a child row (criterion 2).
+func threadGlyphCell(row LogRow) string {
+	if row.Kind != KindThread {
+		return ""
+	}
+	if row.Expanded {
+		return "v"
+	}
+	return ">"
+}
+
+// threadParticipantsCell is criterion 1 (a thread row: "a <> b", from
+// thread.Participants — already resolved display labels, sp034 Task 1's
+// participantLabels, so no re-elision is applied here) and criterion 2 (a
+// child row: its own message's FROM, indented, and — deliberately — no
+// recipient anywhere: the recipient is implicit in the thread's own
+// participant pair and TO is never rendered on a child row).
+func threadParticipantsCell(row LogRow, thread Thread) string {
+	if row.Kind == KindMessage {
+		return threadParticipantIndent + orDash(shortAddress(row.Message.From))
+	}
+	return strings.Join(thread.Participants, " <> ")
+}
+
+// threadCountCell is criterion 1's N cell (a thread row's member count,
+// clamped per threadCountClamp) and criterion 2's blank (a child row never
+// repeats the count).
+func threadCountCell(row LogRow) string {
+	if row.Kind != KindThread {
+		return ""
+	}
+	if row.Count > threadCountClamp {
+		return strconv.Itoa(threadCountClamp) + "+"
+	}
+	return strconv.Itoa(row.Count)
 }
