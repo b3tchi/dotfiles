@@ -461,3 +461,116 @@ func TestForYou_SegmentKeepsTheWidthBudgetAlongsidePending(t *testing.T) {
 		}
 	}
 }
+
+// --- dotfiles-jw73: the filter/draft become visible in the header ---------
+
+// TestFilterHeader_CommittedQueryShown is requirement 2: a non-empty
+// committed query renders in the header, so a reduced view is never silent.
+func TestFilterHeader_CommittedQueryShown(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	got := RenderLog(sample, false, now, 100, LogSignals{FilterQuery: "claude-main"})[0]
+	if got != "messages — updated 30s ago  filter: claude-main" {
+		t.Fatalf("header = %q, want the base header with a filter segment", got)
+	}
+}
+
+// TestFilterHeader_EmptyQueryKeysOnContentNotSet is the bug's central claim:
+// a committed empty query (Filter{Set: true, Query: ""}) matches everything
+// and must render exactly as if no filter had ever been committed — the
+// caller has nothing but the query string to signal that with (LogSignals
+// carries no Set bool), so an empty FilterQuery must never itself add a
+// segment.
+func TestFilterHeader_EmptyQueryKeysOnContentNotSet(t *testing.T) {
+	at := time.Now()
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+	base := RenderLog(sample, false, at, 100)[0]
+
+	if got := RenderLog(sample, false, at, 100, LogSignals{FilterQuery: ""})[0]; got != base {
+		t.Errorf("empty FilterQuery changed the header: %q, want %q", got, base)
+	}
+}
+
+// TestFilterHeader_EditingShowsDraftWithCursor is requirement 1: while
+// Editing, the draft as typed so far is echoed — including a trailing
+// cursor marker on an EMPTY draft, mirroring composerBodyLines' "an empty
+// draft still shows where typing lands" (cmd/agent-monitor/main.go).
+func TestFilterHeader_EditingShowsDraftWithCursor(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	got := RenderLog(sample, false, now, 100, LogSignals{FilterEditing: true, FilterDraft: ""})[0]
+	if got != "messages — updated 30s ago  editing filter: ▏" {
+		t.Fatalf("header = %q, want an empty draft still to show the cursor", got)
+	}
+
+	got = RenderLog(sample, false, now, 100, LogSignals{FilterEditing: true, FilterDraft: "cla"})[0]
+	if got != "messages — updated 30s ago  editing filter: cla▏" {
+		t.Fatalf("header = %q, want the typed draft echoed with a trailing cursor", got)
+	}
+}
+
+// TestFilterHeader_EditingWinsOverAStaleCommittedQuery is the composer-shape
+// choice (requirement 5): while Editing, the header shows the DRAFT, not the
+// previously committed query that is still in effect until Enter recommits
+// — exactly like the composer's region never shows anything but the current
+// draft.
+func TestFilterHeader_EditingWinsOverAStaleCommittedQuery(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	got := RenderLog(sample, false, now, 100, LogSignals{FilterQuery: "old", FilterEditing: true, FilterDraft: "new"})[0]
+	if got != "messages — updated 30s ago  editing filter: new▏" {
+		t.Fatalf("header = %q, want only the draft while editing", got)
+	}
+}
+
+// TestFilterHeader_ByteIdenticalWhenInactive is the regression anchor
+// (requirement 4): a caller that never sets FilterQuery/FilterEditing (every
+// pre-dotfiles-jw73 call, and any other zero-value LogSignals) gets the
+// exact byte-identical header as before this task.
+func TestFilterHeader_ByteIdenticalWhenInactive(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	for _, width := range []int{8, 20, 26, 40, 100} {
+		omitted := RenderLog(sample, false, now, width)
+		explicit := RenderLog(sample, false, now, width, LogSignals{})
+		withOtherSignals := RenderLog(sample, false, now, width, LogSignals{Pending: 3, ForYou: 1, Identity: identityAddr})[0]
+		if omitted[0] != explicit[0] {
+			t.Fatalf("width=%d: 4-arg and explicit-zero calls differ: %q vs %q", width, omitted[0], explicit[0])
+		}
+		if strings.Contains(omitted[0], "filter") {
+			t.Fatalf("width=%d: an inactive filter leaked a segment into the header: %q", width, omitted[0])
+		}
+		if strings.Contains(withOtherSignals, "filter") {
+			t.Fatalf("width=%d: an inactive filter leaked a segment alongside other signals: %q", width, withOtherSignals)
+		}
+	}
+}
+
+// TestFilterHeader_SegmentKeepsTheWidthBudget mirrors
+// TestRenderLog_PendingSegmentKeepsTheWidthBudget: the filter segment is
+// subject to the same width-fit rule as every other header segment.
+func TestFilterHeader_SegmentKeepsTheWidthBudget(t *testing.T) {
+	at := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := at.Add(30 * time.Second)
+	sample := &source.MessageSample{Messages: sampleMessages(), At: at}
+
+	// "  filter: claude-main, +4 new" is 30 cells; every width below fits it
+	// exactly or with room to spare for (elided) prose.
+	for _, width := range []int{30, 40, 50, 60} {
+		header := RenderLog(sample, false, now, width, LogSignals{FilterQuery: "claude-main", Pending: 4})[0]
+		if got := displayWidth(header); got > width {
+			t.Errorf("width=%d: header is %d cells wide: %q", width, got, header)
+		}
+		if !strings.Contains(header, "filter: claude-main") {
+			t.Errorf("width=%d: filter segment squeezed out of %q", width, header)
+		}
+	}
+}

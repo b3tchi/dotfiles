@@ -206,6 +206,30 @@ func TestFilter_TypingBuildsQueryAndBackspaceEdits(t *testing.T) {
 	}
 }
 
+// TestFilter_FilterDraftExposesTypedText is dotfiles-jw73's accessor, the
+// filter draft's ComposeDraft equivalent: m.draft is otherwise package-
+// private, and the render layer (cmd/) needs to read back what the operator
+// is typing before Enter commits it.
+func TestFilter_FilterDraftExposesTypedText(t *testing.T) {
+	m := NewModel()
+	m.HandleKey(Key{Rune: '/'})
+
+	if got := m.FilterDraft(); got != "" {
+		t.Fatalf("got FilterDraft() %q on a freshly opened draft, want empty", got)
+	}
+	for _, r := range "cla" {
+		m.HandleKey(Key{Rune: r})
+	}
+	if got := m.FilterDraft(); got != "cla" {
+		t.Fatalf("got FilterDraft() %q, want %q", got, "cla")
+	}
+
+	m.HandleKey(Key{Special: KeyEnter})
+	if got := m.FilterDraft(); got != "" {
+		t.Fatalf("got FilterDraft() %q after commit, want the draft cleared", got)
+	}
+}
+
 // TestFilter_QWhileEditingIsTextNotQuit guards the ordering in HandleKey:
 // editing must be checked BEFORE the quit/refresh/tab/scroll switch, or
 // typing a filter containing 'q', 'r', 'j' or 'k' would trigger those

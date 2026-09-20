@@ -545,6 +545,120 @@ func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
 	}
 }
 
+// TestRenderFrame_CommittedFilterShownInMessageHeader is dotfiles-jw73
+// requirement 2, wired through renderFrame: a non-empty committed filter
+// query appears in the message pane's header line so a reduced view is
+// never silent.
+func TestRenderFrame_CommittedFilterShownInMessageHeader(t *testing.T) {
+	roster := wideRoster(5)
+	msgs := wideMessages(5)
+
+	model := tui.NewModel()
+	model.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "claude-main" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+	model.HandleKey(tui.Key{Special: tui.KeyEnter})
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	if !containsSubstring(lines, "filter: claude-main") {
+		t.Fatalf("expected the message header to show the committed filter, got %v", lines)
+	}
+}
+
+// TestRenderFrame_ClearedFilterShowsNoIndicator is the bug's central claim,
+// wired through renderFrame: committing an EMPTY query (Filter{Set: true,
+// Query: ""}, the documented way to clear a filter) must not display an
+// indicator — a Set-keyed check would show a filter that isn't filtering.
+func TestRenderFrame_ClearedFilterShowsNoIndicator(t *testing.T) {
+	roster := wideRoster(5)
+	msgs := wideMessages(5)
+
+	model := tui.NewModel()
+	model.HandleKey(tui.Key{Rune: '/'})
+	model.HandleKey(tui.Key{Special: tui.KeyEnter})
+	if !model.Filter.Set {
+		t.Fatalf("setup: expected Filter.Set after committing an empty query")
+	}
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	if containsSubstring(lines, "filter:") {
+		t.Fatalf("a cleared (Set=true, Query=\"\") filter must show no indicator, got %v", lines)
+	}
+}
+
+// TestRenderFrame_DraftEchoedWhileEditing is dotfiles-jw73 requirement 1,
+// wired through renderFrame: pressing `/` and typing must echo the draft
+// text in the message header rather than typing blind.
+func TestRenderFrame_DraftEchoedWhileEditing(t *testing.T) {
+	roster := wideRoster(5)
+	msgs := wideMessages(5)
+
+	model := tui.NewModel()
+	model.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "cla" {
+		model.HandleKey(tui.Key{Rune: r})
+	}
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	if !containsSubstring(lines, "editing filter: cla") {
+		t.Fatalf("expected the message header to echo the in-progress draft, got %v", lines)
+	}
+}
+
+// TestRenderFrame_FrameByteIdenticalWhenFilterInactive is dotfiles-jw73
+// requirement 4, the regression anchor: opening a filter draft and
+// abandoning it with esc, or committing then re-clearing it, must leave the
+// frame byte-identical to a model that never touched the filter at all —
+// mirroring TestLayout_FrameByteIdenticalWhenComposerClosed's proof shape.
+func TestRenderFrame_FrameByteIdenticalWhenFilterInactive(t *testing.T) {
+	roster := wideRoster(20)
+	msgs := wideMessages(20)
+	now := time.Now()
+
+	baseline := tui.NewModel()
+	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40)
+
+	abandoned := tui.NewModel()
+	abandoned.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "never committed" {
+		abandoned.HandleKey(tui.Key{Rune: r})
+	}
+	abandoned.HandleKey(tui.Key{Special: tui.KeyEsc})
+	if abandoned.Editing {
+		t.Fatalf("setup: esc did not close the filter draft")
+	}
+
+	clearedAgain := tui.NewModel()
+	clearedAgain.HandleKey(tui.Key{Rune: '/'})
+	for _, r := range "peer-1" {
+		clearedAgain.HandleKey(tui.Key{Rune: r})
+	}
+	clearedAgain.HandleKey(tui.Key{Special: tui.KeyEnter})
+	clearedAgain.HandleKey(tui.Key{Rune: '/'})
+	clearedAgain.HandleKey(tui.Key{Special: tui.KeyEnter})
+	if !clearedAgain.Filter.Set || clearedAgain.Filter.Query != "" {
+		t.Fatalf("setup: expected a committed empty (cleared) filter, got %+v", clearedAgain.Filter)
+	}
+
+	for name, touched := range map[string]*tui.Model{"esc-abandoned": abandoned, "committed-then-cleared": clearedAgain} {
+		t.Run(name, func(t *testing.T) {
+			gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40)
+			if len(gotLines) != len(baseLines) {
+				t.Fatalf("changed the frame's line count: got %d, want %d", len(gotLines), len(baseLines))
+			}
+			for i := range baseLines {
+				if gotLines[i] != baseLines[i] {
+					t.Fatalf("line %d differs:\ngot:  %q\nwant: %q", i, gotLines[i], baseLines[i])
+				}
+			}
+			if gotLayout != baseLayout {
+				t.Fatalf("layout differs:\ngot:  %+v\nwant: %+v", gotLayout, baseLayout)
+			}
+		})
+	}
+}
+
 func containsSubstring(lines []string, sub string) bool {
 	for _, l := range lines {
 		if strings.Contains(l, sub) {

@@ -931,6 +931,13 @@ func (m *Model) OpenComposer(toAddress string) (bool, string) {
 // draft field — this is the one read-only door into it, mirroring ComposeTo.
 func (m *Model) ComposeDraft() string { return m.composeDraft }
 
+// FilterDraft exposes the filter draft's current text (dotfiles-jw73): the
+// message pane's header needs to echo what the operator is typing while
+// Editing, exactly as ComposeDraft echoes the reply composer's — draft was
+// package-private with no accessor until now, which is what made `/` type
+// blind.
+func (m *Model) FilterDraft() string { return m.draft }
+
 // SendRequest is what ctrl+s yields from the composer (criterion 3): the
 // address OpenComposer bound at open time and the draft's final text. T9
 // dispatches it as a tea.Cmd; nothing here interprets or sends it — the

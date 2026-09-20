@@ -830,10 +830,23 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// (nothing counts without a reported viewport, and height == 0 never
 	// reports one; --once also never resolves an unregistered identity), so
 	// that frame's bytes are unchanged.
+	// model.Filter.Query/FilterDraft()/Editing are dotfiles-jw73's addition,
+	// passed the same way as Pending/ForYou above: render/ owns every byte
+	// of the header, this file only threads the model's own state through.
+	// FilterQuery is passed UNCONDITIONALLY (never gated on Filter.Set) —
+	// a committed empty query is the documented "cleared" state and must
+	// render with no segment, which is exactly what an empty string already
+	// does on the render/ side without this file special-casing Set. Both
+	// are zero-value on the --once path by construction (nothing ever sets
+	// Editing or commits a query without a keystroke), so that frame's
+	// bytes are unchanged.
 	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, render.LogSignals{
-		Pending:  model.PendingMessages,
-		ForYou:   model.ForYouCount,
-		Identity: resolvedIdentity.Address,
+		Pending:       model.PendingMessages,
+		ForYou:        model.ForYouCount,
+		Identity:      resolvedIdentity.Address,
+		FilterQuery:   model.Filter.Query,
+		FilterDraft:   model.FilterDraft(),
+		FilterEditing: model.Editing,
 	})
 	// sp033 T4 criterion 4: the resolved identity is named once in the
 	// message pane header, so the operator can see which party the monitor

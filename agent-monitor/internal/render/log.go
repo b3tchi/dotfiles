@@ -161,6 +161,21 @@ type LogSignals struct {
 	Pending  int
 	ForYou   int
 	Identity string
+
+	// FilterQuery, FilterDraft and FilterEditing are dotfiles-jw73's
+	// addition: the message pane's own filter state was rendered nowhere,
+	// so a reduced view looked identical to a quiet bus and a `/` draft was
+	// typed blind. FilterQuery is the COMMITTED query (tui.Model.Filter.
+	// Query) — passed unconditionally, its emptiness is what gates the
+	// segment, never a Set bool, because Filter{Set: true, Query: ""} is
+	// the documented "cleared" state and must render exactly like no
+	// filter at all (see tui.Filter's doc comment). FilterDraft/
+	// FilterEditing mirror tui.Model.FilterDraft()/Editing the same way
+	// Pending/ForYou already mirror tui.Model's counters: caller-owned
+	// state, this package only turns it into text.
+	FilterQuery   string
+	FilterDraft   string
+	FilterEditing bool
 }
 
 // pending is sp032 T6's counter, inverted for the head by sp033 T6: how many
@@ -227,7 +242,32 @@ func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time, sig 
 		// ToAddresses against.
 		forYou = 0
 	}
-	return withCountSegments(base, sig.Pending, forYou, width)
+	return withCountSegments(base, filterSegment(sig), sig.Pending, forYou, width)
+}
+
+// filterCursor is the filter draft's trailing cursor marker — the same
+// glyph cmd/agent-monitor's composerBodyLines appends to an in-progress
+// reply, kept here as its own literal since this package renders no code
+// shared with cmd/.
+const filterCursor = "▏"
+
+// filterSegment turns LogSignals' filter fields into the header's optional
+// filter segment (dotfiles-jw73). Editing wins over a committed query even
+// when both are set: the composer's region never shows anything but the
+// current draft either, and mirroring that (rather than inventing a second
+// shape that shows both) is requirement 5. Neither non-empty draft/query nor
+// FilterEditing returns "", the byte-identical case requirement 4 pins —
+// deliberately never keyed on a Set-style bool, since a committed empty
+// query (Filter{Set: true, Query: ""}) is the documented "cleared" state and
+// must render exactly like no filter was ever committed.
+func filterSegment(sig LogSignals) string {
+	if sig.FilterEditing {
+		return "editing filter: " + sig.FilterDraft + filterCursor
+	}
+	if sig.FilterQuery != "" {
+		return "filter: " + sig.FilterQuery
+	}
+	return ""
 }
 
 // firstSignalOrZero reads RenderLog's variadic signals argument. No value is
@@ -263,8 +303,11 @@ func firstSignalOrZero(vals []LogSignals) LogSignals {
 // them is elided first, then the separator, and only a terminal too narrow
 // for the segment text itself overruns — the same trade-off subjectWidth
 // documents for the one column it refuses to drop.
-func withCountSegments(base string, pending, forYou int, width int) string {
+func withCountSegments(base string, filter string, pending, forYou int, width int) string {
 	var parts []string
+	if filter != "" {
+		parts = append(parts, filter)
+	}
 	if pending > 0 {
 		parts = append(parts, fmt.Sprintf("+%d new", pending))
 	}
