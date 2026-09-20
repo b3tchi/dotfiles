@@ -154,3 +154,91 @@ func Threads(msgs []source.Message) []Thread {
 
 	return threads
 }
+
+// RowKind distinguishes a thread's own summary row from one of its member
+// rows in the pane's rendered row list.
+type RowKind int
+
+const (
+	// KindThread is a thread's own row: one per Thread, always present.
+	KindThread RowKind = iota
+	// KindMessage is one thread member's row, present only when its
+	// thread is expanded.
+	KindMessage
+)
+
+// LogRow is one line of the pane's rendered row list -- the flattened
+// output of ThreadRows, and (Task 3) what RenderLog and (Task 6) what
+// SetMessagesLen, the scroll derivation and selectedMessage all walk as one
+// list ("## solution": one list, one cursor). Every row, thread or message,
+// carries its thread's Key, Count and Expanded state, so a caller never
+// needs to look the row's thread back up in the Threads slice to answer
+// "which thread is this row part of, how many members does it have, is it
+// open".
+type LogRow struct {
+	// Kind is KindThread or KindMessage.
+	Kind RowKind
+	// Key is this row's thread's Key -- the same value on a thread row
+	// and every one of its child rows.
+	Key string
+	// Message is the envelope this row renders. On a KindThread row it
+	// is the thread's NEWEST member (Messages[0]); on a KindMessage row
+	// it is that specific member.
+	Message source.Message
+	// Count is the thread's member count (Thread.Count), carried on
+	// every row of the thread, not just its thread row.
+	Count int
+	// Expanded is whether this row's thread is expanded. True on a
+	// thread row exactly when it has child rows following it, and true
+	// on every one of its own child rows too.
+	Expanded bool
+}
+
+// ThreadRows flattens threads (already ordered by Threads -- this function
+// establishes no order of its own, per ## plan's "do not derive a second
+// order") into the pane's rendered row list: one LogRow of kind thread per
+// Thread, immediately followed -- only when expanded(thread.Key) is true --
+// by one LogRow of kind message per member, in the thread's own
+// newest-first order (the same order Messages already holds).
+//
+// A nil expanded is treated as "nothing expanded" rather than dereferenced,
+// so a caller that has not built its expansion set yet (cmd/'s
+// shell.opened-style map, per ## solution) renders a fully collapsed list
+// instead of panicking.
+func ThreadRows(threads []Thread, expanded func(key string) bool) []LogRow {
+	if expanded == nil {
+		expanded = func(string) bool { return false }
+	}
+
+	rows := make([]LogRow, 0, len(threads))
+	for _, th := range threads {
+		var newest source.Message
+		if len(th.Messages) > 0 {
+			newest = th.Messages[0]
+		}
+		isOpen := expanded(th.Key)
+
+		rows = append(rows, LogRow{
+			Kind:     KindThread,
+			Key:      th.Key,
+			Message:  newest,
+			Count:    th.Count,
+			Expanded: isOpen,
+		})
+
+		if !isOpen {
+			continue
+		}
+		for _, m := range th.Messages {
+			rows = append(rows, LogRow{
+				Kind:     KindMessage,
+				Key:      th.Key,
+				Message:  m,
+				Count:    th.Count,
+				Expanded: isOpen,
+			})
+		}
+	}
+
+	return rows
+}
