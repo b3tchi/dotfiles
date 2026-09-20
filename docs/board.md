@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp036|agent-monitor-label-neutralise-order-and-glyphs]]
 
 
 
