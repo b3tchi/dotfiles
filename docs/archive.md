@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp035|agent-monitor-thread-fold-and-detail-addresses]]
+
 - [[sp034|agent-monitor-threaded-message-view]]
 
 - [[sp033|agent-monitor-person-inbox]]

@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp035|agent-monitor-thread-fold-and-detail-addresses]]
 
 
 
