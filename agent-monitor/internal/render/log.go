@@ -513,18 +513,21 @@ const (
 	// for-you conversation must stay findable after every other column has
 	// dropped).
 	threadColMark threadColumn = iota
-	// threadColGlyph is Task 3's own column: ">" collapsed, "v" expanded, on
-	// a thread row; blank on a child row. Never a drop candidate — the named
-	// edge case is that a list whose expansion state is invisible cannot be
-	// navigated, so the glyph survives exactly as far as the mark does.
+	// threadColGlyph is Task 3's own column: "+" collapsed, "-" expanded
+	// (dotfiles-qm4h Task 3 — plain ASCII, like the ">"/"v" pair it
+	// replaces), on a thread row; blank on a child row. Never a drop
+	// candidate — the named edge case is that a list whose expansion state
+	// is invisible cannot be navigated, so the glyph survives exactly as
+	// far as the mark does.
 	threadColGlyph
 	// threadColTime mirrors msgColTime: both row kinds carry TIME.
 	threadColTime
-	// threadColParticipants carries "a <> b" on a thread row and a
-	// two-cell-indented FROM on a child row (## plan: the participants
-	// column is spent differently per kind, not a different column). It is
-	// this grid's droppable column, exactly the role msgColTo plays in the
-	// flat grid's drop order.
+	// threadColParticipants carries the newest message's direction --
+	// "a > b" collapsed, sender-only "a" expanded (dotfiles-qm4h Task 3) --
+	// on a thread row, and a two-cell-indented FROM on a child row (## plan:
+	// the participants column is spent differently per kind, not a
+	// different column). It is this grid's droppable column, exactly the
+	// role msgColTo plays in the flat grid's drop order.
 	threadColParticipants
 	// threadColCount carries the thread's member count on a thread row and
 	// is blank on a child row. Clamped, never a drop candidate: a count
@@ -769,13 +772,14 @@ func threadMarkCell(row LogRow, thread Thread, identity string) string {
 	return ""
 }
 
-// threadGlyphCell is criterion 1: ">" collapsed, "v" expanded, on a thread
-// row; blank on a child row (criterion 2). sp035 Task 2 adds a third blank
-// case: a thread row whose Expandable is false (Thread.Count == 1, derived
-// once by ThreadRows — see LogRow.Expandable's own doc) has nothing to fold
-// out, so it carries no chevron either. The cell still occupies its column
-// (pad, in the caller, keeps the width), so the grid does not shift — only
-// the glyph CONTENT is blank, exactly like a child row's.
+// threadGlyphCell is dotfiles-qm4h Task 3's glyph pair: "+" collapsed, "-"
+// expanded (plain ASCII, replacing sp034 Task 3's ">"/"v"), on a thread row;
+// blank on a child row (criterion 2). sp035 Task 2 adds a third blank case:
+// a thread row whose Expandable is false (Thread.Count == 1, derived once by
+// ThreadRows — see LogRow.Expandable's own doc) has nothing to fold out, so
+// it carries no glyph either. The cell still occupies its column (pad, in
+// the caller, keeps the width), so the grid does not shift — only the glyph
+// CONTENT is blank, exactly like a child row's.
 func threadGlyphCell(row LogRow) string {
 	if row.Kind != KindThread {
 		return ""
@@ -784,22 +788,77 @@ func threadGlyphCell(row LogRow) string {
 		return ""
 	}
 	if row.Expanded {
-		return "v"
+		return "-"
 	}
-	return ">"
+	return "+"
 }
 
-// threadParticipantsCell is criterion 1 (a thread row: "a <> b", from
-// thread.Participants — already resolved display labels, sp034 Task 1's
-// participantLabels, so no re-elision is applied here) and criterion 2 (a
-// child row: its own message's FROM, indented, and — deliberately — no
-// recipient anywhere: the recipient is implicit in the thread's own
-// participant pair and TO is never rendered on a child row).
+// threadPartyLabel resolves one participant's display label the SAME way
+// thread.Participants already does (sp034 Task 1's participantLabels): the
+// thread's own Key (sorted addresses) and Participants (labels, same order)
+// are a positional pair, so looking addr up there reuses that resolution --
+// including its own shortAddress fallback for an address no message in the
+// thread ever supplied a trustworthy label for -- rather than re-deriving
+// it. addr == "" (an envelope with no address field at all, sp034 Task 1's
+// edge case) has nothing to look up, so raw -- the message's own From/To
+// text -- is what is left to show.
+func threadPartyLabel(addr, raw string, thread Thread) string {
+	if addr != "" {
+		for i, a := range strings.Split(thread.Key, threadKeySep) {
+			if a == addr && i < len(thread.Participants) {
+				return thread.Participants[i]
+			}
+		}
+		return orDash(shortAddress(addr))
+	}
+	return orDash(raw)
+}
+
+// threadDirectionRecipients resolves every recipient of m through
+// threadPartyLabel, comma-joined -- the collapsed cell's "to" side. A
+// length mismatch between To and ToAddresses (the same malformed-envelope
+// case detail.go's own mismatch handling guards) falls back to the raw To
+// labels rather than pairing a label with the wrong address.
+func threadDirectionRecipients(m source.Message, thread Thread) string {
+	if len(m.To) != len(m.ToAddresses) {
+		labels := make([]string, len(m.To))
+		for i, to := range m.To {
+			labels[i] = orDash(to)
+		}
+		return strings.Join(labels, ",")
+	}
+	labels := make([]string, len(m.ToAddresses))
+	for i, addr := range m.ToAddresses {
+		labels[i] = threadPartyLabel(addr, m.To[i], thread)
+	}
+	return strings.Join(labels, ",")
+}
+
+// threadParticipantsCell is dotfiles-qm4h Task 3's direction cell (a thread
+// row) and sp034 Task 3's unchanged child-row form (criterion 2: its own
+// message's FROM, indented, and — deliberately — no recipient anywhere: the
+// recipient is implicit in the thread's own participant pair and TO is
+// never rendered on a child row).
+//
+// A thread row renders row.Message — the thread's NEWEST member (Task 2's
+// doc) — not thread.Participants' address-sorted pair: COLLAPSED, "<from> >
+// <to>", so the row reports who spoke LAST rather than a fixed, grouping-
+// only ordering; EXPANDED, only the newest SENDER, since the children below
+// already carry each message's own sender and repeating the recipient above
+// rows that already say it spends width on a constant (## solution). This
+// is display order WITHIN the cell only — thread.Key, thread.Participants
+// and the thread's own grouping are never touched here (## plan's
+// anti-pattern: do not reorder the thread KEY).
 func threadParticipantsCell(row LogRow, thread Thread) string {
 	if row.Kind == KindMessage {
 		return threadParticipantIndent + orDash(shortAddress(row.Message.From))
 	}
-	return strings.Join(thread.Participants, " <> ")
+	newest := row.Message
+	from := threadPartyLabel(newest.FromAddress, newest.From, thread)
+	if row.Expanded {
+		return from
+	}
+	return from + " > " + threadDirectionRecipients(newest, thread)
 }
 
 // threadCountCell is criterion 1's N cell (a thread row's member count,

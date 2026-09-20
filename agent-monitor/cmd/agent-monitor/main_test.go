@@ -4954,6 +4954,72 @@ func TestShell_ModeTogglePreservesSelection(t *testing.T) {
 	}
 }
 
+// TestShell_FrameCarriesNewGlyphsAndDirection is dotfiles-qm4h Task 3's own
+// named test_plan case, pinned at INTEGRATION altitude — a real frame
+// through cmd/ (Update -> View), not just the render package's own unit
+// tests. addressedThreadStub's thread A ("jan <> worker-a", newest m3
+// running jan -> worker-a) is the collapsed, cursor-owning row: its glyph is
+// "+" and its PARTICIPANTS cell is the newest message's own direction,
+// "jan > worker-a". Thread B ("jan <> worker-b", one member, m2 running
+// worker-b -> jan) is never expandable, so its glyph stays blank while its
+// PARTICIPANTS cell still shows the collapsed direction form — and since
+// its newest (only) message runs worker-b -> jan, the OPPOSITE order from
+// its address-sorted Participants pair ("jan <> worker-b"), this row alone
+// already fails an implementation that rendered the sorted key. Expanding
+// thread A (KeyRight) flips its glyph to "-" and its PARTICIPANTS to the
+// newest SENDER alone ("jan"), with neither an arrow nor the recipient.
+func TestShell_FrameCarriesNewGlyphsAndDirection(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+
+	before := s.View()
+	lineA := frameLineContaining(t, before, "hello-a-2")
+	if !strings.Contains(lineA, "+ 12:02:00") {
+		t.Errorf("collapsed thread A row missing its + glyph immediately before TIME: %q", lineA)
+	}
+	if !strings.Contains(lineA, "jan > worker-a") {
+		t.Errorf("collapsed thread A row missing its newest-direction PARTICIPANTS: %q", lineA)
+	}
+
+	lineB := frameLineContaining(t, before, "hello-b-1")
+	if !strings.Contains(lineB, "worker-b > jan") {
+		t.Errorf("non-expandable thread B row missing its collapsed direction PARTICIPANTS: %q", lineB)
+	}
+	// Blank glyph column (pad("", 1)) plus its separator is two spaces
+	// immediately before TIME — checked instead of a bare "+"/"-" absence
+	// check, which "hello-b-1"'s own hyphens would otherwise trip.
+	if !strings.Contains(lineB, "  12:01:00") {
+		t.Errorf("non-expandable thread B row unexpectedly carries a glyph before TIME: %q", lineB)
+	}
+
+	s.Update(key(tea.KeyRight)) // expand thread A (cursor starts on its row)
+	after := s.View()
+
+	lineAExpanded := frameLineContaining(t, after, "hello-a-2")
+	if !strings.Contains(lineAExpanded, "- 12:02:00") {
+		t.Errorf("expanded thread A row missing its - glyph immediately before TIME: %q", lineAExpanded)
+	}
+	if strings.Contains(lineAExpanded, "worker-a") {
+		t.Errorf("expanded thread A row still carries the recipient: %q", lineAExpanded)
+	}
+	if strings.Contains(lineAExpanded, "jan > ") {
+		t.Errorf("expanded thread A row still carries an arrow: %q", lineAExpanded)
+	}
+}
+
+// frameLineContaining returns the first line of a rendered frame containing
+// substr, failing the test if none does — a helper for pinning per-row
+// assertions against a real multi-line View() output.
+func frameLineContaining(t *testing.T, frame, substr string) string {
+	t.Helper()
+	for _, l := range strings.Split(frame, "\n") {
+		if strings.Contains(l, substr) {
+			return l
+		}
+	}
+	t.Fatalf("no line containing %q in frame:\n%s", substr, frame)
+	return ""
+}
+
 // TestShell_ClickOnChildRowSelectsIt is the test_plan's named case: a real
 // tea.MouseMsg at the computed y for an EXPANDED thread's child row selects
 // that child specifically, through hitTest — [[sp032]]'s "child rows

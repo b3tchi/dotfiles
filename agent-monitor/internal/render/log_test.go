@@ -774,22 +774,133 @@ func TestRenderLog_ChildRowOmitsRecipient(t *testing.T) {
 	}
 }
 
-// TestRenderLog_GlyphReflectsExpansion is criterion 1: ">" collapsed, "v"
-// expanded, on a thread row.
-func TestRenderLog_GlyphReflectsExpansion(t *testing.T) {
+// TestRenderThreadRow_CollapsedShowsNewestDirection is dotfiles-qm4h Task
+// 3's own named test_plan case: the thread's newest message runs
+// worker-a -> jan, but the thread's address-sorted KEY (adr0034) puts the
+// identity address first ("a...IDENTITY" < "a...WORKERA" lexically), so
+// Participants is the SORTED pair [jan, worker-a] -- the opposite order
+// from the newest message's own direction. An implementation that rendered
+// Participants (or any other sorted-key-order text) instead of the newest
+// message's own From/To would print "jan <> worker-a" or "jan > worker-a"
+// here, not "worker-a > jan" -- this fails on exactly that shape.
+func TestRenderThreadRow_CollapsedShowsNewestDirection(t *testing.T) {
+	older := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "d1",
+		From: "jan", To: []string{"worker-a"}, Kind: "message",
+		Content:     json.RawMessage(`"older"`),
+		FromAddress: identityAddr,
+		ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERA"},
+	}
+	newest := source.Message{
+		At: "2026-09-12T12:05:00.000000Z", ID: "d2",
+		From: "worker-a", To: []string{"jan"}, Kind: "message",
+		Content:     json.RawMessage(`"newest"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
+		ToAddresses: []string{identityAddr},
+	}
+	// dotfiles-qm4h.2: Threads() preserves input order -- newest first,
+	// matching what orderedMessages actually feeds it.
+	threads := Threads([]source.Message{newest, older})
+	if len(threads) != 1 {
+		t.Fatalf("fixture drift: want one thread, got %d", len(threads))
+	}
+	th := threads[0]
+	if len(th.Participants) != 2 || th.Participants[0] != "jan" || th.Participants[1] != "worker-a" {
+		t.Fatalf("fixture drift: want sorted Participants [jan worker-a], got %v (thread's address-sorted key must put identity before worker-a for this fixture to discriminate)", th.Participants)
+	}
+
+	rows := ThreadRows(threads, func(string) bool { return false })
+	if len(rows) != 1 || rows[0].Kind != KindThread {
+		t.Fatalf("fixture drift: want one collapsed thread row, got %+v", rows)
+	}
+	collapsed := rows[0]
+	collapsed.Expanded = false
+	if collapsed.Message.ID != "d2" {
+		t.Fatalf("fixture drift: thread row's own Message is not the newest member: %+v", collapsed.Message)
+	}
+
+	got := threadParticipantsCell(collapsed, th)
+	if want := "worker-a > jan"; got != want {
+		t.Errorf("collapsed PARTICIPANTS = %q, want %q", got, want)
+	}
+}
+
+// TestRenderThreadRow_ExpandedShowsSenderOnly is dotfiles-qm4h Task 3's own
+// named test_plan case: an EXPANDED thread row shows only the newest
+// message's SENDER — no recipient, no arrow — since the children below
+// already carry each message's own sender.
+func TestRenderThreadRow_ExpandedShowsSenderOnly(t *testing.T) {
+	th, rows := threadFixture()
+	expanded := rows[0]
+	expanded.Expanded = true
+	if expanded.Message.From != "jan" {
+		t.Fatalf("fixture drift: threadFixture's newest sender is not jan: %+v", expanded.Message)
+	}
+
+	got := threadParticipantsCell(expanded, th)
+	if got != "jan" {
+		t.Errorf("expanded PARTICIPANTS = %q, want sender-only %q", got, "jan")
+	}
+	if strings.Contains(got, ">") {
+		t.Errorf("expanded PARTICIPANTS carries an arrow: %q", got)
+	}
+	if strings.Contains(got, "worker-a") {
+		t.Errorf("expanded PARTICIPANTS carries the recipient: %q", got)
+	}
+}
+
+// TestRenderThreadRow_SelfAddressedRendersBothSides is the test_plan's named
+// edge case: a self-addressed envelope (From == To) collapsed renders "x >
+// x" rather than a bare name, so the row is not silently ambiguous with the
+// expanded (sender-only) form.
+func TestRenderThreadRow_SelfAddressedRendersBothSides(t *testing.T) {
+	self := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "e1",
+		From: "loopback", To: []string{"loopback"}, Kind: "message",
+		Content:     json.RawMessage(`"self-addressed"`),
+		FromAddress: identityAddr,
+		ToAddresses: []string{identityAddr},
+	}
+	threads := Threads([]source.Message{self})
+	if len(threads) != 1 {
+		t.Fatalf("fixture drift: want one thread, got %d", len(threads))
+	}
+	th := threads[0]
+
+	rows := ThreadRows(threads, func(string) bool { return false })
+	if len(rows) != 1 || rows[0].Kind != KindThread {
+		t.Fatalf("fixture drift: want one collapsed thread row, got %+v", rows)
+	}
+	collapsed := rows[0]
+	collapsed.Expanded = false
+
+	got := threadParticipantsCell(collapsed, th)
+	if want := "loopback > loopback"; got != want {
+		t.Errorf("self-addressed collapsed PARTICIPANTS = %q, want %q", got, want)
+	}
+}
+
+// TestRenderThreadRow_GlyphsArePlusMinus is dotfiles-qm4h Task 3's own named
+// test_plan case: "+" collapsed, "-" expanded, on a thread row (replacing
+// sp034 Task 3's ">"/"v"), and the child-row blank case sp034 Task 3 already
+// established re-asserted here so the glyph change cannot silently revive a
+// chevron on it. TestRenderThreadRow_OneMessageThreadHasNoGlyph re-asserts
+// sp035 Task 2's OTHER blank case (a non-expandable thread row) unchanged,
+// since that assertion never hardcoded a glyph character to begin with.
+func TestRenderThreadRow_GlyphsArePlusMinus(t *testing.T) {
 	_, rows := threadFixture()
 	threadRow := rows[0]
 
 	collapsed := threadRow
 	collapsed.Expanded = false
-	if got := threadGlyphCell(collapsed); got != ">" {
-		t.Errorf("collapsed glyph = %q, want %q", got, ">")
+	if got := threadGlyphCell(collapsed); got != "+" {
+		t.Errorf("collapsed glyph = %q, want %q", got, "+")
 	}
 
 	expanded := threadRow
 	expanded.Expanded = true
-	if got := threadGlyphCell(expanded); got != "v" {
-		t.Errorf("expanded glyph = %q, want %q", got, "v")
+	if got := threadGlyphCell(expanded); got != "-" {
+		t.Errorf("expanded glyph = %q, want %q", got, "-")
 	}
 
 	if got := threadGlyphCell(LogRow{Kind: KindMessage}); got != "" {
@@ -904,7 +1015,7 @@ func TestRenderLog_NarrowWidthDropsParticipantsKeepsGlyphAndSubject(t *testing.T
 		collapsed := threadRow
 		collapsed.Expanded = false
 		line := RenderThreadRow(collapsed, th, width, identityAddr)
-		if !strings.Contains(line, ">") {
+		if !strings.Contains(line, "+") {
 			t.Errorf("width=%d: collapsed glyph dropped: %q", width, line)
 		}
 	}
@@ -1168,6 +1279,6 @@ func TestRenderThreadLog_HostileLabelIsNeutralisedInParticipantsAndChildRow(t *t
 	}
 	childLine := RenderThreadRow(rows[1], th, 80, "")
 	if hasStrippedControlByte(childLine) {
-		t.Errorf("child row (indented FROM) still carries an ESC byte: %q", childLine)
+		t.Errorf("child row (indented FROM) still carries a byte neutralize should have stripped: %q", childLine)
 	}
 }
