@@ -161,12 +161,16 @@ func TestThreads_ParticipantLabelsFallBackToElidedAddress(t *testing.T) {
 }
 
 // TestThreads_InputNotMutated asserts Threads leaves the caller's slice
-// untouched: same order, same contents, after the call.
+// untouched: same order, same contents, after the call. The fixture is
+// deliberately OLDEST-first (m1 older than m2) -- Threads' own output order
+// is newest-first, so an in-place newest-first sort of the caller's slice
+// would flip this fixture and get caught, where a newest-first fixture
+// would let that exact mutation hide behind a no-op sort.
 func TestThreads_InputNotMutated(t *testing.T) {
 	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
 	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
-	m1 := msg("2026-09-12T12:01:00Z", "a2", "bob", []string{"alice"}, b, []string{a})
-	m2 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
+	m1 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
+	m2 := msg("2026-09-12T12:01:00Z", "a2", "bob", []string{"alice"}, b, []string{a})
 
 	input := []source.Message{m1, m2}
 	want := []source.Message{m1, m2}
