@@ -173,7 +173,7 @@ func runOnce(w io.Writer, project string, as ...string) error {
 	model := tui.NewModel()
 	model.Project = project
 	identity := resolveIdentityForModel(ctx, model, firstOrEmpty(as))
-	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0, identity)
+	lines, _ := buildFrame(model, censusMonitor, msgMonitor, time.Now(), terminalWidth(), 0, nil, identity)
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
@@ -276,6 +276,21 @@ type shell struct {
 	// since sp033 T6), and every frame after it leaves a reader who scrolled
 	// back exactly where they are.
 	opened bool
+
+	// expansion is dotfiles-1t00 Task 6's expansion SET — which thread keys
+	// (render.Thread.Key) are currently expanded — following the shell.opened
+	// precedent above: per-session state a keystroke changes that tui.Model
+	// cannot hold, because Model is a comparable struct (fixtures assert
+	// `*m != want`) and a map field would break that at compile time
+	// (## plan's anti-pattern list, restated on Threaded's own doc).
+	// HandleKey reports only the INTENT on Outcome.Thread — it holds no row
+	// list to say WHICH key is meant — so applyThreadOutcome is what resolves
+	// the message pane's current cursor row to a key and mutates this map.
+	//
+	// It is consulted, never trusted (## edge_cases): a key for a thread that
+	// has since vanished from the bus is simply never asked about again — see
+	// expandedFn — so a stale entry costs a little memory and nothing else.
+	expansion map[string]bool
 }
 
 // identity is VARIADIC for the same reason runOnce's --as and RenderLog's
@@ -322,6 +337,20 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if s.tryOpenComposer(k) {
 				continue
 			}
+			// dotfiles-1t00.6 edge case: "Toggling mode preserves the
+			// SELECTED envelope where it still exists, rather than resetting
+			// the cursor to row 0." `t` mutates model.Threaded directly
+			// inside HandleKey (it is unconditional, not gated on Focus, and
+			// carries no Outcome signal of its own — see keys.go), so the
+			// only way to notice it happened is to check the condition
+			// ourselves and capture the pre-toggle selection before calling
+			// HandleKey at all.
+			isModeToggle := !s.model.Editing && !s.model.Composing && (k.Rune == 't' || k.Rune == 'T')
+			var selectedBeforeToggle string
+			if isModeToggle {
+				selectedBeforeToggle = s.selectedMessageID()
+			}
+
 			outcome := s.model.HandleKey(k)
 			if outcome.Quit {
 				return s, tea.Quit
@@ -332,6 +361,12 @@ func (s *shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if outcome.Send != nil {
 				return s, s.sendCmd(outcome.Send)
+			}
+			if outcome.Thread != tui.ThreadNone {
+				s.applyThreadOutcome(outcome.Thread)
+			}
+			if isModeToggle {
+				s.restoreSelectionByID(selectedBeforeToggle)
 			}
 		}
 
@@ -366,7 +401,7 @@ func (s *shell) tryOpenComposer(k tui.Key) bool {
 		return false
 	}
 	toAddress := ""
-	if msg := selectedMessage(s.model, s.msgs.Last()); msg != nil {
+	if msg := selectedMessage(s.model, s.currentMessageRows()); msg != nil {
 		toAddress = msg.FromAddress
 	}
 	opened, reason := s.model.OpenComposer(toAddress)
@@ -376,6 +411,175 @@ func (s *shell) tryOpenComposer(k tui.Key) bool {
 	}
 	s.model.DetailZoom = false
 	return true
+}
+
+// expandedFn is the "is this key expanded" predicate render.ThreadRows takes
+// (Task 2), backed by s.expansion. Reading a nil map is safe in Go (it
+// answers false, never panics), which is exactly the "consulted, never
+// trusted" rule the stale-key edge case asks for: a key nothing has expanded
+// yet, or a key whose thread has since vanished from the bus, both simply
+// read false rather than needing to be purged first.
+func (s *shell) expandedFn() func(string) bool {
+	return func(key string) bool { return s.expansion[key] }
+}
+
+// currentThreadsAndRows recomputes the message pane's CURRENT threads and row
+// list off the shell's last sample, model.Threaded and s.expansion — the same
+// inputs filterMessageRows renders from, but read-only: it calls neither
+// SetMessagesLen nor SetMessageCount nor AddForYouArrivals, because it exists
+// for Update to resolve "what row is the cursor on right now" between
+// keystrokes, not to advance any of those counters a second time for the same
+// sample. threads is nil in flat mode (there is nothing to look a key's
+// membership up in); rows is nil when there is no sample yet, matching
+// filterMessageRows' own nil-sample case.
+func (s *shell) currentThreadsAndRows() ([]render.Thread, []render.LogRow) {
+	sample := s.msgs.Last()
+	if sample == nil {
+		return nil, nil
+	}
+	msgs := orderedMessages(s.model, sample)
+	if !s.model.Threaded {
+		rows, _ := buildMessageRows(msgs, false, nil)
+		return nil, rows
+	}
+	threads := render.Threads(msgs)
+	return threads, render.ThreadRows(threads, s.expandedFn())
+}
+
+// currentMessageRows is currentThreadsAndRows without the threads slice, for
+// the callers (applyThreadOutcome) that only need the row list.
+func (s *shell) currentMessageRows() []render.LogRow {
+	_, rows := s.currentThreadsAndRows()
+	return rows
+}
+
+// selectedMessageID is the message pane's current selection, by envelope
+// identity (source.Message.ID) rather than by row index — exactly what
+// restoreSelectionByID needs to find the SAME envelope again after the row
+// list's shape changes out from under it (a mode toggle, criterion/edge
+// case: "Toggling mode preserves the SELECTED envelope where it still
+// exists"). Empty when nothing is selected (an empty log, or a cursor
+// somehow past the end).
+func (s *shell) selectedMessageID() string {
+	rows := s.currentMessageRows()
+	if s.model.MessagesCursor < 0 || s.model.MessagesCursor >= len(rows) {
+		return ""
+	}
+	return rows[s.model.MessagesCursor].Message.ID
+}
+
+// restoreSelectionByID re-selects the envelope named by id after `t` has
+// already flipped model.Threaded — id is empty when nothing was selected
+// before the toggle, in which case this is a no-op and the cursor stays
+// wherever HandleKey/SetMessagesLen's next clamp leaves it. It tries the
+// envelope's own row first (every flat row and a thread row whose newest
+// member IS the envelope both match directly), and falls back to the row of
+// the THREAD that owns it — the case a toggle from flat to threaded folds an
+// older thread member invisibly behind its (collapsed) summary row, per
+// indexByIdentity's own doc.
+func (s *shell) restoreSelectionByID(id string) {
+	if id == "" {
+		return
+	}
+	threads, rows := s.currentThreadsAndRows()
+	if i := indexByIdentity(rows, id, ownerThreadKey(threads, id)); i >= 0 {
+		s.model.MessagesCursor = i
+	}
+}
+
+// applyThreadOutcome is dotfiles-1t00 Task 6's other half of the signal
+// HandleKey returns for l/h/KeyLeft/KeyRight/space (Outcome.Thread): HandleKey
+// names only the INTENT (expand/collapse/toggle) because it holds no
+// expansion set and no row list to say WHICH thread key is meant (Model must
+// stay comparable — see Threaded's own doc, and see keys.go:1115-1127). This
+// is the caller that owns both: s.expansion, and the row list this frame's
+// last render computed, which is what resolves "the message pane's current
+// selection" (Outcome.Thread's own doc) to a THREAD KEY.
+//
+// The resolution reads off the CURRENT cursor ROW, not off some separate
+// notion of "the selected thread": on a KindMessage (child) row, the key
+// resolved is that child's OWN thread key (LogRow.Key is the same value on a
+// thread row and every one of its children — Task 2's doc), which is what
+// lets h/KeyLeft collapse the expansion the cursor is standing INSIDE rather
+// than being a no-op or reaching some other thread entirely (CARRIED FORWARD
+// FROM TASK 5's AUDIT, dotfiles-1t00.5).
+//
+// After the mutation, the cursor is re-resolved by envelope identity — the
+// same rule restoreSelectionByID uses for a mode toggle — falling back to the
+// thread's OWN row when the envelope itself just left the rendered list
+// (collapsing hides every child): "Collapsing a thread the cursor is standing
+// inside leaves the cursor on the thread row rather than off the end."
+// Expanding never needs the fallback (a collapsed thread has no child row to
+// stand on, so the cursor is always on the thread's own row when it is
+// expanded, and that row's identity is unchanged by gaining children), but
+// resolving generally, the same way either direction, means this function
+// carries no separate case for which way the toggle went.
+func (s *shell) applyThreadOutcome(intent tui.ThreadIntent) {
+	rows := s.currentMessageRows()
+	if s.model.MessagesCursor < 0 || s.model.MessagesCursor >= len(rows) {
+		return
+	}
+	current := rows[s.model.MessagesCursor]
+	key, selectedID := current.Key, current.Message.ID
+
+	if s.expansion == nil {
+		s.expansion = make(map[string]bool)
+	}
+	switch intent {
+	case tui.ThreadExpand:
+		s.expansion[key] = true
+	case tui.ThreadCollapse:
+		delete(s.expansion, key)
+	case tui.ThreadToggle:
+		s.expansion[key] = !s.expansion[key]
+	default:
+		return
+	}
+
+	if i := indexByIdentity(s.currentMessageRows(), selectedID, key); i >= 0 {
+		s.model.MessagesCursor = i
+	}
+}
+
+// indexByIdentity finds selectedID (a source.Message.ID) among rows and
+// returns its index. When no row carries that exact envelope any more — a
+// collapse hid it inside its thread's children, or a mode toggle folded it
+// behind a summary row it is not itself — it falls back to the row of kind
+// thread whose Key is fallbackKey, so a caller always lands on SOME row that
+// still represents the envelope's conversation rather than an arbitrary
+// clamp. Returns -1 when neither is found (the envelope and its thread are
+// both gone — the bus pruned it), which every caller treats as "leave the
+// cursor alone; the next SetMessagesLen clamps it into range regardless".
+func indexByIdentity(rows []render.LogRow, selectedID, fallbackKey string) int {
+	for i, row := range rows {
+		if row.Message.ID == selectedID {
+			return i
+		}
+	}
+	if fallbackKey == "" {
+		return -1
+	}
+	for i, row := range rows {
+		if row.Kind == render.KindThread && row.Key == fallbackKey {
+			return i
+		}
+	}
+	return -1
+}
+
+// ownerThreadKey answers "which thread's Key contains the message with this
+// ID", for indexByIdentity's fallback when the exact envelope is not its own
+// row (a mode toggle folded an older thread member behind its collapsed
+// summary row). Empty in flat mode (threads is nil) or when nothing matches.
+func ownerThreadKey(threads []render.Thread, id string) string {
+	for _, th := range threads {
+		for _, m := range th.Messages {
+			if m.ID == id {
+				return th.Key
+			}
+		}
+	}
+	return ""
 }
 
 // sendResultMsg is what a dispatched send reports back into Update — never
@@ -479,7 +683,7 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 		return
 	}
 
-	_, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
+	_, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.expandedFn(), s.identity)
 	target, isData, offset := hitTest(layout, msg.Y)
 
 	switch msg.Button {
@@ -527,7 +731,7 @@ func (s *shell) handleMouse(msg tea.MouseMsg) {
 // the output mapping now, so the cause is gone and the workaround goes with
 // it rather than being carried forward as a superstition.
 func (s *shell) View() string {
-	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.expandedFn(), s.identity)
 	// sp032 T8: this session's FIRST frame opens the message pane at its
 	// live end (dotfiles-utob — a monitor that opened on the wrong end, and
 	// since T6 opens already `+N` behind, contradicts the conditional
@@ -543,7 +747,7 @@ func (s *shell) View() string {
 	// nothing on the --once path pays for it at all: runOnce calls buildFrame
 	// directly and never constructs a shell.
 	if s.openMessagesAtHeadOnce() {
-		lines, layout = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.identity)
+		lines, layout = buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, s.expandedFn(), s.identity)
 	}
 	lines = applySendNotice(lines, layout, s.sendNotice, s.width)
 	return strings.Join(lines, "\n")
@@ -746,8 +950,8 @@ func runInteractive(project string, as string) error {
 // *source.Monitor's last sample is unexported and only settable by execing
 // a real or stubbed binary — renderFrame takes samples directly so a test
 // can hand-build one).
-func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int, identity ...source.Identity) ([]string, frameLayout) {
-	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height, identity...)
+func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *source.MessagesMonitor, now time.Time, width, height int, expanded func(string) bool, identity ...source.Identity) ([]string, frameLayout) {
+	return renderFrame(model, censusMonitor.Last(), censusMonitor.Stale(), msgMonitor.Last(), msgMonitor.Stale(), now, width, height, expanded, identity...)
 }
 
 // renderFrame stacks the roster pane, the message pane and (when it fits)
@@ -769,7 +973,7 @@ func buildFrame(model *tui.Model, censusMonitor *source.Monitor, msgMonitor *sou
 // same paneBudgets/fitPanes call that trimmed roster/log — never a second
 // arithmetic on height — and it is the ONLY thing a mouse handler consults to
 // turn a screen row into (pane, row); see hitTest.
-func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int, identity ...source.Identity) ([]string, frameLayout) {
+func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool, msgSample *source.MessageSample, msgStale bool, now time.Time, width, height int, expanded func(string) bool, identity ...source.Identity) ([]string, frameLayout) {
 	// Order matters, and is the whole point of this arrangement (sp031 T1's
 	// binding criterion: a resized terminal cannot leave the cursor
 	// off-screen). Filter FIRST — that fixes each pane's row count and, via
@@ -786,7 +990,12 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// COUNTS, and a pane's line count is a pure function of its row count.
 	resolvedIdentity := firstIdentityOrZero(identity)
 	rosterRows := filterRosterRows(model, censusSample)
-	msgRows := filterMessageRows(model, msgSample, resolvedIdentity)
+	// dotfiles-1t00.6: --once (height<=0) always renders FLAT regardless of
+	// model.Threaded — "a pipe has no cursor and nothing to expand" (## plan)
+	// — so the decision has to live here rather than reading model.Threaded
+	// on its own, which is otherwise the only signal either path would read.
+	threaded := height > 0 && model.Threaded
+	msgRows, msgThreads := filterMessageRows(model, msgSample, resolvedIdentity, threaded, expanded)
 	rosterLines := paneLines(censusSample != nil, len(rosterRows))
 	logLines := paneLines(msgSample != nil, len(msgRows))
 
@@ -799,7 +1008,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// (sp032 T1's whole point) for the duration of the zoom.
 	if height > 0 && model.DetailVisible && model.DetailZoom {
 		_, _, detailBudget, _, _, _ := paneBudgets(rosterLines, logLines, height, true, true, model.Composing)
-		detailLines := renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, true)
+		detailLines := renderDetailPane(model, selectedMessage(model, msgRows), width, detailBudget, true)
 		return detailLines, frameLayout{
 			detail:      detailRegion(0, len(detailLines)),
 			detailShown: true,
@@ -848,14 +1057,30 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// are zero-value on the --once path by construction (nothing ever sets
 	// Editing or commits a query without a keystroke), so that frame's
 	// bytes are unchanged.
-	log := render.RenderLog(scrolledMessageSample(msgSample, msgRows, model.MessagesScroll), msgStale, now, width, render.LogSignals{
+	logSignals := render.LogSignals{
 		Pending:       model.PendingMessages,
 		ForYou:        model.ForYouCount,
 		Identity:      resolvedIdentity.Address,
 		FilterQuery:   model.Filter.Query,
 		FilterDraft:   model.FilterDraft(),
 		FilterEditing: model.Editing,
-	})
+	}
+	// dotfiles-1t00.6: threaded and flat share this ONE row list (msgRows) —
+	// the split below is only about which GRID renders it. Flat goes through
+	// the untouched pre-spec call (a *source.MessageSample built from the
+	// SAME rows, in the SAME order, which is what keeps --once and every
+	// flat frame byte-identical: TestRenderLog_FlatOutputUnchanged's contract
+	// travels through unchanged bytes, not through a coincidence). Threaded
+	// goes through Task 6's RenderThreadLog, over the SAME scrolled slice of
+	// msgRows and the threads map filterMessageRows/buildMessageRows already
+	// built — render/ does no re-ordering of its own either way.
+	var log []string
+	scrolledRows := scrolledLogRows(msgRows, model.MessagesScroll)
+	if threaded {
+		log = render.RenderThreadLog(scrolledRows, msgThreads, msgSample != nil, sampleAtOrZero(msgSample), msgStale, now, width, logSignals)
+	} else {
+		log = render.RenderLog(scrolledFlatMessageSample(msgSample, scrolledRows), msgStale, now, width, logSignals)
+	}
 	// sp033 T4 criterion 4: the resolved identity is named once in the
 	// message pane header, so the operator can see which party the monitor
 	// thinks they are. This is a post-processing step on RenderLog's output,
@@ -883,7 +1108,7 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// length rather than the budget that merely bounds it.
 	var detailLines []string
 	if detailShown {
-		detailLines = renderDetailPane(model, selectedMessage(model, msgSample), width, detailBudget, false)
+		detailLines = renderDetailPane(model, selectedMessage(model, msgRows), width, detailBudget, false)
 	}
 
 	// composerLines is detailLines' twin (sp033 T10 criterion 1): rendered
@@ -1025,23 +1250,26 @@ func viewportRows(paneLines int) int {
 }
 
 // selectedMessage returns the message under the message pane's cursor, from
-// the full FILTERED, ORDERED list — not the slice already scrolled into
-// RenderLog's view — so the detail pane tracks selection regardless of what
-// happens to be scrolled on screen. It goes through orderedMessages, the
-// same reorder filterMessageRows applies, so MessagesCursor indexes the same
-// row here as it does on screen. nil means nothing is selected: an empty
-// log, or (as a guard, not expected given SetMessagesLen's same-pass clamp)
-// a cursor past the end; either way RenderDetail's own nil case is the
+// the full FILTERED row list — not the slice already scrolled into the
+// renderer's view — so the detail pane tracks selection regardless of what
+// happens to be scrolled on screen. rows is filterMessageRows' own return
+// value, so MessagesCursor indexes the same row here as it does on screen,
+// whether flat or threaded (dotfiles-1t00.6). nil means nothing is selected:
+// an empty log, or (as a guard, not expected given SetMessagesLen's same-pass
+// clamp) a cursor past the end; either way RenderDetail's own nil case is the
 // placeholder.
-func selectedMessage(model *tui.Model, sample *source.MessageSample) *source.Message {
-	if sample == nil {
+//
+// A KindThread row's own Message field is already its thread's NEWEST member
+// (render.LogRow's own contract, Task 2), so this needs no special case for
+// "which envelope does a thread row mean" — it is the same field a flat
+// KindMessage row carries, which is exactly what keeps the detail pane, `a`'s
+// reply recipient (tryOpenComposer) and this function agreeing on ONE
+// envelope regardless of row kind (Task 6 criterion 3).
+func selectedMessage(model *tui.Model, rows []render.LogRow) *source.Message {
+	if model.MessagesCursor < 0 || model.MessagesCursor >= len(rows) {
 		return nil
 	}
-	msgs := orderedMessages(model, sample)
-	if model.MessagesCursor < 0 || model.MessagesCursor >= len(msgs) {
-		return nil
-	}
-	return &msgs[model.MessagesCursor]
+	return &rows[model.MessagesCursor].Message
 }
 
 // fitPanes trims the two stacked scrolling panes (and reports the detail
@@ -1620,31 +1848,72 @@ func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 }
 
 // filterMessageRows is filterRosterRows' twin for the message pane. sp033
-// T6 additionally reorders: it hands SetMessagesLen (and, through its
-// return value, RenderLog) the pane's own display order — newest-first,
-// row 0 the newest envelope — rather than source.ParseMessages' ascending
-// wire order, so every consumer of MessagesCursor (this file's
-// scrolledMessageSample/markPane, and selectedMessage below) agrees on what
-// index 0 means. See orderedMessages for why the reorder lives here rather
-// than in render/log.go or in tui.Model.
-// dotfiles-1t00.4: SetMessagesLen and SetMessageCount are called with the
-// same len(msgs) here because threading does not exist yet — msgs IS the
-// pane's rendered row list today. Task 6 wires a thread-flattened ROW list
-// into SetMessagesLen while SetMessageCount keeps reading len(msgs), the
-// MESSAGE count, so expanding a thread (which changes row count only) can
-// never inflate PendingMessages/ForYouCount. before is read off
-// model.MessagesCount (the message-count twin), not model.MessagesLen (the
-// row count), for the same reason.
-func filterMessageRows(model *tui.Model, sample *source.MessageSample, identity source.Identity) []source.Message {
+// T6 additionally reorders: it puts the sample into the pane's own display
+// order — newest-first, row 0 the newest envelope — rather than
+// source.ParseMessages' ascending wire order (see orderedMessages for why the
+// reorder lives here rather than in render/log.go or in tui.Model). Task 6
+// adds the second step: it hands SetMessagesLen (and, through its return
+// value, RenderLog/RenderThreadLog, the scroll slice and selectedMessage) the
+// pane's own rendered ROW list — one row per message when flat, one row per
+// thread (plus, per expanded thread, one row per member) when threaded — so
+// every consumer of MessagesCursor agrees on what index 0 means regardless of
+// mode ("## plan"'s single-reorder-point rule extended to the row list
+// itself: render.Threads/render.ThreadRows do no re-sorting of their own,
+// thread.go's own doc, so there is exactly one order here either way).
+//
+// dotfiles-1t00.4: SetMessagesLen gets the ROW count (len(rows)) and
+// SetMessageCount gets the MESSAGE count (len(msgs)) — wiring these backwards
+// reintroduces exactly the defect Task 4 exists to prevent, since expanding a
+// thread changes rows, never messages. before is read off model.MessagesCount
+// (the message-count twin), not model.MessagesLen (the row count), for the
+// same reason. threads is nil in flat mode (buildMessageRows' own doc) — this
+// file's own caller only reaches for it when it is about to render threaded.
+func filterMessageRows(model *tui.Model, sample *source.MessageSample, identity source.Identity, threaded bool, expanded func(string) bool) ([]render.LogRow, map[string]render.Thread) {
 	if sample == nil {
-		return nil
+		return nil, nil
 	}
 	msgs := orderedMessages(model, sample)
 	before := model.MessagesCount
-	model.SetMessagesLen(len(msgs))
 	model.SetMessageCount(len(msgs))
 	model.AddForYouArrivals(countNewForYou(msgs, before, identity))
-	return msgs
+
+	rows, threads := buildMessageRows(msgs, threaded, expanded)
+	model.SetMessagesLen(len(rows))
+	return rows, threads
+}
+
+// buildMessageRows is filterMessageRows' and currentThreadsAndRows' shared
+// row-list construction (dotfiles-1t00 Task 6): threaded wraps msgs through
+// render.Threads/render.ThreadRows (Task 1/Task 2), producing one row per
+// thread and — only for an expanded key — its child rows; flat wraps each
+// message as its own KindMessage row, in the SAME order msgs already carries.
+// Either way the caller gets ONE list to walk for row count, the scroll
+// slice and "the message at index i" (SetMessagesLen, selectedMessage) — ##
+// plan's "do not derive a second order" applied to the row list itself, not
+// just to msgs.
+//
+// Every row's Message is a real envelope regardless of kind: a KindThread
+// row's Message is its thread's NEWEST member (render.ThreadRows' own
+// contract), which is what lets selectedMessage agree with the detail pane
+// and `a`'s reply recipient no matter which kind of row is selected.
+//
+// threads is nil in flat mode: there is no grouping to look a key's
+// membership up in, and a caller that only wants rows (the flat render path,
+// or currentThreadsAndRows' own flat branch) has no use for it either way.
+func buildMessageRows(msgs []source.Message, threaded bool, expanded func(string) bool) ([]render.LogRow, map[string]render.Thread) {
+	if !threaded {
+		rows := make([]render.LogRow, len(msgs))
+		for i, m := range msgs {
+			rows[i] = render.LogRow{Kind: render.KindMessage, Message: m, Count: 1}
+		}
+		return rows, nil
+	}
+	threads := render.Threads(msgs)
+	byKey := make(map[string]render.Thread, len(threads))
+	for _, th := range threads {
+		byKey[th.Key] = th
+	}
+	return render.ThreadRows(threads, expanded), byKey
 }
 
 // countNewForYou is sp033 T7's arrival count for Model.AddForYouArrivals,
@@ -1712,12 +1981,48 @@ func scrolledCensusSample(sample *source.Sample, rows []source.Row, scroll int) 
 	return &source.Sample{Rows: rows[scroll:], At: sample.At}
 }
 
-// scrolledMessageSample is scrolledCensusSample's twin for the message pane.
-func scrolledMessageSample(sample *source.MessageSample, msgs []source.Message, scroll int) *source.MessageSample {
+// scrolledLogRows is scrolledCensusSample's twin for the message pane's ROW
+// list (dotfiles-1t00.6): dropping the first `scroll` rows is the same
+// operation regardless of mode, since flat and threaded now share the one
+// []render.LogRow shape — there is no longer a separate
+// scrolledMessageSample for []source.Message, because a rendered row and a
+// message stopped being the same thing the moment a thread can collapse.
+func scrolledLogRows(rows []render.LogRow, scroll int) []render.LogRow {
+	if scroll < 0 || scroll > len(rows) {
+		return rows
+	}
+	return rows[scroll:]
+}
+
+// scrolledFlatMessageSample rebuilds a *source.MessageSample from the flat
+// row list's own messages, in the SAME order, so RenderLog's pre-spec call
+// shape (a *source.MessageSample, not a []render.LogRow) is unchanged and
+// every flat frame — including --once — stays byte-identical
+// (TestRenderLog_FlatOutputUnchanged, TestShell_OnceIsFlatAndByteIdentical).
+// It is only ever called with FLAT rows (buildMessageRows' KindMessage-per-
+// message wrapping), so extracting .Message back out recovers exactly
+// orderedMessages' own slice.
+func scrolledFlatMessageSample(sample *source.MessageSample, rows []render.LogRow) *source.MessageSample {
 	if sample == nil {
 		return nil
 	}
-	return &source.MessageSample{Messages: msgs[scroll:], At: sample.At}
+	msgs := make([]source.Message, len(rows))
+	for i, row := range rows {
+		msgs[i] = row.Message
+	}
+	return &source.MessageSample{Messages: msgs, At: sample.At}
+}
+
+// sampleAtOrZero reads a *source.MessageSample's own At for RenderThreadLog,
+// which carries no sample pointer of its own to read it off (its data is
+// []render.LogRow, not []source.Message) — the zero time.Time{} for a nil
+// sample is never actually read, since RenderThreadLog's haveSample argument
+// (msgSample != nil) short-circuits before it would matter.
+func sampleAtOrZero(sample *source.MessageSample) time.Time {
+	if sample == nil {
+		return time.Time{}
+	}
+	return sample.At
 }
 
 func terminalWidth() int {

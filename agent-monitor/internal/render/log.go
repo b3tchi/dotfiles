@@ -213,7 +213,7 @@ func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width in
 	allCols := append(append([]msgColumn{}, cols...), msgColSubject)
 
 	var lines []string
-	lines = append(lines, logHeaderLine(sample, stale, now, sig, width))
+	lines = append(lines, logHeaderLine(sample.At, stale, now, sig, width))
 	lines = append(lines, msgColumnHeaderLine(allCols, widths))
 
 	if len(sample.Messages) == 0 {
@@ -227,8 +227,14 @@ func RenderLog(sample *source.MessageSample, stale bool, now time.Time, width in
 	return lines
 }
 
-func logHeaderLine(sample *source.MessageSample, stale bool, now time.Time, sig LogSignals, width int) string {
-	age := ageString(now, sample.At)
+// logHeaderLine takes the sample's own `at` timestamp rather than the sample
+// itself (sp034 Task 6 refactor, no behaviour change): RenderThreadLog needs
+// the identical header line but carries no *source.MessageSample of its own
+// (its data is []LogRow, not []source.Message), so the one piece RenderLog's
+// header actually reads off the sample — its At — is what this function takes
+// directly, and both callers hand it the same value.
+func logHeaderLine(at time.Time, stale bool, now time.Time, sig LogSignals, width int) string {
+	age := ageString(now, at)
 	var base string
 	if stale {
 		base = fmt.Sprintf("messages — STALE (last good sample %s old)", age)
@@ -615,6 +621,25 @@ const threadParticipantIndent = "  "
 // (edge case: a count of 999+ does not widen the grid).
 const threadCountClamp = 999
 
+// threadColumnLayout is the thread grid's column-fitting preamble, shared by
+// every row RenderThreadRow renders AND by RenderThreadLog's own column
+// header (sp034 Task 6): the same (allCols, widths) computation for both, so
+// the header and the data rows can never drift apart the way two independent
+// computations could on a resize. Task 3 shipped a speculative
+// ThreadColumnHeaderLine and deleted it, unused, before this preamble had a
+// second caller to share it with; Task 6 gives it that second caller and
+// extracts the preamble at the same time rather than duplicating it.
+func threadColumnLayout(width int, hasIdentity bool) (allCols []threadColumn, widths map[threadColumn]int) {
+	cols := fitThreadColumns(width, hasIdentity)
+	subjW := threadSubjectWidth(width, cols)
+	widths = map[threadColumn]int{threadColSubject: subjW}
+	for _, c := range cols {
+		widths[c] = threadFixedWidth[c]
+	}
+	allCols = append(append([]threadColumn{}, cols...), threadColSubject)
+	return allCols, widths
+}
+
 // RenderThreadRow renders one row of the pane's threaded row list — a
 // thread's own summary row or one of its child rows (sp034 Task 2's
 // LogRow) — on threadColumn's ONE grid. thread is the Thread that owns row
@@ -624,20 +649,80 @@ const threadCountClamp = 999
 // member (Task 2's doc). RenderThreadRow establishes no order and re-sorts
 // nothing; it renders exactly the one row it is given.
 func RenderThreadRow(row LogRow, thread Thread, width int, identity string) string {
-	hasIdentity := identity != ""
-	cols := fitThreadColumns(width, hasIdentity)
-	subjW := threadSubjectWidth(width, cols)
-	widths := map[threadColumn]int{threadColSubject: subjW}
-	for _, c := range cols {
-		widths[c] = threadFixedWidth[c]
-	}
-	allCols := append(append([]threadColumn{}, cols...), threadColSubject)
+	allCols, widths := threadColumnLayout(width, identity != "")
 
 	parts := make([]string, 0, len(allCols))
 	for _, c := range allCols {
 		parts = append(parts, pad(threadCellFor(c, row, thread, widths[c], identity), widths[c]))
 	}
 	return join(parts)
+}
+
+// threadColumnHeader names threadColumn's header text — msgColumnHeader's
+// counterpart. Mark and glyph carry no label of their own (a one-cell mark/
+// glyph column has no room for a header word, exactly like msgColMark), and
+// COUNT's header is the single letter N so it never itself forces the count
+// column wider than threadFixedWidth's own "999+" allowance.
+var threadColumnHeader = map[threadColumn]string{
+	threadColMark:         "",
+	threadColGlyph:        "",
+	threadColTime:         "TIME",
+	threadColParticipants: "PARTICIPANTS",
+	threadColCount:        "N",
+	threadColSubject:      "SUBJECT",
+}
+
+// threadColumnHeaderLine is msgColumnHeaderLine's counterpart for the thread
+// grid (sp034 Task 6): the header row RenderThreadLog prints above the
+// pane's data rows, built from the SAME (cols, widths) threadColumnLayout
+// gives every data row, so SUBJECT starts at the same cell on the header as
+// it does on every row beneath it.
+func threadColumnHeaderLine(cols []threadColumn, widths map[threadColumn]int) string {
+	parts := make([]string, 0, len(cols))
+	for _, c := range cols {
+		parts = append(parts, pad(threadColumnHeader[c], widths[c]))
+	}
+	return join(parts)
+}
+
+// RenderThreadLog is RenderLog's counterpart for the pane's THREADED row list
+// (sp034 Task 6): the identical header line (logHeaderLine — Pending/ForYou/
+// Identity/Filter behave exactly as they do in flat mode) but a column header
+// and data rows built from threadColumn's grid (Task 3) instead of
+// msgColumn's. rows is the pane's already-flattened row list — render.
+// ThreadRows' own output (Task 2), sliced to whatever the caller's scroll
+// offset shows — so this function establishes no order of its own, matching
+// ## plan's "do not derive a second order": it only lays out the rows it is
+// given. threads is keyed by Thread.Key (render.Threads' own output), so
+// RenderThreadRow's per-row PARTICIPANTS/member lookup needs no second
+// derivation here.
+//
+// haveSample distinguishes RenderLog's "no sample yet" case (the identical
+// "messages — waiting for first sample" line) from "a sample with zero rows"
+// ("(no messages)") — this function's row list carries no sample pointer of
+// its own to be nil, unlike RenderLog's *source.MessageSample, so the caller
+// states the distinction directly.
+func RenderThreadLog(rows []LogRow, threads map[string]Thread, haveSample bool, sampleAt time.Time, stale bool, now time.Time, width int, signals ...LogSignals) []string {
+	if !haveSample {
+		return []string{"messages — waiting for first sample"}
+	}
+
+	sig := firstSignalOrZero(signals)
+	allCols, widths := threadColumnLayout(width, sig.Identity != "")
+
+	var lines []string
+	lines = append(lines, logHeaderLine(sampleAt, stale, now, sig, width))
+	lines = append(lines, threadColumnHeaderLine(allCols, widths))
+
+	if len(rows) == 0 {
+		lines = append(lines, "(no messages)")
+		return lines
+	}
+
+	for _, row := range rows {
+		lines = append(lines, RenderThreadRow(row, threads[row.Key], width, sig.Identity))
+	}
+	return lines
 }
 
 func threadCellFor(c threadColumn, row LogRow, thread Thread, width int, identity string) string {

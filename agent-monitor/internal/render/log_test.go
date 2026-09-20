@@ -909,3 +909,103 @@ func TestRenderLog_LongDraftKeepsTheTypedTail(t *testing.T) {
 		t.Errorf("the tail the operator just typed is missing: %q", header)
 	}
 }
+
+// --- sp034 Task 6: the thread grid's own column header + assembler --------
+
+// threadFixtureThreadsByKey adapts threadFixture's single thread into the
+// map[string]Thread RenderThreadLog takes.
+func threadFixtureThreadsByKey(th Thread) map[string]Thread {
+	return map[string]Thread{th.Key: th}
+}
+
+// TestRenderThreadLog_HeaderColumnsMatchRowGrid is threadColumnHeaderLine's
+// own version of TestRenderLog_ThreadRowGridMatchesChildGrid: the header row
+// RenderThreadLog prints must lay SUBJECT out at the SAME column index as the
+// data rows beneath it, computed from the rendered strings rather than a
+// hardcoded literal — Task 3 shipped a speculative ThreadColumnHeaderLine and
+// deleted it, unused, before anything could pin this; this is that pin.
+func TestRenderThreadLog_HeaderColumnsMatchRowGrid(t *testing.T) {
+	th, rows := threadFixture()
+	lines := RenderThreadLog(rows, threadFixtureThreadsByKey(th), true, time.Now(), false, time.Now(), 80)
+	if len(lines) != 2+len(rows) {
+		t.Fatalf("got %d lines, want %d (2 header + %d rows): %q", len(lines), 2+len(rows), len(rows), lines)
+	}
+	header := lines[1]
+	dataLine := lines[2]
+
+	idxHeader := strings.Index(header, "SUBJECT")
+	idxData := strings.Index(dataLine, "distinctive-newest-subject")
+	if idxHeader < 0 {
+		t.Fatalf("column header lost SUBJECT: %q", header)
+	}
+	if idxData < 0 {
+		t.Fatalf("thread row lost its SUBJECT: %q", dataLine)
+	}
+	if idxHeader != idxData {
+		t.Fatalf("SUBJECT starts at different columns: header=%d row=%d\nheader: %q\nrow:    %q",
+			idxHeader, idxData, header, dataLine)
+	}
+}
+
+// TestRenderThreadLog_NoSampleRendersWaiting is RenderLog's nil-sample case
+// restated for the row-list caller, which carries no *source.MessageSample
+// of its own to be nil — haveSample is how it says the same thing.
+func TestRenderThreadLog_NoSampleRendersWaiting(t *testing.T) {
+	lines := RenderThreadLog(nil, nil, false, time.Time{}, false, time.Now(), 80)
+	if len(lines) != 1 || lines[0] != "messages — waiting for first sample" {
+		t.Fatalf("got %v, want the waiting-for-first-sample line", lines)
+	}
+}
+
+// TestRenderThreadLog_EmptyRowsRendersNoMessages is RenderLog's empty-sample
+// case restated: a sample that exists but flattens to zero rows (a filter
+// matching nothing, or a genuinely empty bus) renders the placeholder, not an
+// empty pane.
+func TestRenderThreadLog_EmptyRowsRendersNoMessages(t *testing.T) {
+	lines := RenderThreadLog(nil, nil, true, time.Now(), false, time.Now(), 80)
+	if len(lines) != 3 || lines[2] != "(no messages)" {
+		t.Fatalf("got %v, want a 2-line header plus \"(no messages)\"", lines)
+	}
+}
+
+// TestRenderThreadLog_RendersRowsInGivenOrder asserts RenderThreadLog
+// establishes no order of its own (## plan's "do not derive a second
+// order"): the three rows come out in exactly the sequence they were given —
+// thread, newest child, older child — matching threadFixture's own row order.
+func TestRenderThreadLog_RendersRowsInGivenOrder(t *testing.T) {
+	th, rows := threadFixture()
+	lines := RenderThreadLog(rows, threadFixtureThreadsByKey(th), true, time.Now(), false, time.Now(), 80)
+
+	data := lines[2:]
+	if len(data) != 3 {
+		t.Fatalf("got %d data rows, want 3: %q", len(data), data)
+	}
+	if !strings.Contains(data[0], "2") { // the thread row's own N cell
+		t.Errorf("row 0 is not the thread's summary row: %q", data[0])
+	}
+	if !strings.Contains(data[1], "distinctive-newest-subject") {
+		t.Errorf("row 1 is not the newest child: %q", data[1])
+	}
+	if !strings.Contains(data[2], "distinctive-older-subject") {
+		t.Errorf("row 2 is not the older child: %q", data[2])
+	}
+}
+
+// TestRenderThreadLog_HeaderCarriesPendingForYouAndIdentity is the
+// threaded-header twin of RenderLog's own Pending/ForYou/Identity coverage —
+// logHeaderLine is shared code, but this pins that RenderThreadLog actually
+// reaches it with the signals it was given, not a zero LogSignals{}.
+func TestRenderThreadLog_HeaderCarriesPendingForYouAndIdentity(t *testing.T) {
+	th, rows := threadFixture()
+	header := RenderThreadLog(rows, threadFixtureThreadsByKey(th), true, time.Now(), false, time.Now(), 100, LogSignals{
+		Pending:  7,
+		ForYou:   2,
+		Identity: identityAddr,
+	})[0]
+
+	for _, want := range []string{"+7 new", "2 for you"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("threaded header lost %q: %q", want, header)
+		}
+	}
+}

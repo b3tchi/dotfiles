@@ -349,7 +349,7 @@ func sampleMessage(from string, content string) source.Message {
 // detail pane renders the message under the message pane's cursor, and
 // follows it as the cursor moves.
 func TestRenderFrame_DetailFollowsMessagesCursor(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	msgs := &source.MessageSample{Messages: []source.Message{
 		sampleMessage("alice", `"first"`),
@@ -362,13 +362,13 @@ func TestRenderFrame_DetailFollowsMessagesCursor(t *testing.T) {
 	// "→" only appears in the detail header (`from → to`), so checking for
 	// it distinguishes "the detail pane selected this sender" from "this
 	// sender merely appears as a log row", which would be true either way.
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "carol →") {
 		t.Fatalf("expected the newest message (cursor at row 0) in the detail pane, got %v", lines)
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
-	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "alice →") {
 		t.Fatalf("expected the older message (cursor at row 1) after moving down, got %v", lines)
 	}
@@ -378,10 +378,10 @@ func TestRenderFrame_DetailFollowsMessagesCursor(t *testing.T) {
 // an empty log must not make the detail region disappear, so the layout
 // does not jump as messages arrive.
 func TestRenderFrame_EmptyMessageList_DetailShowsPlaceholder(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	msgs := &source.MessageSample{Messages: nil}
 
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "no message selected") {
 		t.Fatalf("expected the detail placeholder with an empty message list, got %v", lines)
 	}
@@ -391,7 +391,7 @@ func TestRenderFrame_EmptyMessageList_DetailShowsPlaceholder(t *testing.T) {
 // toggling the detail pane off while the cursor is in the message pane, then
 // back on, must still show the same message.
 func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	msgs := &source.MessageSample{Messages: []source.Message{
 		sampleMessage("alice", `"first"`),
@@ -400,12 +400,12 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 	// A real session always draws once (establishing MessagesLen, which
 	// bounds the cursor) before any key is read — see runInteractive's
 	// initial draw(). Mirror that ordering here.
-	renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	// sp033 T6: row 0 is carol (the newest), so 'j' selects alice.
 	model.HandleKey(tui.Key{Rune: 'j'}) // select alice
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // off
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	// "→" only ever appears in the detail header (detailHeaderLine's
 	// `from → to`); the message pane's own SUBJECT column never contains it,
 	// so its absence is a precise "no detail region" check, distinct from
@@ -415,7 +415,7 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Rune: 'd'}) // on
-	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "alice →") {
 		t.Fatalf("expected alice still selected after toggling back on, got %v", lines)
 	}
@@ -425,11 +425,11 @@ func TestRenderFrame_ToggleOffAndOn_PreservesSelection(t *testing.T) {
 // edge case: a terminal too short for three panes hides detail, and the two
 // remaining panes still each keep their header.
 func TestRenderFrame_TooShortForThreePanes_HidesDetailButKeepsHeaders(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 5)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 5, nil)
 	if containsSubstring(lines, "no message selected") {
 		t.Fatalf("height 5: expected detail hidden, got %v", lines)
 	}
@@ -446,10 +446,10 @@ func TestRenderFrame_TooShortForThreePanes_HidesDetailButKeepsHeaders(t *testing
 // end-to-end): height<=0 means no cursor and no height, so no detail region
 // regardless of DetailVisible.
 func TestRenderFrame_OnceHeight_NoDetailNoToggle(t *testing.T) {
-	model := tui.NewModel() // DetailVisible defaults true
+	model := flatModel() // DetailVisible defaults true
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 0)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 0, nil)
 	if containsSubstring(lines, "no message selected") || containsSubstring(lines, "alice →") {
 		t.Fatalf("height 0 (--once) must never render a detail pane, got %v", lines)
 	}
@@ -471,12 +471,12 @@ func TestRenderFrame_ProjectFiltersRosterButNotMessages(t *testing.T) {
 		sampleMessage("bob", `"second"`),
 	}}
 
-	unfiltered := tui.NewModel()
-	unfilteredLines, _ := renderFrame(unfiltered, roster, false, msgs, false, time.Now(), 80, 40)
+	unfiltered := flatModel()
+	unfilteredLines, _ := renderFrame(unfiltered, roster, false, msgs, false, time.Now(), 80, 40, nil)
 
-	filtered := tui.NewModel()
+	filtered := flatModel()
 	filtered.Project = "dotfiles"
-	filteredLines, _ := renderFrame(filtered, roster, false, msgs, false, time.Now(), 80, 40)
+	filteredLines, _ := renderFrame(filtered, roster, false, msgs, false, time.Now(), 80, 40, nil)
 
 	// Roster: --project must actually shrink it.
 	if !containsSubstring(unfilteredLines, "peer-copacks") {
@@ -521,7 +521,7 @@ func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
 		{Project: "copacks", UID: "u3", Name: "peer-one"},
 	}}
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.Project = "dotfiles"
 	model.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "peer-one" {
@@ -529,7 +529,7 @@ func TestRenderFrame_ProjectComposesWithCommittedFilter(t *testing.T) {
 	}
 	model.HandleKey(tui.Key{Special: tui.KeyEnter})
 
-	lines, _ := renderFrame(model, roster, false, nil, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, nil, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "peer-one") {
 		t.Fatalf("expected the row matching both --project and the filter, got %v", lines)
 	}
@@ -558,14 +558,14 @@ func TestRenderFrame_CommittedFilterShownInRosterHeader(t *testing.T) {
 	roster := wideRoster(5)
 	msgs := wideMessages(5)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "agent00" {
 		model.HandleKey(tui.Key{Rune: r})
 	}
 	model.HandleKey(tui.Key{Special: tui.KeyEnter})
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	// lines[0] is the ROSTER's own header (it stacks first) — asserting on
 	// it specifically, not on the whole frame, distinguishes this from the
 	// message pane's already-wired indicator so the test cannot pass
@@ -583,14 +583,14 @@ func TestRenderFrame_CommittedFilterShownInMessageHeader(t *testing.T) {
 	roster := wideRoster(5)
 	msgs := wideMessages(5)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "claude-main" {
 		model.HandleKey(tui.Key{Rune: r})
 	}
 	model.HandleKey(tui.Key{Special: tui.KeyEnter})
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "filter: claude-main") {
 		t.Fatalf("expected the message header to show the committed filter, got %v", lines)
 	}
@@ -604,14 +604,14 @@ func TestRenderFrame_ClearedFilterShowsNoIndicator(t *testing.T) {
 	roster := wideRoster(5)
 	msgs := wideMessages(5)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HandleKey(tui.Key{Rune: '/'})
 	model.HandleKey(tui.Key{Special: tui.KeyEnter})
 	if !model.Filter.Set {
 		t.Fatalf("setup: expected Filter.Set after committing an empty query")
 	}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	if containsSubstring(lines, "filter:") {
 		t.Fatalf("a cleared (Set=true, Query=\"\") filter must show no indicator, got %v", lines)
 	}
@@ -624,13 +624,13 @@ func TestRenderFrame_DraftEchoedWhileEditing(t *testing.T) {
 	roster := wideRoster(5)
 	msgs := wideMessages(5)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "cla" {
 		model.HandleKey(tui.Key{Rune: r})
 	}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	if !containsSubstring(lines, "editing filter: cla") {
 		t.Fatalf("expected the message header to echo the in-progress draft, got %v", lines)
 	}
@@ -646,10 +646,10 @@ func TestRenderFrame_FrameByteIdenticalWhenFilterInactive(t *testing.T) {
 	msgs := wideMessages(20)
 	now := time.Now()
 
-	baseline := tui.NewModel()
-	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40)
+	baseline := flatModel()
+	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40, nil)
 
-	abandoned := tui.NewModel()
+	abandoned := flatModel()
 	abandoned.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "never committed" {
 		abandoned.HandleKey(tui.Key{Rune: r})
@@ -659,7 +659,7 @@ func TestRenderFrame_FrameByteIdenticalWhenFilterInactive(t *testing.T) {
 		t.Fatalf("setup: esc did not close the filter draft")
 	}
 
-	clearedAgain := tui.NewModel()
+	clearedAgain := flatModel()
 	clearedAgain.HandleKey(tui.Key{Rune: '/'})
 	for _, r := range "peer-1" {
 		clearedAgain.HandleKey(tui.Key{Rune: r})
@@ -673,7 +673,7 @@ func TestRenderFrame_FrameByteIdenticalWhenFilterInactive(t *testing.T) {
 
 	for name, touched := range map[string]*tui.Model{"esc-abandoned": abandoned, "committed-then-cleared": clearedAgain} {
 		t.Run(name, func(t *testing.T) {
-			gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40)
+			gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40, nil)
 			if len(gotLines) != len(baseLines) {
 				t.Fatalf("changed the frame's line count: got %d, want %d", len(gotLines), len(baseLines))
 			}
@@ -724,7 +724,7 @@ func logRowHasSender(lines []string, sender string) bool {
 // budgets a frame slices against must be derived from THIS frame's height,
 // not from the viewport the previous frame left behind.
 func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	var msgs []source.Message
 	for i := 0; i < 40; i++ {
@@ -736,31 +736,31 @@ func TestRenderFrame_ResizeKeepsCursorRowVisibleInSameFrame(t *testing.T) {
 	// a key), then walk the cursor deep into the list. sp033 T6: row 0 is
 	// sender39 (the newest, last in the ascending sample), so 30 steps down
 	// lands on sender09.
-	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40, nil)
 	for i := 0; i < 30; i++ {
 		model.HandleKey(tui.Key{Rune: 'j'})
 	}
-	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40, nil)
 	if !logRowHasSender(lines, "sender09") {
 		t.Fatalf("height 40: expected the cursor's row visible before the resize, got %v", lines)
 	}
 
 	// A single draw at a much shorter height. sender09 must be in THIS
 	// frame's message pane.
-	lines, _ = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8)
+	lines, _ = renderFrame(model, nil, false, sample, false, time.Now(), 120, 8, nil)
 	if !logRowHasSender(lines, "sender09") {
 		t.Fatalf("height 8: the cursor's row is absent from the message pane in the frame that observed the resize, got %v", lines)
 	}
 }
 
 // TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt is sp032 T1's
-// clamp seen at the use site: scrolledMessageSample does msgs[scroll:], so a
-// scroll offset left pointing past a list a committed filter just shrank is
-// a panic, not a cosmetic bug. The model clamps scroll in the same pass as
-// the length (filterMessageRows -> SetMessagesLen), so the frame that
-// observes the filter already slices in range.
+// clamp seen at the use site: scrolledLogRows does rows[scroll:], so a scroll
+// offset left pointing past a list a committed filter just shrank is a
+// panic, not a cosmetic bug. The model clamps scroll in the same pass as the
+// length (filterMessageRows -> SetMessagesLen), so the frame that observes
+// the filter already slices in range.
 func TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	var msgs []source.Message
 	for i := 0; i < 40; i++ {
@@ -771,7 +771,7 @@ func TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt(t *testing.T) {
 	// Settle a frame so the pane reports a real viewport, then scroll deep
 	// with the cursor left behind at row 0 — the post-wheel state T3 and T6
 	// produce, which sp031's model could not represent at all.
-	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	renderFrame(model, nil, false, sample, false, time.Now(), 120, 40, nil)
 	model.ScrollMessages(30)
 	if model.MessagesScroll == 0 {
 		t.Fatalf("setup: expected a non-zero scroll, got %d", model.MessagesScroll)
@@ -783,7 +783,7 @@ func TestRenderFrame_ScrolledPaneSurvivesAFilterThatShrinksIt(t *testing.T) {
 	// A committed filter cuts the list to a single row. This frame must not
 	// panic slicing it.
 	model.Filter = tui.Filter{Set: true, Query: "sender07"}
-	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40)
+	lines, _ := renderFrame(model, nil, false, sample, false, time.Now(), 120, 40, nil)
 
 	if model.MessagesScroll != 0 {
 		t.Fatalf("expected scroll clamped to 0 for a 1-row list, got %d", model.MessagesScroll)
@@ -829,11 +829,11 @@ func styledLines(lines []string) []string {
 // TestRenderFrame_FocusedPaneHeaderIsMarked, which pinned the header-marks-
 // on-focus half of the bug as though it were correct behavior.
 func TestRenderFrame_FocusedListPaneMarksRowNotHeader(t *testing.T) {
-	model := tui.NewModel() // focus starts on the roster
+	model := flatModel() // focus starts on the roster
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	if containsSubstring(lines, testStyleOn+"agents") {
 		t.Fatalf("roster is a list pane: its header must never be marked, focused or not; got %v", lines)
 	}
@@ -846,7 +846,7 @@ func TestRenderFrame_FocusedListPaneMarksRowNotHeader(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Special: tui.KeyTab})
-	lines, _ = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	if containsSubstring(lines, testStyleOn+"messages") {
 		t.Fatalf("messages is a list pane: its header must never be marked, focused or not; got %v", lines)
 	}
@@ -863,7 +863,7 @@ func TestRenderFrame_FocusedListPaneMarksRowNotHeader(t *testing.T) {
 }
 
 func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	msgs := &source.MessageSample{Messages: []source.Message{
 		sampleMessage("alice", `"first"`),
@@ -871,7 +871,7 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 	}}
 
 	// sp033 T6: row 0 is carol (the newest, last in the ascending sample).
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	marked := styledLines(lines)
 	if !anyContains(marked, "carol") {
 		t.Fatalf("cursor at 0: carol's LOG ROW must be marked, got marked=%v all=%v", marked, lines)
@@ -881,7 +881,7 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 	}
 
 	model.HandleKey(tui.Key{Rune: 'j'})
-	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ = renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	marked = styledLines(lines)
 	if !anyContains(marked, "alice") {
 		t.Fatalf("cursor at 1: alice's row must be marked, got marked=%v all=%v", marked, lines)
@@ -891,11 +891,11 @@ func TestRenderFrame_SelectedRowIsMarked(t *testing.T) {
 // An empty list has nothing to select. The placeholder must never be marked
 // as though it were a row — the same honesty adr0017 asks of a verdict.
 func TestRenderFrame_EmptyListHasNoSelectionMark(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	msgs := &source.MessageSample{Messages: nil}
 
-	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 40, nil)
 	for _, l := range styledLines(lines) {
 		if strings.Contains(l, "(no messages)") {
 			t.Fatalf("the empty-list placeholder must not be marked as a selected row: %q", l)
@@ -912,7 +912,7 @@ func TestRenderFrame_EmptyListHasNoSelectionMark(t *testing.T) {
 // original bug. While Composing, the composer is the only focusable
 // surface, so it alone must carry the mark.
 func TestRenderFrame_ComposerOpenMarksOnlyComposerHeader(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages // focus held here before 'a' is pressed
 	model.HasIdentity = true
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
@@ -928,7 +928,7 @@ func TestRenderFrame_ComposerOpenMarksOnlyComposerHeader(t *testing.T) {
 		t.Fatalf("setup: OpenComposer must not move focus, got %v", model.Focus)
 	}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40, nil)
 	marked := styledLines(lines)
 	if len(marked) != 1 {
 		t.Fatalf("composer open: want exactly one marked line, got %d: %v (frame=%v)", len(marked), marked, lines)
@@ -1009,9 +1009,9 @@ func TestRenderFrame_ExactlyOneMarkedLineAcrossStates(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			model := tui.NewModel()
+			model := flatModel()
 			tc.setup(t, model)
-			lines, _ := renderFrame(model, roster, false, tc.msgs, false, time.Now(), 80, 40)
+			lines, _ := renderFrame(model, roster, false, tc.msgs, false, time.Now(), 80, 40, nil)
 			marked := styledLines(lines)
 			if len(marked) != tc.want {
 				t.Fatalf("want %d marked line(s), got %d: %v", tc.want, len(marked), marked)
@@ -1029,7 +1029,7 @@ func TestRenderFrame_ExactlyOneMarkedLineAcrossStates(t *testing.T) {
 // which renderFrame's own SetMessagesViewport call would just re-clamp back
 // into range before markPane ever saw it.
 func TestRenderFrame_CursorScrolledOutOfViewMarksNothing(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneMessages
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	var msgList []source.Message
@@ -1039,7 +1039,7 @@ func TestRenderFrame_CursorScrolledOutOfViewMarksNothing(t *testing.T) {
 	msgs := &source.MessageSample{Messages: msgList}
 
 	// First frame settles the real viewport for this height/width.
-	renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12)
+	renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12, nil)
 	vp := model.MessagesViewport
 	if vp <= 0 || vp >= len(msgList) {
 		t.Fatalf("setup: viewport = %d, want a pageable pane shorter than %d messages", vp, len(msgList))
@@ -1051,7 +1051,7 @@ func TestRenderFrame_CursorScrolledOutOfViewMarksNothing(t *testing.T) {
 		t.Fatalf("setup: cursor %d must be above the scrolled window %d", model.MessagesCursor, model.MessagesScroll)
 	}
 
-	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12)
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12, nil)
 	marked := styledLines(lines)
 	if len(marked) != 0 {
 		t.Fatalf("cursor scrolled out of view: want zero marked lines, got %d: %v", len(marked), marked)
@@ -1208,11 +1208,31 @@ func agentMonitorRoot(t *testing.T) string {
 	}
 }
 
+// flatModel is tui.NewModel() with Threaded forced false. tui.NewModel()
+// opens THREADED by default (dotfiles-1t00 Task 5/Task 6's own criterion),
+// but essentially no message fixture in this file sets FromAddress/
+// ToAddresses (sampleMessage, wideMessages, writeMessageStub's wire payload
+// all omit them, and several — sampleMessage above all — reuse the same
+// literal ID across every message in a slice), so every message in this
+// file's fixtures computes the SAME degenerate thread key ("") and would
+// collapse into ONE row if rendered threaded — exactly the kind of
+// mode-dependent row list this task's own ## plan forbids a caller from being
+// surprised by. This file's pane-mechanics tests (scroll, cursor, click,
+// pending counts, filter…) were written against the flat list and stay
+// correct in flat mode; the tests that actually exercise threading build
+// their own addressed fixtures and opt into Threaded explicitly (see
+// TestShell_* below).
+func flatModel() *tui.Model {
+	m := tui.NewModel()
+	m.Threaded = false
+	return m
+}
+
 // newTestShell builds a shell over two monitors that have never sampled —
 // enough for every key-mapping assertion, none of which renders.
 func newTestShell(t *testing.T) *shell {
 	t.Helper()
-	model := tui.NewModel()
+	model := flatModel()
 	s := newShell(context.Background(), model,
 		source.NewMonitor(source.NewSampler(filepath.Join(t.TempDir(), "stamp"))),
 		source.NewMessagesMonitor(source.NewMessagesSampler()))
@@ -1264,7 +1284,7 @@ func newWiredShellIn(t *testing.T, dir string, rosterRows, msgRows, width, heigh
 	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
 	msgs.Tick(ctx)
 
-	model := tui.NewModel()
+	model := flatModel()
 	s := newShell(ctx, model, census, msgs)
 	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
 	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
@@ -1305,7 +1325,7 @@ func writeMessageStub(t *testing.T, dir string, msgRows int) {
 // geometry from the same width/height/now before dispatching).
 func settleLayout(s *shell) frameLayout {
 	_, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(),
-		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height)
+		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height, nil)
 	return layout
 }
 
@@ -1592,7 +1612,7 @@ func TestView_EqualsRenderFrameOutput(t *testing.T) {
 
 	now := time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC)
 
-	s := newShell(ctx, tui.NewModel(), census, msgs)
+	s := newShell(ctx, flatModel(), census, msgs)
 	s.now = func() time.Time { return now }
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	got := s.View()
@@ -1600,7 +1620,7 @@ func TestView_EqualsRenderFrameOutput(t *testing.T) {
 	// An independent model at the same starting state, so the comparison is
 	// "same model, same samples, same string" rather than a second pass over
 	// state the first render already mutated.
-	wantLines, _ := renderFrame(tui.NewModel(), census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), now, 100, 30)
+	wantLines, _ := renderFrame(flatModel(), census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), now, 100, 30, nil)
 	want := strings.Join(wantLines, "\n")
 
 	if got != want {
@@ -1686,10 +1706,10 @@ func TestLayout_MatchesPaneBudgets(t *testing.T) {
 	for _, height := range []int{5, 6, 7, 8, 10, 16, 24, 32, 40, 64, 80} {
 		for _, detailVisible := range []bool{false, true} {
 			t.Run(fmt.Sprintf("h=%d/detail=%v", height, detailVisible), func(t *testing.T) {
-				model := tui.NewModel()
+				model := flatModel()
 				model.DetailVisible = detailVisible
 
-				lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+				lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height, nil)
 
 				rosterLines := paneLines(true, 100)
 				logLines := paneLines(true, 100)
@@ -1738,7 +1758,8 @@ func TestLayout_MatchesPaneBudgets(t *testing.T) {
 					// below is two lines) renders fewer lines than its
 					// budget, with no padding to fill it — exactly the bug
 					// this assertion exists to catch.
-					wantDetailLines := render.RenderDetail(selectedMessage(model, msgs), 80, detailBudget)
+					wantRows, _ := buildMessageRows(orderedMessages(model, msgs), model.Threaded, nil)
+					wantDetailLines := render.RenderDetail(selectedMessage(model, wantRows), 80, detailBudget)
 					wantDetailLen := len(wantDetailLines)
 
 					wantDetailFirst := wantMsgFirst + wantLogLen + 1
@@ -1783,7 +1804,7 @@ func TestMouse_ClickOnDataRowSelectsThatRow(t *testing.T) {
 		for _, scroll := range []int{0, 3, 10} {
 			for _, offset := range []int{0, 2, 5} {
 				t.Run(fmt.Sprintf("%s/scroll=%d/offset=%d", tc.name, scroll, offset), func(t *testing.T) {
-					model := tui.NewModel()
+					model := flatModel()
 					model.DetailVisible = false
 					roster := wideRoster(50)
 					msgs := wideMessages(50)
@@ -1791,14 +1812,14 @@ func TestMouse_ClickOnDataRowSelectsThatRow(t *testing.T) {
 					// Settle a frame once so the pane reports a real
 					// viewport (sp032 T1's own tests use this same
 					// draw-then-act sequencing), THEN scroll.
-					renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+					renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 					if tc.focus == tui.PaneRoster {
 						model.ScrollRoster(scroll)
 					} else {
 						model.ScrollMessages(scroll)
 					}
 
-					_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+					_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 
 					pane := layout.roster
 					wantHit := hitRoster
@@ -1845,12 +1866,12 @@ func TestMouse_ClickOnDataRowSelectsThatRow(t *testing.T) {
 // header half: both the status header line and the column-header line focus
 // the pane and leave its cursor exactly where it was.
 func TestMouse_ClickOnHeaderFocusesWithoutSelecting(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.DetailVisible = false
 	roster := wideRoster(20)
 	msgs := wideMessages(20)
 
-	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 
 	model.Focus = tui.PaneMessages
 	for i := 0; i < 4; i++ {
@@ -1882,12 +1903,12 @@ func TestMouse_ClickOnHeaderFocusesWithoutSelecting(t *testing.T) {
 // "(no messages)" line focuses the pane but never selects the placeholder as
 // though it were a row.
 func TestMouse_ClickOnPlaceholderDoesNotSelect(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneRoster
 	model.DetailVisible = false
 	msgs := &source.MessageSample{Messages: []source.Message{}}
 
-	_, layout := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 24)
+	_, layout := renderFrame(model, nil, false, msgs, false, time.Now(), 80, 24, nil)
 
 	y := layout.messages.firstRow + layout.messages.headerRows // the "(no messages)" line
 	target, isData, _ := hitTest(layout, y)
@@ -2057,12 +2078,12 @@ func TestMouse_PressOnSeparatorChangesNothing(t *testing.T) {
 // no scroll (T4's job) — and a wheel over a pane showing only the
 // placeholder must leave its scroll at 0, not go negative.
 func TestMouse_WheelOverDetailAndEmptyPaneIsSafe(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.DetailVisible = true
 	roster := wideRoster(3)
 	msgs := &source.MessageSample{Messages: []source.Message{}}
 
-	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 	if !layout.detailShown {
 		t.Fatalf("test setup: expected detail shown at height 24")
 	}
@@ -2099,12 +2120,12 @@ func TestMouse_WheelOverDetailAndEmptyPaneIsSafe(t *testing.T) {
 // and the draft itself (observable only via the eventual committed Filter)
 // must survive untouched.
 func TestMouse_ClickWhileEditingMovesSelectionWithoutCancellingDraft(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.DetailVisible = false
 	roster := wideRoster(20)
 	msgs := wideMessages(20)
 
-	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 
 	model.Focus = tui.PaneRoster
 	model.HandleKey(tui.Key{Rune: '/'})
@@ -2145,13 +2166,13 @@ func TestMouse_ClickWhileEditingMovesSelectionWithoutCancellingDraft(t *testing.
 // underflow; x is not part of hitTest's contract at all (see its doc), so an
 // arbitrarily large x must not change the result.
 func TestMouse_ClickAtTopRowAndBeyondWidthIsSafe(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.DetailVisible = false
 	model.Focus = tui.PaneMessages
 	roster := wideRoster(20)
 	msgs := wideMessages(20)
 
-	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24)
+	_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 24, nil)
 
 	for _, x := range []int{0, 79, 1000, -5} {
 		target, isData, _ := hitTest(layout, 0)
@@ -2234,12 +2255,12 @@ func TestMouse_NeverProducesOutOfRangeCursorOrScroll(t *testing.T) {
 		msgRows := rng.Intn(60)
 		detailVisible := rng.Intn(2) == 0
 
-		model := tui.NewModel()
+		model := flatModel()
 		model.DetailVisible = detailVisible
 		roster := wideRoster(rosterRows)
 		msgs := wideMessages(msgRows)
 
-		_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+		_, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height, nil)
 
 		y := rng.Intn(height+20) - 10
 
@@ -2322,7 +2343,7 @@ func TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame(t *testing.
 	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
 	msgs.Tick(ctx)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneRoster
 	model.DetailVisible = true
 	s := newShell(ctx, model, census, msgs)
@@ -2330,7 +2351,7 @@ func TestMouse_ClickThroughShellUpdate_SelectsRowAndFocusesSameFrame(t *testing.
 
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	_, layout := renderFrame(s.model, census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), s.now(), s.width, s.height)
+	_, layout := renderFrame(s.model, census.Last(), census.Stale(), msgs.Last(), msgs.Stale(), s.now(), s.width, s.height, nil)
 	y := layout.messages.firstRow + layout.messages.headerRows + 1 // carol, the second message row
 
 	s.Update(tea.MouseMsg{X: 5, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
@@ -2401,7 +2422,7 @@ func newDetailShell(t *testing.T, msgCount, bodyKeys, width, height int) *shell 
 	mm := source.NewMessagesMonitor(source.NewMessagesSampler())
 	mm.Tick(ctx)
 
-	s := newShell(ctx, tui.NewModel(), census, mm)
+	s := newShell(ctx, flatModel(), census, mm)
 	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
 	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	// A real session always draws once before bubbletea delivers a key
@@ -2420,7 +2441,7 @@ func newDetailShell(t *testing.T, msgCount, bodyKeys, width, height int) *shell 
 // operator sees.
 func detailPaneLines(t *testing.T, s *shell) (header string, body []string) {
 	t.Helper()
-	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 	if !layout.detailShown {
 		t.Fatalf("detail pane is not shown in this frame: %q", lines)
 	}
@@ -2532,7 +2553,7 @@ func TestZoom_HidesOtherPanesAndRestoresScrollOnExit(t *testing.T) {
 	if !s.model.DetailZoom {
 		t.Fatalf("enter did not zoom")
 	}
-	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 
 	for _, l := range lines {
 		if strings.Contains(l, "agent0") {
@@ -2568,7 +2589,7 @@ func TestZoom_HidesOtherPanesAndRestoresScrollOnExit(t *testing.T) {
 	if s.model.DetailZoom {
 		t.Fatalf("esc did not leave zoom")
 	}
-	back, backLayout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	back, backLayout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 	if !containsSubstring(back, "agent00") {
 		t.Errorf("esc did not restore the roster pane: %q", back)
 	}
@@ -2589,14 +2610,14 @@ func TestZoom_HidesOtherPanesAndRestoresScrollOnExit(t *testing.T) {
 // frame must survive both zoom keys untouched.
 func TestZoom_RefusedWithNoSelection(t *testing.T) {
 	s := newDetailShell(t, 0, 0, 100, 40)
-	before, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	before, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 
 	for _, k := range []tea.KeyMsg{key(tea.KeyEnter), runeKey('o'), runeKey('O')} {
 		s.Update(k)
 		if s.model.DetailZoom {
 			t.Fatalf("key %v zoomed with an empty log", k)
 		}
-		after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+		after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 		if !reflect.DeepEqual(before, after) {
 			t.Fatalf("key %v changed the frame on a refused zoom:\n got %q\nwant %q", k, after, before)
 		}
@@ -2626,7 +2647,7 @@ func TestDetail_HidingWhileFocusedMovesFocus(t *testing.T) {
 		t.Errorf("Focus = %v after hiding the focused detail pane, want PaneMessages", s.model.Focus)
 	}
 
-	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 	if layout.detailShown {
 		t.Errorf("layout still reports the detail pane shown after `d`")
 	}
@@ -2652,7 +2673,7 @@ func TestEsc_CancelsFilterDraft(t *testing.T) {
 	if got := s.model.Filter; got != (tui.Filter{Set: true, Query: "s01"}) {
 		t.Fatalf("setup: Filter = %+v, want the committed s01", got)
 	}
-	committed, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	committed, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 
 	s.Update(runeKey('/'))
 	s.Update(runeKey('z'))
@@ -2663,7 +2684,7 @@ func TestEsc_CancelsFilterDraft(t *testing.T) {
 	if got := s.model.Filter; got != (tui.Filter{Set: true, Query: "s01"}) {
 		t.Errorf("Filter = %+v after esc, want the committed s01 untouched", got)
 	}
-	after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	after, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 	if !reflect.DeepEqual(committed, after) {
 		t.Errorf("esc on a draft changed the frame:\n got %q\nwant %q", after, committed)
 	}
@@ -2734,7 +2755,7 @@ func TestZoom_TerminalTooShortStillFits(t *testing.T) {
 		if !s.model.DetailZoom {
 			t.Fatalf("height %d: enter did not zoom", h)
 		}
-		lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+		lines, _ := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 		if len(lines) > h {
 			t.Errorf("height %d: zoomed frame is %d lines, want at most %d", h, len(lines), h)
 		}
@@ -2746,13 +2767,13 @@ func TestZoom_TerminalTooShortStillFits(t *testing.T) {
 // pane width (wrapCells) and be reachable by scrolling, not run off the
 // right edge.
 func TestDetail_WideSingleLinePayloadWrapsAndScrolls(t *testing.T) {
-	model := tui.NewModel()
+	model := flatModel()
 	model.Focus = tui.PaneDetail
 	wide := strings.Repeat("abcdefghij", 400) // 4000 cells on one physical line
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"`+wide+`"`)}}
 
 	const width = 40
-	lines, layout := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40)
+	lines, layout := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40, nil)
 	if !layout.detailShown {
 		t.Fatalf("setup: detail pane not shown")
 	}
@@ -2764,7 +2785,7 @@ func TestDetail_WideSingleLinePayloadWrapsAndScrolls(t *testing.T) {
 	first := lines[layout.detail.firstRow+layout.detail.headerRows]
 
 	model.ScrollDetail(3)
-	lines2, layout2 := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40)
+	lines2, layout2 := renderFrame(model, wideRoster(3), false, msgs, false, time.Now(), width, 40, nil)
 	if got := lines2[layout2.detail.firstRow+layout2.detail.headerRows]; got == first {
 		t.Fatalf("scrolling a 4000-cell single-line payload showed the same first row %q", got)
 	}
@@ -2950,7 +2971,7 @@ func TestUpdate_PagingKeysReachTheFocusedPane(t *testing.T) {
 // messageHeaderLine is the message pane's header row in a rendered frame.
 func messageHeaderLine(t *testing.T, s *shell) string {
 	t.Helper()
-	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height)
+	lines, layout := buildFrame(s.model, s.census, s.msgs, s.now(), s.width, s.height, nil)
 	if layout.messages.headerRows == 0 {
 		t.Fatalf("the message pane rendered no header: %v", lines)
 	}
@@ -3133,7 +3154,7 @@ func TestTail_OncePathNeverCountsOrFollows(t *testing.T) {
 			t.Fatalf("the messages sampler did not deliver a sample of %d", n)
 		}
 		lines, _ := renderFrame(s.model, s.census.Last(), s.census.Stale(),
-			s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, 0)
+			s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, 0, nil)
 
 		if s.model.PendingMessages != 0 {
 			t.Fatalf("n=%d: --once counted %d pending messages", n, s.model.PendingMessages)
@@ -3166,7 +3187,7 @@ func firstFrame(t *testing.T, s *shell) ([]string, frameLayout) {
 	t.Helper()
 	view := s.View()
 	lines, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(),
-		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height)
+		s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height, nil)
 	if got := strings.Join(lines, "\n"); got != view {
 		t.Fatalf("the decomposed frame is not the one View returned:\n got %q\nwant %q", got, view)
 	}
@@ -3325,7 +3346,7 @@ func TestStartup_FirstSampleAfterTheFirstWindowSize(t *testing.T) {
 	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
 	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
 
-	s := newShell(ctx, tui.NewModel(), census, msgs)
+	s := newShell(ctx, flatModel(), census, msgs)
 	s.now = func() time.Time { return time.Date(2026, 9, 17, 10, 0, 5, 0, time.UTC) }
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	firstFrame(t, s) // a frame with no sample at all yet
@@ -3731,7 +3752,7 @@ func TestRunOnce_RegisteredIdentitySetsHasIdentityOnTheModel(t *testing.T) {
 	writeWhoamiStub(t, dir, `{"user":"jan","label":"jan","address":"aABCDEFGHJKMNPQRSTVWXYZ012","kind":"person","registered":true}`)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	model := tui.NewModel()
+	model := flatModel()
 	identity := resolveIdentityForModel(context.Background(), model, "")
 
 	if !model.HasIdentity {
@@ -3928,7 +3949,7 @@ func newComposerReadyShell(t *testing.T, width, height int) *shell {
 	mm := source.NewMessagesMonitor(source.NewMessagesSampler())
 	mm.Tick(ctx)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HasIdentity = true
 	s := newShell(ctx, model, census, mm)
 	s.identity = source.Identity{Address: "aOPERATOR00000000000000000003", Label: "me", Registered: true}
@@ -4204,13 +4225,13 @@ func TestLayout_ComposerRegionSizedFromBudgets(t *testing.T) {
 
 	for _, height := range []int{16, 24, 32, 40, 64, 80} {
 		t.Run(fmt.Sprintf("h=%d", height), func(t *testing.T) {
-			model := tui.NewModel()
+			model := flatModel()
 			model.HasIdentity = true
 			if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
 				t.Fatalf("setup: OpenComposer refused: %s", reason)
 			}
 
-			lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+			lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height, nil)
 
 			rosterLines := paneLines(true, 50)
 			logLines := paneLines(true, 50)
@@ -4241,10 +4262,10 @@ func TestLayout_FrameByteIdenticalWhenComposerClosed(t *testing.T) {
 	msgs := wideMessages(20)
 	now := time.Now()
 
-	baseline := tui.NewModel()
-	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40)
+	baseline := flatModel()
+	baseLines, baseLayout := renderFrame(baseline, roster, false, msgs, false, now, 80, 40, nil)
 
-	touched := tui.NewModel()
+	touched := flatModel()
 	touched.HasIdentity = true
 	if ok, reason := touched.OpenComposer("aADDRESS0000000000000000001"); !ok {
 		t.Fatalf("setup: OpenComposer refused: %s", reason)
@@ -4257,7 +4278,7 @@ func TestLayout_FrameByteIdenticalWhenComposerClosed(t *testing.T) {
 		t.Fatalf("setup: esc did not close the composer")
 	}
 
-	gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40)
+	gotLines, gotLayout := renderFrame(touched, roster, false, msgs, false, now, 80, 40, nil)
 
 	if len(gotLines) != len(baseLines) {
 		t.Fatalf("closed composer changed the frame's line count: got %d, want %d", len(gotLines), len(baseLines))
@@ -4283,13 +4304,13 @@ func TestLayout_ShortTerminalKeepsTheMessageList(t *testing.T) {
 	msgs := wideMessages(50)
 	const height = 14
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HasIdentity = true
 	if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
 		t.Fatalf("setup: OpenComposer refused: %s", reason)
 	}
 
-	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height)
+	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, height, nil)
 
 	if layout.detailShown {
 		t.Errorf("expected the detail pane to lose its room to the composer at height %d", height)
@@ -4307,8 +4328,8 @@ func TestLayout_ShortTerminalKeepsTheMessageList(t *testing.T) {
 
 	// Regression: without a composer open, the SAME height still shows
 	// detail exactly as sp032 left it.
-	plain := tui.NewModel()
-	_, plainLayout := renderFrame(plain, roster, false, msgs, false, time.Now(), 80, height)
+	plain := flatModel()
+	_, plainLayout := renderFrame(plain, roster, false, msgs, false, time.Now(), 80, height, nil)
 	if !plainLayout.detailShown {
 		t.Errorf("without a composer open, detail should still show at height %d (regression)", height)
 	}
@@ -4324,7 +4345,7 @@ func TestOnce_NeverRendersComposer(t *testing.T) {
 	roster := wideRoster(3)
 	msgs := wideMessages(3)
 
-	model := tui.NewModel()
+	model := flatModel()
 	model.HasIdentity = true
 	if ok, reason := model.OpenComposer("aADDRESS0000000000000000001"); !ok {
 		t.Fatalf("setup: OpenComposer refused: %s", reason)
@@ -4333,7 +4354,7 @@ func TestOnce_NeverRendersComposer(t *testing.T) {
 		model.HandleKey(tui.Key{Rune: r})
 	}
 
-	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 0)
+	lines, layout := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 0, nil)
 
 	if layout.composerShown {
 		t.Fatalf("expected --once (height 0) to never show the composer")
@@ -4434,6 +4455,11 @@ func TestKeys_RealKeypressExpandsAndCollapses(t *testing.T) {
 		t.Helper()
 		s := newTestShell(t)
 		s.model.Focus = tui.PaneMessages
+		// canToggleThread requires Threaded — newTestShell now defaults it
+		// false (flatModel, see its own doc) so the OTHER pane-mechanics
+		// tests in this file stay flat; this is the one table that needs the
+		// real default back.
+		s.model.Threaded = true
 		s.model.SetMessagesLen(5)
 		return s
 	}
@@ -4606,5 +4632,367 @@ func TestKeys_EscStillExitsZoomWithMessagesFocusedAndThreaded(t *testing.T) {
 	s.Update(key(tea.KeyEsc))
 	if s.model.DetailZoom {
 		t.Fatalf("esc did not exit the zoom")
+	}
+}
+
+// --- sp034 Task 6: wiring the threaded pane into the shell -----------------
+//
+// Every fixture above this point is deliberately flat (flatModel/
+// newTestShell/newWiredShellIn all force Threaded false — see flatModel's own
+// doc) because none of it carries FromAddress/ToAddresses. The tests below
+// build their OWN addressed fixture — addressedThreadStub — and opt into
+// Threaded explicitly, so they can exercise real grouping.
+
+// addressedThreadStub writes a pi-worker stub returning 3 messages across 2
+// threads, keyed on addresses per [[adr0034]]: "worker-a" <-> "jan" carries
+// two members (m1 the older, m3 the newest — m3 is also the newest message on
+// the whole bus), and "worker-b" <-> "jan" carries one (m2). Collapsed, the
+// row list is exactly two rows — [threadA (newest m3), threadB (m2)] — for
+// three messages, which is what every test below expands, collapses, clicks
+// or mode-toggles from.
+func addressedThreadStub(t *testing.T, dir string) {
+	t.Helper()
+	wire := `[` +
+		`{"id":"m1","at":"2026-09-12T12:00:00Z","from":"worker-a","to":["jan"],"kind":"message","content":"hello-a-1","from_address":"aWORKERA0000000000000000001","to_addresses":["aJAN000000000000000000000J"]},` +
+		`{"id":"m2","at":"2026-09-12T12:01:00Z","from":"worker-b","to":["jan"],"kind":"message","content":"hello-b-1","from_address":"aWORKERB0000000000000000002","to_addresses":["aJAN000000000000000000000J"]},` +
+		`{"id":"m3","at":"2026-09-12T12:02:00Z","from":"jan","to":["worker-a"],"kind":"message","content":"hello-a-2","from_address":"aJAN000000000000000000000J","to_addresses":["aWORKERA0000000000000000001"]}` +
+		`]`
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '"+wire+"'\n")
+}
+
+// newThreadedShell wires a real shell over addressedThreadStub's fixture,
+// sized by a real WindowSizeMsg, message pane focused, Threaded explicitly
+// true (tui.NewModel's own default, restated here since every OTHER shell
+// builder in this file forces it false).
+func newThreadedShell(t *testing.T, width, height int) *shell {
+	t.Helper()
+	dir := t.TempDir()
+	addressedThreadStub(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	s := newShell(ctx, model, census, msgs)
+	s.now = func() time.Time { return time.Date(2026, 9, 12, 12, 5, 0, 0, time.UTC) }
+	s.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return s
+}
+
+// TestShell_ExpansionSetDrivesRows is the test_plan's named case: a real
+// tea.KeyMsg expand (KeyRight, cursor on thread A's own row — the newest row
+// on the collapsed list) makes the NEXT frame gain exactly that thread's two
+// children, without disturbing thread B's own row, and without inflating
+// MessagesCount — dotfiles-1t00.4's whole point.
+func TestShell_ExpansionSetDrivesRows(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+
+	before := s.View()
+	if strings.Contains(before, "hello-a-1") {
+		t.Fatalf("thread A rendered expanded before any keypress:\n%s", before)
+	}
+	if !strings.Contains(before, "hello-a-2") || !strings.Contains(before, "hello-b-1") {
+		t.Fatalf("collapsed frame lost a thread's own (newest-member) row:\n%s", before)
+	}
+
+	s.Update(key(tea.KeyRight))
+	after := s.View()
+
+	if !strings.Contains(after, "hello-a-1") {
+		t.Fatalf("expanding thread A did not surface its older member:\n%s", after)
+	}
+	if !strings.Contains(after, "hello-b-1") {
+		t.Fatalf("thread B's own row went missing after expanding a DIFFERENT thread:\n%s", after)
+	}
+	if s.model.MessagesLen != 4 {
+		t.Fatalf("MessagesLen = %d after expanding a 2-member thread among 2 threads, want 4 (threadA + 2 children + threadB)", s.model.MessagesLen)
+	}
+	if s.model.MessagesCount != 3 {
+		t.Fatalf("MessagesCount = %d, want 3 — expanding a thread must not look like mail arriving (dotfiles-1t00.4)", s.model.MessagesCount)
+	}
+}
+
+// TestShell_SelectedMessageOnThreadRowIsNewest is the test_plan's named case:
+// with nothing expanded, the cursor sits on thread A's own (collapsed) row,
+// and the detail pane must show its NEWEST member (m3, "jan → worker-a"),
+// never the older one — criterion 3's "one envelope" agreement.
+func TestShell_SelectedMessageOnThreadRowIsNewest(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+
+	header, body := detailPaneLines(t, s)
+	full := header + "\n" + strings.Join(body, "\n")
+
+	if !strings.Contains(header, "jan") || !strings.Contains(header, "worker-a") {
+		t.Fatalf("detail header does not name thread A's newest member (jan -> worker-a): %q", header)
+	}
+	if strings.Contains(full, "hello-a-1") {
+		t.Fatalf("detail pane shows the OLDER member's content instead of the newest:\n%s", full)
+	}
+	if !strings.Contains(full, "hello-a-2") {
+		t.Fatalf("detail pane does not show the newest member's own content:\n%s", full)
+	}
+}
+
+// TestShell_CollapseKeepsCursorOnThreadRow is the test_plan's named case,
+// combined with the CARRIED FORWARD FROM TASK 5's AUDIT gate (dotfiles-
+// 1t00.5, relocated to this task's own notes): KeyLeft on a CHILD row must
+// collapse THAT CHILD'S OWN THREAD — not be a no-op, not reach some other
+// thread — and the cursor must land on the thread's own row immediately, as
+// applyThreadOutcome's OWN repositioning rather than as an accident of
+// SetMessagesLen's later clamp (asserted before the next render runs at
+// all).
+//
+// This collapses thread B — row 1 on the collapsed list, not row 0 — on
+// purpose: a resolver that landed on row 0 unconditionally (or stayed on
+// whatever row started selected) would still pass a fixture where the right
+// answer happened to BE 0; row 1 is the one answer only a genuinely correct
+// resolution produces.
+func TestShell_CollapseKeepsCursorOnThreadRow(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View() // settle the opening; populates MessagesLen for the collapsed list (2)
+
+	s.Update(runeKey('j')) // onto thread B (row 1)
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("setup: cursor = %d after j, want 1 (thread B)", s.model.MessagesCursor)
+	}
+
+	s.Update(key(tea.KeyRight)) // expand thread B (its own single member)
+	s.View()                    // MessagesLen -> 3 (threadA, threadB, its 1 child)
+
+	if s.model.MessagesLen != 3 {
+		t.Fatalf("setup: MessagesLen = %d after expanding thread B, want 3", s.model.MessagesLen)
+	}
+
+	s.Update(runeKey('j')) // onto thread B's own (only) child row, index 2
+	if s.model.MessagesCursor != 2 {
+		t.Fatalf("setup: cursor = %d after j, want 2 (thread B's child)", s.model.MessagesCursor)
+	}
+
+	s.Update(key(tea.KeyLeft))
+	if got := s.model.MessagesCursor; got != 1 {
+		t.Fatalf("cursor = %d immediately after collapsing thread B from its child row (before any re-render), want 1 (thread B's own row) — must be applyThreadOutcome's own repositioning, not a later SetMessagesLen clamp", got)
+	}
+
+	out := s.View()
+	if s.model.MessagesLen != 2 {
+		t.Fatalf("MessagesLen = %d after collapsing thread B, want 2 (both threads collapsed)", s.model.MessagesLen)
+	}
+	if !strings.Contains(out, "hello-b-1") {
+		t.Fatalf("thread B's own row lost its content after collapsing:\n%s", out)
+	}
+}
+
+// TestShell_ModeTogglePreservesSelection is the test_plan's named case, in
+// the direction that exercises the FALLBACK rule (restoreSelectionByID's own
+// doc): the operator is reading m1 ("hello-a-1", thread A's OLDER member) in
+// FLAT mode, where it is its own row; `t` flips to threaded with nothing
+// expanded, so m1 is folded invisibly behind thread A's collapsed summary
+// row — which this fixture deliberately puts at row 1, NOT row 0 (thread B
+// carries the overall-newest message, so it sorts first): a resolver that
+// merely landed on row 0 — the answer a same-row-0 fixture could not tell
+// apart from a genuine fix — must fail this one.
+func TestShell_ModeTogglePreservesSelection(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	wire := `[` +
+		`{"id":"m1","at":"2026-09-12T12:00:00Z","from":"worker-a","to":["jan"],"kind":"message","content":"hello-a-1","from_address":"aWORKERA0000000000000000001","to_addresses":["aJAN000000000000000000000J"]},` +
+		`{"id":"m3","at":"2026-09-12T12:01:00Z","from":"jan","to":["worker-a"],"kind":"message","content":"hello-a-2","from_address":"aJAN000000000000000000000J","to_addresses":["aWORKERA0000000000000000001"]},` +
+		`{"id":"m2","at":"2026-09-12T12:02:00Z","from":"worker-b","to":["jan"],"kind":"message","content":"hello-b-1","from_address":"aWORKERB0000000000000000002","to_addresses":["aJAN000000000000000000000J"]}` +
+		`]`
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '"+wire+"'\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	model.Threaded = false // start flat
+	s := newShell(ctx, model, census, msgs)
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	s.View() // populate MessagesLen for the flat list (3 rows)
+
+	// Flat, newest-first: row0 m2 (hello-b-1, 12:02), row1 m3 (hello-a-2,
+	// 12:01), row2 m1 (hello-a-1, 12:00) — move onto m1.
+	s.Update(runeKey('j'))
+	s.Update(runeKey('j'))
+	if s.model.MessagesCursor != 2 {
+		t.Fatalf("setup: cursor = %d after 2x j in flat mode, want 2 (m1, hello-a-1)", s.model.MessagesCursor)
+	}
+
+	s.Update(runeKey('t'))
+
+	if !s.model.Threaded {
+		t.Fatalf("setup: `t` did not flip Threaded")
+	}
+	// Threaded, nothing expanded, newest-first: row0 thread B (newest
+	// overall, m2 @ 12:02, unrelated to the selection), row1 thread A
+	// (newest member m3 @ 12:01, whose OLDER member m1 — the envelope that
+	// was selected — is folded behind it).
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("cursor = %d after toggling to threaded, want 1 (thread A's own collapsed row, which owns the previously-selected m1)", s.model.MessagesCursor)
+	}
+}
+
+// TestShell_ClickOnChildRowSelectsIt is the test_plan's named case: a real
+// tea.MouseMsg at the computed y for an EXPANDED thread's child row selects
+// that child specifically, through hitTest — [[sp032]]'s "child rows
+// participate as ordinary rows" criterion.
+func TestShell_ClickOnChildRowSelectsIt(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View()
+
+	s.Update(key(tea.KeyRight)) // expand thread A
+
+	// The layout used here is computed with the REAL expansion predicate
+	// (s.expandedFn()) — unlike settleLayout, whose renderFrame call is
+	// deliberately handed nil for every OTHER (flat) test in this file, this
+	// one needs the actual post-expand geometry.
+	_, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(), s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height, s.expandedFn())
+	y := layout.messages.firstRow + layout.messages.headerRows + 1 // row index 1: thread A's newest child
+
+	s.Update(tea.MouseMsg{X: 0, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+
+	if s.model.Focus != tui.PaneMessages {
+		t.Fatalf("click did not focus the message pane")
+	}
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("cursor = %d after clicking the child row at y=%d, want 1", s.model.MessagesCursor, y)
+	}
+	msg := selectedMessage(s.model, s.currentMessageRows())
+	if msg == nil || msg.ID != "m3" {
+		t.Fatalf("selected message after the click = %+v, want thread A's newest child (m3, hello-a-2)", msg)
+	}
+}
+
+// TestShell_OnceIsFlatAndByteIdentical is the test_plan's named case,
+// exercised against an ADDRESSED fixture specifically: if --once ever leaked
+// model.Threaded's own default (true, per tui.NewModel) into its rendering
+// decision, these three messages would collapse into ONE thread row
+// ("worker-a <> jan", count 2) instead of three flat FROM/TO rows. ## plan:
+// "a pipe has no cursor and nothing to expand" — this is the fixture that
+// fails first if that ever regresses.
+func TestShell_OnceIsFlatAndByteIdentical(t *testing.T) {
+	dir := t.TempDir()
+	addressedThreadStub(t, dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	if err := runOnce(&buf, ""); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{"hello-a-1", "hello-a-2", "hello-b-1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("--once dropped %q — a grouped/threaded render would hide it behind a collapsed summary row:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "<>") {
+		t.Fatalf("--once rendered a thread's PARTICIPANTS cell (\"<>\") — it must always render FLAT regardless of Threaded's default:\n%s", out)
+	}
+	if strings.ContainsRune(out, 0x1b) {
+		t.Fatalf("--once emitted an ESC byte: %q", out)
+	}
+}
+
+// TestShell_ThreadGridColumnDropOrderAtWidth32 pins the CARRIED FORWARD note
+// from Task 3's audit (rev-dotfiles-1t00-3): the thread grid drops
+// PARTICIPANTS before TIME (PARTICIPANTS gone by width 46, TIME gone by
+// width 25 — verified by hand at Task 3's close but never pinned in a test).
+// Width 32 sits between the two: PARTICIPANTS must be gone, TIME must
+// survive — through the real interactive rendering path, not through
+// render/'s own unit test of fitThreadColumns.
+func TestShell_ThreadGridColumnDropOrderAtWidth32(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.Update(tea.WindowSizeMsg{Width: 32, Height: 24})
+
+	out := s.View()
+
+	if strings.Contains(out, "PARTICIPANTS") {
+		t.Fatalf("PARTICIPANTS header survived at width 32, want it dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "TIME") {
+		t.Fatalf("TIME header dropped at width 32, want it to survive:\n%s", out)
+	}
+}
+
+// TestShell_SpaceTogglesExpansionThroughTheRealPath is Outcome.ThreadToggle's
+// own integration coverage — the test_plan names KeyRight/KeyLeft/mouse
+// explicitly but ThreadToggle shares applyThreadOutcome's SAME switch, so a
+// mutant that broke only that case would otherwise go unseen at this
+// altitude: a real "space" keypress expands a collapsed thread, and pressing
+// it again collapses it back.
+func TestShell_SpaceTogglesExpansionThroughTheRealPath(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View()
+
+	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	s.View()
+	if s.model.MessagesLen != 4 {
+		t.Fatalf("MessagesLen = %d after space on a collapsed thread, want 4 (expanded)", s.model.MessagesLen)
+	}
+
+	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	s.View()
+	if s.model.MessagesLen != 2 {
+		t.Fatalf("MessagesLen = %d after space again, want 2 (collapsed)", s.model.MessagesLen)
+	}
+}
+
+// TestShell_ThreadedEmptyBusRendersNoMessages is the edge case "Zero
+// messages renders (no messages) in both modes" — the threaded half; the
+// flat half is already covered elsewhere in this file (e.g.
+// TestStartup_EmptyAndSingleMessageLogs).
+func TestShell_ThreadedEmptyBusRendersNoMessages(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '[]'\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel() // Threaded true, per its own default
+	s := newShell(ctx, model, census, msgs)
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	out := s.View()
+	if !strings.Contains(out, "(no messages)") {
+		t.Fatalf("empty threaded bus did not render the placeholder:\n%s", out)
+	}
+}
+
+// TestShell_ResizeMidExpansionKeepsExpansionState is the edge case "A resize
+// mid-expansion re-fits columns without changing expansion state."
+func TestShell_ResizeMidExpansionKeepsExpansionState(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View()
+	s.Update(key(tea.KeyRight)) // expand thread A
+	s.View()
+	if s.model.MessagesLen != 4 {
+		t.Fatalf("setup: MessagesLen = %d after expanding, want 4", s.model.MessagesLen)
+	}
+
+	s.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+	out := s.View()
+
+	if s.model.MessagesLen != 4 {
+		t.Fatalf("MessagesLen = %d after a resize, want 4 — a resize must not change expansion state", s.model.MessagesLen)
+	}
+	if !strings.Contains(out, "hello-a-1") {
+		t.Fatalf("thread A collapsed after a resize, want it to stay expanded:\n%s", out)
 	}
 }
