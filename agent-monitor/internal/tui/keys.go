@@ -131,6 +131,20 @@ type Model struct {
 	MessagesLen      int
 	MessagesViewport int
 
+	// MessagesCount is PendingMessages'/ForYouCount's growth reference —
+	// the sample's actual MESSAGE count, as opposed to MessagesLen, which
+	// (from the threaded pane onward) is the RENDERED ROW count. Before
+	// threading existed the two were always the same number; dotfiles-1t00.4
+	// splits them apart so a later thread-flattening pass can feed
+	// SetMessagesLen a row count that legitimately differs from the message
+	// count without inflating `+N new`/`N for you` — expanding a thread
+	// changes rows, never messages.
+	//
+	// It is a plain int, same as MessagesLen: Model stays a comparable
+	// struct, and this is SetMessageCount's own persisted "previous count"
+	// rather than something cmd/ has to track and re-supply every tick.
+	MessagesCount int
+
 	// PendingMessages is how many messages have arrived since the message
 	// pane stopped being LIVE (sp032 T6, inverted for the head by sp033 T6)
 	// — the `+N new` the log header carries while the pane is frozen on
@@ -253,9 +267,17 @@ func (m *Model) SetRosterLen(n int) {
 // across a growing sample (sp033 T6 criterion 3) — restated verbatim from
 // sp032 rather than adjusted for the index shift a head-prepend causes,
 // which is the cost `## known limitations` names for this task.
+//
+// dotfiles-1t00.4: this ONLY clamps cursor/scroll against the ROW count now.
+// PendingMessages/ForYouCount no longer grow off `n` here — see
+// SetMessageCount, their twin keyed on the sample's MESSAGE count instead.
+// Once the pane renders threads, n is a rendered row count and expanding a
+// thread would otherwise inflate both counters with no message having
+// arrived; that defect is exactly what the split prevents. The live-branch
+// zeroing stays here regardless of which count is which, because returning
+// to row 0 clears both counters no matter what moved the cursor there.
 func (m *Model) SetMessagesLen(n int) {
 	live := m.messagesLive()
-	grown := n - m.MessagesLen
 	m.MessagesLen = n
 
 	if live {
@@ -266,16 +288,39 @@ func (m *Model) SetMessagesLen(n int) {
 		return
 	}
 
-	// The windowless regime counts nothing: see messagesLive for why --once
-	// must never see either half of this feature.
-	if grown > 0 && m.MessagesViewport > 0 {
-		m.PendingMessages += grown
-	}
 	m.MessagesCursor = clamp(m.MessagesCursor, 0, maxIndex(n))
 	m.MessagesScroll = scrollAfterClamp(m.MessagesScroll, m.MessagesCursor, m.MessagesLen, m.MessagesViewport)
 	// A shrink can put the cursor back on row 0 — the pane is live again by
 	// derivation, so the count it was carrying is stale.
 	m.clearPendingWhenLive()
+}
+
+// SetMessageCount is PendingMessages' growth reference (dotfiles-1t00.4),
+// restated at the MESSAGE count rather than SetMessagesLen's rendered ROW
+// count: `grown := n - m.MessagesCount` is exactly SetMessagesLen's old
+// `grown := n - m.MessagesLen` line, just diffed against the count that
+// cannot be inflated by a thread expanding. main.go calls this once per
+// tick, right alongside SetMessagesLen, with the sample's actual message
+// count (len(msgs), taken BEFORE any thread flattening) — today the two
+// numbers are identical because threading does not exist yet; the split
+// exists so task .6 can wire the row list into SetMessagesLen without also
+// wiring it into this counter.
+//
+// It re-derives messagesLive() itself rather than trusting the caller, the
+// same shape AddForYouArrivals already uses: a live pane reads zero
+// regardless of n, and the windowless regime (MessagesViewport <= 0) counts
+// nothing, so --once never sees this feature either.
+func (m *Model) SetMessageCount(n int) {
+	grown := n - m.MessagesCount
+	m.MessagesCount = n
+
+	if m.messagesLive() {
+		m.PendingMessages = 0
+		return
+	}
+	if grown > 0 && m.MessagesViewport > 0 {
+		m.PendingMessages += grown
+	}
 }
 
 // messagesLive derives sp033 T6's LIVE state for the message pane: the
@@ -316,18 +361,20 @@ func (m *Model) clearPendingWhenLive() {
 }
 
 // AddForYouArrivals is ForYouCount's accumulation step, twinning
-// SetMessagesLen's `m.PendingMessages += grown`. main.go calls it once per
-// tick, right after SetMessagesLen, with however many of THIS tick's newly
-// arrived rows carry the identity's address in ToAddresses (cmd/agent-
-// monitor's countNewForYou is the one place that comparison happens — Model
-// holds no source.Message to compare against here).
+// SetMessageCount's `m.PendingMessages += grown` (dotfiles-1t00.4 moved that
+// line off SetMessagesLen, onto the MESSAGE-count twin, so both counters now
+// grow off the same kind of number). main.go calls it once per tick, right
+// after SetMessageCount, with however many of THIS tick's newly arrived
+// MESSAGES carry the identity's address in ToAddresses (cmd/agent-monitor's
+// countNewForYou is the one place that comparison happens — Model holds no
+// source.Message to compare against here).
 //
 // It re-derives messagesLive() itself rather than trusting the caller to
 // skip the call on a live pane: a tick where nothing for-you arrived still
 // calls this with n == 0, and a live pane must read zero regardless of what
 // n is, exactly like clearPendingWhenLive restores for PendingMessages. The
 // windowless regime (MessagesViewport <= 0) counts nothing, for the same
-// reason SetMessagesLen's grown-count gate exists: --once must never see
+// reason SetMessageCount's grown-count gate exists: --once must never see
 // this feature either.
 func (m *Model) AddForYouArrivals(n int) {
 	if m.messagesLive() {

@@ -1627,19 +1627,28 @@ func filterRosterRows(model *tui.Model, sample *source.Sample) []source.Row {
 // scrolledMessageSample/markPane, and selectedMessage below) agrees on what
 // index 0 means. See orderedMessages for why the reorder lives here rather
 // than in render/log.go or in tui.Model.
+// dotfiles-1t00.4: SetMessagesLen and SetMessageCount are called with the
+// same len(msgs) here because threading does not exist yet — msgs IS the
+// pane's rendered row list today. Task 6 wires a thread-flattened ROW list
+// into SetMessagesLen while SetMessageCount keeps reading len(msgs), the
+// MESSAGE count, so expanding a thread (which changes row count only) can
+// never inflate PendingMessages/ForYouCount. before is read off
+// model.MessagesCount (the message-count twin), not model.MessagesLen (the
+// row count), for the same reason.
 func filterMessageRows(model *tui.Model, sample *source.MessageSample, identity source.Identity) []source.Message {
 	if sample == nil {
 		return nil
 	}
 	msgs := orderedMessages(model, sample)
-	before := model.MessagesLen
+	before := model.MessagesCount
 	model.SetMessagesLen(len(msgs))
+	model.SetMessageCount(len(msgs))
 	model.AddForYouArrivals(countNewForYou(msgs, before, identity))
 	return msgs
 }
 
 // countNewForYou is sp033 T7's arrival count for Model.AddForYouArrivals,
-// SetMessagesLen's `grown := n - m.MessagesLen` restated at this file's
+// SetMessageCount's `grown := n - m.MessagesCount` restated at this file's
 // boundary (Model itself holds no source.Message to compare against). msgs
 // is already in the pane's display order — newest-first, sp033 T6 — so the
 // rows genuinely NEW this tick are its first `len(msgs)-before` entries; of
@@ -1647,8 +1656,9 @@ func filterMessageRows(model *tui.Model, sample *source.MessageSample, identity 
 // address (criterion 1: an address comparison, never a label one, matching
 // render.forYouRow's rule exactly). An unregistered identity never counts —
 // there is no address to compare against — and a shrink (before > len(msgs))
-// yields zero new rows, the same floor SetMessagesLen enforces for
-// PendingMessages.
+// yields zero new rows, the same floor SetMessageCount enforces for
+// PendingMessages. before is the MESSAGE count (dotfiles-1t00.4), not the
+// rendered row count — the two diverge once a thread can be expanded.
 func countNewForYou(msgs []source.Message, before int, identity source.Identity) int {
 	if !identity.Registered {
 		return 0

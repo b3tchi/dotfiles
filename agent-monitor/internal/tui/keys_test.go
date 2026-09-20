@@ -67,6 +67,7 @@ func TestScroll_FocusedPaneOnly(t *testing.T) {
 	m := NewModel()
 	m.SetRosterLen(5)
 	m.SetMessagesLen(5)
+	m.SetMessageCount(5)
 	m.HandleKey(Key{Rune: 'j'}) // roster focused by default
 	m.HandleKey(Key{Special: KeyTab})
 	m.HandleKey(Key{Rune: 'j'})
@@ -152,6 +153,7 @@ func TestDetailVisible_ToggleDoesNotAffectSelection(t *testing.T) {
 	m := NewModel()
 	m.Focus = PaneMessages
 	m.SetMessagesLen(5)
+	m.SetMessageCount(5)
 	m.HandleKey(Key{Rune: 'j'})
 	m.HandleKey(Key{Rune: 'j'})
 	if m.MessagesCursor != 2 {
@@ -703,6 +705,7 @@ func TestCursor_MessagesPaneIndependentOfRoster(t *testing.T) {
 	m := NewModel()
 	m.SetRosterLen(5)
 	m.SetMessagesLen(5)
+	m.SetMessageCount(5)
 	m.SetRosterViewport(2)
 	m.SetMessagesViewport(2)
 
@@ -740,6 +743,7 @@ func TestCursor_MessagesPaneIndependentOfRoster(t *testing.T) {
 func TestScroll_WheelScrollSurvivesASampleTick(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 	m.SetMessagesViewport(5)
 
 	m.ScrollMessages(3)
@@ -752,6 +756,7 @@ func TestScroll_WheelScrollSurvivesASampleTick(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		m.SetMessagesLen(20) // five sampler ticks, same row count
+		m.SetMessageCount(20)
 		if m.MessagesScroll != 3 {
 			t.Fatalf("tick %d: expected scroll to survive at 3, got %d", i+1, m.MessagesScroll)
 		}
@@ -834,6 +839,7 @@ func TestCursor_MoveOnlyScrollsWhenItMustEnsureVisibility(t *testing.T) {
 func TestScroll_ClampsWhenFilterShrinksTheList(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(50)
+	m.SetMessageCount(50)
 	m.SetMessagesViewport(5)
 	m.ScrollMessages(40)
 	if m.MessagesScroll != 40 {
@@ -841,6 +847,7 @@ func TestScroll_ClampsWhenFilterShrinksTheList(t *testing.T) {
 	}
 
 	m.SetMessagesLen(6) // the filter committed
+	m.SetMessageCount(6)
 
 	if m.MessagesScroll != 1 {
 		t.Fatalf("expected scroll clamped to len-viewport=1, got %d", m.MessagesScroll)
@@ -902,6 +909,7 @@ func TestScroll_ViewportAtLeastAsLongAsTheListNeverScrolls(t *testing.T) {
 func TestScroll_EmptyListNeverScrollsNegative(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(0)
+	m.SetMessageCount(0)
 	m.SetMessagesViewport(5)
 	m.ScrollMessages(-3)
 	m.ScrollMessages(9)
@@ -942,6 +950,7 @@ func TestScroll_NeverExceedsMaxForViewport(t *testing.T) {
 		viewport := rng.Intn(12)
 		m := NewModel()
 		m.SetMessagesLen(length)
+		m.SetMessageCount(length)
 		m.SetMessagesViewport(viewport)
 
 		for step := 0; step < 20; step++ {
@@ -950,6 +959,7 @@ func TestScroll_NeverExceedsMaxForViewport(t *testing.T) {
 				m.ScrollMessages(rng.Intn(21) - 10)
 			case 1:
 				m.SetMessagesLen(rng.Intn(40))
+				m.SetMessageCount(rng.Intn(40))
 			case 2:
 				m.SetMessagesViewport(rng.Intn(12))
 			default:
@@ -1018,6 +1028,7 @@ func TestClickPane_DataRowSelectsScrollPlusOffset(t *testing.T) {
 			// and start this test somewhere other than the top of the list.
 			m.SetRosterLen(40)
 			m.SetMessagesLen(40)
+			m.SetMessageCount(40)
 			m.SetRosterViewport(5)
 			m.SetMessagesViewport(5)
 			m.ScrollRoster(tc.scroll)
@@ -1048,6 +1059,7 @@ func TestClickPane_NonDataPressFocusesWithoutMovingTheCursor(t *testing.T) {
 	m.SetMessagesViewport(5)
 	m.SetRosterLen(40)
 	m.SetMessagesLen(40)
+	m.SetMessageCount(40)
 	m.ScrollMessages(9)
 	m.MessagesCursor = 4
 	m.RosterCursor = 2
@@ -1079,6 +1091,7 @@ func TestClickPane_OffsetPastTheListClampsIntoRange(t *testing.T) {
 	empty := NewModel()
 	empty.SetMessagesViewport(5)
 	empty.SetMessagesLen(0)
+	empty.SetMessageCount(0)
 	empty.ClickPane(PaneMessages, true, 2)
 	if empty.MessagesCursor != 0 {
 		t.Errorf("MessagesCursor = %d, want 0 for an empty list", empty.MessagesCursor)
@@ -1103,6 +1116,7 @@ func TestScrollPane_MovesOnlyThatPanesScroll(t *testing.T) {
 			// and start this test somewhere other than the top of the list.
 			m.SetRosterLen(40)
 			m.SetMessagesLen(40)
+			m.SetMessageCount(40)
 			m.SetRosterViewport(5)
 			m.SetMessagesViewport(5)
 			m.RosterCursor = 6
@@ -1140,6 +1154,7 @@ func TestScrollPane_MovesOnlyThatPanesScroll(t *testing.T) {
 func TestTab_CyclesThreePanes(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(3)
+	m.SetMessageCount(3)
 	want := []Pane{PaneMessages, PaneDetail, PaneRoster, PaneMessages, PaneDetail, PaneRoster}
 	for i, w := range want {
 		m.HandleKey(Key{Special: KeyTab})
@@ -1155,6 +1170,7 @@ func TestTab_CyclesThreePanes(t *testing.T) {
 func TestTab_SkipsTheDetailPaneWhileItIsHidden(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(3)
+	m.SetMessageCount(3)
 	m.DetailVisible = false
 	for i, w := range []Pane{PaneMessages, PaneRoster, PaneMessages, PaneRoster} {
 		m.HandleKey(Key{Special: KeyTab})
@@ -1171,6 +1187,7 @@ func TestTab_SkipsTheDetailPaneWhileItIsHidden(t *testing.T) {
 func TestDetail_HidingWhileFocusedMovesFocus(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(3)
+	m.SetMessageCount(3)
 	m.Focus = PaneDetail
 	m.DetailZoom = true
 
@@ -1216,6 +1233,7 @@ func TestZoom_RefusedWithNoSelection(t *testing.T) {
 	for _, k := range []Key{{Special: KeyEnter}, {Rune: 'o'}, {Rune: 'O'}} {
 		m := NewModel()
 		m.SetMessagesLen(0)
+		m.SetMessageCount(0)
 		m.HandleKey(k)
 		if m.DetailZoom {
 			t.Errorf("key %+v zoomed with an empty log, want the zoom refused", k)
@@ -1233,6 +1251,7 @@ func TestZoom_EnterAndOZoomAndEscRestores(t *testing.T) {
 	for _, k := range []Key{{Special: KeyEnter}, {Rune: 'o'}, {Rune: 'O'}} {
 		m := NewModel()
 		m.SetMessagesLen(5)
+		m.SetMessageCount(5)
 		m.HandleKey(k)
 		if !m.DetailZoom {
 			t.Fatalf("key %+v did not zoom", k)
@@ -1258,6 +1277,7 @@ func TestZoom_EnterAndOZoomAndEscRestores(t *testing.T) {
 func TestEsc_CancelsFilterDraft(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(5)
+	m.SetMessageCount(5)
 	m.HandleKey(Key{Rune: '/'})
 	m.HandleKey(Key{Rune: 'a'})
 	m.HandleKey(Key{Special: KeyEnter}) // commit "a"
@@ -1299,6 +1319,7 @@ func TestDetail_ScrollKeysMoveOnlyTheDetailPane(t *testing.T) {
 		m.SetRosterLen(100)
 		m.SetRosterViewport(10)
 		m.SetMessagesLen(100)
+		m.SetMessageCount(100)
 		m.SetMessagesViewport(10)
 		m.SetDetailLen(100)
 		m.SetDetailViewport(10)
@@ -1472,6 +1493,7 @@ func TestScrollPane_DetailIsAScrollTarget(t *testing.T) {
 	m.SetRosterLen(100)
 	m.SetRosterViewport(10)
 	m.SetMessagesLen(100)
+	m.SetMessageCount(100)
 	m.SetMessagesViewport(10)
 	m.SetDetailLen(100)
 	m.SetDetailViewport(10)
@@ -1495,6 +1517,7 @@ func TestScrollPane_DetailIsAScrollTarget(t *testing.T) {
 func TestTab_WhileZoomedIsANoOp(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(3)
+	m.SetMessageCount(3)
 	m.HandleKey(Key{Special: KeyEnter}) // zoom
 	if !m.DetailZoom || m.Focus != PaneDetail {
 		t.Fatalf("setup: DetailZoom=%v Focus=%v, want zoomed on PaneDetail", m.DetailZoom, m.Focus)
@@ -1522,6 +1545,7 @@ func pagingModel() *Model {
 	m.SetRosterLen(100)
 	m.SetRosterViewport(10)
 	m.SetMessagesLen(100)
+	m.SetMessageCount(100)
 	m.SetMessagesViewport(10)
 	m.SetDetailLen(100)
 	m.SetDetailViewport(10)
@@ -1745,6 +1769,7 @@ func TestPaging_ClampsAtBothEnds(t *testing.T) {
 				m.SetRosterLen(0)
 				m.SetRosterViewport(10)
 				m.SetMessagesLen(0)
+				m.SetMessageCount(0)
 				m.SetMessagesViewport(10)
 				m.Focus = focus
 				before := *m
@@ -1760,6 +1785,7 @@ func TestPaging_ClampsAtBothEnds(t *testing.T) {
 		for _, k := range keys {
 			m := NewModel()
 			m.SetMessagesLen(1)
+			m.SetMessageCount(1)
 			m.SetMessagesViewport(10)
 			m.Focus = PaneMessages
 			m.HandleKey(k)
@@ -1938,6 +1964,7 @@ func TestPaging_ViewportZeroDoesNotStepBackwards(t *testing.T) {
 			m := NewModel()
 			m.SetRosterLen(100)
 			m.SetMessagesLen(100)
+			m.SetMessageCount(100)
 			m.Focus = c.focus // viewport never set: still 0
 			c.set(m, 40)
 
@@ -1956,6 +1983,7 @@ func TestPaging_ViewportZeroDoesNotStepBackwards(t *testing.T) {
 		// viewport-1 is 0 here, which would make paging a silent no-op.
 		m := NewModel()
 		m.SetMessagesLen(100)
+		m.SetMessageCount(100)
 		m.SetMessagesViewport(1)
 		m.Focus = PaneMessages
 		m.MessagesCursor = 40
@@ -1994,6 +2022,7 @@ func liveMessagePane(t *testing.T, length, viewport int) *Model {
 	m.Focus = PaneMessages
 	m.SetMessagesViewport(viewport)
 	m.SetMessagesLen(length)
+	m.SetMessageCount(length)
 	m.GoToFirst()
 	if m.MessagesCursor != 0 {
 		t.Fatalf("setup: cursor = %d, want 0 (row 0)", m.MessagesCursor)
@@ -2017,6 +2046,7 @@ func TestOrder_NewestIsRowZero(t *testing.T) {
 	m.Focus = PaneMessages
 	m.SetMessagesViewport(10)
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
 		t.Fatalf("cursor/scroll = %d/%d, want 0/0 — row 0 is the newest envelope", m.MessagesCursor, m.MessagesScroll)
 	}
@@ -2033,6 +2063,7 @@ func TestOrder_FollowsHeadWhileLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 
 	m.SetMessagesLen(23)
+	m.SetMessageCount(23)
 
 	if m.MessagesCursor != 0 {
 		t.Errorf("cursor = %d, want 0 (row 0 stays the newest)", m.MessagesCursor)
@@ -2046,6 +2077,7 @@ func TestOrder_FollowsHeadWhileLive(t *testing.T) {
 
 	// And it keeps following, sample after sample.
 	m.SetMessagesLen(24)
+	m.SetMessageCount(24)
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
 		t.Errorf("second append: cursor/scroll = %d/%d, want 0/0", m.MessagesCursor, m.MessagesScroll)
 	}
@@ -2067,6 +2099,7 @@ func TestOrder_FrozenWhenScrolledBack(t *testing.T) {
 
 	for i := 1; i <= 5; i++ {
 		m.SetMessagesLen(20 + i*3)
+		m.SetMessageCount(20 + i*3)
 		if m.MessagesCursor != wantCursor {
 			t.Fatalf("sample %d moved the cursor: %d, want %d", i, m.MessagesCursor, wantCursor)
 		}
@@ -2090,6 +2123,7 @@ func TestOrder_PendingCountIncrementsPerAppend(t *testing.T) {
 	m.SetMessagesViewport(5)
 
 	m.SetMessagesLen(10) // the very first sample
+	m.SetMessageCount(10)
 	if m.PendingMessages != 0 {
 		t.Fatalf("first sample counted %d pending, want 0", m.PendingMessages)
 	}
@@ -2097,14 +2131,17 @@ func TestOrder_PendingCountIncrementsPerAppend(t *testing.T) {
 	m.GoToLast() // jump to the oldest message: no longer live
 
 	m.SetMessagesLen(12)
+	m.SetMessageCount(12)
 	if m.PendingMessages != 2 {
 		t.Fatalf("after +2: PendingMessages = %d, want 2", m.PendingMessages)
 	}
 	m.SetMessagesLen(12) // a sample that appends nothing
+	m.SetMessageCount(12)
 	if m.PendingMessages != 2 {
 		t.Fatalf("an empty sample changed the count: %d, want it still 2", m.PendingMessages)
 	}
 	m.SetMessagesLen(15)
+	m.SetMessageCount(15)
 	if m.PendingMessages != 5 {
 		t.Fatalf("after a further +3: PendingMessages = %d, want 5 (accumulated, not replaced)", m.PendingMessages)
 	}
@@ -2126,6 +2163,7 @@ func TestOrder_HomeReturnsToLiveAndZeroesCount(t *testing.T) {
 			m := liveMessagePane(t, 20, 10)
 			m.ScrollMessages(5)
 			m.SetMessagesLen(26)
+			m.SetMessageCount(26)
 			if m.PendingMessages != 6 {
 				t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
 			}
@@ -2143,6 +2181,7 @@ func TestOrder_HomeReturnsToLiveAndZeroesCount(t *testing.T) {
 			}
 			// And it is genuinely live again, not merely zeroed.
 			m.SetMessagesLen(28)
+			m.SetMessageCount(28)
 			if m.MessagesCursor != 0 {
 				t.Errorf("after returning to live the pane did not follow: cursor = %d, want 0", m.MessagesCursor)
 			}
@@ -2166,6 +2205,7 @@ func TestOrder_EndReachesTheOldestAndStaysFrozen(t *testing.T) {
 			m := liveMessagePane(t, 20, 10)
 			m.ScrollMessages(5)
 			m.SetMessagesLen(26)
+			m.SetMessageCount(26)
 			if m.PendingMessages != 6 {
 				t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
 			}
@@ -2191,6 +2231,7 @@ func TestOrder_ClickOnRowZeroReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(5) // window now shows rows 5..14
 	m.SetMessagesLen(24)
+	m.SetMessageCount(24)
 	if m.PendingMessages != 4 {
 		t.Fatalf("setup: PendingMessages = %d, want 4", m.PendingMessages)
 	}
@@ -2221,6 +2262,7 @@ func TestOrder_FilterCommitResetsLiveness(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(5)
 	m.SetMessagesLen(27)
+	m.SetMessageCount(27)
 	if m.PendingMessages != 7 {
 		t.Fatalf("setup: PendingMessages = %d, want 7", m.PendingMessages)
 	}
@@ -2236,6 +2278,7 @@ func TestOrder_FilterCommitResetsLiveness(t *testing.T) {
 	// The next sample re-evaluates liveness from scratch against the new
 	// list rather than resuming the old count.
 	m.SetMessagesLen(6)
+	m.SetMessageCount(6)
 	if m.PendingMessages != 0 {
 		t.Errorf("the filtered sample resurrected a count: %d, want 0", m.PendingMessages)
 	}
@@ -2248,11 +2291,13 @@ func TestOrder_ListShrinkDoesNotGoNegative(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.GoToLast() // cursor on the oldest row: not live
 	m.SetMessagesLen(26)
+	m.SetMessageCount(26)
 	if m.PendingMessages != 6 {
 		t.Fatalf("setup: PendingMessages = %d, want 6", m.PendingMessages)
 	}
 
 	m.SetMessagesLen(3) // the bus was pruned hard
+	m.SetMessageCount(3)
 	if m.PendingMessages < 0 {
 		t.Fatalf("PendingMessages went negative: %d", m.PendingMessages)
 	}
@@ -2263,6 +2308,7 @@ func TestOrder_ListShrinkDoesNotGoNegative(t *testing.T) {
 	// Shrinking all the way to empty leaves the pane at its (only) row, so
 	// it is live again and the count is zero — not negative.
 	m.SetMessagesLen(0)
+	m.SetMessageCount(0)
 	if m.PendingMessages != 0 {
 		t.Errorf("PendingMessages = %d after the list emptied, want 0", m.PendingMessages)
 	}
@@ -2278,10 +2324,12 @@ func TestOrder_NoViewportNeverFollowsOrCounts(t *testing.T) {
 	m.Focus = PaneMessages
 
 	m.SetMessagesLen(40)
+	m.SetMessageCount(40)
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
 		t.Fatalf("cursor/scroll = %d/%d, want 0/0 — no window means no follow", m.MessagesCursor, m.MessagesScroll)
 	}
 	m.SetMessagesLen(60)
+	m.SetMessageCount(60)
 	if m.MessagesCursor != 0 || m.MessagesScroll != 0 {
 		t.Errorf("a growing sample moved a windowless pane: cursor/scroll = %d/%d", m.MessagesCursor, m.MessagesScroll)
 	}
@@ -2304,11 +2352,13 @@ func TestOrder_WheelBackToTheTopReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(6) // frozen with the cursor still on row 0
 	m.SetMessagesLen(28)
+	m.SetMessageCount(28)
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
 	}
 
 	m.SetMessagesLen(20) // the bus pruned back
+	m.SetMessageCount(20)
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: the prune changed the count: %d, want 8", m.PendingMessages)
 	}
@@ -2332,6 +2382,7 @@ func TestOrder_WheelBackToTheTopReturnsToLive(t *testing.T) {
 
 	// And it follows again.
 	m.SetMessagesLen(22)
+	m.SetMessageCount(22)
 	if m.MessagesCursor != 0 {
 		t.Errorf("the pane did not resume following: cursor = %d, want 0", m.MessagesCursor)
 	}
@@ -2348,6 +2399,7 @@ func TestOrder_CursorUpOntoRowZeroReturnsToLive(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.moveCursor(3) // cursor 3, frozen
 	m.SetMessagesLen(22)
+	m.SetMessageCount(22)
 	if m.PendingMessages != 2 {
 		t.Fatalf("setup: PendingMessages = %d, want 2", m.PendingMessages)
 	}
@@ -2378,7 +2430,9 @@ func TestOrder_ResizeIntoLivenessZeroesTheCount(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(6)
 	m.SetMessagesLen(28)
+	m.SetMessageCount(28)
 	m.SetMessagesLen(20) // pruned back: the cursor is still row 0
+	m.SetMessageCount(20)
 	if m.PendingMessages != 8 {
 		t.Fatalf("setup: PendingMessages = %d, want 8", m.PendingMessages)
 	}
@@ -2450,6 +2504,7 @@ func TestRoster_OrderUnchanged(t *testing.T) {
 func TestStartup_OpenMessagesAtHeadParksOnTheNewest(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 	m.SetMessagesViewport(5)
 	if m.MessagesCursor != 0 {
 		t.Fatalf("setup: cursor = %d, want 0 — the pane has not been opened yet", m.MessagesCursor)
@@ -2479,6 +2534,7 @@ func TestStartup_OpenMessagesAtHeadParksOnTheNewest(t *testing.T) {
 func TestStartup_OpenRefusedWithNoWindow(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 
 	if m.OpenMessagesAtHead() {
 		t.Fatalf("OpenMessagesAtHead opened a pane with no window — that is the --once regime")
@@ -2522,6 +2578,7 @@ func TestStartup_OpeningTouchesNothingButTheMessagePane(t *testing.T) {
 	m := NewModel()
 	m.SetRosterLen(40)
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 	m.SetRosterViewport(5)
 	m.SetMessagesViewport(5)
 	m.MessagesCursor, m.MessagesScroll = 5, 3
@@ -2550,6 +2607,7 @@ func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 	for _, n := range []int{0, 1} {
 		m := NewModel()
 		m.SetMessagesLen(n)
+		m.SetMessageCount(n)
 		m.SetMessagesViewport(5)
 		if !m.OpenMessagesAtHead() {
 			t.Fatalf("n=%d: OpenMessagesAtHead refused", n)
@@ -2562,6 +2620,7 @@ func TestStartup_EmptyAndSingleMessageLogs(t *testing.T) {
 		}
 
 		m.SetMessagesLen(n + 6) // the bus fills up
+		m.SetMessageCount(n + 6)
 		if m.MessagesCursor != 0 {
 			t.Errorf("n=%d: the opened pane did not follow the next sample: cursor = %d, want 0", n, m.MessagesCursor)
 		}
@@ -2578,8 +2637,10 @@ func TestStartup_OpeningClearsAPendingCountItInherits(t *testing.T) {
 	m := NewModel()
 	m.SetMessagesViewport(5)
 	m.SetMessagesLen(20)
+	m.SetMessageCount(20)
 	m.ScrollMessages(9)
 	m.SetMessagesLen(24)
+	m.SetMessageCount(24)
 	if m.PendingMessages == 0 {
 		t.Fatalf("setup: PendingMessages = 0, want a frozen pane carrying a count")
 	}
@@ -2804,6 +2865,7 @@ func TestComposer_RecipientSurvivesASampleThatMovesTheList(t *testing.T) {
 	m.Focus = PaneMessages
 	m.SetMessagesViewport(5)
 	m.SetMessagesLen(3)
+	m.SetMessageCount(3)
 	m.MessagesCursor = 1 // the operator is replying to the row at index 1
 
 	ok, _ := m.OpenComposer("original-recipient-address")
@@ -2814,6 +2876,7 @@ func TestComposer_RecipientSurvivesASampleThatMovesTheList(t *testing.T) {
 	// A sample arrives mid-draft and reorders/grows the list under the
 	// cursor — exactly what a live bus does between keystrokes.
 	m.SetMessagesLen(10)
+	m.SetMessageCount(10)
 	m.MessagesCursor = 7
 
 	for _, r := range "reply text" {
@@ -2842,6 +2905,7 @@ func TestComposer_PagingKeysSwallowed(t *testing.T) {
 		m.Focus = PaneMessages
 		m.SetMessagesViewport(5)
 		m.SetMessagesLen(10)
+		m.SetMessageCount(10)
 		m.MessagesCursor = 4
 		m.OpenComposer("peer-3-address")
 		beforeCursor := m.MessagesCursor
@@ -2918,6 +2982,7 @@ func TestForYou_CountAndPendingAreIndependent(t *testing.T) {
 	frozen := liveMessagePane(t, 20, 10)
 	frozen.ScrollMessages(5) // no longer live
 	frozen.SetMessagesLen(23)
+	frozen.SetMessageCount(23)
 	frozen.AddForYouArrivals(1) // of the 3 new rows, 1 was for-you
 
 	if frozen.PendingMessages != 3 {
@@ -2929,6 +2994,7 @@ func TestForYou_CountAndPendingAreIndependent(t *testing.T) {
 
 	// Accumulates across ticks independently, same as PendingMessages.
 	frozen.SetMessagesLen(25)
+	frozen.SetMessageCount(25)
 	frozen.AddForYouArrivals(0) // neither of the 2 new rows was for-you
 	if frozen.PendingMessages != 5 {
 		t.Fatalf("PendingMessages = %d, want 5 (accumulated)", frozen.PendingMessages)
@@ -2939,6 +3005,7 @@ func TestForYou_CountAndPendingAreIndependent(t *testing.T) {
 
 	live := liveMessagePane(t, 20, 10)
 	live.SetMessagesLen(23)
+	live.SetMessageCount(23)
 	live.AddForYouArrivals(2) // a live pane reads zero regardless of n
 	if live.PendingMessages != 0 {
 		t.Fatalf("live PendingMessages = %d, want 0", live.PendingMessages)
@@ -2956,6 +3023,7 @@ func TestForYou_ReturnToLiveZeroesTheCount(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(5)
 	m.SetMessagesLen(26)
+	m.SetMessageCount(26)
 	m.AddForYouArrivals(2)
 	if m.ForYouCount != 2 {
 		t.Fatalf("setup: ForYouCount = %d, want 2", m.ForYouCount)
@@ -2980,6 +3048,7 @@ func TestForYou_FilterCommitResetsTheCount(t *testing.T) {
 	m := liveMessagePane(t, 20, 10)
 	m.ScrollMessages(5)
 	m.SetMessagesLen(27)
+	m.SetMessageCount(27)
 	m.AddForYouArrivals(4)
 	if m.ForYouCount != 4 {
 		t.Fatalf("setup: ForYouCount = %d, want 4", m.ForYouCount)
@@ -2996,6 +3065,7 @@ func TestForYou_FilterCommitResetsTheCount(t *testing.T) {
 	// The next sample re-evaluates from scratch against the new list rather
 	// than resuming the old count.
 	m.SetMessagesLen(6)
+	m.SetMessageCount(6)
 	m.AddForYouArrivals(0)
 	if m.ForYouCount != 0 {
 		t.Errorf("the filtered sample resurrected a count: %d, want 0", m.ForYouCount)
@@ -3018,5 +3088,193 @@ func TestComposer_ComposeDraftExposesTypedText(t *testing.T) {
 	}
 	if got := m.ComposeDraft(); got != "hi" {
 		t.Fatalf("got ComposeDraft() %q, want %q", got, "hi")
+	}
+}
+
+// --- dotfiles-1t00.4: pending / for-you accounting decoupled from the
+// rendered row count -------------------------------------------------------
+//
+// sp034 widens the message pane to a threaded view where SetMessagesLen's
+// argument becomes a RENDERED ROW count (a thread row plus its expanded
+// children), no longer the sample's MESSAGE count. Threading itself does not
+// exist yet (that is Task 6) — these tests drive the two counts apart by
+// hand, at the Model level, exactly the way a thread expansion will: a
+// bigger SetMessagesLen argument with an unchanged SetMessageCount argument.
+
+// TestPending_ExpandingAThreadWhileFrozenDoesNotCount is the test plan's
+// named defect case: on a frozen pane, a tick that grows the RENDERED ROW
+// count (SetMessagesLen) without growing the sample's MESSAGE count
+// (SetMessageCount) must leave both PendingMessages and ForYouCount
+// unchanged. Before dotfiles-1t00.4, SetMessagesLen alone drove
+// PendingMessages off its own argument — a rendered row count would have
+// read as mail arriving.
+func TestPending_ExpandingAThreadWhileFrozenDoesNotCount(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(5) // no longer live
+
+	// A real arrival: 3 new messages, rendered as 3 new rows (nothing
+	// expanded yet).
+	m.SetMessagesLen(23)
+	m.SetMessageCount(23)
+	m.AddForYouArrivals(1)
+	if m.PendingMessages != 3 {
+		t.Fatalf("setup: PendingMessages = %d, want 3", m.PendingMessages)
+	}
+	if m.ForYouCount != 1 {
+		t.Fatalf("setup: ForYouCount = %d, want 1", m.ForYouCount)
+	}
+
+	// Expanding a thread adds 8 CHILD ROWS with no message arriving: the
+	// rendered row count grows, the message count does not.
+	m.SetMessagesLen(31)
+	m.SetMessageCount(23)
+	m.AddForYouArrivals(0)
+
+	if m.PendingMessages != 3 {
+		t.Errorf("PendingMessages = %d after a thread expanded, want unchanged 3", m.PendingMessages)
+	}
+	if m.ForYouCount != 1 {
+		t.Errorf("ForYouCount = %d after a thread expanded, want unchanged 1", m.ForYouCount)
+	}
+
+	// And collapsing it back — the row count shrinks, again with no message
+	// count change — must not move the counters either.
+	m.SetMessagesLen(23)
+	m.SetMessageCount(23)
+	m.AddForYouArrivals(0)
+	if m.PendingMessages != 3 {
+		t.Errorf("PendingMessages = %d after the thread collapsed, want unchanged 3", m.PendingMessages)
+	}
+	if m.ForYouCount != 1 {
+		t.Errorf("ForYouCount = %d after the thread collapsed, want unchanged 1", m.ForYouCount)
+	}
+}
+
+// TestPending_ModeToggleDoesNotCount is the edge case named in `## tasks`
+// Task 4: toggling threaded<->flat re-renders a different ROW count with no
+// arrivals at all, and neither counter may move.
+func TestPending_ModeToggleDoesNotCount(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(5) // no longer live
+	m.SetMessagesLen(24)
+	m.SetMessageCount(24)
+	m.AddForYouArrivals(2)
+	if m.PendingMessages != 4 || m.ForYouCount != 2 {
+		t.Fatalf("setup: PendingMessages/ForYouCount = %d/%d, want 4/2", m.PendingMessages, m.ForYouCount)
+	}
+
+	// Flipping to threaded mode re-renders the same 24 messages as, say, 15
+	// thread rows with nothing expanded — fewer rows, same messages.
+	m.SetMessagesLen(15)
+	m.SetMessageCount(24)
+	m.AddForYouArrivals(0)
+	if m.PendingMessages != 4 {
+		t.Errorf("PendingMessages = %d after a mode toggle shrank the row count, want unchanged 4", m.PendingMessages)
+	}
+	if m.ForYouCount != 2 {
+		t.Errorf("ForYouCount = %d after a mode toggle shrank the row count, want unchanged 2", m.ForYouCount)
+	}
+
+	// And back to flat — the row count grows back to 24 messages, still no
+	// arrival.
+	m.SetMessagesLen(24)
+	m.SetMessageCount(24)
+	m.AddForYouArrivals(0)
+	if m.PendingMessages != 4 {
+		t.Errorf("PendingMessages = %d after toggling back to flat, want unchanged 4", m.PendingMessages)
+	}
+	if m.ForYouCount != 2 {
+		t.Errorf("ForYouCount = %d after toggling back to flat, want unchanged 2", m.ForYouCount)
+	}
+}
+
+// TestPending_FlatBehaviourUnchanged is the test plan's named re-run of the
+// sp032/sp033 pending fixtures against the new accounting path: in flat mode
+// (no threading), the rendered row count and the message count are always
+// the same number, so calling SetMessagesLen and SetMessageCount with that
+// one shared n must reproduce sp032's original accumulate/clear behaviour
+// exactly — every test above named TestOrder_* and TestForYou_* already
+// re-runs this fixture set call-by-call; this is the compact restatement of
+// the same contract in one place.
+func TestPending_FlatBehaviourUnchanged(t *testing.T) {
+	m := NewModel()
+	m.Focus = PaneMessages
+	m.SetMessagesViewport(5)
+
+	m.SetMessagesLen(10) // the very first sample: no previous count to diff
+	m.SetMessageCount(10)
+	if m.PendingMessages != 0 {
+		t.Fatalf("first sample counted %d pending, want 0", m.PendingMessages)
+	}
+
+	m.GoToLast() // no longer live
+
+	m.SetMessagesLen(12)
+	m.SetMessageCount(12)
+	if m.PendingMessages != 2 {
+		t.Fatalf("after +2: PendingMessages = %d, want 2", m.PendingMessages)
+	}
+
+	m.SetMessagesLen(12) // a sample that appends nothing
+	m.SetMessageCount(12)
+	if m.PendingMessages != 2 {
+		t.Fatalf("an empty sample changed the count: %d, want it still 2", m.PendingMessages)
+	}
+
+	m.SetMessagesLen(15)
+	m.SetMessageCount(15)
+	if m.PendingMessages != 5 {
+		t.Fatalf("after a further +3: PendingMessages = %d, want 5 (accumulated, not replaced)", m.PendingMessages)
+	}
+
+	m.HandleKey(Key{Special: KeyHome}) // returns to live
+	if m.PendingMessages != 0 {
+		t.Fatalf("PendingMessages = %d once the pane is live again, want 0", m.PendingMessages)
+	}
+}
+
+// TestForYou_CountsMessagesNotRows is the test plan's named case: a frozen
+// pane where one MESSAGE arrives inside a thread that renders as several
+// EXPANDED child rows must report ForYouCount 1, not the row count the
+// arrival added.
+func TestForYou_CountsMessagesNotRows(t *testing.T) {
+	m := liveMessagePane(t, 20, 10)
+	m.ScrollMessages(5) // no longer live
+
+	// One new message arrives; it belongs to an already-expanded thread, so
+	// it renders as 1 new thread-header-row-stays-put plus the thread's
+	// existing children re-flowing — net 6 new RENDERED ROWS for 1 new
+	// MESSAGE.
+	m.SetMessagesLen(26)
+	m.SetMessageCount(21)
+	m.AddForYouArrivals(1)
+
+	if m.ForYouCount != 1 {
+		t.Errorf("ForYouCount = %d, want 1 (one message), not the 6 rows the expansion added", m.ForYouCount)
+	}
+	if m.PendingMessages != 1 {
+		t.Errorf("PendingMessages = %d, want 1 (one message arrived)", m.PendingMessages)
+	}
+}
+
+// TestModel_StaysComparable is the test plan's compile-time property: Model
+// must stay usable with `*m != want`, which every fixture above relies on.
+// It fails to COMPILE — not merely to pass — the moment a map, slice or func
+// field lands on Model, which is the whole point of asserting it here rather
+// than only reading the struct definition.
+func TestModel_StaysComparable(t *testing.T) {
+	m := NewModel()
+	want := *m
+	if *m != want {
+		t.Fatalf("a freshly constructed Model does not equal its own copy:\n got %+v\nwant %+v", *m, want)
+	}
+
+	m.SetMessagesLen(10)
+	m.SetMessageCount(10)
+	m.PendingMessages = 3
+	m.ForYouCount = 1
+	touched := *m
+	if touched == want {
+		t.Fatalf("mutating m did not change the comparable snapshot — the test is not exercising anything")
 	}
 }
