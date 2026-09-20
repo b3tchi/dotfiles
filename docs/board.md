@@ -19,9 +19,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp034|agent-monitor-threaded-message-view]]
-
 ## ready
+
+- [[sp034|agent-monitor-threaded-message-view]]
 
 
 
