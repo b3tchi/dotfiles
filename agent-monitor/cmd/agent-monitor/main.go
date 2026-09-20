@@ -959,16 +959,17 @@ const (
 	styleOff = "\x1b[27m"
 )
 
-// markPane applies one pane's interactive affordances: its header line in
-// reverse video when the pane holds focus, and its selected data row in
-// reverse video.
+// markPane applies one pane's interactive affordances in reverse video, and
+// dotfiles-o7ab's rule is exactly ONE reversed line per frame: a pane with
+// rows to select carries the mark on its SELECTED ROW when focused and
+// nowhere at all when not; a pane with no rows (rows <= 0 — the detail view,
+// the reply composer, or a list pane that is currently empty and so has
+// nothing to select) carries it on its HEADER when focused, since a header
+// is the only line such a pane has to carry it.
 //
 // cursor is an index into the pane's FULL filtered row list and scroll is
 // the first row currently visible, so cursor-scroll is the selected row's
-// offset within the lines this pane actually rendered. rows is that full
-// list's length: zero means there is nothing to select, and the
-// "(no agents)"/"(no messages)" placeholder occupying the first data line
-// must NOT be marked as though it were a row.
+// offset within the lines this pane actually rendered.
 //
 // Since sp032 T1 the cursor may legally sit OUTSIDE the scrolled window (the
 // operator scrolled away from their selection), above it or below it. The
@@ -982,15 +983,18 @@ func markPane(lines []string, focused bool, cursor, scroll, rows int) []string {
 	out := make([]string, len(lines))
 	copy(out, lines)
 
-	if focused {
-		out[0] = styleOn + out[0] + styleOff
-	}
 	if rows <= 0 {
+		if focused {
+			out[0] = styleOn + out[0] + styleOff
+		}
+		return out
+	}
+	if !focused {
 		return out
 	}
 	// headerLines is the pane header plus the column header; data rows start
 	// after them. A pane still waiting for its first sample renders a single
-	// line and never reaches here.
+	// line and never reaches here (rows <= 0 above).
 	if i := headerLines + (cursor - scroll); i > headerLines-1 && i < len(out) {
 		out[i] = styleOn + out[i] + styleOff
 	}

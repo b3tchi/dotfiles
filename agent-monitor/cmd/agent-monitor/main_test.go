@@ -820,26 +820,45 @@ func styledLines(lines []string) []string {
 	return out
 }
 
-func TestRenderFrame_FocusedPaneHeaderIsMarked(t *testing.T) {
+// TestRenderFrame_FocusedListPaneMarksRowNotHeader is dotfiles-o7ab: a list
+// pane (roster, messages) used to mark BOTH its header (when focused) and
+// its selected row (always) — two reversed lines on a focused pane, one on
+// an unfocused pane, neither of which read as "the cursor is here". The
+// fixed contract is exactly one reversed line per frame: the focused pane's
+// selected row, nothing else. This replaces the old
+// TestRenderFrame_FocusedPaneHeaderIsMarked, which pinned the header-marks-
+// on-focus half of the bug as though it were correct behavior.
+func TestRenderFrame_FocusedListPaneMarksRowNotHeader(t *testing.T) {
 	model := tui.NewModel() // focus starts on the roster
 	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
 	msgs := &source.MessageSample{Messages: []source.Message{sampleMessage("alice", `"x"`)}}
 
 	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
-	if !containsSubstring(lines, testStyleOn+"agents") {
-		t.Fatalf("roster has focus, so its header must be marked; got %v", lines)
+	if containsSubstring(lines, testStyleOn+"agents") {
+		t.Fatalf("roster is a list pane: its header must never be marked, focused or not; got %v", lines)
 	}
-	if containsSubstring(lines, testStyleOn+"messages") {
-		t.Fatalf("messages pane does NOT have focus; its header must not be marked; got %v", lines)
+	marked := styledLines(lines)
+	if !anyContains(marked, "u1") {
+		t.Fatalf("roster has focus, so its selected row must be marked; got %v", lines)
+	}
+	if len(marked) != 1 {
+		t.Fatalf("want exactly one marked line in the frame, got %v", marked)
 	}
 
 	model.HandleKey(tui.Key{Special: tui.KeyTab})
 	lines, _ = renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
-	if !containsSubstring(lines, testStyleOn+"messages") {
-		t.Fatalf("after tab the messages pane has focus and must be marked; got %v", lines)
+	if containsSubstring(lines, testStyleOn+"messages") {
+		t.Fatalf("messages is a list pane: its header must never be marked, focused or not; got %v", lines)
 	}
-	if containsSubstring(lines, testStyleOn+"agents") {
-		t.Fatalf("after tab the roster no longer has focus; got %v", lines)
+	marked = styledLines(lines)
+	if !anyContains(marked, "alice") {
+		t.Fatalf("after tab the messages pane has focus, so its selected row must be marked; got %v", lines)
+	}
+	if anyContains(marked, "u1") {
+		t.Fatalf("after tab the roster no longer has focus; nothing in it should be marked; got %v", lines)
+	}
+	if len(marked) != 1 {
+		t.Fatalf("want exactly one marked line in the frame, got %v", marked)
 	}
 }
 
@@ -3029,14 +3048,14 @@ func TestStartup_MessagePaneOpensLiveAtTheHead(t *testing.T) {
 		t.Errorf("the first frame already reaches the oldest message:\n%s", joined)
 	}
 
-	// The selection mark is on the pane's FIRST data row, which is what
-	// makes this the head rather than merely a scrolled pane.
+	// The newest message sits on the pane's FIRST data row — proof this is
+	// the head, not merely a scrolled pane. No selection-mark assertion here
+	// (dotfiles-o7ab): the roster holds focus by default at startup, not the
+	// message pane, and an unfocused list pane now marks nothing at all —
+	// marking it regardless of focus was the bug this task fixed.
 	first := layout.messages.firstRow + layout.messages.headerRows
-	if !strings.Contains(lines[first], styleOn) {
-		t.Errorf("the first data row is not marked as the selection: %q", lines[first])
-	}
 	if !strings.Contains(lines[first], "message 19") {
-		t.Errorf("the marked row is not the newest message: %q", lines[first])
+		t.Errorf("the newest message is not on the pane's first data row: %q", lines[first])
 	}
 }
 
