@@ -530,15 +530,6 @@ const (
 	threadColSubject
 )
 
-var threadColumnHeader = map[threadColumn]string{
-	threadColMark:         "",
-	threadColGlyph:        "",
-	threadColTime:         "TIME",
-	threadColParticipants: "PARTICIPANTS",
-	threadColCount:        "N",
-	threadColSubject:      "SUBJECT",
-}
-
 // threadFixedWidth is threadColumn's counterpart to msgFixedWidth: the
 // declared width of every column except SUBJECT. threadCountWidth is sized
 // to "999+" (edge case: a count of 999+ does not widen the grid; the column
@@ -613,24 +604,6 @@ func threadSubjectWidth(width int, cols []threadColumn) int {
 		w = minSubjectWidth
 	}
 	return w
-}
-
-// ThreadColumnHeaderLine renders this grid's column header at the given
-// width/identity — the thread-mode counterpart of msgColumnHeaderLine.
-func ThreadColumnHeaderLine(width int, hasIdentity bool) string {
-	cols := fitThreadColumns(width, hasIdentity)
-	subjW := threadSubjectWidth(width, cols)
-	widths := map[threadColumn]int{threadColSubject: subjW}
-	for _, c := range cols {
-		widths[c] = threadFixedWidth[c]
-	}
-	allCols := append(append([]threadColumn{}, cols...), threadColSubject)
-
-	parts := make([]string, 0, len(allCols))
-	for _, c := range allCols {
-		parts = append(parts, pad(threadColumnHeader[c], widths[c]))
-	}
-	return join(parts)
 }
 
 // threadParticipantIndent is how far a child row's FROM is indented inside
