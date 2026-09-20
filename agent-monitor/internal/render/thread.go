@@ -192,14 +192,41 @@ type LogRow struct {
 	// thread row exactly when it has child rows following it, and true
 	// on every one of its own child rows too.
 	Expanded bool
+	// Expandable is whether this row's thread has anything to fold out at
+	// all -- Thread.Count > 1, derived HERE and nowhere else (sp035 "##
+	// plan": Count > 1 must not be spelled twice). Carried on the thread
+	// row and every one of its child rows, exactly as Count is, so a
+	// caller (the glyph renderer, the shell's expand/collapse/toggle
+	// handling -- Task 2) never recomputes the predicate for itself. A
+	// Count == 1 thread is not expandable: it has nothing beneath its own
+	// summary row once the fold starts at the second-newest member.
+	Expandable bool
 }
 
 // ThreadRows flattens threads (already ordered by Threads -- this function
 // establishes no order of its own, per ## plan's "do not derive a second
 // order") into the pane's rendered row list: one LogRow of kind thread per
-// Thread, immediately followed -- only when expanded(thread.Key) is true --
-// by one LogRow of kind message per member, in the thread's own
-// newest-first order (the same order Messages already holds).
+// Thread, immediately followed -- only when the thread is both expandable
+// and expanded(thread.Key) is true -- by one LogRow of kind message per
+// member EXCEPT the newest (Messages[1:]), in the thread's own newest-first
+// order (the same order Messages already holds).
+//
+// The thread row already shows the newest member's own TIME and SUBJECT
+// (its Message field), so the fold starts at the SECOND-newest member
+// (sp035 "## solution") -- folding the full membership, as sp034 shipped,
+// rendered the newest message twice: once as the thread row's summary and
+// again as the first child. A thread of N therefore yields N-1 children
+// when expanded, and Count keeps reporting the conversation's total (N),
+// never len(children) -- Count stays a property of the conversation, not of
+// the rows currently on screen.
+//
+// Expandable is derived HERE, once, as Thread.Count > 1, and carried on the
+// thread row and every child row exactly as Count is (## plan: "Count > 1
+// must not be spelled twice" -- no other function in this package or its
+// callers may recompute this predicate). A thread of one has nothing left
+// to fold out once its only member already lives on the thread row, so it
+// is NOT expandable: expanded(key) returning true for it must not produce
+// any child rows -- the predicate cannot override expandability.
 //
 // A nil expanded is treated as "nothing expanded" rather than dereferenced,
 // so a caller that has not built its expansion set yet (cmd/'s
@@ -216,26 +243,33 @@ func ThreadRows(threads []Thread, expanded func(key string) bool) []LogRow {
 		if len(th.Messages) > 0 {
 			newest = th.Messages[0]
 		}
-		isOpen := expanded(th.Key)
+		expandable := th.Count > 1
+		isOpen := expandable && expanded(th.Key)
 
 		rows = append(rows, LogRow{
-			Kind:     KindThread,
-			Key:      th.Key,
-			Message:  newest,
-			Count:    th.Count,
-			Expanded: isOpen,
+			Kind:       KindThread,
+			Key:        th.Key,
+			Message:    newest,
+			Count:      th.Count,
+			Expanded:   isOpen,
+			Expandable: expandable,
 		})
 
-		if !isOpen {
+		// len(th.Messages) guards a hand-built Thread{} whose Count
+		// disagrees with its own Messages -- Messages[1:] on an empty
+		// slice would panic, and Threads() itself never produces such a
+		// mismatch.
+		if !isOpen || len(th.Messages) == 0 {
 			continue
 		}
-		for _, m := range th.Messages {
+		for _, m := range th.Messages[1:] {
 			rows = append(rows, LogRow{
-				Kind:     KindMessage,
-				Key:      th.Key,
-				Message:  m,
-				Count:    th.Count,
-				Expanded: isOpen,
+				Kind:       KindMessage,
+				Key:        th.Key,
+				Message:    m,
+				Count:      th.Count,
+				Expanded:   isOpen,
+				Expandable: expandable,
 			})
 		}
 	}

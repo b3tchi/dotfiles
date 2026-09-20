@@ -301,13 +301,20 @@ func TestThreadRows_CollapsedIsOneRowPerThread(t *testing.T) {
 	if rows[1].Count != 2 {
 		t.Errorf("row 1 (t2): Count = %d, want 2", rows[1].Count)
 	}
+	wantExpandable := []bool{false, true, false}
+	for i, row := range rows {
+		if row.Expandable != wantExpandable[i] {
+			t.Errorf("row %d: Expandable = %v, want %v", i, row.Expandable, wantExpandable[i])
+		}
+	}
 }
 
 // TestThreadRows_ExpandedInsertsChildrenInOrder asserts the exact row
 // SEQUENCE for a two-thread fixture with only the first expanded: thread,
-// child, child, thread. A wrong insertion point (children appended at the
-// end, or before the wrong thread row) fails this, where a count-only
-// assertion would not.
+// child, thread. The fold starts at the SECOND-newest member (sp035), so
+// th1's two messages (c1 newest, c2 older) yield exactly one child (c2) --
+// a wrong insertion point, or a fold that repeats the newest member as its
+// own first child, fails this, where a count-only assertion would not.
 func TestThreadRows_ExpandedInsertsChildrenInOrder(t *testing.T) {
 	c1 := msg("2026-09-12T12:05:00Z", "c1", "alice", nil, "a", nil)
 	c2 := msg("2026-09-12T12:04:00Z", "c2", "bob", nil, "b", nil)
@@ -321,10 +328,9 @@ func TestThreadRows_ExpandedInsertsChildrenInOrder(t *testing.T) {
 	rows := ThreadRows([]Thread{th1, th2}, expanded)
 
 	want := []LogRow{
-		{Kind: KindThread, Key: "k1", Message: c1, Count: 2, Expanded: true},
-		{Kind: KindMessage, Key: "k1", Message: c1, Count: 2, Expanded: true},
-		{Kind: KindMessage, Key: "k1", Message: c2, Count: 2, Expanded: true},
-		{Kind: KindThread, Key: "k2", Message: d1, Count: 1, Expanded: false},
+		{Kind: KindThread, Key: "k1", Message: c1, Count: 2, Expanded: true, Expandable: true},
+		{Kind: KindMessage, Key: "k1", Message: c2, Count: 2, Expanded: true, Expandable: true},
+		{Kind: KindThread, Key: "k2", Message: d1, Count: 1, Expanded: false, Expandable: false},
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("row sequence mismatch:\ngot  %+v\nwant %+v", rows, want)
@@ -413,11 +419,17 @@ func TestThreadRows_ZeroThreadsReturnsEmptyNonNilSlice(t *testing.T) {
 	}
 }
 
-// TestThreadRows_OneMessageThreadExpandedIsNotNoOp: a one-message thread
-// still gains a child row when expanded -- the count column reads 1, but the
-// row list still grows from 1 to 2. A "skip children when count == 1"
-// shortcut would fail this.
-func TestThreadRows_OneMessageThreadExpandedIsNotNoOp(t *testing.T) {
+// TestThreadRows_OneMessageThreadIsNotExpandable is the REWRITE of sp034
+// Task 2's TestThreadRows_OneMessageThreadExpandedIsNotNoOp, inverted by
+// [[sp035]]: that test pinned a one-message thread gaining a child row when
+// expanded (count read 1, row list still grew 1 -> 2). Under sp035 the fold
+// starts at the SECOND-newest member, which the thread row already shows as
+// its own summary -- so a one-message thread has nothing left to fold out
+// at all and becomes NOT EXPANDABLE. expanded(key) returning true for it
+// must produce zero child rows; the predicate cannot override
+// expandability. The prior test is rewritten, not deleted, so the inversion
+// has a dated record (## plan anti-pattern).
+func TestThreadRows_OneMessageThreadIsNotExpandable(t *testing.T) {
 	m := msg("2026-09-12T12:00:00Z", "n1", "alice", nil, "a", nil)
 	th := Thread{Key: "k1", Messages: []source.Message{m}, Count: 1}
 
@@ -427,13 +439,132 @@ func TestThreadRows_OneMessageThreadExpandedIsNotNoOp(t *testing.T) {
 	if len(collapsed) != 1 {
 		t.Fatalf("collapsed: got %d rows, want 1", len(collapsed))
 	}
-	if len(expanded) != 2 {
-		t.Fatalf("expanded: got %d rows, want 2 (thread + 1 child): %+v", len(expanded), expanded)
+	if collapsed[0].Expandable {
+		t.Fatalf("collapsed[0].Expandable = true, want false for a one-message thread: %+v", collapsed[0])
 	}
-	if expanded[0].Count != 1 || expanded[1].Count != 1 {
-		t.Fatalf("count column must read 1 on both rows: %+v", expanded)
+
+	if len(expanded) != 1 {
+		t.Fatalf("expanded: got %d rows, want 1 (thread row only, zero children): %+v", len(expanded), expanded)
 	}
-	if expanded[1].Kind != KindMessage || expanded[1].Message.ID != "n1" {
-		t.Fatalf("child row wrong: %+v", expanded[1])
+	if expanded[0].Expanded {
+		t.Fatalf("expanded[0].Expanded = true, want false -- a Count == 1 thread cannot open even with its key expanded: %+v", expanded[0])
+	}
+	if expanded[0].Expandable {
+		t.Fatalf("expanded[0].Expandable = true, want false: %+v", expanded[0])
+	}
+	if expanded[0].Count != 1 {
+		t.Fatalf("count column must read 1: %+v", expanded[0])
+	}
+}
+
+// TestThreadRows_ExpandedOmitsTheNewestMember is the sp035 regression this
+// task exists for: sp034's fold rendered the newest member of an expanded
+// thread TWICE -- once as the thread row's own summary (TIME/SUBJECT come
+// from Messages[0]) and again as the first child, because children were the
+// thread's full membership. The fold now starts at the SECOND-newest
+// member, so a three-message thread expanded yields exactly two children
+// (Messages[1:]) and the newest message's id appears exactly once across
+// every rendered row -- the assertion that fails on the pre-sp035 code.
+func TestThreadRows_ExpandedOmitsTheNewestMember(t *testing.T) {
+	newest := msg("2026-09-12T12:02:00Z", "n1", "alice", nil, "a", nil)
+	middle := msg("2026-09-12T12:01:00Z", "n2", "bob", nil, "b", nil)
+	oldest := msg("2026-09-12T12:00:00Z", "n3", "carol", nil, "c", nil)
+	th := Thread{Key: "k1", Messages: []source.Message{newest, middle, oldest}, Count: 3}
+
+	rows := ThreadRows([]Thread{th}, func(string) bool { return true })
+
+	want := []LogRow{
+		{Kind: KindThread, Key: "k1", Message: newest, Count: 3, Expanded: true, Expandable: true},
+		{Kind: KindMessage, Key: "k1", Message: middle, Count: 3, Expanded: true, Expandable: true},
+		{Kind: KindMessage, Key: "k1", Message: oldest, Count: 3, Expanded: true, Expandable: true},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("row sequence mismatch:\ngot  %+v\nwant %+v", rows, want)
+	}
+
+	seen := 0
+	for _, row := range rows {
+		if row.Message.ID == newest.ID {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("newest message id %q appeared %d times across rendered rows, want exactly 1: %+v", newest.ID, seen, rows)
+	}
+}
+
+// TestThreadRows_ExpandableIsCarriedOnChildRows asserts every child row
+// carries Expandable true alongside Count -- Task 2's shell and glyph code
+// read Expandable off whichever row the cursor currently sits on, not just
+// the thread row.
+func TestThreadRows_ExpandableIsCarriedOnChildRows(t *testing.T) {
+	newest := msg("2026-09-12T12:02:00Z", "n1", "alice", nil, "a", nil)
+	middle := msg("2026-09-12T12:01:00Z", "n2", "bob", nil, "b", nil)
+	oldest := msg("2026-09-12T12:00:00Z", "n3", "carol", nil, "c", nil)
+	th := Thread{Key: "k1", Messages: []source.Message{newest, middle, oldest}, Count: 3}
+
+	rows := ThreadRows([]Thread{th}, func(string) bool { return true })
+
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3: %+v", len(rows), rows)
+	}
+	for i, row := range rows {
+		if !row.Expandable {
+			t.Errorf("row %d (%+v): Expandable = false, want true", i, row)
+		}
+	}
+}
+
+// TestThreadRows_CountStaysTheConversationTotal asserts Count reads the
+// thread's total member count on every row, never len(children) -- an
+// expanded thread of 3 renders one summary row and only 2 children, but
+// Count must read 3 on all three rows. Two numbers that agree only when
+// collapsed is exactly the bug sp035 exists to prevent.
+func TestThreadRows_CountStaysTheConversationTotal(t *testing.T) {
+	newest := msg("2026-09-12T12:02:00Z", "n1", "alice", nil, "a", nil)
+	middle := msg("2026-09-12T12:01:00Z", "n2", "bob", nil, "b", nil)
+	oldest := msg("2026-09-12T12:00:00Z", "n3", "carol", nil, "c", nil)
+	th := Thread{Key: "k1", Messages: []source.Message{newest, middle, oldest}, Count: 3}
+
+	rows := ThreadRows([]Thread{th}, func(string) bool { return true })
+
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3 (1 thread + 2 children): %+v", len(rows), rows)
+	}
+	for i, row := range rows {
+		if row.Count != 3 {
+			t.Errorf("row %d: Count = %d, want 3", i, row.Count)
+		}
+	}
+}
+
+// TestThreadRows_CollapsedUnchanged pins collapsed output against the
+// pre-sp035 expectation: same thread rows, same Count, same order, same
+// Message (the newest) on each thread row -- the fold-from-second-newest
+// change touches only the expanded path, and Expandable is the only new
+// information a collapsed row carries.
+func TestThreadRows_CollapsedUnchanged(t *testing.T) {
+	t1 := Thread{
+		Key:      "k1",
+		Messages: []source.Message{msg("2026-09-12T12:02:00Z", "n1", "alice", nil, "a", nil)},
+		Count:    1,
+	}
+	t2 := Thread{
+		Key: "k2",
+		Messages: []source.Message{
+			msg("2026-09-12T12:01:00Z", "n2", "bob", nil, "b", nil),
+			msg("2026-09-12T12:00:00Z", "n3", "bob", nil, "b", nil),
+		},
+		Count: 2,
+	}
+
+	rows := ThreadRows([]Thread{t1, t2}, noneExpanded)
+
+	want := []LogRow{
+		{Kind: KindThread, Key: "k1", Message: t1.Messages[0], Count: 1, Expanded: false, Expandable: false},
+		{Kind: KindThread, Key: "k2", Message: t2.Messages[0], Count: 2, Expanded: false, Expandable: true},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("collapsed row mismatch:\ngot  %+v\nwant %+v", rows, want)
 	}
 }
