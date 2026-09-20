@@ -770,9 +770,17 @@ func threadMarkCell(row LogRow, thread Thread, identity string) string {
 }
 
 // threadGlyphCell is criterion 1: ">" collapsed, "v" expanded, on a thread
-// row; blank on a child row (criterion 2).
+// row; blank on a child row (criterion 2). sp035 Task 2 adds a third blank
+// case: a thread row whose Expandable is false (Thread.Count == 1, derived
+// once by ThreadRows — see LogRow.Expandable's own doc) has nothing to fold
+// out, so it carries no chevron either. The cell still occupies its column
+// (pad, in the caller, keeps the width), so the grid does not shift — only
+// the glyph CONTENT is blank, exactly like a child row's.
 func threadGlyphCell(row LogRow) string {
 	if row.Kind != KindThread {
+		return ""
+	}
+	if !row.Expandable {
 		return ""
 	}
 	if row.Expanded {

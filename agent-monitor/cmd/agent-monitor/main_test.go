@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -4687,9 +4689,11 @@ func newThreadedShell(t *testing.T, width, height int) *shell {
 
 // TestShell_ExpansionSetDrivesRows is the test_plan's named case: a real
 // tea.KeyMsg expand (KeyRight, cursor on thread A's own row — the newest row
-// on the collapsed list) makes the NEXT frame gain exactly that thread's two
-// children, without disturbing thread B's own row, and without inflating
-// MessagesCount — dotfiles-1t00.4's whole point.
+// on the collapsed list) makes the NEXT frame gain exactly that thread's
+// fold-from-second-newest children (sp035: Messages[1:], one row for a
+// 2-member thread — the newest member stays on the thread row's own summary
+// and is never repeated as a child), without disturbing thread B's own row,
+// and without inflating MessagesCount — dotfiles-1t00.4's whole point.
 func TestShell_ExpansionSetDrivesRows(t *testing.T) {
 	s := newThreadedShell(t, 100, 24)
 
@@ -4710,8 +4714,8 @@ func TestShell_ExpansionSetDrivesRows(t *testing.T) {
 	if !strings.Contains(after, "hello-b-1") {
 		t.Fatalf("thread B's own row went missing after expanding a DIFFERENT thread:\n%s", after)
 	}
-	if s.model.MessagesLen != 4 {
-		t.Fatalf("MessagesLen = %d after expanding a 2-member thread among 2 threads, want 4 (threadA + 2 children + threadB)", s.model.MessagesLen)
+	if s.model.MessagesLen != 3 {
+		t.Fatalf("MessagesLen = %d after expanding a 2-member thread among 2 threads, want 3 (threadA + 1 child (sp035: second-newest and older, never the newest again) + threadB)", s.model.MessagesLen)
 	}
 	if s.model.MessagesCount != 3 {
 		t.Fatalf("MessagesCount = %d, want 3 — expanding a thread must not look like mail arriving (dotfiles-1t00.4)", s.model.MessagesCount)
@@ -4748,29 +4752,27 @@ func TestShell_SelectedMessageOnThreadRowIsNewest(t *testing.T) {
 // tryOpenComposer back to the pre-Task-6 flat-list selection survived the
 // whole suite as a result.
 //
-// The cursor is deliberately parked on thread B's own row — row 3 of the
-// 4-row expanded list — rather than row 0: on this fixture rows 0-2 name the
-// SAME envelope under both the threaded row list and the pre-task flat one
-// (thread A's own row and its two children are, respectively, m3, m3 and
-// m1 — coincidentally what a flat cursor at those same indices would also
-// select), so a test anchored there could not tell the fixed code from the
-// reverted mutant. Row 3 is where the two lists disagree: threaded row 3 is
-// thread B (m2), while the flat list at index 3 doesn't exist at all (it has
-// only 3 entries) — so the mutant resolves nil (no recipient) instead of
-// worker-b's address.
+// The cursor is deliberately parked on thread B's own row — row 2 of the
+// 3-row expanded list (sp035's fold: thread A's own summary row, its ONE
+// child (Messages[1:] of a 2-member thread — the newest member m3 is never
+// repeated as a child), then thread B) — rather than row 0. Row 2 is where
+// the threaded list and the pre-task flat one (m3, m2, m1 newest-first)
+// disagree: threaded row 2 is thread B (m2), while flat row 2 is m1 — so a
+// mutant reverted to flat-list selection resolves worker-a's address instead
+// of worker-b's.
 func TestShell_ReplyFromThreadRowAddressesNewestMember(t *testing.T) {
 	s := newThreadedShell(t, 100, 24)
 	s.model.HasIdentity = true
 	s.View()
 
 	s.Update(key(tea.KeyRight)) // expand thread A
-	s.View()                    // MessagesLen -> 4
+	s.View()                    // MessagesLen -> 3
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		s.Update(runeKey('j'))
 	}
-	if s.model.MessagesCursor != 3 {
-		t.Fatalf("setup: cursor = %d after 3x j, want 3 (thread B's own row)", s.model.MessagesCursor)
+	if s.model.MessagesCursor != 2 {
+		t.Fatalf("setup: cursor = %d after 2x j, want 2 (thread B's own row)", s.model.MessagesCursor)
 	}
 
 	s.Update(runeKey('a'))
@@ -4810,52 +4812,80 @@ func TestShell_ThreadedDecisionAgreesAtHeightZero(t *testing.T) {
 	}
 }
 
-// TestShell_CollapseKeepsCursorOnThreadRow is the test_plan's named case,
-// combined with the CARRIED FORWARD FROM TASK 5's AUDIT gate (dotfiles-
-// 1t00.5, relocated to this task's own notes): KeyLeft on a CHILD row must
-// collapse THAT CHILD'S OWN THREAD — not be a no-op, not reach some other
-// thread — and the cursor must land on the thread's own row immediately, as
-// applyThreadOutcome's OWN repositioning rather than as an accident of
-// SetMessagesLen's later clamp (asserted before the next render runs at
-// all).
+// TestShell_CollapseFromChildRowStillTargetsItsThread is the test_plan's
+// named case, combined with the CARRIED FORWARD FROM TASK 5's AUDIT gate
+// (dotfiles-1t00.5) re-asserted against sp035's new row shape: KeyLeft on a
+// CHILD row must collapse THAT CHILD'S OWN THREAD — not be a no-op, not
+// reach some other thread — and the cursor must land on the thread's own
+// row immediately, as applyThreadOutcome's OWN repositioning rather than as
+// an accident of SetMessagesLen's later clamp (asserted before the next
+// render runs at all).
 //
-// This collapses thread B — row 1 on the collapsed list, not row 0 — on
-// purpose: a resolver that landed on row 0 unconditionally (or stayed on
+// This is a bespoke fixture, not addressedThreadStub's: under sp035 a
+// single-message thread is NOT expandable at all (LogRow.Expandable false —
+// that is Task 1's fix for the very sp034 bug this gate used to exploit, a
+// one-message thread expanding to one duplicate child), so
+// addressedThreadStub's thread B (a single message) can no longer supply
+// this test's "expand, descend into the child, collapse" path. Here thread
+// X (2 members) is the one with something to fold, and it is placed at row
+// 1 — NOT row 0 — by giving thread Y's single message the overall-newest
+// timestamp: a resolver that landed on row 0 unconditionally (or stayed on
 // whatever row started selected) would still pass a fixture where the right
 // answer happened to BE 0; row 1 is the one answer only a genuinely correct
 // resolution produces.
-func TestShell_CollapseKeepsCursorOnThreadRow(t *testing.T) {
-	s := newThreadedShell(t, 100, 24)
+func TestShell_CollapseFromChildRowStillTargetsItsThread(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	wire := `[` +
+		`{"id":"x1","at":"2026-09-12T12:00:00Z","from":"worker-x","to":["jan"],"kind":"message","content":"hello-x-1","from_address":"aWORKERX0000000000000000001","to_addresses":["aJAN000000000000000000000J"]},` +
+		`{"id":"x2","at":"2026-09-12T12:01:00Z","from":"jan","to":["worker-x"],"kind":"message","content":"hello-x-2","from_address":"aJAN000000000000000000000J","to_addresses":["aWORKERX0000000000000000001"]},` +
+		`{"id":"y1","at":"2026-09-12T12:02:00Z","from":"worker-y","to":["jan"],"kind":"message","content":"hello-y-1","from_address":"aWORKERY0000000000000000002","to_addresses":["aJAN000000000000000000000J"]}` +
+		`]`
+	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '"+wire+"'\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	census := source.NewMonitor(source.NewSampler(filepath.Join(dir, "stamp")))
+	census.Refresh(ctx)
+	msgs := source.NewMessagesMonitor(source.NewMessagesSampler())
+	msgs.Tick(ctx)
+
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	s := newShell(ctx, model, census, msgs)
+	s.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	s.View() // settle the opening; populates MessagesLen for the collapsed list (2)
 
-	s.Update(runeKey('j')) // onto thread B (row 1)
+	// Collapsed, newest-first: row0 thread Y (y1 @ 12:02, single member, NOT
+	// expandable), row1 thread X (x2 @ 12:01, its own newest, 2 members).
+	s.Update(runeKey('j')) // onto thread X (row 1)
 	if s.model.MessagesCursor != 1 {
-		t.Fatalf("setup: cursor = %d after j, want 1 (thread B)", s.model.MessagesCursor)
+		t.Fatalf("setup: cursor = %d after j, want 1 (thread X)", s.model.MessagesCursor)
 	}
 
-	s.Update(key(tea.KeyRight)) // expand thread B (its own single member)
-	s.View()                    // MessagesLen -> 3 (threadA, threadB, its 1 child)
+	s.Update(key(tea.KeyRight)) // expand thread X (Messages[1:] -> its one older member, x1)
+	s.View()                    // MessagesLen -> 3 (threadY, threadX, its 1 child)
 
 	if s.model.MessagesLen != 3 {
-		t.Fatalf("setup: MessagesLen = %d after expanding thread B, want 3", s.model.MessagesLen)
+		t.Fatalf("setup: MessagesLen = %d after expanding thread X, want 3", s.model.MessagesLen)
 	}
 
-	s.Update(runeKey('j')) // onto thread B's own (only) child row, index 2
+	s.Update(runeKey('j')) // onto thread X's own (only) child row, index 2
 	if s.model.MessagesCursor != 2 {
-		t.Fatalf("setup: cursor = %d after j, want 2 (thread B's child)", s.model.MessagesCursor)
+		t.Fatalf("setup: cursor = %d after j, want 2 (thread X's child)", s.model.MessagesCursor)
 	}
 
 	s.Update(key(tea.KeyLeft))
 	if got := s.model.MessagesCursor; got != 1 {
-		t.Fatalf("cursor = %d immediately after collapsing thread B from its child row (before any re-render), want 1 (thread B's own row) — must be applyThreadOutcome's own repositioning, not a later SetMessagesLen clamp", got)
+		t.Fatalf("cursor = %d immediately after collapsing thread X from its child row (before any re-render), want 1 (thread X's own row) — must be applyThreadOutcome's own repositioning, not a later SetMessagesLen clamp", got)
 	}
 
 	out := s.View()
 	if s.model.MessagesLen != 2 {
-		t.Fatalf("MessagesLen = %d after collapsing thread B, want 2 (both threads collapsed)", s.model.MessagesLen)
+		t.Fatalf("MessagesLen = %d after collapsing thread X, want 2 (both threads collapsed)", s.model.MessagesLen)
 	}
-	if !strings.Contains(out, "hello-b-1") {
-		t.Fatalf("thread B's own row lost its content after collapsing:\n%s", out)
+	if !strings.Contains(out, "hello-x-2") {
+		t.Fatalf("thread X's own row lost its content after collapsing:\n%s", out)
 	}
 }
 
@@ -4929,7 +4959,7 @@ func TestShell_ClickOnChildRowSelectsIt(t *testing.T) {
 	// deliberately handed nil for every OTHER (flat) test in this file, this
 	// one needs the actual post-expand geometry.
 	_, layout := renderFrame(s.model, s.census.Last(), s.census.Stale(), s.msgs.Last(), s.msgs.Stale(), s.now(), s.width, s.height, s.expandedFn())
-	y := layout.messages.firstRow + layout.messages.headerRows + 1 // row index 1: thread A's newest child
+	y := layout.messages.firstRow + layout.messages.headerRows + 1 // row index 1: thread A's (only) child (sp035: Messages[1:] — the newest, m3, is never repeated as a child)
 
 	s.Update(tea.MouseMsg{X: 0, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 
@@ -4940,8 +4970,8 @@ func TestShell_ClickOnChildRowSelectsIt(t *testing.T) {
 		t.Fatalf("cursor = %d after clicking the child row at y=%d, want 1", s.model.MessagesCursor, y)
 	}
 	msg := selectedMessage(s.model, s.currentMessageRows())
-	if msg == nil || msg.ID != "m3" {
-		t.Fatalf("selected message after the click = %+v, want thread A's newest child (m3, hello-a-2)", msg)
+	if msg == nil || msg.ID != "m1" {
+		t.Fatalf("selected message after the click = %+v, want thread A's (only) child (m1, hello-a-1)", msg)
 	}
 }
 
@@ -5009,8 +5039,8 @@ func TestShell_SpaceTogglesExpansionThroughTheRealPath(t *testing.T) {
 
 	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
 	s.View()
-	if s.model.MessagesLen != 4 {
-		t.Fatalf("MessagesLen = %d after space on a collapsed thread, want 4 (expanded)", s.model.MessagesLen)
+	if s.model.MessagesLen != 3 {
+		t.Fatalf("MessagesLen = %d after space on a collapsed thread, want 3 (expanded: threadA + its 1 child + threadB)", s.model.MessagesLen)
 	}
 
 	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
@@ -5053,17 +5083,154 @@ func TestShell_ResizeMidExpansionKeepsExpansionState(t *testing.T) {
 	s.View()
 	s.Update(key(tea.KeyRight)) // expand thread A
 	s.View()
-	if s.model.MessagesLen != 4 {
-		t.Fatalf("setup: MessagesLen = %d after expanding, want 4", s.model.MessagesLen)
+	if s.model.MessagesLen != 3 {
+		t.Fatalf("setup: MessagesLen = %d after expanding, want 3", s.model.MessagesLen)
 	}
 
 	s.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
 	out := s.View()
 
-	if s.model.MessagesLen != 4 {
-		t.Fatalf("MessagesLen = %d after a resize, want 4 — a resize must not change expansion state", s.model.MessagesLen)
+	if s.model.MessagesLen != 3 {
+		t.Fatalf("MessagesLen = %d after a resize, want 3 — a resize must not change expansion state", s.model.MessagesLen)
 	}
 	if !strings.Contains(out, "hello-a-1") {
 		t.Fatalf("thread A collapsed after a resize, want it to stay expanded:\n%s", out)
 	}
+}
+
+// --- sp035 Task 2: honouring LogRow.Expandable in the shell ---------------
+
+// TestShell_ExpandOnOneMessageThreadIsANoOp is the test_plan's named case:
+// KeyRight on a one-message thread (LogRow.Expandable false, derived once by
+// ThreadRows and never recomputed here) is a TRUE no-op — the expansion set,
+// the cursor and the rendered frame are all asserted BYTE-IDENTICAL before
+// and after, rather than merely "no visible symptom" (thread B on
+// addressedThreadStub's fixture carries exactly one message, m2).
+func TestShell_ExpandOnOneMessageThreadIsANoOp(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View()
+	s.Update(runeKey('j')) // onto thread B (row 1, single message m2 — not expandable)
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("setup: cursor = %d after j, want 1 (thread B)", s.model.MessagesCursor)
+	}
+	if current := s.currentMessageRows()[s.model.MessagesCursor]; current.Expandable {
+		t.Fatalf("fixture drift: thread B reports Expandable true")
+	}
+
+	before := s.View()
+	beforeCursor := s.model.MessagesCursor
+	beforeExpansion := len(s.expansion)
+
+	s.Update(key(tea.KeyRight))
+	after := s.View()
+
+	if len(s.expansion) != beforeExpansion {
+		t.Fatalf("expansion set mutated by expand on a one-message thread: %v", s.expansion)
+	}
+	if s.model.MessagesCursor != beforeCursor {
+		t.Fatalf("cursor moved from %d to %d on a no-op expand", beforeCursor, s.model.MessagesCursor)
+	}
+	if before != after {
+		t.Fatalf("rendered frame changed on a no-op expand:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+// TestShell_ToggleOnOneMessageThreadIsANoOp is the test_plan's named case
+// for the toggle path SPECIFICALLY: applyThreadOutcome's ThreadToggle case
+// is `s.expansion[key] = !s.expansion[key]`, and on a MISSING key that
+// expression reads false and then WRITES true — inserting an entry for a
+// thread that can never have children. The guard has to return before that
+// line is ever reached, which this test proves by asserting the key stays
+// ABSENT, not merely false, plus the same cursor/frame byte-identity
+// TestShell_ExpandOnOneMessageThreadIsANoOp asserts for expand.
+func TestShell_ToggleOnOneMessageThreadIsANoOp(t *testing.T) {
+	s := newThreadedShell(t, 100, 24)
+	s.View()
+	s.Update(runeKey('j')) // onto thread B (row 1, single message m2 — not expandable)
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("setup: cursor = %d after j, want 1 (thread B)", s.model.MessagesCursor)
+	}
+	threadKey := s.currentMessageRows()[s.model.MessagesCursor].Key
+
+	before := s.View()
+	beforeCursor := s.model.MessagesCursor
+
+	s.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	after := s.View()
+
+	if _, ok := s.expansion[threadKey]; ok {
+		t.Fatalf("toggle on a one-message thread inserted a key into the expansion set: %v", s.expansion)
+	}
+	if s.model.MessagesCursor != beforeCursor {
+		t.Fatalf("cursor moved from %d to %d on a no-op toggle", beforeCursor, s.model.MessagesCursor)
+	}
+	if before != after {
+		t.Fatalf("rendered frame changed on a no-op toggle:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+// TestNoSecondExpandabilityDerivation is the ## plan anti-pattern made
+// executable (sp035): expandability is derived ONCE, in
+// internal/render/thread.go, from Thread.Count. Neither threadGlyphCell nor
+// applyThreadOutcome may recompute it — both must read LogRow.Expandable
+// instead. This scans every non-test .go source file in the module for a
+// `Count > 1` or `Count >= 2` style comparison outside thread.go; sp034
+// Task 6's audit found exactly this shape of mistake (two layers each
+// deciding the same predicate, disagreeing at height 0) and this test is
+// what makes a repeat of it fail the build rather than wait for a human to
+// notice.
+func TestNoSecondExpandabilityDerivation(t *testing.T) {
+	moduleRoot := repoRoot(t)
+	pattern := regexp.MustCompile(`Count\s*(>|>=)\s*(1|2)\b`)
+
+	var offenders []string
+	err := filepath.WalkDir(moduleRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == ".worktrees" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(moduleRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == filepath.Join("internal", "render", "thread.go") {
+			return nil // the one authorized derivation
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if pattern.Match(data) {
+			offenders = append(offenders, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking module for a second Count > 1 derivation: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("Count > 1 (or >= 2) style comparison found outside thread.go: %v — expandability must be derived ONCE, in ThreadRows, and read via LogRow.Expandable everywhere else", offenders)
+	}
+}
+
+// repoRoot returns the agent-monitor module's own root (the directory
+// containing this test file's package's module, i.e. two levels up from
+// cmd/agent-monitor) so TestNoSecondExpandabilityDerivation walks the whole
+// module — internal/ and cmd/ alike — rather than just its own package.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	// cmd/agent-monitor -> agent-monitor (the module root, go.mod's dir)
+	return filepath.Dir(filepath.Dir(wd))
 }

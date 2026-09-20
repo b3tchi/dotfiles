@@ -550,6 +550,19 @@ func (s *shell) applyThreadOutcome(intent tui.ThreadIntent) {
 	current := rows[s.model.MessagesCursor]
 	key, selectedID := current.Key, current.Message.ID
 
+	// sp035 Task 2: a thread with nothing to fold out (LogRow.Expandable
+	// false, derived once by ThreadRows from Thread.Count — never
+	// recomputed here) refuses expand, collapse AND toggle alike, before
+	// the expansion map is even allocated. This MUST return here, ahead of
+	// the switch below: ThreadToggle's own
+	// `s.expansion[key] = !s.expansion[key]` reads a missing key as false
+	// and then WRITES true, so falling through would insert a key for a
+	// thread that can never have children — a true no-op has to leave
+	// s.expansion exactly as it found it, allocated or not.
+	if !current.Expandable {
+		return
+	}
+
 	if s.expansion == nil {
 		s.expansion = make(map[string]bool)
 	}

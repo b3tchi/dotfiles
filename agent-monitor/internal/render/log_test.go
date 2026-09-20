@@ -675,15 +675,20 @@ func TestRenderLog_CountsSurviveALongFilter(t *testing.T) {
 
 // --- sp034 Task 3: thread and child rows on one column grid ----------------
 
-// threadFixture builds a two-message thread ("worker-a" <-> the identity
-// address) where the NEWEST message ("a2", the operator's own reply) is NOT
-// addressed to the identity, and the OLDER message ("a1") is. This is the
-// fixture TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe needs: a mark
-// computed from row.Message (the newest member) alone would miss it.
+// threadFixture builds a THREE-message thread ("worker-a" <-> the identity
+// address) under sp035's fold-from-second-newest contract: the thread row
+// shows the newest member ("a3") and NEVER repeats it as a child (that
+// repetition was the very defect sp035 removes — see sp035's ## problem).
+// The children are Messages[1:] in newest-first order: "a2" (the middle
+// member, also the operator's own reply, NOT addressed to the identity)
+// then "a1" (the oldest member, addressed to the identity). "a1" being
+// addressed to the identity while it is NOT the newest member is what
+// TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe needs: a mark computed
+// from row.Message (the newest member) alone would miss it.
 //
 // Returns the thread and its rows in ThreadRows' own order: rows[0] is the
-// thread row, rows[1] the newest child (the operator's own sent message,
-// "a2"), rows[2] the older child (the for-you message, "a1").
+// thread row (newest, "a3"), rows[1] the middle child ("a2"), rows[2] the
+// oldest child, also the for-you message ("a1").
 func threadFixture() (Thread, []LogRow) {
 	older := source.Message{
 		At: "2026-09-12T12:00:00.000000Z", ID: "a1",
@@ -692,14 +697,21 @@ func threadFixture() (Thread, []LogRow) {
 		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERA",
 		ToAddresses: []string{identityAddr},
 	}
-	newest := source.Message{
+	middle := source.Message{
 		At: "2026-09-12T12:05:00.000000Z", ID: "a2",
+		From: "jan", To: []string{"worker-a"}, Kind: "message",
+		Content:     json.RawMessage(`"distinctive-middle-subject"`),
+		FromAddress: identityAddr,
+		ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERA"},
+	}
+	newest := source.Message{
+		At: "2026-09-12T12:10:00.000000Z", ID: "a3",
 		From: "jan", To: []string{"worker-a"}, Kind: "message",
 		Content:     json.RawMessage(`"distinctive-newest-subject"`),
 		FromAddress: identityAddr,
 		ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERA"},
 	}
-	threads := Threads([]source.Message{older, newest})
+	threads := Threads([]source.Message{older, middle, newest})
 	if len(threads) != 1 {
 		panic(fmt.Sprintf("fixture drift: want one thread, got %d", len(threads)))
 	}
@@ -727,7 +739,7 @@ func TestRenderLog_ThreadRowGridMatchesChildGrid(t *testing.T) {
 	childLine := RenderThreadRow(childRow, th, 80, "")
 
 	idxThread := strings.Index(threadLine, "distinctive-newest-subject")
-	idxChild := strings.Index(childLine, "distinctive-newest-subject")
+	idxChild := strings.Index(childLine, "distinctive-middle-subject")
 	if idxThread < 0 {
 		t.Fatalf("thread row lost its SUBJECT: %q", threadLine)
 	}
@@ -779,25 +791,83 @@ func TestRenderLog_GlyphReflectsExpansion(t *testing.T) {
 	}
 }
 
+// TestRenderThreadRow_OneMessageThreadHasNoGlyph is sp035 Task 2's own named
+// test_plan case: a thread whose Count is 1 — Expandable false, derived once
+// by ThreadRows and never recomputed here — renders a BLANK glyph cell, not
+// ">" or "v", AND the grid does not shift: SUBJECT starts at the same
+// computed column index it does on an expandable thread row at the same
+// width.
+func TestRenderThreadRow_OneMessageThreadHasNoGlyph(t *testing.T) {
+	solo := source.Message{
+		At: "2026-09-12T12:00:00.000000Z", ID: "b1",
+		From: "worker-c", To: []string{"jan"}, Kind: "message",
+		Content:     json.RawMessage(`"solo-thread-subject"`),
+		FromAddress: "a01M2M36Y5KJJ0YARD1BWORKERC",
+		ToAddresses: []string{identityAddr},
+	}
+	threads := Threads([]source.Message{solo})
+	if len(threads) != 1 {
+		t.Fatalf("fixture drift: want one thread, got %d", len(threads))
+	}
+	rows := ThreadRows(threads, func(string) bool { return true })
+	if len(rows) != 1 || rows[0].Kind != KindThread {
+		t.Fatalf("fixture drift: want exactly one thread row, got %+v", rows)
+	}
+	oneMsgRow := rows[0]
+	if oneMsgRow.Expandable {
+		t.Fatalf("fixture drift: one-message thread reports Expandable true")
+	}
+
+	expandableTh, expandableRows := threadFixture()
+	expandableRow := expandableRows[0]
+	if !expandableRow.Expandable {
+		t.Fatalf("fixture drift: threadFixture's thread row is not Expandable")
+	}
+
+	if got := threadGlyphCell(oneMsgRow); got != "" {
+		t.Errorf("non-expandable thread glyph = %q, want blank", got)
+	}
+	if got := threadGlyphCell(expandableRow); got == "" {
+		t.Fatalf("fixture drift: expandable thread row's own glyph is blank")
+	}
+
+	oneMsgLine := RenderThreadRow(oneMsgRow, threads[0], 80, "")
+	expandableLine := RenderThreadRow(expandableRow, expandableTh, 80, "")
+
+	idxOneMsg := strings.Index(oneMsgLine, "solo-thread-subject")
+	idxExpandable := strings.Index(expandableLine, "distinctive-newest-subject")
+	if idxOneMsg < 0 {
+		t.Fatalf("one-message thread row lost its SUBJECT: %q", oneMsgLine)
+	}
+	if idxExpandable < 0 {
+		t.Fatalf("expandable thread row lost its SUBJECT: %q", expandableLine)
+	}
+	if idxOneMsg != idxExpandable {
+		t.Fatalf("SUBJECT starts at different columns: one-message=%d expandable=%d\none-message: %q\nexpandable:  %q",
+			idxOneMsg, idxExpandable, oneMsgLine, expandableLine)
+	}
+}
+
 // TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe is the test_plan's
 // named case: the thread's only for-you message is NOT the newest member,
 // so a thread row whose mark were computed from row.Message alone (the
 // newest) would wrongly render unmarked.
 func TestRenderLog_ForYouMarksThreadWhenAnyMemberIsForMe(t *testing.T) {
 	th, rows := threadFixture()
-	threadRow, newestChildRow, olderChildRow := rows[0], rows[1], rows[2]
+	threadRow, middleChildRow, olderChildRow := rows[0], rows[1], rows[2]
 
 	threadLine := RenderThreadRow(threadRow, th, 80, identityAddr)
 	if !strings.HasPrefix(threadLine, markCell) {
 		t.Errorf("thread row with a buried for-you member missing its mark: %q", threadLine)
 	}
 
-	// The newest member itself is the operator's own sent message — never
+	// The middle member is also the operator's own sent message — never
 	// for-you — so its own child row must NOT carry the mark, even though
-	// the thread row (aggregating every member) does.
-	newestChildLine := RenderThreadRow(newestChildRow, th, 80, identityAddr)
-	if strings.HasPrefix(newestChildLine, markCell) {
-		t.Errorf("child row for the operator's own sent message wrongly marked: %q", newestChildLine)
+	// the thread row (aggregating every member, including the newest — which
+	// under sp035's fold is never itself a child row) does.
+	middleChildLine := RenderThreadRow(middleChildRow, th, 80, identityAddr)
+	if strings.HasPrefix(middleChildLine, markCell) {
+		t.Errorf("child row for the operator's own sent message wrongly marked: %q", middleChildLine)
 	}
 
 	// The older child row IS the for-you message and must carry its own mark.
@@ -971,7 +1041,11 @@ func TestRenderThreadLog_EmptyRowsRendersNoMessages(t *testing.T) {
 // TestRenderThreadLog_RendersRowsInGivenOrder asserts RenderThreadLog
 // establishes no order of its own (## plan's "do not derive a second
 // order"): the three rows come out in exactly the sequence they were given —
-// thread, newest child, older child — matching threadFixture's own row order.
+// thread, middle child, older child — matching threadFixture's own row
+// order. Row 1 carrying the MIDDLE member's own subject (not the newest's,
+// repeated) is the fix sp035 exists for: a fold that duplicated the newest
+// member as its own first child would show "distinctive-newest-subject"
+// here too.
 func TestRenderThreadLog_RendersRowsInGivenOrder(t *testing.T) {
 	th, rows := threadFixture()
 	lines := RenderThreadLog(rows, threadFixtureThreadsByKey(th), true, time.Now(), false, time.Now(), 80)
@@ -980,11 +1054,11 @@ func TestRenderThreadLog_RendersRowsInGivenOrder(t *testing.T) {
 	if len(data) != 3 {
 		t.Fatalf("got %d data rows, want 3: %q", len(data), data)
 	}
-	if !strings.Contains(data[0], "2") { // the thread row's own N cell
+	if !strings.Contains(data[0], "3") { // the thread row's own N cell (conversation total)
 		t.Errorf("row 0 is not the thread's summary row: %q", data[0])
 	}
-	if !strings.Contains(data[1], "distinctive-newest-subject") {
-		t.Errorf("row 1 is not the newest child: %q", data[1])
+	if !strings.Contains(data[1], "distinctive-middle-subject") {
+		t.Errorf("row 1 is not the middle child: %q", data[1])
 	}
 	if !strings.Contains(data[2], "distinctive-older-subject") {
 		t.Errorf("row 2 is not the older child: %q", data[2])
