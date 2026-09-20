@@ -2,6 +2,12 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -83,16 +89,54 @@ func TestThreads_MultiRecipientIsItsOwnThread(t *testing.T) {
 	}
 }
 
-// TestThreads_OrderIsNewestFirstAndTotal shuffles the input and asserts the
-// exact thread order, each thread's own internal order, and that repeated
-// derivations over the same input are byte-identical.
-func TestThreads_OrderIsNewestFirstAndTotal(t *testing.T) {
+// TestThreads_PreservesInputOrder is dotfiles-qm4h.2's core test: Threads
+// performs no ordering of its own. Thread order is FIRST APPEARANCE in the
+// input, and each thread's own Messages stay in exactly the order they
+// arrived in msgs. The AB/AC interleaving (AB, then AC, then AB again) means
+// any sorting implementation -- by At, by ID, newest-first or not -- would
+// reorder either the threads slice or AB's own Messages; only an
+// order-preserving grouping produces the assertions below.
+func TestThreads_PreservesInputOrder(t *testing.T) {
 	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
 	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
 	c := "aCCCCCCCCCCCCCCCCCCCCCCCCCC1"
 
-	// Thread AB: two messages. Thread AC: one message, newer than both AB
-	// messages.
+	ab1 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
+	ac1 := msg("2026-09-12T12:01:00Z", "a2", "alice", []string{"carol"}, a, []string{c})
+	ab2 := msg("2026-09-12T12:02:00Z", "a3", "bob", []string{"alice"}, b, []string{a})
+
+	interleaved := []source.Message{ab1, ac1, ab2}
+
+	threads := Threads(interleaved)
+
+	if len(threads) != 2 {
+		t.Fatalf("got %d threads, want 2: %+v", len(threads), threads)
+	}
+	// AB appears first in the input (ab1), so its thread must come first,
+	// even though AC's own message (ac1) has a later At and a higher ID.
+	if threads[0].Messages[0].ID != "a1" {
+		t.Fatalf("thread order wrong: first thread's first message = %q, want a1 (AB, first-appearance)", threads[0].Messages[0].ID)
+	}
+	if threads[1].Messages[0].ID != "a2" {
+		t.Fatalf("thread order wrong: second thread's message = %q, want a2 (AC)", threads[1].Messages[0].ID)
+	}
+	// AB thread's own messages stay in INPUT order: ab1 (a1) then ab2 (a3) --
+	// not At/ID-descending, which would put a3 first.
+	ab := threads[0]
+	if len(ab.Messages) != 2 || ab.Messages[0].ID != "a1" || ab.Messages[1].ID != "a3" {
+		t.Fatalf("AB thread internal order wrong, want [a1 a3] (input order): %+v", ab.Messages)
+	}
+}
+
+// TestThreads_Deterministic asserts repeated derivations over the same input
+// are byte-identical -- carried forward from the pre-qm4h.2
+// OrderIsNewestFirstAndTotal test, whose ordering assertions moved to
+// TestThreads_PreservesInputOrder now that Threads sorts nothing.
+func TestThreads_Deterministic(t *testing.T) {
+	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
+	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
+	c := "aCCCCCCCCCCCCCCCCCCCCCCCCCC1"
+
 	ab1 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
 	ab2 := msg("2026-09-12T12:01:00Z", "a2", "bob", []string{"alice"}, b, []string{a})
 	ac1 := msg("2026-09-12T12:02:00Z", "a3", "alice", []string{"carol"}, a, []string{c})
@@ -105,18 +149,79 @@ func TestThreads_OrderIsNewestFirstAndTotal(t *testing.T) {
 	if !reflect.DeepEqual(threads1, threads2) {
 		t.Fatalf("Threads is not deterministic:\n%+v\n%+v", threads1, threads2)
 	}
+}
 
-	if len(threads1) != 2 {
-		t.Fatalf("got %d threads, want 2: %+v", len(threads1), threads1)
+// TestThreads_ClockSkewAgreesWithFlatOrder is the dotfiles-i1sw regression:
+// two envelopes in the SAME thread whose At contradicts their ULID order --
+// ordinary clock skew between two agents on the bus. msgs is given exactly
+// as orderedMessages (cmd/agent-monitor/main.go) would produce it,
+// ID-descending, so msgs[0] IS the flat pane's row 0. On today's code
+// Threads() re-sorts each thread's Messages by isNewer (At-primary), so the
+// threaded pane's row 0 diverges from the flat pane's -- this test fails on
+// that code. After qm4h.2, Threads keeps input order, so threads[0].Messages[0]
+// must be the SAME envelope as msgs[0].
+func TestThreads_ClockSkewAgreesWithFlatOrder(t *testing.T) {
+	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
+	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
+
+	// m2 has the higher ID (newer by ULID) but an EARLIER At than m1 --
+	// clock skew. orderedMessages sorts ID-descending, so the flat list is
+	// [m2, m1]; that is also what Threads receives.
+	m1 := msg("2026-09-12T12:05:00Z", "a1", "bob", []string{"alice"}, b, []string{a})
+	m2 := msg("2026-09-12T12:00:00Z", "a2", "alice", []string{"bob"}, a, []string{b})
+
+	flat := []source.Message{m2, m1}
+
+	threads := Threads(flat)
+	if len(threads) != 1 {
+		t.Fatalf("got %d threads, want 1 (same address pair): %+v", len(threads), threads)
 	}
-	// AC thread (newest member ac1) must sort before AB thread.
-	if threads1[0].Messages[0].ID != "a3" {
-		t.Fatalf("thread order wrong: first thread's newest = %q, want a3", threads1[0].Messages[0].ID)
+
+	flatRow0 := flat[0]
+	threadedRow0 := threads[0].Messages[0]
+	if threadedRow0.ID != flatRow0.ID {
+		t.Fatalf("flat row 0 = %q but threaded row 0 = %q; the two panes disagree on the newest envelope under clock skew", flatRow0.ID, threadedRow0.ID)
 	}
-	// AB thread's own messages must be newest-first: ab2 (a2) then ab1 (a1).
-	ab := threads1[1]
-	if len(ab.Messages) != 2 || ab.Messages[0].ID != "a2" || ab.Messages[1].ID != "a1" {
-		t.Fatalf("AB thread internal order wrong: %+v", ab.Messages)
+}
+
+// TestThreads_GroupingIndependentOfAdjacency asserts an interleaved input
+// and the same messages pre-grouped by thread produce identical Threads()
+// output (modulo each thread's own internal order, which is input order by
+// construction) -- grouping is by KEY, not by run-detection over adjacent
+// messages.
+func TestThreads_GroupingIndependentOfAdjacency(t *testing.T) {
+	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
+	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
+	c := "aCCCCCCCCCCCCCCCCCCCCCCCCCC1"
+
+	ab1 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
+	ac1 := msg("2026-09-12T12:01:00Z", "a2", "alice", []string{"carol"}, a, []string{c})
+	ab2 := msg("2026-09-12T12:02:00Z", "a3", "bob", []string{"alice"}, b, []string{a})
+
+	interleaved := []source.Message{ab1, ac1, ab2}
+	grouped := []source.Message{ab1, ab2, ac1}
+
+	fromInterleaved := Threads(interleaved)
+	fromGrouped := Threads(grouped)
+
+	if len(fromInterleaved) != len(fromGrouped) {
+		t.Fatalf("thread count differs: interleaved %d, grouped %d", len(fromInterleaved), len(fromGrouped))
+	}
+	byKey := func(threads []Thread) map[string][]string {
+		out := make(map[string][]string, len(threads))
+		for _, th := range threads {
+			ids := make([]string, len(th.Messages))
+			for i, m := range th.Messages {
+				ids[i] = m.ID
+			}
+			out[th.Key] = ids
+		}
+		return out
+	}
+	got := byKey(fromInterleaved)
+	want := byKey(fromGrouped)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("grouping depends on adjacency:\ninterleaved -> %+v\ngrouped     -> %+v", got, want)
 	}
 }
 
@@ -229,9 +334,15 @@ func TestThreads_SelfAddressedYieldsOneParticipantKey(t *testing.T) {
 	}
 }
 
-// TestThreads_TiesOnAtResolveByIDDescending pins the total-order tiebreak:
-// two messages sharing At order by ID descending.
-func TestThreads_TiesOnAtResolveByIDDescending(t *testing.T) {
+// TestThreads_SameAtInputOrderWins is the REWRITE of the pre-qm4h.2
+// TestThreads_TiesOnAtResolveByIDDescending, which pinned isNewer's At-tie
+// ID-descending tiebreak. isNewer is deleted (dotfiles-i1sw option (a)):
+// Threads no longer compares At or ID at all, so two messages sharing an
+// identical At resolve purely by INPUT order, never by ID. Fixture puts the
+// LOWER ID first in the input: the old ID-descending tiebreak would put the
+// higher-ID message (a2) first regardless, so this fails on today's code and
+// only passes once ties resolve by input order alone.
+func TestThreads_SameAtInputOrderWins(t *testing.T) {
 	a := "aAAAAAAAAAAAAAAAAAAAAAAAAAA1"
 	b := "aBBBBBBBBBBBBBBBBBBBBBBBBBB1"
 	m1 := msg("2026-09-12T12:00:00Z", "a1", "alice", []string{"bob"}, a, []string{b})
@@ -241,8 +352,69 @@ func TestThreads_TiesOnAtResolveByIDDescending(t *testing.T) {
 	if len(threads) != 1 {
 		t.Fatalf("got %d threads, want 1", len(threads))
 	}
-	if threads[0].Messages[0].ID != "a2" {
-		t.Fatalf("got newest ID %q, want a2 (ID descending on At tie)", threads[0].Messages[0].ID)
+	if threads[0].Messages[0].ID != "a1" || threads[0].Messages[1].ID != "a2" {
+		t.Fatalf("got order %v, want [a1 a2] (input order, ties untouched)", []string{threads[0].Messages[0].ID, threads[0].Messages[1].ID})
+	}
+}
+
+// TestThreads_NoSortCallInSource is the ## plan anti-pattern ("do not
+// re-introduce a sort in thread.go") made executable, in the same shape as
+// sp035's derivation grep (TestNoSecondExpandabilityDerivation in
+// cmd/agent-monitor/main_test.go). It parses thread.go's AST and inspects
+// ONLY the Threads function body for any sort.* call -- not the whole file,
+// because threadKey legitimately calls sort.Strings to build the composite
+// address key (that is key construction, not message ordering, and is not
+// what dotfiles-i1sw's rule forbids). A whole-file grep for "sort." would
+// therefore either false-positive on threadKey forever or have to special-
+// case it blindly; scoping the AST walk to the Threads FuncDecl is what
+// makes this test scan what it claims to scan.
+func TestThreads_NoSortCallInSource(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	path := filepath.Join(wd, "thread.go")
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if ok && fd.Name.Name == "Threads" {
+			fn = fd
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatalf("no func Threads found in %s", path)
+	}
+	if fn.Body == nil {
+		t.Fatalf("func Threads in %s has no body", path)
+	}
+
+	var offenders []string
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if ident.Name == "sort" {
+			pos := fset.Position(sel.Pos())
+			offenders = append(offenders, fmt.Sprintf("%s:%d: sort.%s", filepath.Base(path), pos.Line, sel.Sel.Name))
+		}
+		return true
+	})
+
+	if len(offenders) > 0 {
+		t.Fatalf("Threads must not sort (## plan: single-reorder rule); found: %v", offenders)
 	}
 }
 

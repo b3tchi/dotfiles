@@ -4935,12 +4935,16 @@ func TestShell_ModeTogglePreservesSelection(t *testing.T) {
 	if !s.model.Threaded {
 		t.Fatalf("setup: `t` did not flip Threaded")
 	}
-	// Threaded, nothing expanded, newest-first: row0 thread B (newest
-	// overall, m2 @ 12:02, unrelated to the selection), row1 thread A
-	// (newest member m3 @ 12:01, whose OLDER member m1 — the envelope that
-	// was selected — is folded behind it).
-	if s.model.MessagesCursor != 1 {
-		t.Fatalf("cursor = %d after toggling to threaded, want 1 (thread A's own collapsed row, which owns the previously-selected m1)", s.model.MessagesCursor)
+	// dotfiles-qm4h.2 / dotfiles-i1sw: Threads() no longer re-sorts by At,
+	// so thread order matches the flat pane's own ID-descending order
+	// (first appearance) rather than each thread's newest At. The flat
+	// pane's row0 is m3 (thread A, ID-descending head), so thread A is
+	// threads[0] too — not thread B (m2), whose At (12:02) is latest but
+	// whose ID sorts behind m3's. Threaded, nothing expanded: row0 is
+	// thread A (which now owns the previously-selected m1, folded behind
+	// its newest member m3), row1 is thread B (m2).
+	if s.model.MessagesCursor != 0 {
+		t.Fatalf("cursor = %d after toggling to threaded, want 0 (thread A's own collapsed row, which owns the previously-selected m1 and agrees with the flat pane's row0)", s.model.MessagesCursor)
 	}
 }
 

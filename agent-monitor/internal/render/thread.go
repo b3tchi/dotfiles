@@ -29,8 +29,11 @@ type Thread struct {
 	// Key is join(sort(dedupe({FromAddress} u ToAddresses)), "|") -- the
 	// same for every message in Messages.
 	Key string
-	// Messages are this thread's own envelopes, newest-first, matching the
-	// pane's own order (sp033 T6).
+	// Messages are this thread's own envelopes, in exactly the order they
+	// appear in Threads' input -- Threads sorts nothing (dotfiles-i1sw),
+	// so this is newest-first only because orderedMessages
+	// (cmd/agent-monitor/main.go), the pane's single reorder point,
+	// already fed them in ID-descending order.
 	Messages []source.Message
 	// Count is len(Messages).
 	Count int
@@ -40,18 +43,6 @@ type Thread struct {
 	// falling back to shortAddress of the raw address when no message in
 	// the thread supplies a trustworthy label for it.
 	Participants []string
-}
-
-// isNewer reports whether a is newer than b: by At, with ties (equal At)
-// resolved by ID descending. This one rule orders both a thread's own
-// Messages and the Threads slice itself by its newest member, so the
-// result is a total order and repeated derivations over the same input are
-// byte-identical.
-func isNewer(a, b source.Message) bool {
-	if a.At != b.At {
-		return a.At > b.At
-	}
-	return a.ID > b.ID
 }
 
 // threadKey computes one message's thread key: the sorted, de-duplicated
@@ -80,7 +71,8 @@ func threadKey(m source.Message) string {
 // mismatch is possible). ToAddresses[i]/To[i] is paired positionally only
 // when the two slices are the same length for that message; a mismatched
 // message contributes no To-side labels at all, so an untrustworthy
-// pairing never produces a wrong label. msgs is newest-first, and the
+// pairing never produces a wrong label. msgs is in Threads' input order
+// (newest-first only because orderedMessages fed them that way), and the
 // first message to supply a label for an address wins the map -- the
 // known limitation that a party renamed mid-conversation shows its most
 // recent label.
@@ -118,10 +110,18 @@ func participantLabels(key string, msgs []source.Message) []string {
 	return out
 }
 
-// Threads groups msgs by threadKey and returns them ordered by their
-// newest member, newest-first; each Thread's own Messages are newest-first
-// too. msgs is never mutated -- every message that gets sorted is sorted
-// in a fresh copy, and msgs itself is only ever ranged over.
+// Threads groups msgs by threadKey and returns the threads in FIRST-
+// APPEARANCE order -- the order their first message shows up in msgs; each
+// Thread's own Messages stay in exactly the order they appear in msgs.
+// Threads sorts nothing (dotfiles-i1sw): orderedMessages
+// (cmd/agent-monitor/main.go) is the pane's single reorder point, and this
+// function's job is grouping by key, not re-deriving an order. Because
+// orderedMessages already produces ID-descending input, the result is
+// newest-first by construction, and the flat pane and this threaded
+// derivation therefore always agree on which envelope is newest -- even
+// under clock skew between two agents, where At and ULID order disagree.
+// msgs is never mutated -- every Messages slice handed out is a fresh copy,
+// and msgs itself is only ever ranged over.
 func Threads(msgs []source.Message) []Thread {
 	byKey := make(map[string][]source.Message, len(msgs))
 	var keys []string
@@ -136,21 +136,16 @@ func Threads(msgs []source.Message) []Thread {
 	threads := make([]Thread, 0, len(keys))
 	for _, k := range keys {
 		group := byKey[k]
-		sorted := make([]source.Message, len(group))
-		copy(sorted, group)
-		sort.SliceStable(sorted, func(i, j int) bool { return isNewer(sorted[i], sorted[j]) })
+		ordered := make([]source.Message, len(group))
+		copy(ordered, group)
 
 		threads = append(threads, Thread{
 			Key:          k,
-			Messages:     sorted,
-			Count:        len(sorted),
-			Participants: participantLabels(k, sorted),
+			Messages:     ordered,
+			Count:        len(ordered),
+			Participants: participantLabels(k, ordered),
 		})
 	}
-
-	sort.SliceStable(threads, func(i, j int) bool {
-		return isNewer(threads[i].Messages[0], threads[j].Messages[0])
-	})
 
 	return threads
 }

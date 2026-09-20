@@ -711,7 +711,13 @@ func threadFixture() (Thread, []LogRow) {
 		FromAddress: identityAddr,
 		ToAddresses: []string{"a01M2M36Y5KJJ0YARD1BWORKERA"},
 	}
-	threads := Threads([]source.Message{older, middle, newest})
+	// dotfiles-qm4h.2: Threads() no longer sorts -- it is fed pre-ordered
+	// input, newest-first, matching what orderedMessages
+	// (cmd/agent-monitor/main.go) actually hands it. This fixture used to
+	// feed oldest-first and rely on Threads' internal At-sort to fix the
+	// order; that internal sort is gone (dotfiles-i1sw), so the input order
+	// here must already be newest-first.
+	threads := Threads([]source.Message{newest, middle, older})
 	if len(threads) != 1 {
 		panic(fmt.Sprintf("fixture drift: want one thread, got %d", len(threads)))
 	}
