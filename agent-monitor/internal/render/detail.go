@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"agent-monitor/internal/source"
 )
@@ -53,8 +54,42 @@ func RenderDetail(msg *source.Message, width, height int) []string {
 	}
 
 	lines := []string{detailHeaderLine(*msg, width)}
+	lines = append(lines, detailAddressLines(*msg, width)...)
 	lines = append(lines, detailBodyLines(msg.Content, width)...)
 	return clampToHeight(lines, width, height)
+}
+
+// detailAddressLines renders the selected envelope's own FromAddress and
+// ToAddresses (sp033 T1's fields) in full — never elided by shortAddress,
+// which exists only for the log's width budget (log.go). This is the fix
+// for sp035: two threads whose participants share LABELS (adr0034 mints a
+// fresh, never-reused address per registration, so a re-registered session
+// wears an old label) were indistinguishable everywhere, including here,
+// because the header above renders labels only. The addresses come
+// straight from the envelope's own fields and are never re-derived from a
+// label (adr0034) — this pane is the view an operator copies an address
+// from, so unlike the header it is never truncated, only wrapped.
+//
+// A pre-sp033-T1 payload decodes both fields to their zero value (empty
+// string / nil slice, source.Message's doc comment), and that renders NO
+// address line at all — never an empty line, never a dash-filled
+// placeholder — so the header's shape is unchanged for old data. A message
+// with only one side populated (e.g. FromAddress set, ToAddresses empty)
+// renders that side alone, without a dangling "→" or an orDash placeholder
+// for the missing side.
+func detailAddressLines(msg source.Message, width int) []string {
+	var raw string
+	switch {
+	case msg.FromAddress != "" && len(msg.ToAddresses) > 0:
+		raw = fmt.Sprintf("%s → %s", msg.FromAddress, strings.Join(msg.ToAddresses, ","))
+	case msg.FromAddress != "":
+		raw = msg.FromAddress
+	case len(msg.ToAddresses) > 0:
+		raw = strings.Join(msg.ToAddresses, ",")
+	default:
+		return nil
+	}
+	return wrapCells(neutralize(raw), width)
 }
 
 // detailHeaderLine renders the `from → to`, time, kind summary. It goes

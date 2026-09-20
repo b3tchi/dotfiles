@@ -11,7 +11,10 @@ import (
 
 // detailMsg builds a source.Message for one of the four wire kinds
 // (inbox/result/error/identity — ft014's data_model as corrected by
-// dotfiles-9oa4) with the given content.
+// dotfiles-9oa4) with the given content. FromAddress/ToAddresses are left
+// at their zero value — the pre-sp033-T1 shape — so every existing test
+// built with this helper stays proof that an addressless envelope renders
+// no address line.
 func detailMsg(kind string, from string, to []string, content string) *source.Message {
 	return &source.Message{
 		At:      "2026-09-12T12:01:00.000000Z",
@@ -22,6 +25,25 @@ func detailMsg(kind string, from string, to []string, content string) *source.Me
 		Content: json.RawMessage(content),
 	}
 }
+
+// detailMsgAddr is detailMsg plus the sp033 T1 address fields, for sp035
+// Task 3's fixtures — a resolved party's address, per adr0034, is never
+// re-derived from its label, so tests exercise the address fields directly
+// rather than deriving them from from/to.
+func detailMsgAddr(kind, from string, to []string, fromAddr string, toAddrs []string, content string) *source.Message {
+	msg := detailMsg(kind, from, to, content)
+	msg.FromAddress = fromAddr
+	msg.ToAddresses = toAddrs
+	return msg
+}
+
+// addrPrefix11 is the shared first-eleven-characters prefix used across the
+// address fixtures below — same-millisecond ULIDs per adr0034's minting
+// scheme carry an identical leading timestamp segment, so any fixture that
+// only varies its tail would pass under a head-truncating implementation.
+// Sharing this prefix and varying only the tail is what makes
+// TestRenderDetail_ShowsFullAddresses fail on a head-truncating renderer.
+const addrPrefix11 = "a01M2TB0H5X"
 
 // Table over the four envelope kinds: header shape (from -> to, time, kind)
 // and body path (pretty-vs-raw) must both hold regardless of which kind the
@@ -275,5 +297,140 @@ func TestRenderDetail_HeightPositive_TruncationUnchanged(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("line %d = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// --- sp035 Task 3: detail pane carries the participants' addresses --------
+
+// TestRenderDetail_ShowsFullAddresses is the test_plan's head-truncation
+// trap: fromAddr and toAddr share their first eleven characters (the
+// millisecond-timestamp segment two same-millisecond ULIDs share per
+// adr0034), so an implementation that renders only a head slice of the
+// address renders the two identically and this assertion catches it.
+func TestRenderDetail_ShowsFullAddresses(t *testing.T) {
+	fromAddr := addrPrefix11 + strings.Repeat("A", 16)
+	toAddr := addrPrefix11 + strings.Repeat("B", 16)
+	if len(fromAddr) != 27 || len(toAddr) != 27 {
+		t.Fatalf("setup: fixture addresses must be 27 chars, got %d and %d", len(fromAddr), len(toAddr))
+	}
+	msg := detailMsgAddr("message", "claude-main", []string{"jan"}, fromAddr, []string{toAddr}, `"ping"`)
+	lines := RenderDetail(msg, 80, 20)
+	// Joined with "" rather than "\n": cell-aware wrapping (wrapCells) may
+	// split an address across two display lines with no separator inserted
+	// (subject.go's precedent, TestRenderDetail_CJKBody_WrapsOnCellBoundary),
+	// so a "\n" join would falsely break a wrapped address's Contains check.
+	joined := strings.Join(lines[1:], "")
+	if !strings.Contains(joined, fromAddr) {
+		t.Fatalf("output %q, want the full from-address %q present", joined, fromAddr)
+	}
+	if !strings.Contains(joined, toAddr) {
+		t.Fatalf("output %q, want the full to-address %q present", joined, toAddr)
+	}
+}
+
+// TestRenderDetail_SameLabelsDifferentAddressesDiffer is the live
+// claude-main <> jan case: two envelopes carry identical From/To LABELS
+// (adr0034 mints a fresh address per registration, so a re-registered
+// session wears an old label) but different addresses. The rendered detail
+// output must differ — the user-visible property this task exists for. No
+// cosmetic implementation (e.g. one that renders addresses but ignores
+// their actual value) satisfies this by accident.
+func TestRenderDetail_SameLabelsDifferentAddressesDiffer(t *testing.T) {
+	fromAddrA := addrPrefix11 + strings.Repeat("1", 16)
+	toAddrA := addrPrefix11 + strings.Repeat("2", 16)
+	fromAddrB := addrPrefix11 + strings.Repeat("3", 16)
+	toAddrB := addrPrefix11 + strings.Repeat("4", 16)
+
+	msgA := detailMsgAddr("message", "claude-main", []string{"jan"}, fromAddrA, []string{toAddrA}, `"hello"`)
+	msgB := detailMsgAddr("message", "claude-main", []string{"jan"}, fromAddrB, []string{toAddrB}, `"hello"`)
+
+	linesA := RenderDetail(msgA, 80, 20)
+	linesB := RenderDetail(msgB, 80, 20)
+
+	if linesA[0] != linesB[0] {
+		t.Fatalf("headers differ (%q vs %q), want identical labels producing identical headers — setup invariant broken", linesA[0], linesB[0])
+	}
+	if strings.Join(linesA, "\n") == strings.Join(linesB, "\n") {
+		t.Fatalf("rendered output identical for two envelopes with different addresses, want them to differ:\n%q", linesA)
+	}
+}
+
+// TestRenderDetail_AddresslessEnvelopeRendersNoAddressLine is a pre-sp033-T1
+// payload: FromAddress/ToAddresses decode to their zero value. The header
+// must stay intact and no address line — empty or dash-filled — may appear.
+func TestRenderDetail_AddresslessEnvelopeRendersNoAddressLine(t *testing.T) {
+	msg := detailMsg("message", "peer-1", []string{"peer-2"}, "hello")
+	lines := RenderDetail(msg, 80, 20)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines %q, want exactly header + one body line (no address line)", len(lines), lines)
+	}
+	for _, want := range []string{"peer-1", "peer-2", "→"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("header %q missing %q", lines[0], want)
+		}
+	}
+	if lines[1] != "hello" {
+		t.Fatalf("body line = %q, want %q (no address line inserted before it)", lines[1], "hello")
+	}
+}
+
+// TestRenderDetail_AddressLineNeutralisedAndWidthBounded embeds a real raw
+// C0 byte (ESC) inside an otherwise address-shaped string, matching
+// subject_test.go's precedent for proving neutralize actually strips it
+// rather than merely not encountering it. Checked at 20/40/80 cells, per
+// the test_plan.
+func TestRenderDetail_AddressLineNeutralisedAndWidthBounded(t *testing.T) {
+	hostile := addrPrefix11 + "\x1bHOSTILE00000"
+	msg := detailMsgAddr("message", "peer-1", []string{"peer-2"}, hostile, []string{addrPrefix11 + strings.Repeat("9", 16)}, `"ping"`)
+	for _, width := range []int{20, 40, 80} {
+		lines := RenderDetail(msg, width, 20)
+		for _, l := range lines {
+			if strings.ContainsRune(l, 0x1b) {
+				t.Fatalf("width=%d: line %q contains raw ESC byte, want it neutralised", width, l)
+			}
+			if w := displayWidth(l); w > width {
+				t.Fatalf("width=%d: line %q is %d cells wide, want <= %d", width, l, w, width)
+			}
+		}
+	}
+}
+
+// TestRenderDetail_MultiRecipientShowsEveryAddress asserts every recipient
+// address renders, never only the first — the same rule toCell already
+// enforces for labels (log.go), now proven for the raw address fields too.
+func TestRenderDetail_MultiRecipientShowsEveryAddress(t *testing.T) {
+	addr1 := addrPrefix11 + strings.Repeat("1", 16)
+	addr2 := addrPrefix11 + strings.Repeat("2", 16)
+	addr3 := addrPrefix11 + strings.Repeat("3", 16)
+	fromAddr := addrPrefix11 + strings.Repeat("F", 16)
+	msg := detailMsgAddr("message", "peer-1", []string{"peer-2", "peer-3", "peer-4"}, fromAddr, []string{addr1, addr2, addr3}, `"fan-out"`)
+	lines := RenderDetail(msg, 80, 20)
+	// "" join for the same reason as TestRenderDetail_ShowsFullAddresses: a
+	// long joined address list wraps at 80 cells, and the wrap point can
+	// land inside one of the addresses.
+	joined := strings.Join(lines[1:], "")
+	for _, want := range []string{addr1, addr2, addr3} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("output %q, want recipient address %q present", joined, want)
+		}
+	}
+}
+
+// TestRenderDetail_FromAddressOnly_NoDanglingArrow is the edge_cases entry:
+// FromAddress set, ToAddresses empty, renders the from-address alone —
+// never a dangling "→" and never an orDash placeholder for the missing
+// side.
+func TestRenderDetail_FromAddressOnly_NoDanglingArrow(t *testing.T) {
+	fromAddr := addrPrefix11 + strings.Repeat("5", 16)
+	msg := detailMsgAddr("message", "peer-1", []string{"peer-2"}, fromAddr, nil, "hello")
+	lines := RenderDetail(msg, 80, 20)
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines %q, want header + address line + one body line", len(lines), lines)
+	}
+	if lines[1] != fromAddr {
+		t.Fatalf("address line = %q, want exactly the bare from-address %q (no arrow, no placeholder)", lines[1], fromAddr)
+	}
+	if lines[2] != "hello" {
+		t.Fatalf("body line = %q, want %q", lines[2], "hello")
 	}
 }
