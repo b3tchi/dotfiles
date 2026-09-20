@@ -903,6 +903,161 @@ func TestRenderFrame_EmptyListHasNoSelectionMark(t *testing.T) {
 	}
 }
 
+// TestRenderFrame_ComposerOpenMarksOnlyComposerHeader is dotfiles-o7ab
+// rejection #1: OpenComposer never touches model.Focus (the pane the
+// operator was on when they pressed 'a' keeps it), so marking roster/log/
+// detail purely off model.Focus double-marked the frame the instant the
+// composer opened — the focused list pane's selected row AND the composer's
+// header, on exactly the path (replying) where the operator noticed the
+// original bug. While Composing, the composer is the only focusable
+// surface, so it alone must carry the mark.
+func TestRenderFrame_ComposerOpenMarksOnlyComposerHeader(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages // focus held here before 'a' is pressed
+	model.HasIdentity = true
+	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
+	msgs := &source.MessageSample{Messages: []source.Message{
+		sampleMessage("alice", `"first"`),
+		sampleMessage("carol", `"second"`),
+	}}
+
+	if ok, reason := model.OpenComposer("aTO00000000000000000000002"); !ok {
+		t.Fatalf("setup: OpenComposer refused: %s", reason)
+	}
+	if model.Focus != tui.PaneMessages {
+		t.Fatalf("setup: OpenComposer must not move focus, got %v", model.Focus)
+	}
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 40)
+	marked := styledLines(lines)
+	if len(marked) != 1 {
+		t.Fatalf("composer open: want exactly one marked line, got %d: %v (frame=%v)", len(marked), marked, lines)
+	}
+	if !strings.Contains(marked[0], "reply to") {
+		t.Fatalf("the one marked line must be the composer header, got %q", marked[0])
+	}
+	if strings.Contains(marked[0], "carol") || strings.Contains(marked[0], "alice") {
+		t.Fatalf("the messages pane's row must not still be marked while composing: %q", marked[0])
+	}
+}
+
+// TestRenderFrame_ExactlyOneMarkedLineAcrossStates is dotfiles-o7ab's own
+// requested sweep: rather than asserting a single "invariant holds" boolean,
+// each state names the exact count of reversed lines it expects, so a
+// regression in any one state fails on its own line instead of behind a
+// generic pass/fail.
+func TestRenderFrame_ExactlyOneMarkedLineAcrossStates(t *testing.T) {
+	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
+	msgs := &source.MessageSample{Messages: []source.Message{
+		sampleMessage("alice", `"first"`),
+		sampleMessage("carol", `"second"`),
+	}}
+	emptyMsgs := &source.MessageSample{Messages: nil}
+
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, m *tui.Model)
+		msgs  *source.MessageSample
+		want  int
+	}{
+		{
+			name:  "focused roster",
+			setup: func(t *testing.T, m *tui.Model) { m.Focus = tui.PaneRoster },
+			msgs:  msgs,
+			want:  1,
+		},
+		{
+			name:  "focused messages",
+			setup: func(t *testing.T, m *tui.Model) { m.Focus = tui.PaneMessages },
+			msgs:  msgs,
+			want:  1,
+		},
+		{
+			name:  "detail focused",
+			setup: func(t *testing.T, m *tui.Model) { m.Focus = tui.PaneDetail },
+			msgs:  msgs,
+			want:  1,
+		},
+		{
+			name: "detail hidden, roster focused",
+			setup: func(t *testing.T, m *tui.Model) {
+				m.Focus = tui.PaneRoster
+				m.DetailVisible = false
+			},
+			msgs: msgs,
+			want: 1,
+		},
+		{
+			name:  "empty list focused (rows==0 falls back to header)",
+			setup: func(t *testing.T, m *tui.Model) { m.Focus = tui.PaneMessages },
+			msgs:  emptyMsgs,
+			want:  1,
+		},
+		{
+			name: "composer open",
+			setup: func(t *testing.T, m *tui.Model) {
+				m.Focus = tui.PaneMessages
+				m.HasIdentity = true
+				if ok, reason := m.OpenComposer("aTO00000000000000000000002"); !ok {
+					t.Fatalf("setup: OpenComposer refused: %s", reason)
+				}
+			},
+			msgs: msgs,
+			want: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := tui.NewModel()
+			tc.setup(t, model)
+			lines, _ := renderFrame(model, roster, false, tc.msgs, false, time.Now(), 80, 40)
+			marked := styledLines(lines)
+			if len(marked) != tc.want {
+				t.Fatalf("want %d marked line(s), got %d: %v", tc.want, len(marked), marked)
+			}
+		})
+	}
+}
+
+// TestRenderFrame_CursorScrolledOutOfViewMarksNothing is the sweep's last
+// state, kept as its own test rather than a table row: sp032 T1's legal
+// state (the cursor sits outside the scrolled window) can only be reached
+// through the real sequence — settle a viewport against this height/width,
+// then scroll the window away from the cursor without moving it, exactly as
+// the wheel does — not by poking MessagesCursor/MessagesScroll directly,
+// which renderFrame's own SetMessagesViewport call would just re-clamp back
+// into range before markPane ever saw it.
+func TestRenderFrame_CursorScrolledOutOfViewMarksNothing(t *testing.T) {
+	model := tui.NewModel()
+	model.Focus = tui.PaneMessages
+	roster := &source.Sample{Rows: []source.Row{{UID: "u1", Name: "u1"}}}
+	var msgList []source.Message
+	for i := 0; i < 20; i++ {
+		msgList = append(msgList, sampleMessage("alice", fmt.Sprintf(`"m%d"`, i)))
+	}
+	msgs := &source.MessageSample{Messages: msgList}
+
+	// First frame settles the real viewport for this height/width.
+	renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12)
+	vp := model.MessagesViewport
+	if vp <= 0 || vp >= len(msgList) {
+		t.Fatalf("setup: viewport = %d, want a pageable pane shorter than %d messages", vp, len(msgList))
+	}
+
+	// Scroll the window away from the cursor without moving the cursor.
+	model.ScrollMessages(vp)
+	if model.MessagesCursor >= model.MessagesScroll {
+		t.Fatalf("setup: cursor %d must be above the scrolled window %d", model.MessagesCursor, model.MessagesScroll)
+	}
+
+	lines, _ := renderFrame(model, roster, false, msgs, false, time.Now(), 80, 12)
+	marked := styledLines(lines)
+	if len(marked) != 0 {
+		t.Fatalf("cursor scrolled out of view: want zero marked lines, got %d: %v", len(marked), marked)
+	}
+}
+
 func anyContains(lines []string, sub string) bool {
 	for _, l := range lines {
 		if strings.Contains(l, sub) {

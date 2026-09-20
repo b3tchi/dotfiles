@@ -911,14 +911,24 @@ func renderFrame(model *tui.Model, censusSample *source.Sample, censusStale bool
 	// function and must emit no ESC byte at all (sp030 T9, asserted in
 	// TestRunOnce): a pipe has no cursor to show.
 	if height > 0 {
-		roster = markPane(roster, model.Focus == tui.PaneRoster, model.RosterCursor, model.RosterScroll, len(rosterRows))
-		log = markPane(log, model.Focus == tui.PaneMessages, model.MessagesCursor, model.MessagesScroll, len(msgRows))
-		// The detail pane is a focus stop since sp032 T4, so its header
-		// earns the same marking. rows is 0: the pane has no selectable
-		// row, so markPane marks the header and stops. (The ZOOM layout
-		// does not mark anything — it is the only pane on screen, so there
-		// is nothing for a focus mark to distinguish it from.)
-		detailLines = markPane(detailLines, model.Focus == tui.PaneDetail, 0, 0, 0)
+		// dotfiles-o7ab rejection #1: OpenComposer never changes model.Focus
+		// (whichever pane the operator was on when they pressed 'a' keeps
+		// it), so marking roster/log/detail off model.Focus alone double-
+		// marked the frame whenever the composer was open — the focused
+		// list pane's row AND the composer's header. While composing, the
+		// composer is the only focusable thing (every key belongs to the
+		// draft), so it must be the ONLY thing marked; gate the other three
+		// panes on !model.Composing rather than on their own focus state.
+		if !model.Composing {
+			roster = markPane(roster, model.Focus == tui.PaneRoster, model.RosterCursor, model.RosterScroll, len(rosterRows))
+			log = markPane(log, model.Focus == tui.PaneMessages, model.MessagesCursor, model.MessagesScroll, len(msgRows))
+			// The detail pane is a focus stop since sp032 T4, so its header
+			// earns the same marking. rows is 0: the pane has no selectable
+			// row, so markPane marks the header and stops. (The ZOOM layout
+			// does not mark anything — it is the only pane on screen, so there
+			// is nothing for a focus mark to distinguish it from.)
+			detailLines = markPane(detailLines, model.Focus == tui.PaneDetail, 0, 0, 0)
+		}
 		// The composer has no cursor and no other stop to distinguish it
 		// from (nothing else is focusable while Composing — every key
 		// belongs to the draft), so it is marked focused unconditionally
