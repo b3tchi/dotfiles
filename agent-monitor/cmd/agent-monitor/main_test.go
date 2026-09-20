@@ -4894,17 +4894,24 @@ func TestShell_CollapseFromChildRowStillTargetsItsThread(t *testing.T) {
 // doc): the operator is reading m1 ("hello-a-1", thread A's OLDER member) in
 // FLAT mode, where it is its own row; `t` flips to threaded with nothing
 // expanded, so m1 is folded invisibly behind thread A's collapsed summary
-// row — which this fixture deliberately puts at row 1, NOT row 0 (thread B
-// carries the overall-newest message, so it sorts first): a resolver that
+// row — which this fixture deliberately puts at row 1, NOT row 0 (thread B's
+// single envelope, m9, carries the highest ID, so orderedMessages' ID-
+// descending flat order puts it first, and post-dotfiles-qm4h.2
+// first-appearance grouping puts its thread first too): a resolver that
 // merely landed on row 0 — the answer a same-row-0 fixture could not tell
 // apart from a genuine fix — must fail this one.
 func TestShell_ModeTogglePreservesSelection(t *testing.T) {
 	dir := t.TempDir()
 	writeStub(t, dir, "agent-census", "#!/bin/sh\necho '[]'\n")
+	// m9 carries the HIGHEST id (not m3, pre-qm4h.2) so that thread B's
+	// single message is also the ID-descending head of the flat list --
+	// under dotfiles-qm4h.2's first-appearance grouping this puts thread B
+	// at threads[0] and thread A (owning the selected m1) at threads[1],
+	// which is what keeps this fixture discriminating (see doc above).
 	wire := `[` +
 		`{"id":"m1","at":"2026-09-12T12:00:00Z","from":"worker-a","to":["jan"],"kind":"message","content":"hello-a-1","from_address":"aWORKERA0000000000000000001","to_addresses":["aJAN000000000000000000000J"]},` +
-		`{"id":"m3","at":"2026-09-12T12:01:00Z","from":"jan","to":["worker-a"],"kind":"message","content":"hello-a-2","from_address":"aJAN000000000000000000000J","to_addresses":["aWORKERA0000000000000000001"]},` +
-		`{"id":"m2","at":"2026-09-12T12:02:00Z","from":"worker-b","to":["jan"],"kind":"message","content":"hello-b-1","from_address":"aWORKERB0000000000000000002","to_addresses":["aJAN000000000000000000000J"]}` +
+		`{"id":"m2","at":"2026-09-12T12:01:00Z","from":"jan","to":["worker-a"],"kind":"message","content":"hello-a-2","from_address":"aJAN000000000000000000000J","to_addresses":["aWORKERA0000000000000000001"]},` +
+		`{"id":"m9","at":"2026-09-12T12:02:00Z","from":"worker-b","to":["jan"],"kind":"message","content":"hello-b-1","from_address":"aWORKERB0000000000000000002","to_addresses":["aJAN000000000000000000000J"]}` +
 		`]`
 	writeStub(t, dir, "pi-worker", "#!/bin/sh\necho '"+wire+"'\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -4922,8 +4929,9 @@ func TestShell_ModeTogglePreservesSelection(t *testing.T) {
 	s.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	s.View() // populate MessagesLen for the flat list (3 rows)
 
-	// Flat, newest-first: row0 m2 (hello-b-1, 12:02), row1 m3 (hello-a-2,
-	// 12:01), row2 m1 (hello-a-1, 12:00) — move onto m1.
+	// Flat, ID-descending (orderedMessages, main.go:2006): row0 m9
+	// (hello-b-1, 12:02, highest id), row1 m2 (hello-a-2, 12:01), row2 m1
+	// (hello-a-1, 12:00) — move onto m1.
 	s.Update(runeKey('j'))
 	s.Update(runeKey('j'))
 	if s.model.MessagesCursor != 2 {
@@ -4935,16 +4943,14 @@ func TestShell_ModeTogglePreservesSelection(t *testing.T) {
 	if !s.model.Threaded {
 		t.Fatalf("setup: `t` did not flip Threaded")
 	}
-	// dotfiles-qm4h.2 / dotfiles-i1sw: Threads() no longer re-sorts by At,
-	// so thread order matches the flat pane's own ID-descending order
-	// (first appearance) rather than each thread's newest At. The flat
-	// pane's row0 is m3 (thread A, ID-descending head), so thread A is
-	// threads[0] too — not thread B (m2), whose At (12:02) is latest but
-	// whose ID sorts behind m3's. Threaded, nothing expanded: row0 is
-	// thread A (which now owns the previously-selected m1, folded behind
-	// its newest member m3), row1 is thread B (m2).
-	if s.model.MessagesCursor != 0 {
-		t.Fatalf("cursor = %d after toggling to threaded, want 0 (thread A's own collapsed row, which owns the previously-selected m1 and agrees with the flat pane's row0)", s.model.MessagesCursor)
+	// dotfiles-qm4h.2 / dotfiles-i1sw: Threads() no longer re-sorts by At;
+	// thread order is first-appearance in the (already ID-descending) flat
+	// list. m9 (thread B) appears first, so thread B is threads[0]; thread
+	// A (m2, m1) is threads[1], with the previously-selected m1 folded
+	// behind m2 as thread A's collapsed summary row. Threaded, nothing
+	// expanded: row0 is thread B (m9), row1 is thread A.
+	if s.model.MessagesCursor != 1 {
+		t.Fatalf("cursor = %d after toggling to threaded, want 1 (thread A's own collapsed row, which owns the previously-selected m1)", s.model.MessagesCursor)
 	}
 }
 
