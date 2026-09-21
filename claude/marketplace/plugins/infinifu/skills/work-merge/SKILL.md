@@ -141,22 +141,26 @@ Script behavior (`scripts/land-bd-task.sh`):
 
 No push. The base branch has a new merge commit; it stays local until spec-retro.
 
-### Pi runtime: accepting the worker after a successful land
+### Accepting the worker after a successful land
 
-Under Pi with [[ft014]], the per-task land above is unchanged — it merges the
-branch, gates on tests, and removes the worktree. What it does NOT do is close
-the worker's tmux window, because a completed worker stays inspectable until
-something explicitly accepts it.
+The per-task land above (Step 2) is runtime-neutral — it merges the branch,
+gates on tests, and removes the worktree the same way regardless of what
+dispatched the worker. What the land script does NOT do is retire the
+worker's own session: a completed worker stays inspectable (cite the
+*inspect* row in `../meta-patterns/runtime-adapter.md`'s `## operation
+binding`) until something explicitly runs *accept and clean* for it.
 
-After `land-bd-task.sh` succeeds, the dispatcher runs
-`pi-worker accept <uid> --repo <path>` for that task's worker and no
-other. Acceptance refuses a worker that is not `complete`, and refuses one whose
-worktree still holds uncommitted work, so a successful merge never licenses
-deleting something nobody reviewed. If the land FAILED, do not accept: the
-window and worktree are what the retry needs.
+After `land-bd-task.sh` succeeds, the dispatcher runs *accept and clean* for
+that task's worker and no other — cite the binding row rather than a tool
+name here. Accept-and-clean refuses a worker that isn't complete, and refuses
+one whose worktree still holds uncommitted work, so a successful merge never
+licenses deleting something nobody reviewed. It must also tolerate a worker
+that an earlier retry already accepted and cleaned — a no-op on an
+already-clean state, not an error. If the land FAILED, do not run accept and
+clean: the worker and its worktree are what the retry needs.
 
 A cleanup that fails midway is reported, and the worker's identity and result
-stay readable on the bus — finish by hand from `pi-worker inspect <uid>`.
+stay readable via *inspect* — finish by hand from there.
 
 ### Step 3 — Last-child check
 

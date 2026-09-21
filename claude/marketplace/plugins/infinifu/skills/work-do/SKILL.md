@@ -120,7 +120,7 @@ cd "$WT"
 
 **If you were dispatched into a `isolation: "worktree"` auto-created worktree** (opaque name): the auto-worktree is a mistake under this convention. ExitWorktree it (`action: remove` if untouched, otherwise hand back with `keep` and log a deviation) and create a properly-named worktree as above. The dir-to-task mapping is load-bearing for the work-merge sweep + spec-retro safety-net sweep — opaque names break it.
 
-**If you are resuming after rejection** (`SendMessage` continuing the same agent): you are already in the previous iteration's worktree on the previous iteration's branch. The previous iteration was rejected, so its worktree + branch will be swept on the next successful land. Pick the next `<N>` and create a fresh worktree + branch per the picker above; do your work in the new worktree.
+**If you are resuming after rejection** (the dispatcher's reject/resume operation continuing the same agent — see `../meta-patterns/runtime-adapter.md`'s `## operation binding`): you are already in the previous iteration's worktree on the previous iteration's branch. The previous iteration was rejected, so its worktree + branch will be swept on the next successful land. Pick the next `<N>` and create a fresh worktree + branch per the picker above; do your work in the new worktree.
 
 Verify with `git branch --show-current` and `pwd` before continuing.
 
@@ -206,22 +206,30 @@ Evidence:
 
 Why you don't close: if you close, `closed` just means "implementer thinks it's done" — which is the same information as `in_progress` + implementation notes. The reviewer owns the `in_progress → closed` transition so `closed` means "reviewed and approved". That gate collapses if the implementer grabs the close too.
 
-### Pi runtime: reporting through the result tool
+### Reporting completion
 
-Under `AI_AGENT=pi` with [[ft014]] installed, you are running as a named worker
-in a tmux window and the steps above are unchanged — same branch naming, same
-commit discipline, same bd notes. Two differences:
+You are running inside a worker — you never called *dispatch* yourself and
+you do not know the dispatcher's side of the handshake (Claude has no
+`$RUN`-equivalent from in here either). The steps above are unchanged
+regardless of what dispatched you — same branch naming, same commit
+discipline, same bd notes. What changes by runtime is only how your
+completion reaches the dispatcher, and that surface is named once in
+`../meta-patterns/runtime-adapter.md` rather than here:
 
-- **Your work content is the bd task id and nothing else.** Everything you need
-  is behind `bd show <id>`; there is no prose in the message because a copied
-  task body would drift from bd on the next edit.
-- **You finish by calling the typed result tool, not by ending your turn.**
-  Settling without it is recorded as `protocol_error`, not success — completion
-  is never inferred from an idle prompt or an exited pane. Report `complete`
-  only with your validation verdict; otherwise report `blocked`,
-  `waiting_human`, or `failed` and say why. Your window stays visible either
-  way, so detail belongs there and in the transcript rather than in the 4 KiB
-  summary.
+- **Your work content is the bd task id and nothing else.** Everything you
+  need is behind `bd show <id>`; there is no prose in the message because a
+  copied task body would drift from bd on the next edit.
+- **You finish by reporting completion, not by quietly ending your turn.**
+  The report is the shared `## Completion envelope` in
+  `../meta-patterns/runtime-adapter.md`: result, validation verdict or
+  command evidence, visible worker name, exact resume command. A stage that
+  cannot report those fields — because validation failed or couldn't run —
+  reports `blocked` or `failed`, not `complete`; the envelope is not only for
+  the success path. On a runtime where completion is a typed call rather
+  than a prose reply, settling without making that call is recorded as
+  `protocol_error`, not success — completion is never inferred from an idle
+  prompt or an exited pane. Detail belongs in your own transcript/window
+  rather than in the compact envelope.
 
 Rejection arrives as a follow-up message in the SAME session — you keep your
 context and your worktree, so fix the named gaps rather than restarting.

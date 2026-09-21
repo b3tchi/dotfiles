@@ -1,6 +1,6 @@
 ---
 name: plan-supervised
-description: Use when executing an approved plan in batches with the user reviewing each batch before the next. Under Pi, this is the sequential lifecycle path when no explicit multi-worker adapter is installed; under Claude's native branch, workers may still use the existing agent dispatch/resume semantics. Pick this for human-in-the-loop supervised execution; pick plan-scrum-master for fully automated Claude-native agent orchestration or future adapter-backed multi-worker orchestration.
+description: Use when executing an approved plan in batches with the user reviewing each batch before the next. Sequential execution — one task dispatched, audited, and merged before the next starts — is a supervision choice available on both runtimes, not something either runtime is limited to. Pick this for human-in-the-loop supervised execution; pick plan-scrum-master for fully automated full-concurrency dispatch on either runtime.
 ---
 
 # Supervised Plan Execution
@@ -18,24 +18,23 @@ Load plan, review critically, execute tasks in runtime-appropriate batches, repo
 ### Runtime adapter gate
 
 Follow the shared runtime-selection contract in
-`../meta-patterns/runtime-adapter.md` before starting a batch.
+`../meta-patterns/runtime-adapter.md` before starting a batch. Selection is
+ordered and fail-closed: an unresolved runtime stops with
+`unsupported-runtime`, naming the lifecycle operation that could not proceed.
 
-- **Claude native branch:** if Claude's native agent surface is available, keep
-  the existing background-worker path used by the Claude lifecycle: workers may
-  be named, resumed, notified, audited, and merged through the Claude adapter.
-- **Pi branch (`AI_AGENT=pi`):** when no explicit Pi multi-worker adapter is
-  installed, run the batch sequentially in the current conversation: perform
-  `work-do`, then `work-audit`, then let approved audits trigger `work-merge`
-  before selecting the next task. Do not claim that Claude `Agent` subagents
-  were dispatched, do not infer worker completion from tmux panes, and do not
-  simulate Claude completion notifications.
-- **Unsupported runtime:** if neither branch is available, stop with
-  `unsupported-runtime` and name the lifecycle operation that cannot proceed.
-
-A future Pi multi-worker adapter may replace the sequential Pi behavior only
-when it explicitly provides worker dispatch, direct messaging, completion
-notification, resume, and stop semantics without changing the bd/Git/AKM state
-model.
+**Sequential is a supervision choice, not a runtime fallback.** This skill
+runs one task at a time — dispatch, then send work, then await its
+completion, then reject/resume or accept-and-clean — on whichever runtime
+selection landed on. That is true on the Claude native branch exactly as it
+is under Pi: neither runtime is limited to sequential execution (Pi's
+transport is peer-addressed and supports the same full-concurrency dispatch
+`plan-scrum-master` uses), this skill simply chooses to run one task through
+the pipeline before starting the next, because that is what gives the human
+checkpoint between batches something small enough to review. Each step below
+names the operation it performs and the concrete surface for that operation
+is whatever `../meta-patterns/runtime-adapter.md`'s `## operation binding`
+lists for the runtime in play — this skill body never spells out a tool or
+CLI verb itself.
 
 Before using this skill, TWO mandatory gates must have been passed:
 

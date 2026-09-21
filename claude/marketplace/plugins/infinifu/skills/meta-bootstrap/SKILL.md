@@ -19,9 +19,11 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 ## Runtime Adapter
 
-Runtime-specific lifecycle behavior follows `infinifu:meta-patterns` reference
-`runtime-adapter.md`. Use that shared contract for Pi, Claude-native, and
-unsupported-runtime branches instead of duplicating the full rule in each skill.
+Runtime-specific lifecycle behavior — including the per-operation Claude/Pi
+binding — lives entirely in `infinifu:meta-patterns` reference
+`runtime-adapter.md` (its `## Runtime selection` and `## operation binding`
+sections). This bootstrap file states no runtime-specific behavior of its
+own; skills cite that shared contract instead of duplicating the full rule.
 
 # Using Skills
 

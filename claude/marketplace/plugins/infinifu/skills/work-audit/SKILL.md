@@ -277,33 +277,35 @@ Land result: <TASK_LANDED | TASK_LANDED + EPIC_DONE>
 Epic <epic-id>: <N open children remaining | closed — run spec-retro for sp###>
 ```
 
-#### Pi runtime
+#### Reject/resume
 
-The verdict is the same; only the plumbing differs. On approval the dispatcher
-runs `pi-worker accept <uid> --repo <path>`, which closes the window and
-removes the worktree — so approve only when you would be content never to look
-at that worktree again. On rejection the dispatcher runs
-`pi-worker resume <uid> --feedback "<your gaps>"`, which reaches the
-original Pi session rather than starting a fresh worker; write the gaps so they
-are actionable by someone who already has the context.
+The verdict is the same regardless of runtime; only the plumbing differs, and
+that plumbing lives once in `../meta-patterns/runtime-adapter.md`'s
+`## operation binding` — cite the *reject/resume* and *accept and clean* rows
+here rather than naming a tool. On approval the dispatcher runs *accept and
+clean* (work-merge's worktree removal cites the same row), which retires the
+worker's session and removes the worktree — so approve only when you would be
+content never to look at that worktree again. On rejection the dispatcher
+runs *reject/resume*, which reaches the ORIGINAL worker rather than starting a
+fresh one; write the gaps so they are actionable by someone who already has
+the context.
 
-**The second-rejection rule is now yours to enforce, not the bus's.** sp029 T8
-retired rejection-counting and the automatic `waiting_human` park from the
-transport — `resume` is an ordinary message now, with no count and no
-escalation field attached. Read the same `metadata.rejection_count` this
-skill's "Counting rejections" (Step 7, below) writes on every REJECTED
-verdict — **not** the notes field: `bd update --notes`/`--append-notes` calls
-made by the implementer's own next report, or by a later `POST-MERGE FAIL`,
-land on top of whatever prose is there, so a count kept only in notes text
-would already have been overwritten by the time you go looking for it. One
-prior rejection (`rejection_count == 1`): resume as above. Two or more: do
-NOT resume a third time — stop, and report to the dispatcher that this task
-needs a person rather than another pass. This reproduces the old CLI behavior
-exactly (two strikes, then a human), just enforced in this skill's own
-durable counter instead of inside `resume`.
+**The second-rejection rule lives on the bd task, not the transport.**
+Whatever messaging surface *reject/resume* uses, it carries no rejection count
+of its own — the count is `metadata.rejection_count` on the bd task itself,
+written by this skill's "Counting rejections" (Step 7, below) on every
+REJECTED verdict. Read that field — **not** the notes field: `bd
+update --notes`/`--append-notes` calls made by the implementer's own next
+report, or by a later `POST-MERGE FAIL`, land on top of whatever prose is
+there, so a count kept only in notes text would already have been overwritten
+by the time you go looking for it. One prior rejection
+(`rejection_count == 1`): reject/resume as above, targeting the original
+worker. Two or more: do NOT resume a third time — stop, and report to the
+dispatcher that this task needs a person rather than another pass (two
+strikes, then a human).
 
-Until acceptance the worker's window stays open, so you can read the full
-transcript instead of relying on the compact envelope.
+Until acceptance the worker stays inspectable (the *inspect* row), so you can
+read its full transcript instead of relying on the compact envelope.
 
 ### Rejected
 
