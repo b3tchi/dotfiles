@@ -43,18 +43,16 @@ FORBIDDEN_HEDGES_ANY_FILE = [
 
 # "Claude native branch only:" specifically gated the three orchestration
 # paragraphs (dispatch, reviewer dispatch, retry) in SKILL.md and the health
-# surface in agent-health.md -- both must now read the same on every runtime.
-# architecture.md is deliberately exempt: its whole purpose (stated in its own
-# first paragraph) is documenting the concrete Claude-native cell in detail,
-# the same way the binding's Claude column does, so it may still describe
-# "the Claude native branch" as a topic without that being a body hedge.
-FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH]
+# surface in agent-health.md -- all three neutral files must now read the
+# same on every runtime. A Claude-only deep-dive reference is itself the
+# drift shape sp037 exists to remove (runtime-adapter.md is the one file
+# T4's lint exempts), so architecture.md is held to this bar too.
+FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH, ARCHITECTURE]
 
 # Runtime-specific tool/CLI names that must live only in the operation
-# binding table (runtime-adapter.md), never restated in the orchestrator body
-# or the health surface. architecture.md is exempt (see
-# FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES above) -- its job is the concrete
-# Claude-native deep dive, same rationale as the binding's own Claude column.
+# binding table (runtime-adapter.md), never restated in any of the three
+# neutral files -- including architecture.md, which used to be the
+# Claude-native deep dive but is now held to the same bar as the others.
 FORBIDDEN_TOOL_NAMES = [
     "pi-worker spawn",
     "pi-worker send",
@@ -65,11 +63,14 @@ FORBIDDEN_TOOL_NAMES = [
     "pi-worker inspect",
     "pi-worker workers",
     "`Agent` tool",
+    "`Agent`-tool",
     "`SendMessage`",
     "`TaskStop`",
     "`ListAgents`",
+    "`agentId`",
+    "`subagent_type`",
 ]
-NO_TOOL_NAME_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH]
+NO_TOOL_NAME_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH, ARCHITECTURE]
 
 
 def read(path: Path) -> str:
@@ -132,6 +133,14 @@ class OrchestrationRuntimeContractTests(unittest.TestCase):
         self.assertIn("SendMessage", binding)
         self.assertIn("TaskStop", binding)
         self.assertIn("ListAgents", binding)
+
+        # architecture.md's "why inline only" rationale survives the tool-name
+        # strip: nested dispatch is still described as structurally blocked,
+        # in operation terms rather than by naming the Agent tool.
+        arch = normalized(ARCHITECTURE)
+        self.assertIn("no nested-agent recursion", arch)
+        self.assertIn("dispatch", arch)
+        self.assertIn("wrapper", arch)
 
     def test_parallelism_is_not_scoped_to_one_runtime(self) -> None:
         """max_parallel / waves / blockers-only / worker_model must not be
