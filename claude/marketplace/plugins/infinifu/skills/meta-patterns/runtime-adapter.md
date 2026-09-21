@@ -19,6 +19,32 @@ Runtime selection is explicit and ordered:
 A later adapter can add a new branch here without changing the lifecycle state
 model. The state model remains runtime-neutral.
 
+## operation binding
+
+Skill bodies describe the pipeline once, in abstract operations, and never
+name a runtime-specific tool or CLI verb themselves. This table is the one
+place that vocabulary lives: one row per operation, one column per runtime. A
+third runtime is a third column and zero skill edits.
+
+| Operation | Claude native | Pi (`pi-worker`) |
+|---|---|---|
+| dispatch | `Agent` spawns a subagent (e.g. `name: impl-<bd-id>`) into its own worktree | `spawn --role --subject --skill --isolation` (also `--project` and `--repo`, derived from the caller's tmux session and current directory — pass them explicitly only when calling from outside tmux or outside the repository, or the derived value is wrong) |
+| send work | the dispatch payload carried in the `Agent` call | `send --as $RUN --to <worker-uid> --content "<work>"` |
+| await | the completion notification the dispatched agent returns | `wait --as $RUN --block --timeout <seconds>` |
+| reject/resume | `SendMessage({to: <agent-name>, message: "<gaps>"})` | `resume <worker-uid> --feedback "<gaps>"` |
+| accept and clean | the worktree sweep in work-merge | `accept <worker-uid> --repo <path>` |
+| tear down | `TaskStop` | `stop <worker-uid>` |
+| inspect | `ListAgents` | `inspect <worker-uid>` / `workers` |
+
+`$RUN` is not a stable dispatcher identity: it is the `run` field of
+`spawn`'s own JSON reply for THAT worker. A dispatcher running several
+workers at once tracks one `$RUN` per worker and calls `wait --as` once per
+worker it wants an answer from, never one call shared across a batch.
+
+Every cell above is filled today; a future operation with no equivalent on a
+runtime would carry an explicit "not available" cell rather than a blank one,
+so completeness stays checkable by looking for empty cells.
+
 ## Control channel and durable state
 
 Direct messaging remains the primary control channel. Runtime adapters may
@@ -40,10 +66,11 @@ Do not store durable lifecycle state in runtime-only process metadata.
 
 Pi does not include Claude Agent / Task subagents. Skills running in Pi must not
 simulate those subagents, claim they were dispatched, or infer completion from a
-tmux pane. Sequential execution is valid. Multi-worker behavior requires a Pi
-runtime adapter such as [[ft014]]; until it exists for the requested operation,
-report the operation as unsupported rather than pretending the Claude surface is
-available.
+tmux pane. Sequential execution is valid, and so is full multi-worker
+parallelism at the same concurrency limits, waves, and modes as the Claude
+branch — the bus is peer-addressed and already bounded-block, so nothing
+structural confines it to one worker at a time. The concrete surface for every
+lifecycle operation is the Pi column of `## operation binding` above.
 
 ### Claude native surface
 

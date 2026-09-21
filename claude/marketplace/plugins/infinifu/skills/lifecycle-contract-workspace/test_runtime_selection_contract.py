@@ -10,6 +10,7 @@ branch, so a reader in Pi cannot follow an unqualified `Agent` instruction.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -135,6 +136,140 @@ class RuntimeSelectionContractTests(unittest.TestCase):
                     r"|claude agent-surface health|claude native branch",
                     f"{line} treats the Claude census as a runtime detector",
                 )
+
+
+OPERATIONS = (
+    "dispatch",
+    "send work",
+    "await",
+    "reject/resume",
+    "accept and clean",
+    "tear down",
+    "inspect",
+)
+
+
+def extract_section(text: str, heading_pattern: str) -> str:
+    """Body text of the first heading whose title matches `heading_pattern`,
+    stopping at the next heading of equal or shallower level."""
+    lines = text.splitlines()
+    start = None
+    level = None
+    for i, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if match and re.search(heading_pattern, match.group(2), re.IGNORECASE):
+            start = i + 1
+            level = len(match.group(1))
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for j in range(start, len(lines)):
+        match = re.match(r"^(#{1,6})\s+", lines[j])
+        if match and len(match.group(1)) <= level:
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+
+def parse_table(section_text: str) -> list[dict[str, str]]:
+    """Parse a GitHub-flavored markdown table into a list of row dicts keyed
+    by header cell text. Assumes the first `|`-row is the header and the
+    second is the `---` separator."""
+    rows = [
+        line.strip()
+        for line in section_text.splitlines()
+        if line.strip().startswith("|")
+    ]
+    if len(rows) < 3:
+        return []
+    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    parsed = []
+    for row in rows[2:]:
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        parsed.append(dict(zip(header, cells)))
+    return parsed
+
+
+class OperationBindingContractTests(unittest.TestCase):
+    """T1: the operation binding table is the single place a runtime tool or
+    CLI verb is named, with a filled cell per runtime for every operation."""
+
+    def _binding_rows(self) -> list[dict[str, str]]:
+        text = ADAPTER.read_text(encoding="utf-8")
+        section = extract_section(text, r"^operation binding$")
+        self.assertTrue(section, "## operation binding section not found")
+        rows = parse_table(section)
+        self.assertTrue(rows, "## operation binding has no table")
+        return rows
+
+    def _pi_column(self, header) -> str:
+        for key in header:
+            if key.lower().startswith("pi"):
+                return key
+        raise AssertionError(f"no Pi column found among {list(header)}")
+
+    def test_operation_binding_has_a_cell_for_every_runtime(self) -> None:
+        rows = self._binding_rows()
+        names = [row.get("Operation", "").strip().lower() for row in rows]
+        self.assertEqual(
+            list(OPERATIONS),
+            names,
+            "operation binding rows do not match the fixed vocabulary",
+        )
+        pi_key = self._pi_column(rows[0].keys())
+        for row in rows:
+            self.assertTrue(
+                row.get("Claude native", "").strip(),
+                f"{row.get('Operation')} has an empty Claude native cell",
+            )
+            self.assertTrue(
+                row.get(pi_key, "").strip(),
+                f"{row.get('Operation')} has an empty Pi cell",
+            )
+
+    def test_pi_spawn_cell_names_the_flags_spawn_refuses_without(self) -> None:
+        rows = self._binding_rows()
+        pi_key = self._pi_column(rows[0].keys())
+        dispatch = next(row for row in rows if row["Operation"].strip().lower() == "dispatch")
+        cell = dispatch[pi_key]
+        for flag in ("--isolation", "--role", "--subject", "--skill"):
+            self.assertIn(
+                flag, cell, f"dispatch Pi cell is missing {flag}: {cell!r}"
+            )
+
+    def test_binding_names_where_run_comes_from(self) -> None:
+        run_blocks = find_block(ADAPTER, r"\$RUN")
+        self.assertTrue(run_blocks, "adapter never explains $RUN")
+        combined = " ".join(block.text.lower() for block in run_blocks)
+        for required in ("run", "field", "spawn", "json"):
+            self.assertIn(
+                required,
+                combined,
+                f"$RUN explanation does not tie it to spawn's JSON output ({required} missing)",
+            )
+
+    def test_unsupported_runtime_is_scoped_to_neither_runtime(self) -> None:
+        text = ADAPTER.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "Multi-worker behavior requires",
+            text,
+            "Pi paragraph still gates multi-worker behavior on an adapter",
+        )
+        pi_section = extract_section(text, r"^Pi:")
+        self.assertTrue(pi_section, "Pi adapter-outcomes subsection not found")
+        self.assertNotRegex(
+            pi_section,
+            r"unsupported",
+            "Pi subsection still conditions its own behavior on unsupported-runtime",
+        )
+        unsupported_section = extract_section(text, r"^Unsupported runtime$")
+        self.assertTrue(unsupported_section, "Unsupported runtime subsection not found")
+        self.assertNotIn(
+            "multi-worker",
+            unsupported_section.lower(),
+            "unsupported-runtime scoped to more than the neither-runtime case",
+        )
 
 
 if __name__ == "__main__":
