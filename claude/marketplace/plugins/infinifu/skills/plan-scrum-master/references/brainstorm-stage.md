@@ -92,8 +92,8 @@ This is the other half of the motivating case — reading the result and
 proceeding, with nobody relaying anything by hand. Whoever ran `spawn`
 already has the address the result comes back to: it is the `run` field
 `spawn`'s own JSON reply carried, captured at spawn time (see
-`plan-scrum-master/SKILL.md`'s Pi worker pipeline table — `$RUN` there, not a
-stable identity of its own).
+`../../meta-patterns/runtime-adapter.md`'s `## operation binding` — `$RUN`
+there, not a stable identity of its own).
 
 ```
 pi-worker wait --as $RUN --block --timeout 60

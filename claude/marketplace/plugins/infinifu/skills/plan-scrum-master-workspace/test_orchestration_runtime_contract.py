@@ -13,6 +13,64 @@ ARCHITECTURE = ROOT / "plan-scrum-master" / "references" / "architecture.md"
 AGENT_HEALTH = ROOT / "plan-scrum-master" / "references" / "agent-health.md"
 FILES = [PLAN_SUPERVISED, PLAN_SCRUM_MASTER, ARCHITECTURE, AGENT_HEALTH]
 
+# The three files this task (sp037 T2) rewrites. plan-supervised belongs to a
+# parallel task (T3) and must not be touched or asserted on for the neutral
+# rewrite here -- only the ft012 regression test below still reads it.
+NEUTRAL_FILES = [PLAN_SCRUM_MASTER, ARCHITECTURE, AGENT_HEALTH]
+
+# Vocabulary fixed by sp037 T1 in runtime-adapter.md's ## operation binding.
+OPERATIONS = [
+    "dispatch",
+    "send work",
+    "await",
+    "reject/resume",
+    "accept and clean",
+    "tear down",
+    "inspect",
+]
+
+# Hedge strings the pre-T2 text used to gate behavior on which runtime was
+# selected. None of these may reappear in ANY neutral file -- their presence
+# means the rewrite regressed back to branching prose.
+FORBIDDEN_HEDGES_ANY_FILE = [
+    "unsupported until [[sp028]]",
+    "If no explicit Pi multi-worker adapter is installed",
+    "Future Pi multi-worker adapter insertion point",
+    "fails clearly or defers multi-worker dispatch",
+    "| Step | Pi command | Claude equivalent |",
+    "Pi branch (`AI_AGENT=pi`)",
+]
+
+# "Claude native branch only:" specifically gated the three orchestration
+# paragraphs (dispatch, reviewer dispatch, retry) in SKILL.md and the health
+# surface in agent-health.md -- both must now read the same on every runtime.
+# architecture.md is deliberately exempt: its whole purpose (stated in its own
+# first paragraph) is documenting the concrete Claude-native cell in detail,
+# the same way the binding's Claude column does, so it may still describe
+# "the Claude native branch" as a topic without that being a body hedge.
+FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH]
+
+# Runtime-specific tool/CLI names that must live only in the operation
+# binding table (runtime-adapter.md), never restated in the orchestrator body
+# or the health surface. architecture.md is exempt (see
+# FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES above) -- its job is the concrete
+# Claude-native deep dive, same rationale as the binding's own Claude column.
+FORBIDDEN_TOOL_NAMES = [
+    "pi-worker spawn",
+    "pi-worker send",
+    "pi-worker wait",
+    "pi-worker resume",
+    "pi-worker accept",
+    "pi-worker stop",
+    "pi-worker inspect",
+    "pi-worker workers",
+    "`Agent` tool",
+    "`SendMessage`",
+    "`TaskStop`",
+    "`ListAgents`",
+]
+NO_TOOL_NAME_FILES = [PLAN_SCRUM_MASTER, AGENT_HEALTH]
+
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -23,40 +81,77 @@ def normalized(path: Path) -> str:
 
 
 class OrchestrationRuntimeContractTests(unittest.TestCase):
-    def test_plan_supervised_has_explicit_pi_sequential_branch(self) -> None:
-        text = normalized(PLAN_SUPERVISED)
-        self.assertIn("Runtime adapter gate", text)
-        self.assertIn("`AI_AGENT=pi`", text)
-        self.assertIn("run the batch sequentially in the current conversation", text)
-        self.assertIn("Do not claim that Claude `Agent` subagents were dispatched", text)
+    def test_orchestration_files_cite_the_binding_not_a_tool(self) -> None:
+        """Each rewritten file points at the operation binding instead of
+        branching in prose or naming a runtime-specific tool itself."""
+        for path in NEUTRAL_FILES:
+            text = read(path)
+            norm = normalized(path)
+            self.assertIn(
+                "runtime-adapter.md",
+                text,
+                f"{path} must cite meta-patterns/runtime-adapter.md",
+            )
+            for hedge in FORBIDDEN_HEDGES_ANY_FILE:
+                self.assertNotIn(hedge, norm, f"{path} still contains hedge: {hedge!r}")
+            if path in FORBIDDEN_CLAUDE_ONLY_HEDGE_FILES:
+                self.assertNotIn(
+                    "Claude native branch only",
+                    norm,
+                    f"{path} still gates behavior with 'Claude native branch only'",
+                )
+            if path in NO_TOOL_NAME_FILES:
+                for tool in FORBIDDEN_TOOL_NAMES:
+                    self.assertNotIn(tool, norm, f"{path} names a runtime tool: {tool!r}")
 
-    def test_plan_scrum_master_preserves_claude_agent_branch(self) -> None:
-        text = normalized(PLAN_SCRUM_MASTER)
-        self.assertIn("Claude native branch", text)
-        self.assertIn("named background subagents via the `Agent` tool", text)
-        self.assertIn("completion notifications", text)
-        self.assertIn("`SendMessage({to: \"impl-<bd-id>\"", text)
-        self.assertIn("`TaskStop({task_id: \"impl-<bd-id>\"})`", text)
+    def test_claude_native_semantics_survive(self) -> None:
+        """Compatibility regression: the native dispatch, resume-not-redispatch,
+        and stop semantics must still be derivable from the neutral body plus
+        the binding -- this fails if the rewrite lost a Claude behavior."""
+        skill = normalized(PLAN_SCRUM_MASTER)
+        binding = normalized(
+            ROOT / "meta-patterns" / "runtime-adapter.md"
+        )
 
-    def test_plan_scrum_master_pi_branch_fails_or_defers_multi_worker(self) -> None:
-        text = normalized(PLAN_SCRUM_MASTER)
-        self.assertIn("Pi branch (`AI_AGENT=pi`)", text)
-        self.assertIn("must not dispatch Claude `Agent` subagents", text)
-        self.assertIn("If no explicit Pi multi-worker adapter is installed", text)
-        self.assertIn("unsupported until [[sp028]] or a later Pi adapter supplies it", text)
+        # Named-worker addressing survives in the neutral body.
+        self.assertIn("impl-<bd-id>", skill)
+        self.assertIn("rev-<bd-id>", skill)
 
-    def test_references_document_future_adapter_insertion_point(self) -> None:
-        text = normalized(ARCHITECTURE)
-        self.assertIn("Future Pi multi-worker adapter insertion point", text)
-        self.assertIn("implements named worker dispatch, direct messaging, completion notification, resume, and stop semantics", text)
-        self.assertIn("does not use [[ft012]] or Claude census output as runtime detection", text)
+        # Every operation this skill relies on is named somewhere in the body.
+        for op in OPERATIONS:
+            self.assertIn(
+                op,
+                skill,
+                f"operation {op!r} is not named anywhere in plan-scrum-master/SKILL.md",
+            )
 
-    def test_agent_health_claude_tools_are_claude_only(self) -> None:
-        text = normalized(AGENT_HEALTH)
-        self.assertIn("Claude native branch only", text)
-        self.assertIn("Pi branch", text)
-        self.assertIn("do not call `ListAgents` or `TaskStop`", text)
-        self.assertIn("use the installed Pi adapter health surface", text)
+        # The binding itself still carries the concrete Claude surface for
+        # each of those operations -- i.e. the native semantics were moved,
+        # not deleted.
+        self.assertIn("Agent", binding)
+        self.assertIn("SendMessage", binding)
+        self.assertIn("TaskStop", binding)
+        self.assertIn("ListAgents", binding)
+
+    def test_parallelism_is_not_scoped_to_one_runtime(self) -> None:
+        """max_parallel / waves / blockers-only / worker_model must not be
+        tied to a single runtime anywhere in the orchestrator body."""
+        skill = normalized(PLAN_SCRUM_MASTER)
+        self.assertNotIn("Claude native branch:** dispatch up to", skill)
+        self.assertNotIn(
+            "Pi branch:** if no explicit Pi multi-worker adapter is installed, do not dispatch multiple",
+            skill,
+        )
+        self.assertIn("none of them is a", skill)
+        self.assertIn("Claude-only or Pi-only setting", skill)
+
+    def test_resume_targets_the_original_worker(self) -> None:
+        """The retry instruction must say resume the ORIGINAL worker, never
+        a redispatch -- the specific flattening the neutral rewrite risks."""
+        skill = normalized(PLAN_SCRUM_MASTER)
+        self.assertIn("Resume the ORIGINAL implementer", skill)
+        self.assertIn("never a fresh dispatch", skill)
+        self.assertIn("same worker, in the same worktree, with its full context", skill)
 
     def test_no_file_treats_ft012_census_as_pi_runtime_detector(self) -> None:
         for path in FILES:

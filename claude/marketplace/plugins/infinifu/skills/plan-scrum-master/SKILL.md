@@ -1,7 +1,7 @@
 ---
 name: plan-scrum-master
 description: >-
-  Use when running or orchestrating multi-agent work from a bd task queue or epic. On Claude's native branch, dispatches implementer and reviewer agents in isolated worktrees, retries failures, respects concurrency limits, and supports auto, waves, blockers-only, and worker-model choices. Under Pi, fails clearly or defers multi-worker dispatch unless an explicit Pi adapter is installed; use plan-supervised for sequential Pi execution. Trigger on "dispatch agents", "run the pipeline", "execute the epic", "process bd ready", "start scrum master", or `/plan-dispatch-fnf`. Pick plan-supervised for human-reviewed batches. Do not use for task creation, specs, brainstorming, or one solo task.
+  Use when running or orchestrating multi-agent work from a bd task queue or epic. Dispatches implementer and reviewer workers in isolated worktrees, retries failures, respects concurrency limits, and supports auto, waves, blockers-only, and worker-model choices, on any runtime the shared operation binding (`../meta-patterns/runtime-adapter.md`) covers. Trigger on "dispatch agents", "run the pipeline", "execute the epic", "process bd ready", "start scrum master", or `/plan-dispatch-fnf`. Pick plan-supervised for sequential, human-reviewed batches. Do not use for task creation, specs, brainstorming, or one solo task.
 
 ---
 
@@ -9,9 +9,9 @@ description: >-
 
 ## Overview
 
-Orchestrate bd-driven development by reading the ready queue, applying the runtime adapter gate, and tracking pipeline progress. Claude's native branch dispatches implementer agents and relays their reports to reviewer agents; Pi reports unsupported or defers multi-worker dispatch until a Pi adapter exists.
+Orchestrate bd-driven development by reading the ready queue, applying the runtime adapter gate, and tracking pipeline progress. The orchestrator dispatches implementer workers and relays their reports to reviewer workers; the runtime-specific command for each step comes from the operation binding, never from this skill body.
 
-**Core principle:** You are a task dispatcher that stays on main. Your domain is bd. You never touch code, git, worktrees, or files. On the Claude native branch, you read the board, dispatch agents (no `isolation: "worktree"` — implementers create their own worktree at `bd-<id>.<N>` so dir name matches branch name), relay information, and track progress. On the Pi branch, you do not claim Claude agent dispatch occurred unless an explicit Pi adapter supplies equivalent semantics. Reviewers verify and per-task land via work-audit → work-merge.
+**Core principle:** You are a task dispatcher that stays on main. Your domain is bd. You never touch code, git, worktrees, or files. You read the board, dispatch workers (operation: dispatch — no isolation mode that hides the worktree behind an opaque path; implementers create their own worktree at `bd-<id>.<N>` so dir name matches branch name), relay information, and track progress. You do not claim a worker was dispatched unless the runtime's own binding cell was actually invoked. Reviewers verify and per-task land via work-audit → work-merge.
 
 **Announce at start:** "I'm using the plan-scrum-master skill to orchestrate the pipeline."
 
@@ -20,47 +20,30 @@ Orchestrate bd-driven development by reading the ready queue, applying the runti
 ### Runtime adapter gate
 
 Follow the shared runtime-selection contract in
-`../meta-patterns/runtime-adapter.md` before dispatching work.
+`../meta-patterns/runtime-adapter.md` before dispatching work. Every step
+below names one of the seven operations in that file's `## operation
+binding` — *dispatch*, *send work*, *await*, *reject/resume*, *accept and
+clean*, *tear down*, *inspect* — and the runtime-specific command for that
+operation lives only in the binding's row, never restated here.
 
-#### Claude native branch
-
-When Claude's native agent surface is available, the main Claude session is the
-scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or
+The main Claude session is the scrum-master when Claude's native surface is
+selected — the user invokes the skill directly (`/plan-dispatch-fnf` or
 equivalent) and talks to the orchestrator as themselves. Workers (implementers
-+ reviewers) are dispatched as **named** background subagents via the `Agent`
-tool. Every dispatch passes `name` — `impl-<bd-id>` for implementers,
-`rev-<bd-id>` for reviewers — and that name is the agent's address for
-`SendMessage`, `ListAgents`, and `TaskStop`. Subagents always run in the
-background; there is no `run_in_background` parameter on the `Agent` tool (nor
-on `SendMessage`) — do not pass one. Each implementer creates its own worktree
-at `bd-<id>.<N>` as part of work-do Step 2 (the previous
-`isolation: "worktree"` shortcut was dropped because the auto-generated dir name
-was opaque and broke the dir-to-task mapping). Main Claude reacts to completion
-notifications; it does not poll or sleep.
++ reviewers) are *dispatched* as **named** workers — `impl-<bd-id>` for
+implementers, `rev-<bd-id>` for reviewers — and that name is the address used
+for every later operation on that worker (*send work*, *reject/resume*,
+*tear down*, *inspect*). Every dispatch uses no isolation mode that hides the
+worktree behind an opaque path: each implementer creates its own worktree at
+`bd-<id>.<N>` as part of work-do Step 2, so dir name matches branch name and
+the cleanup sweeps can map dir → task mechanically. The orchestrator reacts to
+the *await* notification; it does not poll or sleep.
 
-This branch preserves named background subagent dispatch, completion
-notifications, `SendMessage({to: "impl-<bd-id>", message: "..."})` resume
-semantics, and `TaskStop({task_id: "impl-<bd-id>"})` stop semantics. In other
-words, Claude workers are named background subagents via the `Agent` tool.
+If the runtime selected has no equivalent for an operation this skill needs,
+stop with `unsupported-runtime` and name the missing operation — do not fall
+through to a partial pipeline or claim a worker was dispatched when the
+binding cell for this runtime cannot fill the request.
 
-#### Pi branch (`AI_AGENT=pi`)
-
-Pi must not dispatch Claude `Agent` subagents, call `SendMessage`, call
-`ListAgents`, call `TaskStop`, infer worker state from tmux panes, or claim a
-Claude background worker was launched. If no explicit Pi multi-worker adapter
-is installed, this skill's visible multi-worker pipeline is unsupported until
-[[sp028]] or a later Pi adapter supplies it. For one-task or human-supervised
-sequential lifecycle execution under Pi, use `plan-supervised`'s sequential Pi
-branch: run one `work-do` / `work-audit` / `work-merge` chain at a time in the
-current conversation.
-
-A future Pi adapter may be inserted here only when it documents named worker
-dispatch, direct messaging, completion notification, resume, and stop semantics
-for Pi. That adapter still uses bd as the task contract, Git as the source
-contract, and AKM as the knowledge contract; it does not use [[ft012]] or
-Claude agent-census output as runtime detection.
-
-##### Transport boundary (binds any Pi adapter)
+##### Transport boundary (binds any adapter that uses tmux as a process host)
 
 [[ft014]] hosts Pi workers as named windows in an existing linked tmux project
 group. Tmux is the display and process host and nothing more. It is **not** the
@@ -83,121 +66,63 @@ Missing process, bus, or transcript evidence yields `unknown`, which is an
 observation and never licenses stopping, accepting, or deleting anything
 ([[adr0017]]).
 
-##### Pi worker pipeline (available once [[ft014]] is installed)
+##### Operation semantics that hold regardless of runtime
 
-With the `pi-worker` CLI present, the Pi branch runs the same
-implementer → reviewer → merge loop as Claude, driven entirely by `pi-worker`
-commands (sp029 T9's peer-addressed surface). Claude's native path is
-untouched; nothing below uses `Agent`, `SendMessage`, `ListAgents` or
-`TaskStop`.
+Once [[ft014]] or the equivalent worker surface is installed, the full
+implementer → reviewer → merge loop runs the same way on every runtime this
+skill supports; only the concrete command per operation differs, and that
+command lives solely in `../meta-patterns/runtime-adapter.md`'s
+`## operation binding`. A few process rules hold on every runtime regardless
+of which cell fired:
 
-| Step | Pi command | Claude equivalent |
-|---|---|---|
-| Dispatch | `pi-worker spawn --role impl --subject <bd-id> --task <bd-id> --skill work-do --isolation worktree` | `Agent` with `name: impl-<bd-id>` |
-| Send work | `pi-worker send --as $RUN --to <worker-uid> --content "work-do bd-<id>"` | dispatch payload |
-| Await | `pi-worker wait --as $RUN --block --timeout 60` | completion notification |
-| Reject / retry | `pi-worker resume <worker-uid> --feedback "<gaps>"` | `SendMessage({to: ...})` |
-| Accept + clean | `pi-worker accept <worker-uid> --repo <path>` | worktree sweep in work-merge |
-| Tear down | `pi-worker stop <worker-uid>` | `TaskStop` |
-| Inspect | `pi-worker inspect <worker-uid>` / `pi-worker workers` | `ListAgents` |
-
-`$RUN` is not a stable dispatcher identity — it is the `run` field `spawn`'s
-own JSON reply carries back for THAT worker, and it is what `worker-spawn`
-records as the worker's `commissioner`, so it is also the address its
-`result` arrives at. Every `spawn` call mints a fresh one; a dispatcher
-running several workers at once tracks one `$RUN` per worker (e.g.
-`impl_run`, `rev_run`) and calls `wait --as` once per worker it wants an
-answer from, not one call shared across the batch.
-
-None of these commands take a sequence number or a redelivery window, and
-none of them acknowledge delivery as a separate step — sp029 T9 dropped that
-whole shape from the CLI, and T8 evicted rejection-counting and escalation
-from the transport before it. See "Rejection policy now lives here" below
-for where that judgment moved.
-
-Rules that differ from a notification-driven runtime, and why:
-
-- **`wait` marks what it delivers, in the same call.** There is no separate
-  acknowledgment step: `wait --as $RUN` returns every unread row addressed to
-  that address and marks it read before it returns. An orchestrator that dies
-  mid-handling does not get the message re-served by `wait` — recovery instead
-  comes from `inspect <uid>` / `workers`, which rebuild a worker's state and
-  its last reported result directly from its identity record, never from
-  "what wasn't yet marked read."
-- **A completed worker stays inspectable until accepted.** Reporting `complete`
-  does not close the window or remove the worktree; `accept` does that, and
-  only after `land-bd-task.sh` has actually merged the branch. Until then a
-  reviewer can still read the live worktree and transcript.
-- **Rejection resumes, it does not redispatch.** `pi-worker resume <uid>
-  --feedback "<gaps>"` sends the feedback to the original Pi session as an
-  ordinary addressed message — same session, same worktree, same context. It
-  is otherwise unremarkable: no rejection count, no escalation, nothing
-  written about it to the bus.
-- **Rejection policy now lives here, not in the CLI.** The bus no longer
-  counts rejections or parks a worker at `waiting_human` on its own (sp029
-  T8). `work-audit`'s Pi runtime section owns the second-rejection rule now:
-  it counts prior `AUDITED: REJECTED` notes on the bd task itself before
-  deciding whether to `resume` again or stop and hand the task to the human.
-  The review flow a user sees (two strikes, then a human looks at it) is
-  unchanged; only the mechanism that enforces it moved from the transport to
-  the reviewer's own instructions.
-- **Restart is free.** `pi-worker workers` reconstructs every worker in the
-  current project, its state, its last reported result and its resume command
-  from the bus alone. Never keep worker state only in the conversation.
-- **Cleanup is project-scoped.** `accept`/`resume`/`stop` resolve the worker's
-  project from the caller's own cwd, scoped to exactly one project — never a
-  cross-project scan — so a call made from inside one project cannot reach a
-  same-named uid living in another.
-- **Missing evidence is not permission.** A worker with no identity on the bus
-  is refused by name (naming the uid and the project searched), and that
-  refusal never licenses stopping, accepting, or deleting anything
-  ([[adr0017]]).
+- **Reject/resume reaches the ORIGINAL worker, never a fresh one.** It
+  delivers the feedback to the same session, same worktree, same context —
+  a redispatch is a different operation (*dispatch*) and is not what
+  *reject/resume* means. Step 5 below relies on this.
+- **A completed worker stays inspectable until accepted.** *await* returning
+  a result does not by itself remove the worktree or close anything out —
+  *accept and clean* is a separate operation, run only after the merge has
+  actually happened. Until then a reviewer can still read the live worktree
+  and transcript.
+- **The second rejection on the same task always escalates to the human.**
+  That count is read from the bd task's own evidence (Step 5), never
+  reconstructed from transport or session state.
+- **Automatic *tear down* is scoped to workers this orchestrator itself
+  spawned** — never a worker it merely observes, per [[adr0017]].
+- **Missing evidence about a worker is not permission to act on it.** A
+  worker with no discoverable identity is refused by name, and that refusal
+  never licenses stopping, accepting, or deleting anything ([[adr0017]]).
 
 ##### Brainstorm stage: a worker that consults the human, not the dispatcher
 
-Not every Pi worker executes a bd task. Some are spawned to have a
-conversation — design review, requirements gathering, "what should this API
-look like" — where the human is the counterparty and the dispatcher must not
-relay a single word of it. This is the motivating case sp029 exists for: the
-transport had no way for such a worker's report to reach a dispatcher who
-was not sitting there polling.
+Not every worker executes a bd task. Some are spawned to have a conversation
+— design review, requirements gathering, "what should this API look like" —
+where the human is the counterparty and the dispatcher must not relay a
+single word of it. The transport must let such a worker's report reach a
+dispatcher who is not sitting there polling.
 
-Dispatch it exactly like an implementer, with two differences: `--isolation
-main` (nothing about a conversation belongs in a disposable worktree — see
-"Known Issues" in `references/architecture.md` if that seems backwards), and
-the instruction sent via `send --content` is the brainstorm stage instruction
-in full — see `references/brainstorm-stage.md` for the instruction text
-itself and what it must and must not let the agent decide alone.
+Dispatch it exactly like an implementer (operation: *dispatch*), with two
+differences: an isolation mode scoped to the current session rather than a
+disposable worktree (see "Known Issues" in `references/architecture.md` if
+that seems backwards — nothing about a conversation belongs in a throwaway
+worktree), and the work handed over (operation: *send work*) is the
+brainstorm-stage instruction in full — see `references/brainstorm-stage.md`
+for the instruction text itself and what it must and must not let the agent
+decide alone.
 
-```
-SPAWNED=(pi-worker spawn --role brainstorm --subject <slug> --skill idea-brainstorming --isolation main | from json)
-# $SPAWNED.run is the address this worker's result will arrive at — capture
-# it now, there is no other way to get it back later.
-pi-worker send --as $SPAWNED.run --to $SPAWNED.uid --content "<brainstorm-stage instruction + the question to brainstorm>"
-pi-worker wait --as $SPAWNED.run --block --timeout 60   # repeat; the human may take a while
-```
+*Await* returns nothing while the human and the worker are still talking —
+that silence is correct, not a failure, and asking again costs nothing. When
+the worker judges the conversation finished, *await* returns its typed
+result: `status`, `summary`, and how it was validated.
 
-`wait` returns nothing while the human and the worker are still talking — that
-silence is correct, not a failure, and polling again costs nothing. When the
-worker judges the conversation finished, `wait` returns its typed result:
-
-```
-pi-worker result --as <brainstorm-uid> --status complete --summary "<decision>" --validation "<how it was validated>"
-```
-
-The dispatcher reads `content.status`/`content.summary` off that message and
-proceeds — no human relayed anything, and none of the reading requires
-inferring completion from a transcript or a prompt going idle ([[adr0027]]).
-A `status` other than `complete` (`blocked`, `waiting_human`, `failed`) means
-proceed no further than reporting it onward; see
-`references/brainstorm-stage.md` for what each one means for a brainstorm
-specifically.
-
-#### Unsupported runtime
-
-If neither `AI_AGENT=pi` nor the Claude native branch is available, stop with
-`unsupported-runtime` and name the missing orchestration surface. Do not fall
-through to the Claude instructions.
+The dispatcher reads `status`/`summary` off that result and proceeds — no
+human relayed anything, and none of the reading requires inferring completion
+from a transcript or a prompt going idle ([[adr0027]]). A `status` other than
+`complete` (`blocked`, `waiting_human`, `failed`) means proceed no further
+than reporting it onward; see `references/brainstorm-stage.md` for what each
+one means for a brainstorm specifically. A brainstorm worker never claims a
+bd task, so any instruction elsewhere in this skill that assumes "the task"
+does not apply to it.
 
 For the rationale (why a wrapper agent cannot do this) and the full Claude
 dispatch contract, see `references/architecture.md`.
@@ -260,7 +185,7 @@ in_progress → closed  spec-retro skill (after merge / PR)
 
 **Why scrum-master owns the activation:** dispatch is the moment work starts — the state flips from "planned and waiting" to "in flight." Status `in_progress` and priority `P1` both encode that. Nobody else is watching for this moment: `spec-ready` sets up the P2/open snapshot and walks away, `work-do` only touches its own task, `work-audit` closes individual tasks, and `spec-retro` runs much later at delivery time. The scrum-master is the first actor that "knows" the epic is alive.
 
-**When to transition:** right before dispatching the first implementer for a task whose parent epic is still `open` / P2. Run the `bd update` commands before the `Agent` call. If the epic is already `in_progress` / P1 from a previous session, leave it alone.
+**When to transition:** right before dispatching the first implementer for a task whose parent epic is still `open` / P2. Run the `bd update` commands before dispatching. If the epic is already `in_progress` / P1 from a previous session, leave it alone.
 
 **Epic close stays with spec-retro** — do NOT close epics from this skill. The retro step validates the work, writes the learning notes, and archives the spec. Closing early would skip that.
 
@@ -285,9 +210,9 @@ digraph scrum_master {
     "Human confirms?" [shape=diamond];
     "Any tasks ready?" [shape=diamond];
     "Pick up to max_parallel tasks" [shape=box];
-    "Dispatch implementer agent(s)\n(Claude native branch only)" [shape=box];
+    "Dispatch implementer agent(s)" [shape=box];
     "Collect implementer report(s)" [shape=box];
-    "Relay to reviewer agent(s)\n(Claude native branch only): task spec + report" [shape=box];
+    "Relay to reviewer agent(s): task spec + report" [shape=box];
     "Reviewer result?" [shape=diamond];
     "Re-dispatch implementer with rejection details" [shape=box];
     "Rejected twice?" [shape=diamond];
@@ -307,16 +232,16 @@ digraph scrum_master {
     "Any tasks ready?" -> "Escalate to human" [label="no — but open tasks exist"];
     "Pick up to max_parallel tasks" -> "Activate parent epic if still 'open'";
     "Activate parent epic if still 'open'" [shape=box];
-    "Activate parent epic if still 'open'" -> "Dispatch implementer agent(s)\n(Claude native branch only)";
-    "Dispatch implementer agent(s)\n(Claude native branch only)" -> "Wait for agent notifications";
+    "Activate parent epic if still 'open'" -> "Dispatch implementer agent(s)";
+    "Dispatch implementer agent(s)" -> "Wait for agent notifications";
     "Wait for agent notifications" [shape=box style=filled fillcolor=lightyellow];
     "Wait for agent notifications" -> "Collect implementer report(s)" [label="implementer done"];
-    "Collect implementer report(s)" -> "Relay to reviewer agent(s)\n(Claude native branch only): task spec + report";
-    "Relay to reviewer agent(s)\n(Claude native branch only): task spec + report" -> "Reviewer result?";
+    "Collect implementer report(s)" -> "Relay to reviewer agent(s): task spec + report";
+    "Relay to reviewer agent(s): task spec + report" -> "Reviewer result?";
     "Reviewer result?" -> "Report batch progress" [label="approved + closed"];
     "Reviewer result?" -> "Re-dispatch implementer with rejection details" [label="rejected"];
     "Re-dispatch implementer with rejection details" -> "Rejected twice?";
-    "Rejected twice?" -> "Relay to reviewer agent(s)\n(Claude native branch only): task spec + report" [label="no — retry"];
+    "Rejected twice?" -> "Relay to reviewer agent(s): task spec + report" [label="no — retry"];
     "Rejected twice?" -> "Escalate to human" [label="yes"];
     "Report batch progress" -> "Mode = waves?";
     "Mode = waves?" -> "Wait for human feedback" [label="yes"];
@@ -409,9 +334,12 @@ bd list --parent <epic-id> --status open --json | jq -r '.[].id' \
 
 Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do this once per epic, not per task. If some child tasks already have a higher-priority override (P0 — urgent), leave those alone.
 
-### Dispatch the task (Claude native branch)
+### Dispatch the task
 
-Claude native branch only: for each task, run `bd show <id>` and dispatch an `Agent` tool call with `name: "impl-<bd-id>"` (no `run_in_background` — subagents are background by default; no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). In Pi, do not use this section unless a Pi multi-worker adapter has replaced the Claude tool names with its own supported surface. The dispatch payload contains:
+For each task, run `bd show <id>` and dispatch (operation binding row
+`dispatch`) a named worker `impl-<bd-id>`, using no isolation mode that hides
+the worktree behind an opaque path — the implementer creates its own worktree
+at the right name per work-do Step 2. The dispatch payload contains:
 
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
@@ -429,13 +357,17 @@ Claude native branch only: for each task, run `bd show <id>` and dispatch an `Ag
 - Marking blocked if it can't proceed: `bd update <id> --status blocked`
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
 
-**Claude native branch:** dispatch up to `max_parallel` agents in a single message, each with its own `name`. Do NOT poll or sleep — you will be automatically notified when each agent completes. While waiting, you may report status or respond to the human.
+Dispatch up to `max_parallel` workers in a single batch, each with its own
+name. Do NOT poll or sleep — you will be automatically notified when each
+worker completes (operation: *await*). While waiting, you may report status
+or respond to the human. `max_parallel`, `mode` (waves / blockers-only /
+auto), and `worker_model` apply exactly the same way regardless of which
+runtime's *dispatch* and *await* cells are firing — none of them is a
+Claude-only or Pi-only setting.
 
-**Pi branch:** if no explicit Pi multi-worker adapter is installed, do not dispatch multiple workers. Return `unsupported-runtime: plan-scrum-master multi-worker dispatch requires [[sp028]] or another Pi adapter` and offer the sequential `plan-supervised` path for one task at a time.
-
-**Save agent session metadata** after each `Agent` call returns:
-- **Agent name** (`impl-<bd-id>`) — the address for `SendMessage` / `TaskStop`. Names keep working after the agent completes; a send resumes it from its transcript.
-- **Agent ID** (`a...-...`) — fallback address only, for when a name was not set or a newer agent took the name (latest wins)
+**Save worker session metadata** after each dispatch returns:
+- **Worker name** (`impl-<bd-id>`) — the address for *send work*, *reject/resume*, and *tear down*. Names keep working after the worker completes; a send resumes it from its transcript.
+- **Runtime worker ID** — fallback address only, for when a name was not set or a newer worker took the name (latest wins)
 - **Worktree path** — for reviewers to inspect the code
 - **Branch name** — for reviewers to merge
 
@@ -447,7 +379,9 @@ This enables resuming agents on rejection instead of dispatching fresh ones — 
 
 ## Step 4: Relay to Reviewer
 
-Claude native branch only: when notified that an implementer has completed, dispatch a reviewer agent with `name: "rev-<bd-id>"` and `subagent_type: "infinifu:code-reviewer"`. In Pi, use the installed Pi adapter's reviewer dispatch surface; without one, stop and route to sequential `plan-supervised` instead:
+When notified (operation: *await*) that an implementer has completed,
+dispatch (operation binding row `dispatch`) a reviewer worker named
+`rev-<bd-id>` running the `infinifu:code-reviewer` review:
 
 1. **Task spec** — the original design text from bd
 2. **Implementer's full report** — pass through as-is, including any metadata (paths, branches, etc.)
@@ -497,7 +431,12 @@ separate field nothing else touches, so both problems disappear at once.
      `bd update <id> --append-notes "<reason>"` — `--notes` would erase
      whatever evidence is already there.
    - **Model upgrade:** if the original `worker_model` was `sonnet` or `haiku`, the retry uses `opus` (see "Failure-escalation rule" in Configuration). If it was already `opus` or `auto`, keep the same model.
-   - **Claude native branch:** resume the original implementer via `SendMessage({to: "impl-<bd-id>", message: ...})` using its saved name — pass the failure details. The agent retains its full context and is already in the worktree. Resume preserves cheap context; only dispatch a fresh agent if the original session cannot be resumed (e.g., expired) or if the model is being upgraded across providers and a session swap is required. Pi may use only an installed Pi adapter's resume command; without that adapter, stop and defer multi-worker retry to [[sp028]].
+   - **Resume the ORIGINAL implementer** (operation binding row
+     `reject/resume`) by its saved name, passing the failure details. This
+     reaches the same worker, in the same worktree, with its full context —
+     never a fresh dispatch. Resume preserves cheap context; only dispatch a
+     fresh worker if the original session cannot be resumed (e.g., expired)
+     or the model upgrade requires a session swap across providers.
    - When notified of completion, dispatch reviewer again (also in background).
 2. **Second failure on the same task (`$NEXT >= 2`):** Do not retry a third time — even automatically, even silently. Report to the human that the task needs their attention.
 

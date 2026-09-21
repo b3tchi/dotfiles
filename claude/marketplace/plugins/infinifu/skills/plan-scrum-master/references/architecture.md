@@ -45,16 +45,18 @@ A worker can also reach the orchestrator mid-run with `SendMessage({to: "main", 
 
 Names survive completion: a send to a completed agent's name resumes it from its transcript, which is exactly what the rejection-retry path in Step 5 relies on. Use the raw `agentId` only when no name was set, or when a newer agent has taken the name (latest wins).
 
-## Future Pi multi-worker adapter insertion point
+## Multi-worker dispatch on other runtimes
 
-The Pi branch starts sequential and unsupported for visible multi-worker
-scrum-master dispatch. A later adapter may replace that behavior only if it
-implements named worker dispatch, direct messaging, completion notification,
-resume, and stop semantics with Pi-native commands. It must also keep the same
-durable state model: bd for task contracts and notes, Git for source branches
-and worktrees, and AKM for knowledge artifacts.
+The adapter this section used to await has shipped: `../meta-patterns/runtime-adapter.md`'s
+`## operation binding` gives every lifecycle operation — dispatch, send work,
+await, reject/resume, accept and clean, tear down, inspect — a concrete
+command per runtime, so a runtime other than Claude's native surface fills
+these same seven rows rather than needing a bespoke insertion point here. The
+runtime gate stays explicit (`AI_AGENT=pi` or a future declared runtime flag,
+per `## Runtime selection` in the binding file), the durable state model is
+unchanged (bd for task contracts and notes, Git for source branches and
+worktrees, AKM for knowledge artifacts), it does not use [[ft012]] or Claude
+census output as runtime detection, and tmux remains only a process/display
+host unless a runtime's adapter separately documents a message bus.
 
-The adapter's runtime gate must be explicit (`AI_AGENT=pi` or a future declared
-Pi capability flag). It does not use [[ft012]] or Claude census output as
-runtime detection, and tmux remains only a process/display host unless the Pi
-adapter separately documents a message bus.
+A future runtime is a new column on that table, not a new section here.

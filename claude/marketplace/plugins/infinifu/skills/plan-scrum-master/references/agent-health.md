@@ -1,12 +1,10 @@
 # Agent health monitoring
 
-This reference has two runtime branches. **Claude native branch only:** use
-Claude worker names plus `ListAgents` / `TaskStop` as described below. **Pi
-branch:** do not call `ListAgents` or `TaskStop` unless an installed Pi adapter
-maps those operations to Pi-native commands; use the installed Pi adapter health
-surface instead. Without that adapter, visible multi-worker health monitoring is
-unsupported and the scrum-master must fail clearly or use sequential
-`plan-supervised` execution.
+Health monitoring is one operation: *inspect* (see
+`../../meta-patterns/runtime-adapter.md`'s `## operation binding`). The same
+instruction below is executable on any runtime that binding covers — only the
+concrete command per worker name comes from the binding's row for the
+runtime actually selected.
 
 **Alert the user immediately** when any agent shows signs of struggling. Do not wait for the agent to finish or fail — early warning saves time and money, and a stuck agent burns tokens until killed.
 
@@ -32,13 +30,17 @@ Detail:     [what was observed — agent quotes if available]
 Suggestion: [kill and reassign | wait longer | split task | human intervention]
 ```
 
-## Checking on live workers (Claude native branch)
+## Checking on live workers
 
-Claude native branch only: `ListAgents` is the cheap read: every row leads with the worker's `name [ref]` and says whether it is busy or idle right now. Use it to build the health picture instead of guessing from elapsed time alone. This is Claude agent-surface health, not a Pi runtime detector.
+*Inspect* is the cheap read: it reports every worker's name and whether it is
+busy or idle right now. Use it to build the health picture instead of
+guessing from elapsed time alone. This is agent-surface health — never a
+runtime detector — and the binding's `inspect` row gives the concrete command
+for whichever runtime is selected.
 
-- **Never poll it in a loop, and never send "are you done?"** — completion notifications arrive on their own.
+- **Never poll it in a loop, and never send "are you done?"** — completion notifications (operation: *await*) arrive on their own.
 - To hear when a worker goes quiet, prefer the one-shot subscription over repeated checks.
-- Killing a stuck worker: `TaskStop({task_id: "impl-<bd-id>"})` — the agent name is accepted directly as the task id. Kill only workers this session dispatched, and only after alerting the user.
+- **Tear down a stuck worker** (operation binding row `tear down`) by its name. Kill only workers this session dispatched, and only after alerting the user ([[adr0017]]).
 
 ## Comparing agents
 
