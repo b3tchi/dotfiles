@@ -201,17 +201,31 @@ class RuntimeSelectionContractTests(unittest.TestCase):
             "work-audit no longer states the two-strikes-then-human rule",
         )
 
-    def test_pi_branch_rules_are_normative_not_only_anti_patterns(self) -> None:
-        # Edge case: a static check must not pass because the rule appears only
-        # in a warning or anti-pattern list.
+    def test_operation_vocabulary_is_normative_not_only_anti_patterns(self) -> None:
+        # Sibling of test_every_orchestration_file_cites_the_binding. This
+        # replaces test_pi_branch_rules_are_normative_not_only_anti_patterns,
+        # which required a normative `AI_AGENT=pi` mention in SCRUM_MASTER or
+        # SUPERVISED — exactly the literal sp037 T2 and T3 together remove
+        # from both bodies, so once both land the old assertion's list is
+        # empty and it fails against the intended end state. The invariant it
+        # protected (a rule stated only inside a warning/anti-pattern block is
+        # not a rule) still applies, just to the replacement vocabulary: the
+        # reject/resume and accept-and-clean operation names — unique to the
+        # binding (`grep`-verified absent from both files before either T2 or
+        # T3 rewrite) — must appear as an instruction somewhere, not only in
+        # a warning.
         normative = [
             line
             for path in (SCRUM_MASTER, SUPERVISED)
-            for line in find_block(path, r"AI_AGENT=pi", normative_only=True)
+            for pattern in (r"reject[/ ]resume", r"accept[- ]and[- ]clean")
+            for line in find_block(path, pattern, normative_only=True)
         ]
         self.assertTrue(
             normative,
-            "AI_AGENT=pi appears only inside anti-pattern/warning sections",
+            "the reject/resume and accept-and-clean operation vocabulary "
+            "that replaces the old AI_AGENT=pi hedge appears only inside "
+            "anti-pattern/warning sections (or not at all) in "
+            "plan-scrum-master and plan-supervised",
         )
 
     def test_no_file_claims_claude_census_detects_the_runtime(self) -> None:
