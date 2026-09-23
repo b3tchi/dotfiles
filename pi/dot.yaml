@@ -1,6 +1,7 @@
 linux:
   links:
     settings.json: ~/.pi/agent/settings.json
+    claude-bridge.json: ~/.pi/agent/claude-bridge.json
 
   installs:
     cmd: |

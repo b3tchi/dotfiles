@@ -8,5 +8,14 @@
     "~/.dotfiles/claude/marketplace/plugins/pi-workers",
     "npm:pi-claude-bridge"
   ],
-  "lastChangelogVersion": "0.85.1"
+  "kendex": {
+    "extensionManager": {
+      "config": {
+        "@vanillagreen/pi-caveman": {
+          "mode": "full"
+        }
+      }
+    }
+  },
+  "lastChangelogVersion": "0.87.1"
 }
