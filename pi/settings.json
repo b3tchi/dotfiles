@@ -5,7 +5,8 @@
   "enableSkillCommands": true,
   "packages": [
     "~/.dotfiles/claude/marketplace/plugins/infinifu",
-    "~/.dotfiles/claude/marketplace/plugins/pi-workers"
+    "~/.dotfiles/claude/marketplace/plugins/pi-workers",
+    "npm:pi-claude-bridge"
   ],
   "lastChangelogVersion": "0.85.1"
 }
