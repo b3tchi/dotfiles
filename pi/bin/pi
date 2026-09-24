@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# pi launcher: run pi with its own Claude Code config dir.
+#
+# pi-claude-bridge spawns `claude` per turn and reads/writes session files
+# under $CLAUDE_CONFIG_DIR, so the var must be set on pi itself (not on a
+# claude wrapper). A separate dir keeps ~/.claude's plugins (infinifu,
+# caveman, agents, hooks) out of bridge turns — pi loads its own packages.
+#
+# Installed over the npm bin symlink at ~/.local/bin/pi; `rotz link pi --force`
+# restores it after `pi update --self`. pi-workers spawns `pi` by name via
+# tmux, so workers pick this up too.
+#
+# Override: PI_CLAUDE_CONFIG_DIR=~/.claude pi   (bridge uses the main config)
+
+set -euo pipefail
+
+real="${PI_REAL_CLI:-$HOME/.local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js}"
+if [[ ! -f $real ]]; then
+  echo "pi wrapper: real pi not found at $real (set PI_REAL_CLI)" >&2
+  exit 127
+fi
+
+export CLAUDE_CONFIG_DIR="${PI_CLAUDE_CONFIG_DIR:-$HOME/.claude-pi}"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+exec node "$real" "$@"

@@ -2,6 +2,9 @@ linux:
   links:
     settings.json: ~/.pi/agent/settings.json
     claude-bridge.json: ~/.pi/agent/claude-bridge.json
+    # launcher sets CLAUDE_CONFIG_DIR=~/.claude-pi; replaces npm bin symlink
+    bin/pi: ~/.local/bin/pi
+    claude-pi/settings.json: ~/.claude-pi/settings.json
 
   installs:
     cmd: |
