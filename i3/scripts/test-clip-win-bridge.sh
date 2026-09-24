@@ -105,6 +105,81 @@ assert_eq "exit 0" "0" "$rc"
 assert_eq "and prints nothing" "" "$(cat "$TMP/out")"
 
 # ---------------------------------------------------------------------------
+# WATCHER LIVENESS (dotfiles-iy3i). The Win->X watcher is ONE long-lived
+# powershell. On the deployed host it went silent after ~9 days while its
+# process stayed alive: a fresh Windows copy never reached X, the reader sat
+# on an empty pipe, and `ps` showed a perfectly healthy bridge. Nothing in
+# the bridge could tell "clipboard unchanged" from "watcher dead", because
+# both look like no output.
+#
+# So the watcher now proves it is alive: it announces its Windows PID
+# ("P<pid>") and emits a heartbeat line (".") every CLIP_BRIDGE_HB seconds.
+# If nothing at all arrives for CLIP_BRIDGE_STALE seconds the bridge kills it
+# on BOTH sides — Stop-Process on the announced Windows PID (killing only the
+# WSL /init relay could orphan the Windows process, still polling) — and the
+# watch loop respawns it.
+#
+# No X needed: the stand-in only ever plays the watcher; DISPLAY points at a
+# display that does not exist, so the X->Win poller idles harmlessly.
+
+# Kill a process and everything under it, deepest first.
+reap_tree() { # <pid>
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null); do reap_tree "$c"; done
+  kill "$1" 2>/dev/null
+}
+
+# stand-in behaviour is picked by $WATCH_MODE:
+#   stall  — announce a PID, then say nothing ever again (the observed hang)
+#   alive  — announce a PID, then heartbeat every 0.3s (a healthy watcher)
+mkdir -p "$TMP/livebin"
+cat > "$TMP/livebin/powershell.exe" <<'STUBEOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *Stop-Process*) printf '%s\n' "$a" >> "$KILL_LOG"; exit 0 ;;
+    *Get-Clipboard*)
+      echo spawn >> "$SPAWN_LOG"
+      echo "P4242"
+      if [ "$WATCH_MODE" = alive ]; then
+        while :; do echo "."; sleep 0.3; done
+      fi
+      exec sleep 300 ;;
+  esac
+done
+exec sleep 300
+STUBEOF
+chmod +x "$TMP/livebin/powershell.exe"
+
+run_live() { # <mode> <seconds>
+  : > "$TMP/spawn.log"; : > "$TMP/kill.log"
+  env -i HOME="$TMP/home" PATH="$TMP/livebin:/usr/bin:/bin" \
+      WATCH_MODE="$1" SPAWN_LOG="$TMP/spawn.log" KILL_LOG="$TMP/kill.log" \
+      CLIP_BRIDGE_DISPLAY=:99 \
+      CLIP_BRIDGE_LOCK="$TMP/live.lock" \
+      CLIP_BRIDGE_WSL_MARK="$TMP/iswsl" \
+      CLIP_BRIDGE_STALE=2 CLIP_BRIDGE_RESPAWN=0.5 \
+      /bin/sh "$BRIDGE" >"$TMP/live.out" 2>&1 &
+  local pid=$!
+  sleep "$2"
+  reap_tree "$pid"
+  wait "$pid" 2>/dev/null
+}
+
+scenario "liveness: a watcher that goes silent is killed and respawned"
+run_live stall 6
+spawns="$(wc -l < "$TMP/spawn.log")"
+assert_eq "respawned at least once within 6s (spawns >= 2)" "yes" \
+  "$([ "$spawns" -ge 2 ] && echo yes || echo "no ($spawns)")"
+assert_eq "its Windows side was stopped by the announced PID" "yes" \
+  "$(grep -q 'Stop-Process.*4242' "$TMP/kill.log" && echo yes || echo no)"
+
+scenario "liveness CONTROL: a heartbeating watcher is left alone"
+run_live alive 6
+assert_eq "exactly one spawn" "1" "$(wc -l < "$TMP/spawn.log" | tr -d ' ')"
+assert_eq "and nothing was stopped" "" "$(cat "$TMP/kill.log")"
+
+# ---------------------------------------------------------------------------
 # WHAT THE BRIDGE MAY FORWARD (dotfiles-9i56). Everything above is about the
 # startup gate and needs no X server; this section needs one, because the
 # defect is in what the running poller does with a selection it should not
@@ -194,6 +269,37 @@ STUBEOF
   sleep 2
   assert_eq "the later text reached the Windows side" "yes" \
     "$(grep -qF 'BRIDGE-TEXT-after-image' "$PS_LOG" && echo yes || echo no)"
+
+  scenario "liveness: Win->X still delivers, and the PID/heartbeat lines never reach X (dotfiles-iy3i)"
+  # The watcher's protocol lines share the pipe with clipboard payloads.
+  # "P4242" is not valid base64 and "." decodes to nothing — neither may end
+  # up on the X clipboard, and a real payload between them must.
+  for _p in $(pgrep -P "$FWD_PID" 2>/dev/null); do reap_tree "$_p"; done
+  kill "$FWD_PID" 2>/dev/null; wait "$FWD_PID" 2>/dev/null
+  printf '%s' 'x-before' | env DISPLAY="$FWD_DPY" xclip -selection clipboard -i & sleep 0.4
+  cat > "$TMP/fwdbin/powershell.exe" <<STUBEOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in
+    *Get-Clipboard*)
+      echo P4242; echo .
+      echo $(printf 'WIN-marker\r\n' | base64)
+      echo .; echo P4242
+      exec sleep 300 ;;
+    *Set-Clipboard*) cat >/dev/null; exit 0 ;;
+  esac
+done
+exec sleep 300
+STUBEOF
+  env -i HOME="$TMP/home" PATH="$TMP/fwdbin:/usr/bin:/bin" \
+      CLIP_BRIDGE_DISPLAY="$FWD_DPY" \
+      CLIP_BRIDGE_LOCK="$TMP/fwd.lock" \
+      CLIP_BRIDGE_WSL_MARK="$TMP/iswsl" \
+      /bin/sh "$BRIDGE" >"$TMP/fwd.out" 2>&1 &
+  FWD_PID=$!
+  sleep 2
+  assert_eq "X clipboard holds exactly the Windows payload (CR stripped)" "WIN-marker" \
+    "$(env DISPLAY="$FWD_DPY" timeout 2 xclip -selection clipboard -o 2>/dev/null)"
 
   # Reap the whole tree, in the order that actually works: the win_watch
   # SUBSHELL is a child of $FWD_PID and its powershell stand-in a child of

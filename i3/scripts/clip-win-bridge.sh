@@ -44,6 +44,9 @@
 #        CLIP_BRIDGE_POLL=0.5     seconds between X-side polls
 #        CLIP_BRIDGE_WIN_POLL=700 milliseconds between Windows-side polls
 #        CLIP_BRIDGE_TIMEOUT=1    seconds before a single xclip call is abandoned
+#        CLIP_BRIDGE_HB=5         seconds between watcher heartbeats
+#        CLIP_BRIDGE_STALE=30     seconds of watcher silence before it is restarted
+#        CLIP_BRIDGE_RESPAWN=5    seconds between a watcher dying and its respawn
 #        CLIP_BRIDGE_LOCK=...     single-instance lock file
 set -u
 
@@ -51,6 +54,9 @@ DSP="${CLIP_BRIDGE_DISPLAY:-:10}"
 POLL="${CLIP_BRIDGE_POLL:-0.5}"
 WPOLL="${CLIP_BRIDGE_WIN_POLL:-700}"
 T="${CLIP_BRIDGE_TIMEOUT:-1}"
+HB="${CLIP_BRIDGE_HB:-5}"
+STALE="${CLIP_BRIDGE_STALE:-30}"
+RESPAWN="${CLIP_BRIDGE_RESPAWN:-5}"
 LOCK="${CLIP_BRIDGE_LOCK:-/tmp/clip-win-bridge.$(id -u).lock}"
 # ------------------------------------------------------ THE STARTUP GATE ---
 #
@@ -106,6 +112,7 @@ flock -n 9 || exit 0
 
 D="$(mktemp -d)"
 NEW="$D/new"; LAST="$D/last"; TGT="$D/tgt"; WIN="$D/win"
+BEAT="$D/beat"; WINPID="$D/winpid"   # watcher liveness, see win_watch
 : > "$LAST"    # last content synced in either direction
 
 targets() {
@@ -152,28 +159,74 @@ image_only_tgt() {
 # --- Win -> X reader (background) -------------------------------------------
 # The watcher powershell never exits on its own; if interop hiccups and it
 # dies, the outer loop respawns it after a beat.
+#
+# LIVENESS (dotfiles-iy3i). "Never exits" is not "keeps working": on the
+# deployed host the watcher went silent after ~9 days with its process still
+# alive, so Windows->X paste broke while every ps/pgrep check looked healthy.
+# Silence alone can't be diagnosed — an unchanged clipboard also says nothing
+# — so the watcher speaks a tiny line protocol beside the payloads:
+#   P<pid>    first line: its Windows PID, so a hung one can be Stop-Process'd
+#             (killing only the WSL /init relay could orphan it, still polling)
+#   .         heartbeat, every $HB s of no clipboard change
+#   <base64>  a clipboard change (the only line that reaches X)
+# Every line stamps $BEAT; the X->Win loop calls check_watcher, which kills
+# a watcher that has been silent for $STALE s. A watcher whose stdout is gone
+# exits by itself on the next write (emit's catch) rather than lingering.
 win_watch() {
   while :; do
+    date +%s > "$BEAT"      # startup grace: a fresh spawn gets a full $STALE
     "$PS" -NoProfile -Command '
       [Console]::OutputEncoding=[Text.Encoding]::ASCII
+      function emit($s) { try { [Console]::Out.WriteLine($s); [Console]::Out.Flush() } catch { exit 1 } }
+      emit ("P" + $PID)
       $last = $null
+      $hb = [Diagnostics.Stopwatch]::StartNew()
       while ($true) {
         Start-Sleep -Milliseconds '"$WPOLL"'
         try { $c = Get-Clipboard -Raw -ErrorAction Stop } catch { $c = $null }
         if ($c -and $c -cne $last) {
           $last = $c
-          [Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c)))
+          emit ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c)))
+          $hb.Restart()
+        } elseif ($hb.Elapsed.TotalSeconds -ge '"$HB"') {
+          emit "."
+          $hb.Restart()
         }
       }' 2>/dev/null 9>&- |
     while IFS= read -r line; do
+      date +%s > "$BEAT"
+      case "$line" in
+        P*) printf '%s' "${line#P}" > "$WINPID"; continue ;;
+        .|'') continue ;;
+      esac
       printf '%s' "$line" | base64 -d 2>/dev/null | tr -d '\r' > "$WIN"
       [ -s "$WIN" ] || continue
       cmp -s "$WIN" "$LAST" && continue   # our own X->Win push echoing back
       cp "$WIN" "$LAST"
       set_x "$WIN"
     done
-    nap 5
+    : > "$WINPID"
+    nap "$RESPAWN"
   done
+}
+
+# Kill the watcher if it has been silent for $STALE s (see LIVENESS above);
+# win_watch's loop then respawns it. Windows side first, by the PID it
+# announced (digits only — it is spliced into a command line), bounded by
+# timeout because a wedged interop is exactly the situation being handled.
+check_watcher() {
+  _beat="$(cat "$BEAT" 2>/dev/null)" || return 0
+  [ -n "$_beat" ] || return 0
+  [ $(( $(date +%s) - _beat )) -ge "$STALE" ] || return 0
+  echo "clip-win-bridge.sh: Win->X watcher silent for ${STALE}s, restarting it" >&2
+  _wp="$(cat "$WINPID" 2>/dev/null)"
+  case "$_wp" in
+    ''|*[!0-9]*) ;;
+    *) timeout 10 "$PS" -NoProfile -Command "Stop-Process -Id $_wp -Force" \
+         >/dev/null 2>&1 9>&- ;;
+  esac
+  pkill -P "$WPID" 2>/dev/null
+  date +%s > "$BEAT"      # one kill per stale window, not one per tick
 }
 # The subshell must not inherit fd 9 (see the lock note above), and its
 # powershell must not outlive us — an orphaned interop watcher keeps polling
@@ -184,6 +237,7 @@ trap 'rm -rf "$D"; pkill -P "$WPID" 2>/dev/null; kill "$WPID" 2>/dev/null' EXIT
 
 # --- X -> Win poller (foreground) -------------------------------------------
 while :; do
+  check_watcher
   # SECURITY GATE, and the IMAGE GATE beside it — both before the payload is
   # ever read; see the header and image_only_tgt. One TARGETS round trip
   # serves both: `targets` writes $TGT and each gate only greps it, so adding
