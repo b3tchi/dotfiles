@@ -301,6 +301,47 @@ STUBEOF
   assert_eq "X clipboard holds exactly the Windows payload (CR stripped)" "WIN-marker" \
     "$(env DISPLAY="$FWD_DPY" timeout 2 xclip -selection clipboard -o 2>/dev/null)"
 
+  scenario "startup: existing X clipboard is NOT pushed to Windows; Windows wins (dotfiles-4ugc)"
+  # LAST used to start empty, so the first X->Win tick pushed whatever the X
+  # clipboard held. That push is a fresh powershell taking seconds, so a
+  # Windows copy made meanwhile was overwritten by the older X text
+  # (observed on a bridge restart). At startup neither side is known to be
+  # newer; the bridge must not destroy the Windows side, whose current
+  # content the watcher reports first and which therefore lands on X.
+  for _p in $(pgrep -P "$FWD_PID" 2>/dev/null); do reap_tree "$_p"; done
+  kill "$FWD_PID" 2>/dev/null; wait "$FWD_PID" 2>/dev/null
+  printf '%s' 'X-stale' | env DISPLAY="$FWD_DPY" xclip -selection clipboard -i & sleep 0.4
+  : > "$PS_LOG"
+  cat > "$TMP/fwdbin/powershell.exe" <<STUBEOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in
+    *Get-Clipboard*)
+      sleep 1.5; echo P4242
+      echo $(printf 'WIN-current' | base64)
+      exec sleep 300 ;;
+    *Set-Clipboard*) cat >> "\$PS_LOG"; printf '\n--push--\n' >> "\$PS_LOG"; exit 0 ;;
+  esac
+done
+exec sleep 300
+STUBEOF
+  env -i HOME="$TMP/home" PATH="$TMP/fwdbin:/usr/bin:/bin" \
+      PS_LOG="$PS_LOG" \
+      CLIP_BRIDGE_DISPLAY="$FWD_DPY" \
+      CLIP_BRIDGE_LOCK="$TMP/fwd.lock" \
+      CLIP_BRIDGE_WSL_MARK="$TMP/iswsl" \
+      /bin/sh "$BRIDGE" >"$TMP/fwd.out" 2>&1 &
+  FWD_PID=$!
+  sleep 3
+  assert_eq "the pre-existing X text was never pushed to Windows" "no" \
+    "$(grep -qF 'X-stale' "$PS_LOG" && echo yes || echo no)"
+  assert_eq "the Windows clipboard's content landed on X" "WIN-current" \
+    "$(env DISPLAY="$FWD_DPY" timeout 2 xclip -selection clipboard -o 2>/dev/null)"
+  own_text 'X-after-start'
+  sleep 2
+  assert_eq "a copy made after startup is still pushed" "yes" \
+    "$(grep -qF 'X-after-start' "$PS_LOG" && echo yes || echo no)"
+
   # Reap the whole tree, in the order that actually works: the win_watch
   # SUBSHELL is a child of $FWD_PID and its powershell stand-in a child of
   # that, so killing the parent first orphans the rest (observed: a bridge and

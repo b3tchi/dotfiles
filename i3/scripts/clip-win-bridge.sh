@@ -228,6 +228,18 @@ check_watcher() {
   pkill -P "$WPID" 2>/dev/null
   date +%s > "$BEAT"      # one kill per stale window, not one per tick
 }
+# --- the startup seed (dotfiles-4ugc) ---------------------------------------
+# LAST is filled from the live X clipboard BEFORE either direction runs. An
+# empty LAST made the first X->Win tick see "a change" and push the X text to
+# Windows — a fresh powershell taking seconds, so a Windows copy made in that
+# window was overwritten by older X content (observed on a bridge restart).
+# At startup neither side is known to be newer, and the bridge must not guess
+# in the direction that destroys the Windows clipboard (Win+V history, the
+# host the user is sitting at). Seeded, X->Win stays quiet until a real X
+# copy, and the watcher's first report makes Windows' content win onto X.
+# Must precede win_watch, or that first report could race the seed.
+read_x && cp "$NEW" "$LAST"
+
 # The subshell must not inherit fd 9 (see the lock note above), and its
 # powershell must not outlive us — an orphaned interop watcher keeps polling
 # the Windows clipboard forever. pkill -P reaps the pipeline children.
