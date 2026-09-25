@@ -626,13 +626,12 @@ set $transp       #00000000
 # hide/unhide i3status bar
 # bindsym $mod+m bar mode toggle
 
-# Theme colors
-# class                   border  backgr. text    indic.   child_border
-client.focused            #152024 #152024 #FDF6E3 #222D31 
-client.focused_inactive   #152024 #152024 #707880 #222D31
-client.unfocused          #222D31 #222D31 #707880 #222D31
-client.urgent             #CB4B16 #FDF6E3 #16a085 #268BD2
-client.placeholder        #152024 #152024 #FDF6E3 #152024
+# Theme colors — the five client.<class> lines moved to i3/colors.conf
+# (sp003 Task 6, kwi3-7m8.6), shared with kwi3's own config reader. See that
+# file's header for why client.background stays here rather than moving
+# with them: it reads $transp, set two lines below, and i3 does not carry a
+# `set` variable across a file boundary in either direction.
+include ~/.dotfiles/i3/colors.conf
 
 client.background       $transp
 

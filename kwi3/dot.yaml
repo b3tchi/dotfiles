@@ -1,0 +1,183 @@
+# kwi3 — clone, build and link the i3kwin X11 host (sp003 Task 6,
+# kwi3-7m8.6). kwi3 itself lives in a SEPARATE repository
+# (https://github.com/b3tchi/kwi3, or $KWI3_REPO for a local/dev clone) —
+# this dot is the one place that repo and this one meet, and it owns only
+# three things: cloning/building it into ~/.local/src/kwi3, linking the
+# built binary and its session scripts into ~/.local/bin, and this
+# machine's kwi3 config (kwi3/config, linked to ~/.config/kwi3/config,
+# sharing its client.* palette with i3/colors.conf — see that file).
+#
+# ${KWI3_REPO:-https://github.com/b3tchi/kwi3} at ${KWI3_REF:-main} is the
+# real default. A local path clone (KWI3_REPO=/path/to/kwi3) is supported
+# for the same reason KWI3_CONFIG overrides the config lookup on the kwi3
+# side: developing kwi3 and this dot together without a round trip through
+# GitHub.
+#
+# BUILD-TO-TEMP-THEN-MV (hotkeyd/akm-graph/preview precedent, dotfiles-8kro):
+# i3kwin/adapters/x11/Makefile's BUILD variable is overridable from the
+# command line (`BUILD :=`, not `override`d), so the whole build — object
+# files, moc output, the binary — lands in a throwaway directory this dot
+# creates, and only the finished binary is `mv`d over build/i3kwin-x11
+# afterwards. A `make` killed mid-build (disk full, SIGINT) leaves the
+# THROWAWAY directory half-written and the previous i3kwin-x11 untouched;
+# a killed `mv` within one filesystem cannot land a partial file at the
+# final path at all. The build-failure guard follows the same precedent
+# those three dots set: a surviving previous binary warns and exits 0 (the
+# whole `rotz install meta-*` this dot might be one line of should not
+# abort over a stale window manager binary); nothing built at all exits 1,
+# named.
+#
+# IDEMPOTENCE (success criterion 6): the built sha is cached next to the
+# binary (build/.built-sha). A second run whose clone sha has not moved
+# skips `make` entirely — this is what makes a repeated `rotz install kwi3`
+# with nothing changed upstream cheap enough to run from a meta-package on
+# every session bring-up, the same way hotkeyd's `exec_always ... start` is
+# cheap because `start` refuses in a no-op case rather than doing work.
+#
+# WHY ~/.local/bin/i3kwin-x11 IS A LINK, NOT A COPY: the binary finds
+# core/ and qml/ at runtime via a compile-time define
+# (I3KWIN_SOURCE_DIR = the clone path, adapters/x11/Makefile's DEFS) rather
+# than an installed data directory, so it only works while the clone at
+# ~/.local/src/kwi3 stays where this dot put it. That is kwi3's own design
+# (i3kwin/README.md), not a shortcut taken here — see AGENTS.md in the kwi3
+# repo, "The binary finds core/ and qml/ via compile-time
+# I3KWIN_SOURCE_DIR".
+#
+# NOT LINKED FROM THE CLONE: kwi3/config (this directory's own file,
+# linked from HERE like any other dot) and i3kwin/bar, which is COPIED
+# (matching i3kwin/install.sh's own "the bar rides along... copied, not
+# built" choice) rather than linked, so a Quickshell config under
+# ~/.config/quickshell/kwi3 survives a `rm -rf ~/.local/src/kwi3` the way
+# the phone's own copy does.
+linux:
+  links:
+    config: ~/.config/kwi3/config
+
+  installs:
+    cmd: |
+      REPO="${KWI3_REPO:-https://github.com/b3tchi/kwi3}"
+      REF="${KWI3_REF:-main}"
+      SRC="$HOME/.local/src/kwi3"
+
+      # ---------------------------------------------------------------
+      # 1. Clone, or fast-forward an existing clone. Never resets one -
+      #    a dirty or diverged ~/.local/src/kwi3 is refused BY NAME, not
+      #    silently discarded (kwi3-7m8.6 edge case).
+      # ---------------------------------------------------------------
+      if [ -d "$SRC/.git" ]; then
+        if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+          echo "kwi3: $SRC has local changes -- refusing to touch it." >&2
+          echo "kwi3: resolve by hand (commit, stash or reset inside $SRC)" >&2
+          echo "kwi3: and re-run 'rotz install kwi3'." >&2
+          exit 1
+        fi
+        PULL_LOG=$(mktemp)
+        if ! git -C "$SRC" pull --quiet --ff-only origin "$REF" >"$PULL_LOG" 2>&1; then
+          # A clean tree that would not fast-forward is EITHER a diverged
+          # history (refuse, name it) OR the remote being unreachable
+          # (warn, build what is already checked out) - distinguished by
+          # asking the remote directly rather than guessing from git's
+          # error text.
+          if git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
+            echo "kwi3: $SRC did not fast-forward to $REPO#$REF -- refusing to reset it." >&2
+            echo "kwi3: resolve by hand and re-run 'rotz install kwi3'. ($(tail -n1 "$PULL_LOG"))" >&2
+            rm -f "$PULL_LOG"
+            exit 1
+          fi
+          echo "kwi3: WARNING -- could not reach $REPO to update $SRC (network down?); building the checkout already there." >&2
+        fi
+        rm -f "$PULL_LOG"
+      else
+        mkdir -p "$(dirname "$SRC")"
+        CLONE_LOG=$(mktemp)
+        if ! git clone --quiet --branch "$REF" "$REPO" "$SRC" >"$CLONE_LOG" 2>&1; then
+          echo "kwi3: git clone of $REPO (ref $REF) failed and $SRC does not exist -- nothing to build." >&2
+          echo "kwi3: $(tail -n1 "$CLONE_LOG")" >&2
+          rm -f "$CLONE_LOG"
+          exit 1
+        fi
+        rm -f "$CLONE_LOG"
+      fi
+
+      # ---------------------------------------------------------------
+      # 2. Build. Guarded on the build deps and on the make result, both
+      #    following the "warn+exit0 with a previous binary, exit1 named
+      #    without one" rule (hotkeyd/akm-graph/preview precedent).
+      # ---------------------------------------------------------------
+      ADAPTER_DIR="$SRC/i3kwin/adapters/x11"
+      FINAL_BIN="$ADAPTER_DIR/build/i3kwin-x11"
+      SHA_MARKER="$ADAPTER_DIR/build/.built-sha"
+      CUR_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)
+
+      # adapters/x11/Makefile needs g++, pkg-config and Qt6's moc (all from
+      # qt6-base + qt6-declarative), plus xcb + xcb-randr (libxcb). Checked
+      # up front so a missing dependency is named -- qt6-base,
+      # qt6-declarative, libxcb, pkgconf -- rather than surfacing as a raw
+      # pkg-config/g++ error out of `make`.
+      MISSING=""
+      if ! command -v pkg-config >/dev/null 2>&1; then
+        MISSING="pkgconf qt6-base qt6-declarative libxcb"
+      else
+        pkg-config --exists Qt6Core Qt6Gui Qt6Network 2>/dev/null || MISSING="$MISSING qt6-base"
+        pkg-config --exists Qt6Qml 2>/dev/null || MISSING="$MISSING qt6-declarative"
+        pkg-config --exists xcb xcb-randr 2>/dev/null || MISSING="$MISSING libxcb"
+      fi
+      MISSING=$(echo "$MISSING" | sed -e 's/^ *//' -e 's/ *$//')
+      if ! command -v g++ >/dev/null 2>&1; then
+        MISSING="$MISSING${MISSING:+ }(a C++ compiler, e.g. the 'gcc' package)"
+      fi
+
+      if [ -n "$MISSING" ]; then
+        if [ -x "$FINAL_BIN" ]; then
+          echo "kwi3: WARNING -- missing build dependencies: $MISSING" >&2
+          echo "kwi3: $FINAL_BIN is the PREVIOUS binary and is now stale." >&2
+          echo "kwi3: install them (e.g. pacman -S --needed $MISSING) and re-run 'rotz install kwi3'." >&2
+        else
+          echo "kwi3: missing build dependencies: $MISSING" >&2
+          echo "kwi3: no previously built binary exists -- there is no $FINAL_BIN to run." >&2
+          echo "kwi3: install them (e.g. pacman -S --needed $MISSING) and re-run 'rotz install kwi3'." >&2
+          exit 1
+        fi
+      elif [ -x "$FINAL_BIN" ] && [ -f "$SHA_MARKER" ] && [ "$(cat "$SHA_MARKER" 2>/dev/null)" = "$CUR_SHA" ]; then
+        echo "kwi3: build/i3kwin-x11 already built at $CUR_SHA -- not rebuilding"
+      else
+        BUILD_LOG=$(mktemp)
+        TMPBUILD=$(mktemp -d "$ADAPTER_DIR/.build.tmp.XXXXXX")
+        if make -C "$ADAPTER_DIR" BUILD="$TMPBUILD" >"$BUILD_LOG" 2>&1; then
+          mkdir -p "$ADAPTER_DIR/build"
+          mv -f "$TMPBUILD/i3kwin-x11" "$FINAL_BIN"
+          echo "$CUR_SHA" > "$SHA_MARKER"
+          rm -rf "$TMPBUILD"
+          rm -f "$BUILD_LOG"
+          echo "kwi3: built $CUR_SHA"
+        else
+          if [ -x "$FINAL_BIN" ]; then
+            echo "kwi3: WARNING -- build FAILED; $FINAL_BIN is the PREVIOUS binary and is now stale." >&2
+            echo "kwi3: re-run 'rotz install kwi3' once the build error is fixed. Log:" >&2
+            sed 's/^/kwi3:   /' "$BUILD_LOG" >&2
+          else
+            echo "kwi3: build FAILED and no previously built binary exists -- there is no $FINAL_BIN to run." >&2
+            echo "kwi3: fix the build error and re-run 'rotz install kwi3'. Log:" >&2
+            sed 's/^/kwi3:   /' "$BUILD_LOG" >&2
+            rm -rf "$TMPBUILD" "$BUILD_LOG"
+            exit 1
+          fi
+          rm -rf "$TMPBUILD" "$BUILD_LOG"
+        fi
+      fi
+
+      # ---------------------------------------------------------------
+      # 3. Link the binary and the generic session scripts (kwi3-7m8.5)
+      #    into the clone; copy the bar; link this dot's own config.
+      #    Runs whenever step 2 did not already exit 1 above - including
+      #    the warn-and-continue paths, so a stale-but-present binary
+      #    still gets linked (an install that degrades, not one that
+      #    half-applies).
+      # ---------------------------------------------------------------
+      mkdir -p "$HOME/.local/bin" "$HOME/.config/quickshell/kwi3"
+      ln -sf "$FINAL_BIN" "$HOME/.local/bin/i3kwin-x11"
+      ln -sf "$SRC/i3kwin/session/kwi3-x11-session" "$HOME/.local/bin/kwi3-x11-session"
+      ln -sf "$SRC/i3kwin/session/kwi3-session-env.sh" "$HOME/.local/bin/kwi3-session-env.sh"
+      cp -a "$SRC/i3kwin/bar/." "$HOME/.config/quickshell/kwi3/"
+
+      rotz link kwi3 --force
