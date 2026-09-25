@@ -1,0 +1,55 @@
+# Meta-package: WSL with kwi3 over xrdp (X11, kwi3-7m8.7).
+# Usage: rotz install meta-wsl-kwi3
+#
+# UNLIKE meta-wsl-i3 / meta-wsl-sway, this does NOT call wsl-wm-switch —
+# same exception meta-wsl-gnome takes (see CLAUDE.md's meta-package table).
+# kwi3 gets its own xrdp listener on port 3392 (kwi3/xrdp/xrdp-kwi3.service
+# + xrdp-sesman-kwi3.service, kwi3-7m8.7), separate from the stock i3
+# listener on 3391 that wsl-wm-switch's sway<->i3 flip governs. The two
+# coexist: installing this meta does not disturb whichever of i3/sway is
+# the "active" WSL session, and a client picks kwi3 by dialling 3392 rather
+# than by anything this box switches. See krdp/README.md "Two xrdp
+# listeners" (kwi3-soc.14) for the phone's version of the same design, and
+# kwi3/xrdp/xrdp-kwi3.service's header for why a port switch — not a
+# session switch — is what makes both reachable at once.
+#
+# `kwi3` (this dot) clones, builds and links the i3kwin X11 host itself;
+# `hotkeyd` and `quickshell` are the keyboard daemon and the bar
+# kwi3-x11-session starts once the host is up (i3kwin/session/
+# kwi3-x11-session), matching what meta-wsl-i3 already depends on for the
+# same reasons. `st` is the terminal kwi3-x11-session's fallback path
+# reaches for if nothing else is on screen.
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - d2
+  - ssh
+  - glab
+  - azcli
+  - claude
+  - opencode
+  - pi
+  - st
+  - hotkeyd
+  - quickshell
+  - docker
+  - kwi3
+
+installs:
+  # prerequisites: wsl (this box's WSL-specific bits), xrdp (the 3392
+  # listener's binaries and TLS defaults), kwi3 (clones/builds/links
+  # i3kwin-x11 and the session scripts this meta's own xrdp units exec).
+  depends:
+    - wsl
+    - xrdp
+    - kwi3
+  # No installs.cmd: unlike meta-wsl-i3/meta-wsl-sway, there is no session
+  # switch to run here. kwi3's own xrdp listener units
+  # (kwi3/xrdp/xrdp-kwi3.service, xrdp-sesman-kwi3.service) are installed
+  # by kwi3/dot.yaml's own install cmd, which is a `depends` of this meta
+  # via `kwi3` above — not restated here, so there is exactly one place
+  # that does the root-side install (kwi3-7m8.7's own success criterion 5,
+  # idempotence, would otherwise have two).
