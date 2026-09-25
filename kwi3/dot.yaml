@@ -12,6 +12,15 @@
 # already set up — never touching it. See kwi3/xrdp/xrdp-kwi3.service and
 # xrdp/xinitrc's KWI3_SESSION branch for the rest of that mechanism.
 #
+# LAN access to 3392 needs the same firewall rules xrdp/dot.yaml documents
+# for 3391 — admin PowerShell, never run by this dot or by any agent:
+#   New-NetFirewallHyperVRule -DisplayName "WSL kwi3" -Direction Inbound `
+#     -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' `
+#     -Protocol TCP -LocalPorts 3392
+#   New-NetFirewallRule -DisplayName "WSL kwi3 LAN" -Direction Inbound `
+#     -Protocol TCP -LocalPort 3392 -Action Allow -Profile Private `
+#     -RemoteAddress LocalSubnet
+#
 # ${KWI3_REPO:-https://github.com/b3tchi/kwi3} at ${KWI3_REF:-main} is the
 # real default. A local path clone (KWI3_REPO=/path/to/kwi3) is supported
 # for the same reason KWI3_CONFIG overrides the config lookup on the kwi3
