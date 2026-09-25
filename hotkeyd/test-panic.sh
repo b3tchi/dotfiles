@@ -86,6 +86,10 @@ cleanup() {
     pkill -f "$HOTKEYD_PROC_PAT .*--display $XC" 2>/dev/null
     [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null
     [ -n "${FAKE_PID_GO:-}" ] && kill "$FAKE_PID_GO" 2>/dev/null
+    # $XD's daemon is only ever started through the launcher, so the launcher
+    # stops it — by display, like every other reap here.
+    DISPLAY="$XD" "$HERE/hotkeyd.sh" stop "$XD" >/dev/null 2>&1
+    [ -n "${FAKEWM_PID:-}" ] && kill "$FAKEWM_PID" 2>/dev/null
     for p in "${I3_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     for p in "${XVFB_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     rm -rf "$T"
@@ -102,6 +106,10 @@ XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
 # is not entitled to touch, standing in for the caller's live :0/:10. See the
 # sentinel block below.
 XC="$(probe_free_display "$(( ${XB#:} + 1 ))")"
+# XD is a display whose window manager is NOT i3 — a kwi3 session (section 5c,
+# kwi3-8wb.1). Its "WM" is a fake i3-IPC server the suite starts; there is no
+# i3 on it, so nothing there can read config.d.
+XD="$(probe_free_display "$(( ${XC#:} + 1 ))")"
 trap cleanup EXIT
 
 # --- throwaway session -------------------------------------------------------
@@ -235,6 +243,57 @@ for inc in d.get("included_configs", []):
     print(inc.get("variable_replaced_contents") or inc.get("raw_contents", ""))
 EOF
 
+# A window manager that speaks i3 IPC and is NOT i3 (section 5c). It answers
+# GET_VERSION (type 7) with the human_readable it is given — kwi3's is
+# "kwi3 (i3 IPC 4.24 compatible)", i3kwin core/i3ipc.js ipcVersion() — and
+# every other request with a bare success, which is all the daemon needs from
+# it to start. One thread per connection: the daemon holds its own open while
+# the launcher's probe comes and goes.
+cat > "$T/fakewm.py" <<'EOF'
+import json, os, socket, struct, sys, threading
+path, human = sys.argv[1], sys.argv[2]
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(path)
+srv.listen(8)
+def reply(c, kind, obj):
+    body = json.dumps(obj).encode()
+    c.sendall(b"i3-ipc" + struct.pack("=II", len(body), kind) + body)
+def serve(c):
+    try:
+        while True:
+            hdr = b""
+            while len(hdr) < 14:
+                chunk = c.recv(14 - len(hdr))
+                if not chunk:
+                    return
+                hdr += chunk
+            ln, kind = struct.unpack("=II", hdr[6:14])
+            while ln > 0:
+                chunk = c.recv(ln)
+                if not chunk:
+                    return
+                ln -= len(chunk)
+            if kind == 7:
+                reply(c, kind, {"major": 4, "minor": 24, "patch": 0,
+                                "human_readable": human,
+                                "loaded_config_file_name": "<fake>"})
+            elif kind == 0:
+                reply(c, kind, [{"success": True}])
+            else:
+                reply(c, kind, {"success": True})
+    except OSError:
+        return
+    finally:
+        c.close()
+while True:
+    conn, _ = srv.accept()
+    threading.Thread(target=serve, args=(conn,), daemon=True).start()
+EOF
+
 SOCK_A="$T/i3-a.sock"
 cat > "$T/i3.conf" <<EOF
 font pango:monospace 10
@@ -243,7 +302,7 @@ include $HOTKEYD_I3_CONFIG_D/*.conf
 bindsym Mod4+Shift+r exec --no-startup-id $HERE/hotkeyd-panic.sh panic
 EOF
 
-for dpy in "$XA" "$XB" "$XC"; do
+for dpy in "$XA" "$XB" "$XC" "$XD"; do
     Xvfb "$dpy" -screen 0 640x480x24 >/dev/null 2>&1 &
     XVFB_PIDS+=($!)
 done
@@ -561,6 +620,108 @@ DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
 sleep 0.5
 [ "$(daemons_on "$XA")" = 0 ] || bad "teardown: the contested daemon survived"
 
+# --- 5c: the latch is an i3 bind table; a kwi3 display is not i3 (kwi3-8wb.1)
+# The fallback rescues a display by having ITS i3 re-parse config.d and take
+# the chords back. That rescue only exists where i3 is the window manager. On
+# a kwi3 display (the i3kwin X11 host: it serves the i3 IPC socket, has NO
+# bind table, and grabs only the panic chord) nothing reads config.d, so
+# refusing to start the daemon there does not hand the keyboard to anyone —
+# it leaves that display with no keyboard at all. Observed live: a panic on
+# the i3 session :10 left the kwi3 session :40 unable to start its daemon.
+#
+# $XD stands for that display. Its "window manager" is a fake i3-IPC server
+# answering GET_VERSION with kwi3's reply (i3kwin core/i3ipc.js ipcVersion()),
+# reached the way the kwi3 session reaches its real one: HOTKEYD_I3SOCK.
+# Every assertion is made WHILE THE LINK IS SET (sections 4-5b left it so).
+echo "panic: the latch does not reach a display whose WM is not i3 (kwi3)"
+KWI3_SOCK="$T/kwi3-${XD#:}.sock"
+python3 "$T/fakewm.py" "$KWI3_SOCK" \
+    'kwi3 (i3 IPC 4.24 compatible)' >"$T/fakewm.log" 2>&1 &
+FAKEWM_PID=$!
+for _t in 1 2 3 4 5 6 7 8 9 10; do
+    [ -S "$KWI3_SOCK" ] && break
+    sleep 0.2
+done
+[ -L "$LINK" ] || bad "setup: 5c expects the panic link to still be set"
+kwi3_start() {
+    DISPLAY="$XD" HOTKEYD_I3SOCK="$KWI3_SOCK" "$HERE/hotkeyd.sh" "$@" "$XD" 2>&1
+}
+
+out="$(kwi3_start start)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] \
+    && ok "start on a kwi3 display succeeds while i3 is panicked (rc=0)" \
+    || bad "start on a kwi3 display was latched by i3's fallback (rc=$rc): $out"
+[ "$(daemons_on "$XD")" = 1 ] && ok "and a daemon is serving $XD" \
+    || bad "no daemon on the kwi3 display $XD"
+case "$out" in
+    *kwi3*fallback*|*fallback*kwi3*)
+        ok "and it says why the i3 fallback does not apply there" ;;
+    *)  bad "start on kwi3 while panicked said nothing about the latch: $out" ;;
+esac
+
+# `status` must not call it CONTESTED: contested means i3 AND the daemon hold
+# grabs on one display, and kwi3 holds none (only the panic chord, which no
+# table may bind). A daemon serving a kwi3 display is simply running.
+out="$(kwi3_start status)"; rc=$?
+case "$out" in
+    *CONTESTED*) bad "status called a kwi3 display CONTESTED: $out" ;;
+    *)           ok "status does not call the kwi3 display contested" ;;
+esac
+[ "$rc" -eq 0 ] && ok "and exits 0 for the serving daemon there" \
+    || bad "status on the serving kwi3 daemon exited $rc: $out"
+kwi3_start stop >/dev/null
+sleep 0.3
+[ "$(daemons_on "$XD")" = 0 ] || bad "teardown: the kwi3 daemon on $XD survived"
+
+# FAIL CLOSED. The gate is lifted only on a POSITIVE answer from the WM the
+# daemon would dispatch to. Nothing answering (no HOTKEYD_I3SOCK and no i3 on
+# $XD) is "unknown", and unknown keeps today's refusal.
+out="$(DISPLAY="$XD" "$HERE/hotkeyd.sh" start "$XD" 2>&1)"; rc=$?
+[ "$rc" -eq 4 ] \
+    && ok "with no WM answering on $XD, start still refuses (rc=4)" \
+    || bad "start lifted the latch with no WM identified (rc=$rc): $out"
+[ "$(daemons_on "$XD")" = 0 ] || bad "a daemon was spawned with no WM identified"
+
+# The decision is read from the REPLY, not from HOTKEYD_I3SOCK being set:
+# the test rigs (livecheck, dispatchmatrix) point that variable at real i3.
+# Pointed at this suite's real i3 on $XA, the latch holds exactly as before.
+out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$SOCK_A" \
+       "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
+[ "$rc" -eq 4 ] \
+    && ok "HOTKEYD_I3SOCK naming a real i3 is still latched (rc=4)" \
+    || bad "HOTKEYD_I3SOCK at real i3 lifted the latch (rc=$rc): $out"
+[ "$(daemons_on "$XA")" = 0 ] || bad "a daemon was spawned behind i3's fallback"
+
+# The kwi3 answer must be about THIS display. HOTKEYD_I3SOCK is exported by
+# every kwi3 session, and kwi3-x11-session also pushes it into the systemd
+# user manager — so `hotkeyd.sh start :10` typed in a :40 terminal, or run
+# from any user unit, arrives at the i3 display carrying a socket that names
+# ANOTHER display's kwi3. Asking only that socket said "kwi3" and lifted the
+# latch on the i3 display: a daemon behind i3's live fallback, the CONTESTED
+# state itself (rejection #1 of kwi3-8wb.1). The display's own i3 answering
+# must keep the latch whatever HOTKEYD_I3SOCK names.
+out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
+       "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 4 ] \
+    && ok "an i3 display stays latched when HOTKEYD_I3SOCK names another display's kwi3 (rc=4)" \
+    || bad "HOTKEYD_I3SOCK at a foreign kwi3 lifted the latch on i3's display (rc=$rc): $out"
+if [ "$(daemons_on "$XA")" = 0 ]; then
+    ok "and nothing was spawned behind i3's fallback"
+else
+    bad "a daemon was spawned on the i3 display behind its fallback"
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+    sleep 0.5
+fi
+out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
+       "$HERE/hotkeyd.sh" status "$XA" 2>&1)"; rc=$?
+case "$out" in
+    *PANICKED*"$LINK"*resume*)
+        ok "and status on the i3 display still reports PANICKED" ;;
+    *)  bad "status on the i3 display dropped the latch for a foreign kwi3: $out" ;;
+esac
+
 # --- 6: resume round-trip ----------------------------------------------------
 echo "panic: resume"
 out="$(panic resume 2>&1)"; rc=$?
@@ -584,6 +745,16 @@ answer="$(who_answers)"
 out="$(panic resume 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "resume with no link in place exits 0" \
     || bad "second resume exited $rc: $out"
+
+# 5c's other half, with NO link: a kwi3 display starts exactly as an i3 one
+# does (the i3 display's own restart is the resume above).
+out="$(kwi3_start start)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] && [ "$(daemons_on "$XD")" = 1 ] \
+    && ok "with no link, start on the kwi3 display succeeds too" \
+    || bad "start on the kwi3 display with no link failed (rc=$rc): $out"
+kwi3_start stop >/dev/null
+sleep 0.3
 
 # --- 7: panic with the daemon ALREADY DEAD -----------------------------------
 echo "panic: daemon already dead"

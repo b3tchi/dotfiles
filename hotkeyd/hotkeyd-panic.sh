@@ -44,6 +44,9 @@
 #     into the contested state behind the fallback's back. Panic is sticky until
 #     resume, which is the property that survives a reboot — the link is on
 #     disk, the daemon's absence is not.
+#     (On every display whose WM is i3, that is: a kwi3 display reads no
+#     i3 config, so the link cannot rescue it and `start` does not refuse
+#     there — kwi3-8wb.1, latch_applies() in hotkeyd.sh.)
 #   * `resume` RELOADS EVERY LOCAL DISPLAY, not merely the ones panic recorded.
 #     The link it removes was machine-wide, and removing a file does not retract
 #     grabs i3 already holds; a display that reloaded into the fallback during
