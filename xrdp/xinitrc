@@ -14,5 +14,44 @@ fi
 # Alt shortcuts silently leak to the focused window. setxkbmap recompiles the
 # map and resets the locked state to 0.
 setxkbmap -layout us -model pc104 -option ""
+
+# ------------------------------------------------- the kwi3 leg (kwi3-7m8.7)
+# Set only by the kwi3 xrdp listener's own sesman.ini
+# ([SessionVariables] KWI3_SESSION=1 in kwi3/xrdp/sesman.ini) — nothing else
+# on this machine sets it, so the i3 leg below runs exactly as it always has
+# whenever this is unset. Placed after the mod-resource merge and the
+# setxkbmap reset above: hotkeyd resolves $mod from the same i3wm.mod X
+# resource i3 does (hotkeyd/internal/bind/chord.go), so both legs need it,
+# and both need the keymap reset for the same stuck-Mod3 reason. See
+# i3kwin/examples/xinitrc (upstream kwi3 repo) and krdp/README.md "Two xrdp
+# listeners" for the phone's version of this same branch (there, the
+# discriminator is a second xrdp listener on a different port; here it is
+# this same listener's own sesman, per kwi3-7m8.7).
+if [ -n "${KWI3_SESSION:-}" ]; then
+    # Sourced, not run: the whole job of kwi3-session-env.sh is two exports,
+    # $I3SOCK and $HOTKEYD_I3SOCK — never restated here, because the X11
+    # host computes the same socket path itself (adapters/x11/src/
+    # ipcserver.cpp) and two spellings of one path is how a session ends up
+    # exporting a socket nothing serves.
+    ENV_SH="$HOME/.local/bin/kwi3-session-env.sh"
+    if [ -r "$ENV_SH" ]; then
+        # shellcheck source=/dev/null
+        . "$ENV_SH"
+    fi
+
+    # Refuse rather than start half a session: if the env script did not
+    # run, or the two names it exports disagree, hotkeyd and i3-msg would be
+    # talking to two different window managers with no error anywhere
+    # (kwi3-soc.7's measured trap). Falling through to the i3 leg below is
+    # safer than starting kwi3 with a keyboard aimed at nothing.
+    if [ -n "${I3SOCK:-}" ] && [ "$I3SOCK" = "${HOTKEYD_I3SOCK:-}" ] \
+       && [ -x "$HOME/.local/bin/kwi3-x11-session" ]; then
+        exec "$HOME/.local/bin/kwi3-x11-session"
+    fi
+
+    echo "xinitrc: KWI3_SESSION is set but the launcher is missing, not" \
+         "executable, or I3SOCK/HOTKEYD_I3SOCK disagree - falling through" >&2
+fi
+
 # shared config (ft003): ~/.i3/config + ~/.i3/config.d/wsl.conf via rotz
 exec i3
