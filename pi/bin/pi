@@ -23,4 +23,11 @@ fi
 export CLAUDE_CONFIG_DIR="${PI_CLAUDE_CONFIG_DIR:-$HOME/.claude-pi}"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 
+# First run: the bridge needs a Claude login in this separate config dir.
+# Only prompt on an interactive terminal; `pi -p` in scripts just fails as before.
+if [[ ! -f $CLAUDE_CONFIG_DIR/.credentials.json && -t 0 && -t 1 ]] && command -v claude >/dev/null; then
+  echo "pi: no Claude login in $CLAUDE_CONFIG_DIR — starting 'claude auth login'" >&2
+  claude auth login || echo "pi: Claude login failed; claude-bridge models will not work" >&2
+fi
+
 exec node "$real" "$@"
