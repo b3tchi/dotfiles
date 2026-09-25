@@ -1,0 +1,36 @@
+# kwi3-7m8.7 — the kwi3 xrdp listener on 3392, for this WSL/Arch box.
+#
+# Adapted from the phone's krdp/phone/systemd/xrdp-kwi3.service
+# (kwi3-soc.14) with the phone's paths and port swapped for this box's:
+# port 3390 -> 3392 (3391 here is the pre-existing stock i3 instance, not
+# 3390), and Alpine's `/usr/bin/xrdp` stays the same path on Arch too.
+#
+#   sudo install -m 644 xrdp-kwi3.service /etc/systemd/system/
+#
+# The stock xrdp.service keeps serving i3 on 3391 (xrdp/dot.yaml's own WSL
+# sed already moved it there, before this task). This unit serves kwi3 on
+# 3392. Both are up at once; the client chooses by dialling a port.
+#
+# xrdp(8) DOES honour `-c` for its own ini, so xrdp.ini needs no bind mount.
+# sesman.ini does, for the reason spelled out in
+# xrdp-sesman-kwi3.service, and it is repeated here because this process
+# reads that file too — to find out which sesman socket to connect to. Get
+# it wrong and this listener quietly hands its connections to the i3
+# sesman, which is a session that comes up perfectly and runs the wrong
+# window manager.
+[Unit]
+Description=xrdp daemon for the kwi3 listener on 3392 (kwi3-7m8.7)
+Documentation=man:xrdp(8) man:xrdp.ini(5)
+Requires=xrdp-sesman-kwi3.service
+After=network-online.target xrdp-sesman-kwi3.service
+
+[Service]
+Type=exec
+PrivateMounts=yes
+BindPaths=/etc/xrdp-kwi3/sesman.ini:/etc/xrdp/sesman.ini
+ExecStart=/usr/bin/xrdp -c /etc/xrdp-kwi3/xrdp.ini --nodaemon
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
