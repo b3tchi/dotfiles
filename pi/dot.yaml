@@ -17,3 +17,9 @@ linux:
       fi
       rotz link pi --force
       pi update --extensions
+      # pi-claude-bridge 0.8.0 serves Opus 5.5 at 200K until it is in the measured
+      # 1M list; [1m] verified on Max. Drop once upstream adds it.
+      m=~/.pi/agent/npm/node_modules/pi-claude-bridge/src/models.ts
+      if [ -f "$m" ] && ! grep -q '"claude-opus-5-5"' "$m"; then
+        sed -i 's/^\t"claude-opus-5",$/&\n\t"claude-opus-5-5",/' "$m"
+      fi
