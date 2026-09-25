@@ -629,8 +629,10 @@ set $transp       #00000000
 # Theme colors — the five client.<class> lines moved to i3/colors.conf
 # (sp003 Task 6, kwi3-7m8.6), shared with kwi3's own config reader. See that
 # file's header for why client.background stays here rather than moving
-# with them: it reads $transp, set two lines below, and i3 does not carry a
-# `set` variable across a file boundary in either direction.
+# with them: it reads $transp (set above, "set $transp" search this file),
+# and while MEASURED i3 -C behaviour says that would still resolve today —
+# a `set` in an including file IS visible in what it includes — colocating
+# it with its `set` avoids relying on that ordering never changing.
 include ~/.dotfiles/i3/colors.conf
 
 client.background       $transp
