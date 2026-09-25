@@ -1,5 +1,5 @@
 # kwi3-7m8.7 — the kwi3 listener's own session manager, for this WSL/Arch
-# box.
+# box. kwi3-7m8.14 — reached through a private /run/xrdp.
 #
 # Adapted from the phone's krdp/phone/systemd/xrdp-sesman-kwi3.service
 # (kwi3-soc.14) verbatim except for the description; the mechanism does not
@@ -8,23 +8,46 @@
 #
 #   sudo install -m 644 xrdp-sesman-kwi3.service /etc/systemd/system/
 #
-# Deliberately NOT a copy of xrdp-sesman.service with a different --config.
-# xrdp-sesman(8) does take `-c /path/to/sesman.ini`, but its own man page
-# says why that is not enough on its own: "you will have to have a
-# /etc/xrdp/sesman.ini in place too, as a few elements of the system
-# (notably xrdp(8) and xrdp-chansrv(8)) will want to read it." Measured on
-# xrdp 0.10.6 (this box's package, same version as the phone's),
-# xrdp_mm_connect_sm() builds that path with
+# TWO bind mounts, for two different reasons.
 #
-#     g_snprintf(buf, 255, "%s/sesman.ini", "/etc/xrdp")
+# 1. /etc/xrdp-kwi3/sesman.ini over /etc/xrdp/sesman.ini. xrdp-sesman(8)
+#    does take `-c`, but its own man page says why that is not enough: "you
+#    will have to have a /etc/xrdp/sesman.ini in place too, as a few
+#    elements of the system (notably xrdp(8) and xrdp-chansrv(8)) will want
+#    to read it." xrdp 0.10.6's chansrv builds XRDP_CFG_PATH "/sesman.ini"
+#    from a compile-time literal (sesman/chansrv/chansrv.c), and xrdp-sesexec
+#    carries the literal /etc/xrdp/sesman.ini too. Binding the file makes
+#    sesman, sesexec, chansrv and startwm.sh all read the SAME one — which
+#    is what makes [SessionVariables] KWI3_SESSION=1 reach ~/.xinitrc, and
+#    X11DisplayOffset=40 apply. Only that one file is overridden: rsakeys,
+#    certs, startwm.sh, the km-*.ini keymaps and gfx.toml are read unchanged
+#    through the same /etc/xrdp path.
 #
-# — the directory is a compile-time literal in the binary, not derived from
-# `xrdp -c`, so there is no configuration that points a second xrdp at a
-# second sesman. A private mount namespace is what is left, and it is
-# exact: one file, replaced for this unit and everything it spawns, and
-# invisible to the stock stack — /etc/xrdp/rsakeys.ini, cert.pem, key.pem,
-# startwm.sh, the km-*.ini keymaps and gfx.toml are all read unchanged
-# through the same /etc/xrdp path, because only sesman.ini is overridden.
+# 2. /run/xrdp-kwi3 over /run/xrdp — the ROUTING, and the reason the kwi3
+#    sesman.ini leaves ListenPort at its default. xrdp 0.10.6 can only ever
+#    dial /var/run/xrdp/sesman.socket (the full source trail is in
+#    xrdp-kwi3.service's header), so the kwi3 sesman listens on exactly that
+#    name, inside a /run/xrdp only the two kwi3 units see. Its lock file
+#    (.sesman.socket.lock) lands beside it, in the private dir, so it never
+#    contends with the stock sesman's. sesexec, Xorg/xorgxrdp, chansrv and
+#    the session all inherit the namespace, and sesexec exports
+#    XRDP_SOCKET_PATH=/var/run/xrdp/<uid> into the session: every
+#    per-display socket (xrdp_display_<n>, xrdp_chansrv_socket_<n>,
+#    xrdpapi_<n>, the audio pair, xrdp_disconnect_display_<n>) is made and
+#    found under the private dir, consistently with xrdp-kwi3.service,
+#    which binds the same directory. Nothing under /run/xrdp is meant to be
+#    shared with the stock pair: every path the xrdp binaries name there is
+#    either sesman.socket or per-uid/per-display.
+#
+#    Caveat: a process that is NOT a descendant of this unit — anything the
+#    systemd --user manager or D-Bus activation starts, e.g. a PulseAudio or
+#    PipeWire xrdp module — resolves /var/run/xrdp/<uid> in the HOST
+#    namespace and will not find a kwi3 session's sockets there. Nothing on
+#    this box does that today (no pulseaudio-module-xrdp or
+#    pipewire-module-xrdp installed); it would matter for sound.
+#
+# See xrdp-kwi3.service for why RuntimeDirectory=/RuntimeDirectoryPreserve=
+# are set identically in both units, and why /tmp stays shared.
 [Unit]
 Description=xrdp session manager for the kwi3 listener (kwi3-7m8.7)
 Documentation=man:xrdp-sesman(8) man:sesman.ini(5)
@@ -34,12 +57,11 @@ BindsTo=xrdp-kwi3.service
 
 [Service]
 Type=exec
-# The one line this whole unit exists for. sesexec, Xorg, chansrv and
-# startwm.sh are all children of this process, so they inherit the
-# namespace and every one of them reads the SAME sesman.ini — which is
-# what makes [SessionVariables] KWI3_SESSION=1 reach ~/.xinitrc.
 PrivateMounts=yes
+RuntimeDirectory=xrdp-kwi3
+RuntimeDirectoryPreserve=yes
 BindPaths=/etc/xrdp-kwi3/sesman.ini:/etc/xrdp/sesman.ini
+BindPaths=/run/xrdp-kwi3:/run/xrdp
 ExecStart=/usr/bin/xrdp-sesman --nodaemon
 ExecReload=kill -HUP $MAINPID
 

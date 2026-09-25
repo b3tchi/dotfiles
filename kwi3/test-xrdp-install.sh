@@ -47,7 +47,16 @@
 #   - $KWI3_XRDP_ETC_ROOT is the only place any file is written, and it is
 #     mktemp -d'd fresh and removed on exit;
 #   - asserts nothing under the real /etc was ever named in a sudo/install
-#     invocation, as a regression guard on top of the redirection itself.
+#     invocation, as a regression guard on top of the redirection itself;
+#   - asserts every systemctl call across every run names ONLY
+#     xrdp-sesman-kwi3.service / xrdp-kwi3.service - never the stock
+#     xrdp.service / xrdp-sesman.service carrying the i3 session on 3391
+#     (kwi3-7m8.13 point 3, kwi3-7m8.14).
+#
+# It also pins the kwi3-7m8.14 routing fix in the COMMITTED files: the kwi3
+# sesman.ini sets no non-default ListenPort (xrdp 0.10.6 can only dial
+# /var/run/xrdp/sesman.socket), and both units bind a private /run/xrdp-kwi3
+# over /run/xrdp, create it themselves and never remove it on stop.
 
 set -u -o pipefail
 
@@ -74,19 +83,43 @@ BIN="$STATE/bin"
 FAKE_HOME="$STATE/home"
 ETCROOT="$STATE/etc"
 TRACE="$STATE/trace"
+TRACE_ALL="$STATE/trace-all"
 mkdir -p "$BIN" "$FAKE_HOME/.dotfiles/kwi3" "$ETCROOT"
 cp -a "$XRDP_SRC_REAL" "$FAKE_HOME/.dotfiles/kwi3/xrdp"
 : > "$TRACE"
+: > "$TRACE_ALL"
+
+# The real /etc/xrdp-kwi3 legitimately EXISTS on a box where `rotz install
+# kwi3` has run, so the sandbox check at the end compares it before and after
+# rather than demanding that it be absent.
+etc_fingerprint() {
+  if [ -e /etc/xrdp-kwi3 ]; then
+    find /etc/xrdp-kwi3 -printf '%p %s %T@ %i\n' 2>/dev/null | sort
+  else
+    echo absent
+  fi
+}
+ETC_BEFORE="$(etc_fingerprint)"
 
 # ---------------------------------------------------------------- the stubs
+# FAIL_SUDO_INSTALL=1 makes `sudo install ...` fail the way a refused password
+# or a read-only /etc would (kwi3-7m8.13 point 1): recorded, nothing written,
+# exit 1.
 cat > "$BIN/sudo" <<'EOF'
 #!/bin/sh
 printf 'sudo %s\n' "$*" >> "$TRACE"
+if [ "${FAIL_SUDO_INSTALL:-0}" = 1 ] && [ "$1" = install ]; then
+  echo "sudo: a password is required" >&2
+  exit 1
+fi
 exec "$@"
 EOF
+# Every systemctl call from every run is ALSO appended to $TRACE_ALL, which is
+# never truncated, so the stock-unit guard at the end sees all of them.
 cat > "$BIN/systemctl" <<'EOF'
 #!/bin/sh
 printf 'systemctl %s\n' "$*" >> "$TRACE"
+printf 'systemctl %s\n' "$*" >> "$TRACE_ALL"
 exit 0
 EOF
 chmod +x "$BIN/sudo" "$BIN/systemctl"
@@ -98,14 +131,21 @@ yq -r '.linux.installs.cmd' "$DOT_YAML" \
   > "$FRAGMENT"
 [ -s "$FRAGMENT" ] || { echo "test-xrdp-install: extracted fragment is empty - has the marker comment moved?" >&2; exit 2; }
 
-run_step4() {
+run_step4() {   # extra VAR=value arguments are passed into the environment
   env -i \
     HOME="$FAKE_HOME" \
     PATH="$BIN:/usr/bin:/bin" \
     TRACE="$TRACE" \
+    TRACE_ALL="$TRACE_ALL" \
     KWI3_XRDP_ETC_ROOT="$ETCROOT" \
+    "$@" \
     bash "$FRAGMENT"
 }
+
+# The restart step 4 must run when a file changed, and must not run when
+# nothing did (kwi3-7m8.14): a running unit keeps the mount namespace - and
+# the sesman.ini inode it bound - that it was started with.
+RESTART_RE='^systemctl restart xrdp-sesman-kwi3\.service xrdp-kwi3\.service$'
 
 # ============================================================ first install
 : > "$TRACE"
@@ -131,9 +171,12 @@ check "$n_install" "4" "first install: exactly 4 sudo install calls (one per fil
 grep -q '^systemctl daemon-reload' "$TRACE" \
   && ok "first install: daemon-reload ran (unit files changed)" \
   || bad "first install: daemon-reload did not run"
-grep -q '^systemctl enable --now xrdp-sesman-kwi3.service xrdp-kwi3.service' "$TRACE" \
-  && ok "first install: enable --now ran with both units, sesman first" \
-  || bad "first install: enable --now missing or wrong argument order"
+grep -q '^systemctl enable xrdp-sesman-kwi3.service xrdp-kwi3.service$' "$TRACE" \
+  && ok "first install: enable ran with both units, sesman first" \
+  || bad "first install: enable missing or wrong argument order"
+grep -qE "$RESTART_RE" "$TRACE" \
+  && ok "first install: restart named both kwi3 units (restart also starts a stopped unit)" \
+  || bad "first install: no restart of the two kwi3 units"
 
 # ================================================== second install: no-op
 : > "$TRACE"
@@ -149,6 +192,9 @@ grep -q '^systemctl daemon-reload' "$TRACE" \
 grep -q '^systemctl enable --now xrdp-sesman-kwi3.service xrdp-kwi3.service' "$TRACE" \
   && ok "second install: enable --now still ran (idempotent no-op on an already-active unit)" \
   || bad "second install: enable --now missing on the second run"
+grep -q '^systemctl restart' "$TRACE" \
+  && bad "second install: restarted with nothing changed - that drops live kwi3 sessions for nothing" \
+  || ok "second install: nothing changed, nothing restarted"
 
 for f in "$KE/xrdp.ini" "$KE/sesman.ini" "$UD/xrdp-kwi3.service" "$UD/xrdp-sesman-kwi3.service"; do
   h1=$(cmp -s "$f" "$FAKE_HOME/.dotfiles/kwi3/xrdp/$(basename "$f")" && echo same || echo diff)
@@ -173,6 +219,67 @@ else
 fi
 n_install_xrdpini=$(grep -c "sudo install .*$KE/xrdp.ini" "$TRACE" || true)
 check "$n_install_xrdpini" "0" "local-edit repair: xrdp.ini (unedited) was NOT rewritten"
+grep -qE "$RESTART_RE" "$TRACE" \
+  && ok "local-edit repair: the kwi3 units were restarted to pick the repaired sesman.ini up" \
+  || bad "local-edit repair: sesman.ini changed but the kwi3 units were not restarted"
+
+# ============================ a failed sudo install is reported, not "wrote"
+# kwi3-7m8.13 point 1: the old copy_if_changed printed "wrote" and set
+# XRDP_CHANGED after a sudo that had failed.
+printf '\n; another local edit\n' >> "$KE/xrdp.ini"
+: > "$TRACE"
+run_step4 FAIL_SUDO_INSTALL=1 > "$STATE/fail.out" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] \
+  && ok "failed install: step 4 exits non-zero ($rc)" \
+  || bad "failed install: step 4 exited 0 after sudo install failed"
+grep -q 'kwi3-xrdp: wrote' "$STATE/fail.out" \
+  && bad "failed install: still printed 'wrote' for a file it did not write" \
+  || ok "failed install: no 'wrote' line"
+grep -q 'kwi3-xrdp: FAILED to install .*xrdp.ini' "$STATE/fail.out" \
+  && ok "failed install: the failure is named with the file" \
+  || bad "failed install: the failure was not reported by name"
+grep -qE '^systemctl (daemon-reload|restart|enable)' "$TRACE" \
+  && bad "failed install: went on to daemon-reload/enable/restart on a half-written install" \
+  || ok "failed install: no daemon-reload, enable or restart after the failure"
+: > "$TRACE"
+run_step4 > /dev/null 2>&1
+cmp -s "$KE/xrdp.ini" "$XRDP_SRC_REAL/xrdp.ini" \
+  && ok "failed install: the next good run repairs it" \
+  || bad "failed install: the next good run did not repair xrdp.ini"
+
+# =================== the committed files carry the kwi3-7m8.14 routing fix
+# xrdp 0.10.6 always dials XRDP_SOCKET_ROOT_PATH/sesman.socket: its
+# xrdp_mm_get_sesman_port() keeps a sesman.ini ListenPort only when atoi()
+# gives 1..64999, and scp_port_to_unix_domain_path() maps every positive
+# integer to "sesman.socket". A kwi3 sesman on any OTHER socket name is
+# unreachable from xrdp-kwi3, which then reattaches the i3 session instead.
+SI="$XRDP_SRC_REAL/sesman.ini"
+lp=$(awk '/^[ \t]*\[/ { sect = $0; next }
+          sect ~ /^[ \t]*\[Globals\]/ && /^[ \t]*ListenPort[ \t]*=/ {
+            sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t\r]+$/, ""); print; exit }' "$SI")
+case "$lp" in
+  ""|sesman.socket) ok "kwi3 sesman.ini sets no non-default ListenPort (got '${lp:-<none>}')" ;;
+  *) bad "kwi3 sesman.ini sets ListenPort='$lp' - xrdp 0.10.6 can never reach a sesman there" ;;
+esac
+for u in xrdp-kwi3.service xrdp-sesman-kwi3.service; do
+  UF="$XRDP_SRC_REAL/$u"
+  grep -qx 'BindPaths=/run/xrdp-kwi3:/run/xrdp' "$UF" \
+    && ok "$u binds the private /run/xrdp-kwi3 over /run/xrdp" \
+    || bad "$u lacks BindPaths=/run/xrdp-kwi3:/run/xrdp"
+  grep -qx 'RuntimeDirectory=xrdp-kwi3' "$UF" \
+    && ok "$u creates /run/xrdp-kwi3 itself (RuntimeDirectory=xrdp-kwi3)" \
+    || bad "$u lacks RuntimeDirectory=xrdp-kwi3 - BindPaths would fail on a fresh boot"
+  grep -qx 'RuntimeDirectoryPreserve=yes' "$UF" \
+    && ok "$u never removes /run/xrdp-kwi3 on stop (RuntimeDirectoryPreserve=yes)" \
+    || bad "$u lacks RuntimeDirectoryPreserve=yes - stopping it would delete the other unit's sockets"
+  grep -qE '^(PrivateTmp|ProtectSystem|TemporaryFileSystem)=' "$UF" \
+    && bad "$u privatises /tmp - the two sesmen would stop seeing each other's /tmp/.X11-unix displays" \
+    || ok "$u leaves /tmp shared (display-number collision avoidance)"
+done
+grep -qx 'BindPaths=/etc/xrdp-kwi3/sesman.ini:/etc/xrdp/sesman.ini' "$XRDP_SRC_REAL/xrdp-sesman-kwi3.service" \
+  && ok "xrdp-sesman-kwi3 still binds its sesman.ini (chansrv reads /etc/xrdp/sesman.ini by literal path)" \
+  || bad "xrdp-sesman-kwi3 lost its sesman.ini bind - KWI3_SESSION=1 would not reach the session"
 
 # ==================================================== never touches /etc
 if grep -qE '(^| )/etc/xrdp(/| |$)' "$TRACE"; then
@@ -180,10 +287,27 @@ if grep -qE '(^| )/etc/xrdp(/| |$)' "$TRACE"; then
 else
   ok "nothing in any sudo/systemctl call ever named the real /etc/xrdp"
 fi
-if [ -e /etc/xrdp-kwi3 ]; then
-  bad "the real /etc/xrdp-kwi3 exists - this test wrote outside its sandbox"
+if [ "$(etc_fingerprint)" = "$ETC_BEFORE" ]; then
+  ok "the real /etc/xrdp-kwi3 is exactly as it was before the test"
 else
-  ok "the real /etc/xrdp-kwi3 was never created"
+  bad "the real /etc/xrdp-kwi3 changed - this test wrote outside its sandbox"
+fi
+
+# ====================================== never names the STOCK xrdp units
+# kwi3-7m8.13 point 3 / kwi3-7m8.14: across EVERY run above, every argument of
+# every systemctl call is either the verb, a flag, or one of the two kwi3
+# units. xrdp.service / xrdp-sesman.service carry Jan's live i3 session on
+# 3391 and must never be restarted, reloaded, stopped or even enabled here.
+stray=$(awk '{ for (i = 3; i <= NF; i++)
+                 if ($i !~ /^-/ && $i != "xrdp-kwi3.service" && $i != "xrdp-sesman-kwi3.service")
+                   print $i }' "$TRACE_ALL")
+n_sc=$(grep -c '^systemctl ' "$TRACE_ALL" || true)
+if [ -n "$stray" ]; then
+  bad "a systemctl call named something other than the two kwi3 units: $(echo "$stray" | sort -u | tr '\n' ' ')"
+elif [ "$n_sc" -lt 5 ]; then
+  bad "stock-unit guard saw only $n_sc systemctl calls - TRACE_ALL is not recording"
+else
+  ok "all $n_sc systemctl calls named only the kwi3 units (never xrdp.service / xrdp-sesman.service)"
 fi
 
 echo
