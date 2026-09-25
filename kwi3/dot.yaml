@@ -1,11 +1,16 @@
 # kwi3 — clone, build and link the i3kwin X11 host (sp003 Task 6,
-# kwi3-7m8.6). kwi3 itself lives in a SEPARATE repository
+# kwi3-7m8.6), and this box's own kwi3 xrdp listener on port 3392
+# (sp003 Task 7, kwi3-7m8.7). kwi3 itself lives in a SEPARATE repository
 # (https://github.com/b3tchi/kwi3, or $KWI3_REPO for a local/dev clone) —
-# this dot is the one place that repo and this one meet, and it owns only
-# three things: cloning/building it into ~/.local/src/kwi3, linking the
-# built binary and its session scripts into ~/.local/bin, and this
-# machine's kwi3 config (kwi3/config, linked to ~/.config/kwi3/config,
-# sharing its client.* palette with i3/colors.conf — see that file).
+# this dot is the one place that repo and this one meet, and it owns four
+# things: cloning/building it into ~/.local/src/kwi3, linking the built
+# binary and its session scripts into ~/.local/bin, this machine's kwi3
+# config (kwi3/config, linked to ~/.config/kwi3/config, sharing its
+# client.* palette with i3/colors.conf — see that file), and (root, via
+# `sudo` inline below) the kwi3/xrdp/* files that give kwi3 its own xrdp
+# listener on 3392, beside the stock i3 listener on 3391 that xrdp/dot.yaml
+# already set up — never touching it. See kwi3/xrdp/xrdp-kwi3.service and
+# xrdp/xinitrc's KWI3_SESSION branch for the rest of that mechanism.
 #
 # ${KWI3_REPO:-https://github.com/b3tchi/kwi3} at ${KWI3_REF:-main} is the
 # real default. A local path clone (KWI3_REPO=/path/to/kwi3) is supported
@@ -181,3 +186,80 @@ linux:
       cp -a "$SRC/i3kwin/bar/." "$HOME/.config/quickshell/kwi3/"
 
       rotz link kwi3 --force
+
+      # ---------------------------------------------------------------
+      # 4. This BOX's own kwi3 xrdp listener, port 3392 (kwi3-7m8.7). Note
+      #    the source here is kwi3/xrdp/* in THIS dotfiles repo (a sibling
+      #    of this dot.yaml) - not $SRC above, which is the upstream kwi3
+      #    checkout step 1 cloned; the two are unrelated trees.
+      #
+      #    NEVER touches /etc/xrdp itself - the stock i3 instance on 3391
+      #    (xrdp.service/xrdp-sesman.service) is read only where these ini
+      #    files were originally diffed from, never written here, and its
+      #    ActiveEnterTimestamp must be unchanged across this install
+      #    (kwi3-7m8.7 criterion 2).
+      #
+      #    Idempotent (criterion 5): copy_if_changed below `cmp`s before
+      #    ever calling `install`, so a file whose content already matches
+      #    is left alone - untouched mtime, no `install` invocation, no
+      #    log line claiming a write. `systemctl enable --now` on a unit
+      #    that is already enabled and already active is itself a no-op
+      #    per systemd (it neither restarts nor reloads a running unit),
+      #    so running it unconditionally on every install does not disturb
+      #    a session already up on 3392 - only `daemon-reload` is skipped
+      #    when nothing changed, since it is harmless but pointless noise
+      #    otherwise.
+      #
+      #    KWI3_XRDP_ETC_ROOT (default /etc) lets a stub test exercise this
+      #    exact shell text with no root and nothing under /etc touched -
+      #    see kwi3/test-xrdp-install.sh, in the style of
+      #    i3kwin/test/session-launcher-test.sh's own stub approach.
+      # ---------------------------------------------------------------
+      DOTROOT="$HOME/.dotfiles"
+      if command -v akm-root >/dev/null 2>&1; then
+        AR="$(akm-root 2>/dev/null || true)"
+        if [ -n "$AR" ] && [ -d "$AR/kwi3/xrdp" ]; then
+          DOTROOT="$AR"
+        fi
+      fi
+      XRDP_SRC="$DOTROOT/kwi3/xrdp"
+
+      copy_if_changed() {   # copy_if_changed SRC DST MODE
+        _src=$1; _dst=$2; _mode=$3
+        if [ -f "$_dst" ] && cmp -s "$_src" "$_dst" 2>/dev/null; then
+          echo "kwi3-xrdp: $_dst unchanged"
+          return 0
+        fi
+        sudo mkdir -p "$(dirname "$_dst")"
+        sudo install -m "$_mode" "$_src" "$_dst"
+        echo "kwi3-xrdp: wrote $_dst"
+        XRDP_CHANGED=1
+      }
+
+      if [ -d "$XRDP_SRC" ]; then
+        ETCROOT="${KWI3_XRDP_ETC_ROOT:-/etc}"
+        KWI3_XRDP_ETC="$ETCROOT/xrdp-kwi3"
+        UNIT_DIR="$ETCROOT/systemd/system"
+        XRDP_CHANGED=0
+
+        copy_if_changed "$XRDP_SRC/xrdp.ini"                 "$KWI3_XRDP_ETC/xrdp.ini"             644
+        copy_if_changed "$XRDP_SRC/sesman.ini"                "$KWI3_XRDP_ETC/sesman.ini"            644
+        copy_if_changed "$XRDP_SRC/xrdp-kwi3.service"         "$UNIT_DIR/xrdp-kwi3.service"          644
+        copy_if_changed "$XRDP_SRC/xrdp-sesman-kwi3.service"  "$UNIT_DIR/xrdp-sesman-kwi3.service"   644
+
+        if [ "$XRDP_CHANGED" = 1 ]; then
+          sudo systemctl daemon-reload
+          echo "kwi3-xrdp: daemon-reload (unit files changed)"
+        else
+          echo "kwi3-xrdp: no unit files changed - daemon-reload skipped"
+        fi
+
+        # Run every time, not only when XRDP_CHANGED: a unit stopped or
+        # disabled by hand should be put back without needing a file edit
+        # to trigger it, and the very first install (nothing to compare
+        # against yet) still needs this to enable and start both. Idempotent
+        # on an already-enabled, already-active unit - see the block header.
+        sudo systemctl enable --now xrdp-sesman-kwi3.service xrdp-kwi3.service
+      else
+        echo "kwi3-xrdp: no $XRDP_SRC in this clone - skipping the kwi3 xrdp listener (port 3392 will not be set up)" >&2
+      fi
