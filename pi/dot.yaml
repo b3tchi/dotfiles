@@ -4,6 +4,7 @@ linux:
     claude-bridge.json: ~/.pi/agent/claude-bridge.json
     # launcher sets CLAUDE_CONFIG_DIR=~/.claude-pi; replaces npm bin symlink
     bin/pi: ~/.local/bin/pi
+    bin/claude-pi: ~/.local/bin/claude-pi
     claude-pi/settings.json: ~/.claude-pi/settings.json
 
   installs:

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# claude-pi: run Claude Code against pi's config dir (~/.claude-pi).
+# Use it to /login (or `claude-pi auth login`) for the pi claude-bridge profile.
+# Same dir the pi launcher exports; PI_CLAUDE_CONFIG_DIR overrides both.
+
+export CLAUDE_CONFIG_DIR="${PI_CLAUDE_CONFIG_DIR:-$HOME/.claude-pi}"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+exec claude "$@"
