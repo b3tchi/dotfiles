@@ -65,7 +65,8 @@ TAG="$(printf %s "${DPY_BASE#:}" | tr -c 'A-Za-z0-9' '_')"
 # chords — and `start` is reached from an i3 `exec_always`, meaning any reload or
 # xrdp reconnect would rearm one display without anyone asking. `start` refuses
 # instead; `hotkeyd-panic.sh resume` is the only way back. Same env override as
-# the panic script, for the suite's throwaway HOME.
+# the panic script, for the suite's throwaway HOME. The refusal covers only the
+# displays the link can rescue, i.e. those whose WM is i3 — see latch_applies().
 I3_CONFIG_D="${HOTKEYD_I3_CONFIG_D:-$HOME/.i3/config.d}"
 FALLBACK_LINK="$I3_CONFIG_D/zz-fallback-binds.conf"
 
@@ -91,6 +92,50 @@ need_runtime() {
 # `status`, matching `linked()` in hotkeyd-panic.sh. They read the same path and
 # so cannot disagree today; a predicate copied twice is one that eventually does.
 linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
+
+# Does the panic latch REACH this display? (kwi3-8wb.1)
+#
+# The latch is an i3 bind table in i3's config.d. It rescues a display by
+# having THAT display's i3 re-parse config.d and take the chords back, so it
+# only means anything where i3 is the window manager. A display run by kwi3
+# (the i3kwin X11 host) serves the i3 IPC socket but has no bind table and
+# reads no i3 config — the daemon IS its keyboard, apart from the one panic
+# chord kwi3 grabs itself. Refusing to start there hands the keyboard to
+# nobody: observed live, a panic on the i3 session :10 left the kwi3 session
+# :40 with no keyboard at all.
+#
+# ASKED, NOT CONFIGURED. The question goes to the window manager the daemon
+# would dispatch to — $HOTKEYD_I3SOCK when set, else the display-pinned i3
+# resolution, exactly the order main.go's i3SocketResolver uses — and the
+# answer is its own GET_VERSION. kwi3 says so in `human_readable` ("kwi3 (i3
+# IPC 4.24 compatible)", i3kwin core/i3ipc.js ipcVersion()). An env flag like
+# HOTKEYD_WM=kwi3 would be a second statement of a fact the WM already makes,
+# and one that can be wrong: a session that exports it and then runs i3 would
+# start a daemon behind i3's live fallback, which is the contested state this
+# latch exists to prevent. HOTKEYD_I3SOCK being SET is not the signal either —
+# livecheck and dispatchmatrix point it at a real i3.
+#
+# FAILS CLOSED. Only a positive "I am kwi3" lifts the latch. No answer (no
+# i3-msg, no socket, a server that hangs past the timeout) and any other
+# answer — i3's included — keep exactly the refusal every display had before
+# this, so an i3 display cannot be reached by this change whatever goes wrong.
+# Probed ONLY when the link exists: the unpanicked start path, which is every
+# i3 `exec_always`, pays nothing.
+latch_applies() {
+    if [ -n "${HOTKEYD_I3SOCK:-}" ]; then
+        set -- -s "$HOTKEYD_I3SOCK"
+    else
+        set --
+    fi
+    # `env -u I3SOCK` for the dotfiles-hwds.6 reason start gives below: an
+    # inherited I3SOCK is some OTHER display's i3, and would answer for it.
+    ver="$(env -u I3SOCK DISPLAY="$DPY_BASE" timeout 2 \
+           i3-msg "$@" -t get_version 2>/dev/null)" || return 0
+    case "$ver" in
+        *'"human_readable":"kwi3'*|*'"human_readable": "kwi3'*) return 1 ;;
+    esac
+    return 0
+}
 
 # Resolves $DAEMON — the binary start/check will exec — for $DPY_BASE.
 #
@@ -196,8 +241,15 @@ case "$VERB" in
         need_display
         need_runtime
         if linked; then
-            die "session is PANICKED (fallback linked at $FALLBACK_LINK) — \
+            if latch_applies; then
+                die "session is PANICKED (fallback linked at $FALLBACK_LINK) — \
 run hotkeyd-panic.sh resume" 4
+            fi
+            # Said, not silent: someone reading the log after a panic should
+            # see why this display got a daemon while the others did not.
+            printf 'hotkeyd.sh: the i3 panic fallback (linked at %s) does '\
+'not apply on %s -- its window manager is kwi3, which reads no i3 config; '\
+'starting\n' "$FALLBACK_LINK" "$DPY_BASE" >&2
         fi
         pid="$(daemon_pid)"
         if [ -n "$pid" ]; then
@@ -303,7 +355,10 @@ you want" 78
             # holding overlapping chords, the one state the whole panic design
             # exists to prevent. Reporting "running … " at exit 0 is worse than
             # the bare "not running" below, because it ends the investigation.
-            if linked; then
+            # latch_applies: on a kwi3 display nothing takes the fallback's
+            # grabs, so a daemon there contests nothing — it is just running,
+            # and falls through to the health verdict below (kwi3-8wb.1).
+            if linked && latch_applies; then
                 # Adjacent quoted strings, not a backslash-newline: inside
                 # SINGLE quotes a backslash is literal, so continuing the format
                 # that way would print a stray `\` and a line break into the i3
@@ -404,7 +459,9 @@ you want" 78
         # expect for "no daemon"; only the message grows. Here the cure IS
         # `resume`: nothing contends, the session is simply parked in the
         # fallback, and resume is the only way back out.
-        if linked; then
+        # On a kwi3 display resume is NOT the cure — `start` works there
+        # behind the link — so the plain "not running" below is the truth.
+        if linked && latch_applies; then
             printf 'hotkeyd: not running on %s — session is PANICKED '\
 '(fallback linked at %s), run hotkeyd-panic.sh resume\n' \
                 "$DPY_BASE" "$FALLBACK_LINK"
