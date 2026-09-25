@@ -57,12 +57,24 @@
 # repo, "The binary finds core/ and qml/ via compile-time
 # I3KWIN_SOURCE_DIR".
 #
-# NOT LINKED FROM THE CLONE: kwi3/config (this directory's own file,
-# linked from HERE like any other dot) and i3kwin/bar, which is COPIED
-# (matching i3kwin/install.sh's own "the bar rides along... copied, not
-# built" choice) rather than linked, so a Quickshell config under
-# ~/.config/quickshell/kwi3 survives a `rm -rf ~/.local/src/kwi3` the way
-# the phone's own copy does.
+# NOT LINKED FROM THE CLONE: kwi3/config (this directory's own file, linked
+# from HERE like any other dot). i3kwin/bar is NOT copied, unlike
+# i3kwin/install.sh's own phone-side "the bar rides along... copied, not
+# built" choice (kwi3-8wb.2) - it is run straight out of the clone, at
+# $SRC/i3kwin/bar/shell.qml, by kwi3-x11-session's own KWI3_BAR_PATH default.
+# Two reasons: it needs no copy step to stay in sync with whatever this dot
+# last built, and it is no more fragile than the binary this dot already
+# links rather than copies - both already depend on $SRC surviving a `rotz
+# install kwi3`, so the bar gains no new failure mode by depending on it too.
+# The other reason is kwi3-8wb.2 itself: a COPY landed at
+# ~/.config/quickshell/kwi3, which on THIS box is reached by following
+# ~/.config/quickshell - a symlink into this repo's own top-level quickshell
+# config (quickshell/config/shell.qml) - so the copy wrote an untracked
+# quickshell/config/kwi3/ inside ~/.dotfiles, and `qs -c kwi3` still could not
+# find it (quickshell 0.3.x stops looking at subdirectories the moment a
+# top-level shell.qml exists in a search path). This dot must never write
+# through ~/.config/quickshell again for that reason - see
+# kwi3/test-bar-symlink-safe.sh.
 linux:
   links:
     config: ~/.config/kwi3/config
@@ -182,17 +194,23 @@ linux:
 
       # ---------------------------------------------------------------
       # 3. Link the binary and the generic session scripts (kwi3-7m8.5)
-      #    into the clone; copy the bar; link this dot's own config.
-      #    Runs whenever step 2 did not already exit 1 above - including
-      #    the warn-and-continue paths, so a stale-but-present binary
-      #    still gets linked (an install that degrades, not one that
-      #    half-applies).
+      #    into the clone; link this dot's own config. The bar is NOT
+      #    copied anywhere (kwi3-8wb.2, see the header comment above) - it
+      #    runs straight out of $SRC, which kwi3-x11-session finds on its
+      #    own. Runs whenever step 2 did not already exit 1 above -
+      #    including the warn-and-continue paths, so a stale-but-present
+      #    binary still gets linked (an install that degrades, not one
+      #    that half-applies).
+      #
+      #    NEVER add a write through ~/.config/quickshell here - that path
+      #    is a symlink into this repo's own top-level quickshell config on
+      #    this box, and a write through it lands inside ~/.dotfiles
+      #    itself as an untracked file (kwi3-8wb.2's bug).
       # ---------------------------------------------------------------
-      mkdir -p "$HOME/.local/bin" "$HOME/.config/quickshell/kwi3"
+      mkdir -p "$HOME/.local/bin"
       ln -sf "$FINAL_BIN" "$HOME/.local/bin/i3kwin-x11"
       ln -sf "$SRC/i3kwin/session/kwi3-x11-session" "$HOME/.local/bin/kwi3-x11-session"
       ln -sf "$SRC/i3kwin/session/kwi3-session-env.sh" "$HOME/.local/bin/kwi3-session-env.sh"
-      cp -a "$SRC/i3kwin/bar/." "$HOME/.config/quickshell/kwi3/"
 
       rotz link kwi3 --force
 
