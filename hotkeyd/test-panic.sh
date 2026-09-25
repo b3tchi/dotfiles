@@ -693,6 +693,35 @@ out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$SOCK_A" \
     || bad "HOTKEYD_I3SOCK at real i3 lifted the latch (rc=$rc): $out"
 [ "$(daemons_on "$XA")" = 0 ] || bad "a daemon was spawned behind i3's fallback"
 
+# The kwi3 answer must be about THIS display. HOTKEYD_I3SOCK is exported by
+# every kwi3 session, and kwi3-x11-session also pushes it into the systemd
+# user manager — so `hotkeyd.sh start :10` typed in a :40 terminal, or run
+# from any user unit, arrives at the i3 display carrying a socket that names
+# ANOTHER display's kwi3. Asking only that socket said "kwi3" and lifted the
+# latch on the i3 display: a daemon behind i3's live fallback, the CONTESTED
+# state itself (rejection #1 of kwi3-8wb.1). The display's own i3 answering
+# must keep the latch whatever HOTKEYD_I3SOCK names.
+out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
+       "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 4 ] \
+    && ok "an i3 display stays latched when HOTKEYD_I3SOCK names another display's kwi3 (rc=4)" \
+    || bad "HOTKEYD_I3SOCK at a foreign kwi3 lifted the latch on i3's display (rc=$rc): $out"
+if [ "$(daemons_on "$XA")" = 0 ]; then
+    ok "and nothing was spawned behind i3's fallback"
+else
+    bad "a daemon was spawned on the i3 display behind its fallback"
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+    sleep 0.5
+fi
+out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
+       "$HERE/hotkeyd.sh" status "$XA" 2>&1)"; rc=$?
+case "$out" in
+    *PANICKED*"$LINK"*resume*)
+        ok "and status on the i3 display still reports PANICKED" ;;
+    *)  bad "status on the i3 display dropped the latch for a foreign kwi3: $out" ;;
+esac
+
 # --- 6: resume round-trip ----------------------------------------------------
 echo "panic: resume"
 out="$(panic resume 2>&1)"; rc=$?

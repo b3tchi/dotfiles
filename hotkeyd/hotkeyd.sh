@@ -104,31 +104,75 @@ linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 # nobody: observed live, a panic on the i3 session :10 left the kwi3 session
 # :40 with no keyboard at all.
 #
-# ASKED, NOT CONFIGURED. The question goes to the window manager the daemon
-# would dispatch to — $HOTKEYD_I3SOCK when set, else the display-pinned i3
-# resolution, exactly the order main.go's i3SocketResolver uses — and the
-# answer is its own GET_VERSION. kwi3 says so in `human_readable` ("kwi3 (i3
-# IPC 4.24 compatible)", i3kwin core/i3ipc.js ipcVersion()). An env flag like
-# HOTKEYD_WM=kwi3 would be a second statement of a fact the WM already makes,
-# and one that can be wrong: a session that exports it and then runs i3 would
-# start a daemon behind i3's live fallback, which is the contested state this
-# latch exists to prevent. HOTKEYD_I3SOCK being SET is not the signal either —
+# TWO QUESTIONS, BOTH MUST SAY "NOT i3" (rejection #1 of kwi3-8wb.1).
+#
+#   1. THE DISPLAY'S OWN i3. Asked with DISPLAY pinned, no -s and no I3SOCK,
+#      so i3-msg resolves the socket from $DPY_BASE's I3_SOCKET_PATH root
+#      property — which i3 sets on the display it manages and kwi3 does not
+#      set at all (verified on a real i3kwin-x11: `xprop -root
+#      I3_SOCKET_PATH` says "not found", and i3-msg says "Could not
+#      determine i3 socket path"). That exact refusal is the ONLY answer that
+#      clears this step. An i3 answering, a claimed socket that does not
+#      answer, a hang past the timeout, a missing i3-msg: all keep the latch.
+#   2. THE WM THE DAEMON WOULD DISPATCH TO — $HOTKEYD_I3SOCK when set, else
+#      the display-pinned resolution, the order main.go's i3SocketResolver
+#      uses — must positively answer GET_VERSION with a `human_readable`
+#      starting "kwi3" ("kwi3 (i3 IPC 4.24 compatible)", i3kwin
+#      core/i3ipc.js ipcVersion()).
+#
+# Step 2 alone was the first cut, and it was wrong: HOTKEYD_I3SOCK is
+# exported by every kwi3 session and pushed into the systemd user manager by
+# kwi3-x11-session, so `hotkeyd.sh start :10` from a :40 terminal or a user
+# unit asked :40's kwi3, heard "kwi3", and started a daemon behind :10's live
+# fallback — CONTESTED. Step 1 is what binds the answer to $DPY_BASE: the
+# latch is about i3's config.d, and it now holds on every display where i3
+# has claimed the root, whatever the environment names.
+#
+# Step 2 is NOT checked to be on the same display. kwi3's GET_VERSION does
+# not name one, and the socket path (kwi3-<n>.sock) is a convention of
+# kwi3-session-env.sh, not something the WM attests. It does not need to be:
+# once step 1 has ruled i3 out, no bind table on $DPY_BASE can take the
+# fallback's chords, so there is nothing for a daemon to contest there. A
+# daemon on a no-i3 display dispatching to another display's kwi3 is a
+# misrouting, not a latch breach — kwi3-vfg.
+#
+# ASKED, NOT CONFIGURED. An env flag like HOTKEYD_WM=kwi3 would be a second
+# statement of a fact the WM already makes, and one that can be wrong: a
+# session that exports it and then runs i3 would start a daemon behind i3's
+# live fallback. HOTKEYD_I3SOCK being SET is not the signal either —
 # livecheck and dispatchmatrix point it at a real i3.
 #
-# FAILS CLOSED. Only a positive "I am kwi3" lifts the latch. No answer (no
-# i3-msg, no socket, a server that hangs past the timeout) and any other
-# answer — i3's included — keep exactly the refusal every display had before
-# this, so an i3 display cannot be reached by this change whatever goes wrong.
+# THE INVARIANT. The latch is lifted only on a display whose root carries no
+# i3 socket path AND whose dispatch WM says it is kwi3. Every other outcome
+# — including every failure of either probe — is exactly the refusal every
+# display had before kwi3-8wb.1. A stale I3_SOCKET_PATH (an i3 that died and
+# left the property behind) therefore keeps the latch too; that costs a kwi3
+# started on a display i3 once ran, and fails toward the refusal.
 # Probed ONLY when the link exists: the unpanicked start path, which is every
 # i3 `exec_always`, pays nothing.
 latch_applies() {
+    # `env -u I3SOCK` for the dotfiles-hwds.6 reason start gives below: an
+    # inherited I3SOCK is some OTHER display's i3, and would answer for it.
+    own="$(env -u I3SOCK DISPLAY="$DPY_BASE" timeout 2 \
+           i3-msg -t get_version 2>&1)" && own_rc=0 || own_rc=$?
+    if [ "$own_rc" -eq 0 ]; then
+        # Something answered through the display's own I3_SOCKET_PATH. Only a
+        # kwi3 that someday sets that property may go on to step 2.
+        case "$own" in
+            *'"human_readable":"kwi3'*|*'"human_readable": "kwi3'*) ;;
+            *) return 0 ;;
+        esac
+    else
+        case "$own" in
+            *'Could not determine i3 socket path'*) ;;
+            *) return 0 ;;
+        esac
+    fi
     if [ -n "${HOTKEYD_I3SOCK:-}" ]; then
         set -- -s "$HOTKEYD_I3SOCK"
     else
         set --
     fi
-    # `env -u I3SOCK` for the dotfiles-hwds.6 reason start gives below: an
-    # inherited I3SOCK is some OTHER display's i3, and would answer for it.
     ver="$(env -u I3SOCK DISPLAY="$DPY_BASE" timeout 2 \
            i3-msg "$@" -t get_version 2>/dev/null)" || return 0
     case "$ver" in
