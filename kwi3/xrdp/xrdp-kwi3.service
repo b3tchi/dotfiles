@@ -1,4 +1,5 @@
 # kwi3-7m8.7 — the kwi3 xrdp listener on 3392, for this WSL/Arch box.
+# kwi3-7m8.14 — routed to the kwi3 sesman by a private /run/xrdp.
 #
 # Adapted from the phone's krdp/phone/systemd/xrdp-kwi3.service
 # (kwi3-soc.14) with the phone's paths and port swapped for this box's:
@@ -12,12 +13,52 @@
 # 3392. Both are up at once; the client chooses by dialling a port.
 #
 # xrdp(8) DOES honour `-c` for its own ini, so xrdp.ini needs no bind mount.
-# sesman.ini does, for the reason spelled out in
-# xrdp-sesman-kwi3.service, and it is repeated here because this process
-# reads that file too — to find out which sesman socket to connect to. Get
-# it wrong and this listener quietly hands its connections to the i3
-# sesman, which is a session that comes up perfectly and runs the wrong
-# window manager.
+#
+# HOW THIS LISTENER FINDS THE kwi3 SESMAN (kwi3-7m8.14). It cannot be told
+# to: xrdp 0.10.6 always dials /var/run/xrdp/sesman.socket.
+#   - xrdp/xrdp_mm.c xrdp_mm_get_sesman_port() starts from "3350", reads
+#     [Globals] ListenPort from XRDP_CFG_PATH/sesman.ini, and keeps it ONLY
+#     if g_atoi(value) is in 1..64999. A socket NAME atoi()s to 0 and is
+#     dropped; an absolute path atoi()s to 0 and is dropped.
+#   - libipm/scp.c scp_port_to_unix_domain_path() then treats any positive
+#     integer as an "obsolete v0.9 TCP port" and substitutes
+#     SCP_LISTEN_PORT_BASE_STR, giving XRDP_SOCKET_ROOT_PATH "/sesman.socket"
+#     = /var/run/xrdp/sesman.socket (/var/run -> /run on this box).
+# The first cut of this unit bound a sesman.ini with
+# ListenPort=sesman-kwi3.socket over /etc/xrdp/sesman.ini; the kwi3 sesman
+# honoured it, this process silently did not, and 3392 reattached the i3
+# session on :10 (measured 2026-09-25, kwi3-7m8.14).
+#
+# So the socket path is fixed and the DIRECTORY is what changes: this unit
+# and xrdp-sesman-kwi3.service both see /run/xrdp-kwi3 AS /run/xrdp. In this
+# namespace /var/run/xrdp/sesman.socket IS the kwi3 sesman, and so is every
+# per-session socket this process dials afterwards —
+# /var/run/xrdp/<uid>/xrdp_chansrv_socket_<n> and .../xrdp_display_<n>
+# (both format strings are in `strings /usr/bin/xrdp`), created by chansrv
+# and xorgxrdp inside the SESMAN's namespace. That is why BOTH units need
+# the same bind: a listener that shared the stock /run/xrdp would reach the
+# kwi3 sesman nowhere, and one that saw a different private dir from its
+# sesman would log in and then never find the session's display socket.
+#
+# The sesman.ini bind that used to be here is gone: xrdp's only read of
+# sesman.ini is that ListenPort lookup, whose result is sesman.socket
+# whatever the file says. xrdp-sesman-kwi3.service still binds it, for its
+# own children.
+#
+# RuntimeDirectory=xrdp-kwi3 + RuntimeDirectoryPreserve=yes, identical in
+# both units: systemd creates /run/xrdp-kwi3 (root:root 0755, the same as
+# sesman makes /run/xrdp) BEFORE it sets up this unit's mount namespace
+# (systemd.exec(5): "it is not necessary to ensure that the tmpfiles.d
+# configuration is executed before the unit is started"), so the BindPaths=
+# source exists on a fresh boot whichever unit starts first. `Preserve=yes`
+# means stopping or restarting EITHER unit never removes it — the default
+# (no) would let a restart of this listener delete the live sesman's
+# socket and every session's per-display sockets out from under them. /run
+# is a tmpfs, so a reboot still clears it. No tmpfiles.d snippet is needed.
+#
+# /tmp is deliberately NOT private: the two sesmen pick display numbers by
+# probing /tmp/.X11-unix/X<n> and /tmp/.X<n>-lock, so they must keep
+# seeing each other's displays.
 [Unit]
 Description=xrdp daemon for the kwi3 listener on 3392 (kwi3-7m8.7)
 Documentation=man:xrdp(8) man:xrdp.ini(5)
@@ -27,7 +68,9 @@ After=network-online.target xrdp-sesman-kwi3.service
 [Service]
 Type=exec
 PrivateMounts=yes
-BindPaths=/etc/xrdp-kwi3/sesman.ini:/etc/xrdp/sesman.ini
+RuntimeDirectory=xrdp-kwi3
+RuntimeDirectoryPreserve=yes
+BindPaths=/run/xrdp-kwi3:/run/xrdp
 ExecStart=/usr/bin/xrdp -c /etc/xrdp-kwi3/xrdp.ini --nodaemon
 SystemCallArchitectures=native
 SystemCallFilter=@system-service

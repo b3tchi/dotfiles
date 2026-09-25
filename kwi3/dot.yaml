@@ -211,13 +211,28 @@ linux:
       #    Idempotent (criterion 5): copy_if_changed below `cmp`s before
       #    ever calling `install`, so a file whose content already matches
       #    is left alone - untouched mtime, no `install` invocation, no
-      #    log line claiming a write. `systemctl enable --now` on a unit
-      #    that is already enabled and already active is itself a no-op
-      #    per systemd (it neither restarts nor reloads a running unit),
-      #    so running it unconditionally on every install does not disturb
-      #    a session already up on 3392 - only `daemon-reload` is skipped
-      #    when nothing changed, since it is harmless but pointless noise
-      #    otherwise.
+      #    log line claiming a write. With nothing changed, only
+      #    `systemctl enable --now` runs: on a unit that is already enabled
+      #    and already active that is a no-op per systemd (it neither
+      #    restarts nor reloads a running unit), so it does not disturb a
+      #    session already up on 3392.
+      #
+      #    RESTART WHEN SOMETHING CHANGED (kwi3-7m8.14). A running unit
+      #    keeps the mount namespace it was started with: its BindPaths of
+      #    /etc/xrdp-kwi3/sesman.ini pins the OLD inode (`install` replaces
+      #    the file rather than writing into it, so not even SIGHUP sees the
+      #    new one), and a changed BindPaths= only exists for a process
+      #    started after daemon-reload. So when any of the four files was
+      #    written, both kwi3 units are restarted - which drops any live kwi3
+      #    session on 3392, and the line printed says so. It NEVER names
+      #    xrdp.service or xrdp-sesman.service: those carry the i3 session
+      #    on 3391, and kwi3/test-xrdp-install.sh fails if any systemctl
+      #    call here names anything but the two kwi3 units.
+      #
+      #    A FAILED `sudo install` (password refused, read-only /etc) is
+      #    reported by name and stops the step with exit 1 before any
+      #    daemon-reload/enable/restart - a half-written kwi3 config is not
+      #    something to start a listener on (kwi3-7m8.13 point 1).
       #
       #    KWI3_XRDP_ETC_ROOT (default /etc) lets a stub test exercise this
       #    exact shell text with no root and nothing under /etc touched -
@@ -239,8 +254,12 @@ linux:
           echo "kwi3-xrdp: $_dst unchanged"
           return 0
         fi
-        sudo mkdir -p "$(dirname "$_dst")"
-        sudo install -m "$_mode" "$_src" "$_dst"
+        if ! sudo mkdir -p "$(dirname "$_dst")" \
+           || ! sudo install -m "$_mode" "$_src" "$_dst"; then
+          echo "kwi3-xrdp: FAILED to install $_src -> $_dst (sudo mkdir/install failed)" >&2
+          XRDP_FAILED=1
+          return 1
+        fi
         echo "kwi3-xrdp: wrote $_dst"
         XRDP_CHANGED=1
       }
@@ -250,25 +269,38 @@ linux:
         KWI3_XRDP_ETC="$ETCROOT/xrdp-kwi3"
         UNIT_DIR="$ETCROOT/systemd/system"
         XRDP_CHANGED=0
+        XRDP_FAILED=0
+        # The ONLY units this step may ever name (see the block header).
+        KWI3_UNITS="xrdp-sesman-kwi3.service xrdp-kwi3.service"
 
         copy_if_changed "$XRDP_SRC/xrdp.ini"                 "$KWI3_XRDP_ETC/xrdp.ini"             644
         copy_if_changed "$XRDP_SRC/sesman.ini"                "$KWI3_XRDP_ETC/sesman.ini"            644
         copy_if_changed "$XRDP_SRC/xrdp-kwi3.service"         "$UNIT_DIR/xrdp-kwi3.service"          644
         copy_if_changed "$XRDP_SRC/xrdp-sesman-kwi3.service"  "$UNIT_DIR/xrdp-sesman-kwi3.service"   644
 
+        if [ "$XRDP_FAILED" = 1 ]; then
+          echo "kwi3-xrdp: install incomplete - NOT reloading or restarting $KWI3_UNITS." >&2
+          echo "kwi3-xrdp: fix the sudo failure above and re-run 'rotz install kwi3'." >&2
+          exit 1
+        fi
+
         if [ "$XRDP_CHANGED" = 1 ]; then
           sudo systemctl daemon-reload
           echo "kwi3-xrdp: daemon-reload (unit files changed)"
+          sudo systemctl enable $KWI3_UNITS
+          # `restart` also starts a unit that was stopped, so this covers the
+          # very first install as well. Sesman first, so the listener never
+          # comes up with nothing behind /run/xrdp/sesman.socket.
+          echo "kwi3-xrdp: restarting $KWI3_UNITS to apply the change (drops any kwi3 session on 3392; the i3 listener on 3391 is not touched)"
+          sudo systemctl restart $KWI3_UNITS
         else
-          echo "kwi3-xrdp: no unit files changed - daemon-reload skipped"
+          echo "kwi3-xrdp: nothing changed - daemon-reload and restart skipped"
+          # Run every time, not only on a change: a unit stopped or disabled
+          # by hand is put back without needing a file edit to trigger it.
+          # A no-op on an already-enabled, already-active unit - see the
+          # block header.
+          sudo systemctl enable --now $KWI3_UNITS
         fi
-
-        # Run every time, not only when XRDP_CHANGED: a unit stopped or
-        # disabled by hand should be put back without needing a file edit
-        # to trigger it, and the very first install (nothing to compare
-        # against yet) still needs this to enable and start both. Idempotent
-        # on an already-enabled, already-active unit - see the block header.
-        sudo systemctl enable --now xrdp-sesman-kwi3.service xrdp-kwi3.service
       else
         echo "kwi3-xrdp: no $XRDP_SRC in this clone - skipping the kwi3 xrdp listener (port 3392 will not be set up)" >&2
       fi
