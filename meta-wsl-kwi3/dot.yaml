@@ -46,10 +46,17 @@ installs:
     - wsl
     - xrdp
     - kwi3
-  # No installs.cmd: unlike meta-wsl-i3/meta-wsl-sway, there is no session
-  # switch to run here. kwi3's own xrdp listener units
-  # (kwi3/xrdp/xrdp-kwi3.service, xrdp-sesman-kwi3.service) are installed
-  # by kwi3/dot.yaml's own install cmd, which is a `depends` of this meta
-  # via `kwi3` above — not restated here, so there is exactly one place
-  # that does the root-side install (kwi3-7m8.7's own success criterion 5,
-  # idempotence, would otherwise have two).
+  # No session switch here — unlike meta-wsl-i3/meta-wsl-sway, this is the
+  # meta-wsl-gnome exception (CLAUDE.md's meta-package table): kwi3's own
+  # xrdp listener units (kwi3/xrdp/xrdp-kwi3.service, xrdp-sesman-kwi3.
+  # service) are installed by kwi3/dot.yaml's own install cmd, which is a
+  # `depends` of this meta via `kwi3` above — not restated here, so there
+  # is exactly one place that does the root-side install (kwi3-7m8.7's own
+  # success criterion 5, idempotence, would otherwise have two). rotz's
+  # schema requires a non-empty `cmd` alongside `installs.depends` (an
+  # empty one produces an opaque parse error, not a no-op), so this is an
+  # informational echo, not a no-op placeholder.
+  cmd: |
+    echo "meta-wsl-kwi3: kwi3 is on its own xrdp listener, port 3392 -" \
+         "wsl-wm-switch was NOT run and whichever of i3/sway is active" \
+         "on 3391 is untouched."
