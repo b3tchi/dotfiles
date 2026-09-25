@@ -1,0 +1,38 @@
+# kwi3 config — Jan's values (sp003 Task 6, kwi3-7m8.6). Linked by
+# kwi3/dot.yaml to ~/.config/kwi3/config; the X11 host also honours
+# $KWI3_CONFIG pointing straight at this file. See
+# https://github.com/b3tchi/kwi3 i3kwin/README.md's Configuration section
+# (and i3kwin/examples/config for a generic annotated starting point — this
+# file is the real values, not the tutorial).
+#
+# FORMAT: an i3-config SUBSET. kwi3 reads client.*, font and the kwi3_ keys
+# below out of this file and silently skips every other i3 directive, so a
+# real i3 config can `include` this file whole, or, as below, this file can
+# `include` a block shared with the real i3 config instead of restating it.
+
+# Shared with i3/config.common via i3/colors.conf, one source of truth for
+# both. Resolved relative to this file's own directory by kwi3's rcfile
+# reader (../i3/colors.conf from ~/.dotfiles/kwi3/config lands on
+# ~/.dotfiles/i3/colors.conf) — see that file's header for the exact
+# resolution path through the ~/.config/kwi3/config symlink.
+include ../i3/colors.conf
+
+# The terminal's face and size — the titlebar is one terminal ROW tall and
+# draws in this same face, so it has to match what the session's terminal
+# actually renders in.
+font pango:Iosevka 16
+
+# THE MODULE: Jan's session font's real character cell in pixels, measured
+# — not the placeholder in examples/config. Every tiled window, split and
+# gap is a whole number of this cell.
+kwi3_module 8x21
+
+# The focus ring: thickness 2px, corner radius 4px, colour matching
+# qs-focus-border.py's BC (~/.dotfiles/quickshell/qs-focus-border.py:
+# BW, BR = 2, 4; BC = #16a085) — i3 draws no frame; this is Jan's own,
+# separate program's colours, kept in step here rather than duplicated.
+kwi3_frame 2 4 #16a085
+
+# The workspace bar's background, served to the bar over i3's own
+# GET_BAR_CONFIG (bar id "kwi3").
+kwi3_bar_background #000000
