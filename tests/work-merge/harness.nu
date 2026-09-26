@@ -127,3 +127,66 @@ export def read-log [root: string, name: string]: nothing -> list<string> {
     let p = ($root | path join $name)
     if ($p | path exists) { open $p | lines | where {|l| $l | is-not-empty } } else { [] }
 }
+
+# ── archive-epic.sh helpers (auctions-ycr9h) ────────────────────────────────
+# Same shared-tree-safety shape as land-bd-task.sh above, but archive-epic.sh
+# never merges a branch — it edits AKM files directly in AKM_ROOT and commits
+# once, then calls `bd close` on the epic. Its rollback used to
+# `git reset --hard` whenever HEAD had moved past START_HEAD (i.e. whenever
+# the archive commit had landed and `bd close` failed afterward), which wipes
+# unrelated uncommitted edits in the shared main worktree exactly like the
+# land-bd-task incident.
+
+export def script-path-archive []: nothing -> string {
+    $env.FILE_PWD
+    | path join "../../claude/marketplace/plugins/infinifu/skills/work-merge/scripts/archive-epic.sh"
+    | path expand
+}
+
+# A minimal AKM_ROOT shape the finale can archive via the FEATURE-ADD lineage
+# (no us###/im### needed): docs/board.md, docs/archive.md, a `sp` spec at
+# status: ready citing a `ft` deliverable at status: proposed.
+export def make-akm-repo [tag: string, sp: string, ft: string]: nothing -> string {
+    let root = (make-repo $tag)
+    mkdir ($root | path join "docs/notes/spec")
+    $"---\nstatus: ready\n---\n\n## solution\n\nDeliverable: [[($ft)]]\n\nIndex: [[board]]\n"
+        | save -f ($root | path join $"docs/notes/spec/($sp).md")
+    $"---\nstatus: proposed\n---\n\n## summary\n\nsomething\n"
+        | save -f ($root | path join $"docs/notes/($ft).md")
+    $"## spec\n\n- [[($sp)]] some title\n" | save -f ($root | path join "docs/board.md")
+    "## done\n" | save -f ($root | path join "docs/archive.md")
+    git -C $root add docs
+    git -C $root commit -q -m "akm base"
+    $root
+}
+
+# A `bd` stub for archive-epic.sh. `show`/other subcommands behave like
+# make-stubs's; `close` is configurable: it exits `close_exit`, optionally
+# after running `side_effect` (a raw bash snippet, standing in for another
+# session's concurrent write landing in AKM_ROOT while `bd close` is in
+# flight over the network).
+export def make-archive-bd-stub [root: string, close_exit: int, side_effect: string = ""]: nothing -> string {
+    let bin = ($root | path join ".stub-bin")
+    mkdir $bin
+    let bd = ($bin | path join "bd")
+    $"#!/usr/bin/env bash
+if [ \"$1\" = \"show\" ]; then
+  echo '[{\"status\":\"open\"}]'
+  exit 0
+fi
+if [ \"$1\" = \"close\" ]; then
+  ($side_effect)
+  exit ($close_exit)
+fi
+printf '%s\\n' \"$*\" >> \"($root)/bd-calls.log\"
+exit 0
+" | save -f $bd
+    chmod +x $bd
+    $bin
+}
+
+export def run-archive [root: string, bin: string, sp: string, epic: string]: nothing -> record {
+    with-env {PATH: ([$bin] ++ $env.PATH)} {
+        do { ^bash (script-path-archive) $sp "" "" $epic $root } | complete
+    }
+}
