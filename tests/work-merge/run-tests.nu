@@ -14,6 +14,7 @@ use harness.nu *
 const SUITES = [
     [label, file];
     ["land", "land-cases.nu"]
+    ["safety", "safety-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {

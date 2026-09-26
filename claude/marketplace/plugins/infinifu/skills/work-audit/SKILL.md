@@ -262,6 +262,8 @@ work-merge's possible outcomes:
 | `TASK_LANDED` | Merge clean, tests green, worktree removed. Other tasks still open in the epic. | Report APPROVED to dispatcher; pipeline continues. |
 | `TASK_LANDED + EPIC_DONE` | Same as above plus the epic finale fired (AKM flip + board→archive + bd close epic). | Report APPROVED + EPIC_DONE; dispatcher runs `spec-retro` to refresh the graph and push. |
 | `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | **First: was the gate legitimate?** Re-run `<test-command>` on base WITHOUT the merge. If it fails there too, the gate was impossible and this is a gate bug, not a code defect — fix the command (see "Choosing `<test-command>`"), re-run the land, and do NOT reject the implementer for it. Only if the command is green on base and red after the merge is this a real integration failure: convert to a REJECTED verdict and re-dispatch the implementer with the post-merge failure as the gap. |
+| `REFUSED` (exit 3) | The main worktree has uncommitted changes that overlap the merge's paths, or a staged index. Nothing merged, bd untouched. | Not a rejection. The dirt is another session's WIP, so don't stash or discard it. Wait for it to commit, then re-run the land. |
+| `ROLLBACK INCOMPLETE` (exit 4) | A post-merge step failed, and the merge could not be undone without overwriting a local change. Base still carries the merge. | Escalate to the human, with the script's message and the manual `git revert -m 1 <sha>` it prints. Never `reset --hard`. |
 
 Then report to the dispatcher:
 

@@ -5,8 +5,9 @@
 # then sweeps any sibling rejected iterations (`bd-<id>.*`) that still linger.
 # Local operations only — no push, no PR. spec-retro handles remote sync.
 #
-# On test failure: hard-resets base and reopens the task as in_progress with a
-# POST-MERGE FAIL note, leaving the worktree intact for the next implementer.
+# On test failure: undoes the merge (never `reset --hard` — see "Shared-tree
+# safety" below) and reopens the task as in_progress with a POST-MERGE FAIL
+# note, leaving the worktree intact for the next implementer.
 #
 # If the merge changed a lockfile, deps are synced before the test gate runs —
 # otherwise base's installed deps are stale and the gate fails on a missing
@@ -16,7 +17,22 @@
 #   bd-id      — numeric bd task id (without the leading `bd-`)
 #   iteration  — N from the approved branch bd-<id>.<N>
 #   AKM_ROOT   — defaults to $(akm-root) or current dir.
-#   TEST_CMD   — defaults to $LAND_TEST_CMD env var, else empty.
+#   TEST_CMD   — defaults to $LAND_TEST_CMD env var, else empty. Either a
+#                shell command (run with `bash -c` in AKM_ROOT) or a path to a
+#                gate SCRIPT FILE (absolute, or relative to AKM_ROOT) — run
+#                directly if executable, else with `nu` for *.nu / `bash`
+#                otherwise. Prefer a script file for anything with quotes.
+#
+# Exit codes:
+#   0  landed
+#   1  usage / environment error, or a merge conflict (merge aborted, base
+#      unchanged)
+#   2  REJECTED — a post-merge gate failed; merge undone, task reopened
+#   3  REFUSED — the main worktree has uncommitted changes the merge would
+#      touch (or a staged index). Nothing merged, bd untouched. Not the
+#      implementer's fault: wait for / ask the other session, then re-run.
+#   4  ROLLBACK INCOMPLETE — a gate failed but the merge could not be undone
+#      safely; base still carries it. Manual recovery needed (message says how).
 #
 # Env:
 #   LAND_TEST_CMD     — fallback for TEST_CMD.
@@ -84,8 +100,98 @@ echo "Landing $BRANCH into $BASE (worktree: ${WT:-none})"
 git -C "$AKM_ROOT" checkout "$BASE"
 git -C "$AKM_ROOT" pull --ff-only 2>/dev/null || true   # no remote / no upstream is fine
 
-# Merge --no-ff to preserve the bd-task boundary in history
-git -C "$AKM_ROOT" merge --no-ff "$BRANCH" -m "merge: $BRANCH"
+# ── Shared-tree safety (auctions-zyvfr) ─────────────────────────────────
+# AKM_ROOT is usually the MAIN worktree, which parallel sessions share. The
+# rollbacks below used to be `git reset --hard ORIG_HEAD`; on 2026-09-25 a
+# FALSE gate failure (a quoting bug in an inline `nu -c`) made that wipe
+# another session's uncommitted edits — three times in one day. The contract
+# now:
+#   - before merging, refuse (exit 3) if uncommitted paths overlap the paths
+#     the merge touches; unrelated dirty paths are tolerated;
+#   - a merge that fails is `merge --abort`ed, never left half-merged;
+#   - a completed merge is undone with `reset --merge`, which keeps unrelated
+#     local changes and REFUSES rather than overwrite a conflicting one;
+#   - if base moved past our merge commit meanwhile (another session
+#     committed on top), the merge is reverted rather than reset away;
+#   - if none of that is safe, stop loudly (exit 4). Never escalate to --hard.
+g() { git -C "$AKM_ROOT" -c core.quotePath=false "$@"; }
+
+PRE_MERGE="$(g rev-parse HEAD)"
+MERGE_BASE="$(g merge-base HEAD "$BRANCH")"
+MERGE_PATHS="$(g diff --no-renames --name-only "$MERGE_BASE" "$BRANCH" | sort -u)"
+STAGED_PATHS="$(g diff --cached --no-renames --name-only | sort -u)"
+DIRTY_PATHS="$( { g diff --no-renames --name-only; printf '%s\n' "$STAGED_PATHS"; \
+                  g ls-files --others --exclude-standard; } | sed '/^$/d' | sort -u)"
+OVERLAP="$(comm -12 <(printf '%s\n' "$MERGE_PATHS") <(printf '%s\n' "$DIRTY_PATHS") | sed '/^$/d')"
+
+if [ -n "$OVERLAP" ]; then
+  {
+    echo "REFUSED: $AKM_ROOT has uncommitted changes to paths $BRANCH would merge into:"
+    printf '%s\n' "$OVERLAP" | sed 's/^/  /'
+    echo "Nothing was merged and the task was not touched. These are probably another"
+    echo "session's work in progress: let it commit (or stash) them, then re-run the land."
+  } >&2
+  exit 3
+fi
+if [ -n "$STAGED_PATHS" ]; then
+  {
+    echo "REFUSED: $AKM_ROOT has STAGED changes; git refuses a merge over a dirty index:"
+    printf '%s\n' "$STAGED_PATHS" | sed 's/^/  /'
+    echo "Nothing was merged and the task was not touched. Let the owning session commit"
+    echo "or unstage them, then re-run the land. (Unstaged/untracked changes outside the"
+    echo "merge's paths are fine — only the index has to be clean.)"
+  } >&2
+  exit 3
+fi
+if [ -n "$DIRTY_PATHS" ]; then
+  echo "Note: $(printf '%s\n' "$DIRTY_PATHS" | wc -l | tr -d ' ') uncommitted path(s) in $AKM_ROOT outside this merge — tolerated, left untouched."
+fi
+
+# Merge --no-ff to preserve the bd-task boundary in history. A failing merge
+# (conflict) is aborted so base is never left half-merged with markers in it.
+if ! g merge --no-ff "$BRANCH" -m "merge: $BRANCH"; then
+  if g rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    g merge --abort || true
+  fi
+  echo "MERGE FAILED: $BRANCH does not merge cleanly into $BASE — aborted, base unchanged at ${PRE_MERGE:0:12}. Rebase the task branch onto $BASE and re-audit." >&2
+  exit 1
+fi
+MERGE_SHA="$(g rev-parse HEAD)"
+
+# Undo our merge without touching unrelated local changes. Returns nonzero,
+# having changed nothing destructive, when that is not possible.
+rollback_merge() {
+  local head
+  head="$(g rev-parse HEAD)"
+  if [ "$head" = "$MERGE_SHA" ]; then
+    g reset --merge "$PRE_MERGE" && return 0
+    ROLLBACK_HOW="\`git reset --merge ${PRE_MERGE:0:12}\` refused (a local change overlaps the merge)"
+    return 1
+  fi
+  if g merge-base --is-ancestor "$MERGE_SHA" "$head"; then
+    echo "Base moved past the merge commit (another session committed on top) — reverting instead of resetting." >&2
+    g revert -m 1 --no-edit "$MERGE_SHA" && return 0
+    g revert --abort 2>/dev/null || true
+    ROLLBACK_HOW="\`git revert -m 1 ${MERGE_SHA:0:12}\` failed"
+    return 1
+  fi
+  ROLLBACK_HOW="HEAD ${head:0:12} no longer contains merge ${MERGE_SHA:0:12}"
+  return 1
+}
+
+# fail_land <label> <note>: roll back, reopen the task, exit 2 (or 4).
+fail_land() {
+  local label="$1" note="$2"
+  echo "POST-MERGE ${label} FAILED — rolling back" >&2
+  if rollback_merge; then
+    bd update "$ID" --status in_progress --append-notes "${note}$(reopened_suffix)" >/dev/null
+    exit 2   # caller (work-merge / work-audit) translates exit 2 to REJECTED
+  fi
+  echo "ROLLBACK INCOMPLETE: ${ROLLBACK_HOW}. $BASE still carries merge ${MERGE_SHA:0:12}. NOT escalating to reset --hard (that would destroy uncommitted work in a shared tree). Recover by hand: commit/stash the conflicting local change, then \`git -C $AKM_ROOT revert -m 1 ${MERGE_SHA:0:12}\`." >&2
+  bd update "$ID" --status in_progress \
+    --append-notes "${note} ROLLBACK INCOMPLETE: ${ROLLBACK_HOW}; $BASE still carries merge ${MERGE_SHA:0:12} — manual revert needed.$(reopened_suffix)" >/dev/null
+  exit 4
+}
 
 # ── Dependency sync ──────────────────────────────────────────────────────
 # A merge that changed a lockfile leaves base's INSTALLED deps stale: the tree
@@ -152,7 +258,7 @@ detect_install_targets() {
 }
 
 if [ "${LAND_SKIP_INSTALL:-}" != "1" ]; then
-  CHANGED_FILES="$(git -C "$AKM_ROOT" diff --name-only ORIG_HEAD HEAD || true)"
+  CHANGED_FILES="$(git -C "$AKM_ROOT" diff --name-only "$PRE_MERGE" "$MERGE_SHA" || true)"
   INSTALL_TARGETS="$(detect_install_targets "$CHANGED_FILES")"
   # A herestring, not a pipe: the loop must run in THIS shell so a failing
   # sync can `exit 2` the script rather than only its own subshell.
@@ -160,12 +266,7 @@ if [ "${LAND_SKIP_INSTALL:-}" != "1" ]; then
     [ -z "${sync_cmd:-}" ] && continue
     echo "Lockfile changed in ${sync_dir} — syncing deps there: $sync_cmd"
     if ! (cd "$AKM_ROOT/$sync_dir" && eval "$sync_cmd"); then
-      echo "POST-MERGE DEP SYNC FAILED — rolling back" >&2
-      git -C "$AKM_ROOT" reset --hard ORIG_HEAD
-      bd update "$ID" --status in_progress \
-        --append-notes "POST-MERGE FAIL (dep sync): '$sync_cmd' failed in '${sync_dir}' after merging $BRANCH into $BASE. The merge changed a lockfile whose deps do not install. Not a test failure — the dependency change itself is broken.$(reopened_suffix)" \
-        >/dev/null
-      exit 2
+      fail_land "DEP SYNC" "POST-MERGE FAIL (dep sync): '$sync_cmd' failed in '${sync_dir}' after merging $BRANCH into $BASE. The merge changed a lockfile whose deps do not install. Not a test failure — the dependency change itself is broken."
     fi
   done <<< "$INSTALL_TARGETS"
 fi
@@ -178,7 +279,8 @@ fi
 # akm-graph) — a human caught it, not a gate, both times.
 #
 # Scoped to modules the merge actually touched (`go-stale rebuild --since
-# ORIG_HEAD`, using ORIG_HEAD exactly as the dep-sync diff above does) so an
+# <pre-merge sha>`, the same base the dep-sync diff above uses — a recorded
+# sha, not ORIG_HEAD, which any intervening reset/merge would move) so an
 # unrelated merge doesn't pay to rebuild all seven artifacts. Same
 # rollback contract as the dep-sync and test gates: a build failure means
 # the merge itself is bad, so it is treated the same as a failing test, not
@@ -188,26 +290,44 @@ fi
 #   LAND_SKIP_GO_REBUILD=1   opt out entirely.
 GO_STALE="$AKM_ROOT/nushell/actions/go-stale"
 if [ "${LAND_SKIP_GO_REBUILD:-}" != "1" ] && [ -x "$GO_STALE" ] && command -v nu >/dev/null 2>&1; then
-  if ! nu "$GO_STALE" rebuild --repo "$AKM_ROOT" --since ORIG_HEAD; then
-    echo "POST-MERGE GO REBUILD FAILED — rolling back" >&2
-    git -C "$AKM_ROOT" reset --hard ORIG_HEAD
-    bd update "$ID" --status in_progress \
-      --append-notes "POST-MERGE FAIL (go rebuild): 'go-stale rebuild --since ORIG_HEAD' failed after merging $BRANCH into $BASE. A Go module this merge touched no longer builds — not a test failure, the source change itself is broken.$(reopened_suffix)" \
-      >/dev/null
-    exit 2
+  if ! nu "$GO_STALE" rebuild --repo "$AKM_ROOT" --since "$PRE_MERGE"; then
+    fail_land "GO REBUILD" "POST-MERGE FAIL (go rebuild): 'go-stale rebuild --since ${PRE_MERGE:0:12}' failed after merging $BRANCH into $BASE. A Go module this merge touched no longer builds — not a test failure, the source change itself is broken."
   fi
 fi
 
-# Post-merge test gate
+# ── Post-merge test gate ─────────────────────────────────────────────────
+# auctions-zyvfr: the gate used to be `eval`ed inside this script, so it
+# inherited `set -euo pipefail` (an unset var in the gate = false failure) and
+# every caller had to hand-escape quotes through one more shell layer — the
+# 2026-09-25 false failures were exactly that. Now:
+#   - a TEST_CMD naming an existing FILE runs that file (no quoting at all);
+#   - anything else runs in a clean `bash -c`, not in this script's shell.
+run_gate() {
+  local cmd="$1" f
+  case "$cmd" in /*) f="$cmd" ;; *) f="$AKM_ROOT/$cmd" ;; esac
+  if [ -f "$f" ]; then
+    echo "Running post-merge gate script: $f"
+    if [ -x "$f" ]; then (cd "$AKM_ROOT" && "$f")
+    else
+      case "$f" in
+        *.nu) (cd "$AKM_ROOT" && nu "$f") ;;
+        *)    (cd "$AKM_ROOT" && bash "$f") ;;
+      esac
+    fi
+  else
+    printf 'Running post-merge gate: bash -c %q\n' "$cmd"
+    (cd "$AKM_ROOT" && bash -c "$cmd")
+  fi
+}
+
 if [ -n "$TEST_CMD" ]; then
-  echo "Running post-merge tests: $TEST_CMD"
-  if ! (cd "$AKM_ROOT" && eval "$TEST_CMD"); then
-    echo "POST-MERGE TESTS FAILED — rolling back" >&2
-    git -C "$AKM_ROOT" reset --hard ORIG_HEAD
-    bd update "$ID" --status in_progress \
-      --append-notes "POST-MERGE FAIL: tests failed after merging $BRANCH into $BASE. Integration gap — fix and re-audit.$(reopened_suffix)" \
-      >/dev/null
-    exit 2   # caller (work-merge / work-audit) translates exit 2 to REJECTED
+  if run_gate "$TEST_CMD"; then gate_rc=0; else gate_rc=$?; fi
+  if [ "$gate_rc" -ne 0 ]; then
+    hint=""
+    case "$gate_rc" in
+      126|127) hint=" Exit ${gate_rc} = command not found / not executable — likely a malformed GATE, not a code defect: re-run it on base before re-dispatching." ;;
+    esac
+    fail_land "TESTS" "POST-MERGE FAIL: gate exit ${gate_rc} after merging $BRANCH into $BASE (gate: ${TEST_CMD}). Integration gap — fix and re-audit.${hint}"
   fi
 fi
 

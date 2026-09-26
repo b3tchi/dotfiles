@@ -13,7 +13,8 @@ Two operations, gated by whether this task was the last open child of its parent
 
 1. **Always — per-task local land:**
    - Merge `bd-<id>.<N>` into base (`origin/HEAD`, e.g. `main`) with `--no-ff` to preserve the bd-task boundary in history.
-   - Run the post-merge test command **derived from the task's own `success_criteria`** — see "Choosing `<test-command>`" in Step 2. Never invent a repo-wide quality command the task didn't claim; a gate that is already red on base can never certify the merge. Failure rolls the merge back and reopens the task as `in_progress` with a `POST-MERGE FAIL` note.
+   - Run the post-merge test command **derived from the task's own `success_criteria`** — see "Choosing `<test-command>`" in Step 2. Never invent a repo-wide quality command the task didn't claim; a gate that is already red on base can never certify the merge. Failure rolls the merge back (never `reset --hard` — base is usually the shared main worktree) and reopens the task as `in_progress` with a `POST-MERGE FAIL` note.
+   - Refuse up front (exit 3, nothing merged) if the main worktree has uncommitted changes to paths the merge touches, or a staged index. Unrelated dirty paths are tolerated.
    - Remove the worktree (`git worktree remove`, no `--force`) and the local branch (`git branch -d`).
 2. **Conditional — epic finale** (only if `bd list --parent <epic-id>` shows no open/in_progress/blocked children left):
    - Classify the lifecycle shape before mutation: story-backed (`us###` + `im###`), feature-add (one proposed `ft###` deliverable), feature-refresh (`## extends [[ft###]]` naming an already `accepted`/`stable` feature), or mixed (both story and feature).
@@ -121,19 +122,39 @@ Sanity-check before passing a command:
 - **Does the criterion say "no NEW errors vs a baseline" rather than "zero errors"?** Then a bare exit-code gate is the wrong shape — it cannot express "no worse than before". Pass the part that IS a clean binary (usually the test command) and leave the baseline comparison to work-audit, which already verified it with real numbers.
 - **When in doubt, narrower is better.** `<test-command>` is optional and the script skips it if empty. A missing gate is a known hole; a permanently-red gate is a landmine that makes every future failure ambiguous.
 
+#### Prefer a gate script file over an inline command
+
+`<test-command>` may be a **path to a script file** (absolute, or relative to `$AKM_ROOT`). The script runs it directly if executable, else with `nu` for `*.nu` and `bash` otherwise, from `$AKM_ROOT`. Anything else is run with `bash -c` in a clean shell.
+
+Use a file for anything with quotes, pipes, or a nested interpreter (`nu -c '...'`). An inline gate goes through your shell, then the script's `bash -c`, then maybe `nu -c` — each layer eats one level of quoting. On 2026-09-25 exactly that produced three **false** `POST-MERGE FAIL`s in one day (auctions-zyvfr), and the old `reset --hard` rollback then wiped another session's uncommitted work. A file has no quoting layer to get wrong:
+
 ```bash
-bash <skill-path>/work-merge/scripts/land-bd-task.sh "$ID" "$ITER" "$AKM_ROOT" "<test-command>"
+GATE="$(mktemp --suffix=.sh)"
+cat > "$GATE" <<'GATE_EOF'
+nu -c 'use tools/x.nu *; x check "a b"'
+GATE_EOF
+bash <skill-path>/work-merge/scripts/land-bd-task.sh "$ID" "$ITER" "$AKM_ROOT" "$GATE"
 ```
+
+Simple one-word gates (`npm run test:unit`, `cargo test -p auth`) are fine inline.
+
+```bash
+bash <skill-path>/work-merge/scripts/land-bd-task.sh "$ID" "$ITER" "$AKM_ROOT" "<test-command-or-gate-file>"
+```
+
+Exit codes: `0` landed · `1` usage error or merge conflict (merge aborted, base unchanged) · `2` REJECTED, a post-merge gate failed (merge undone, task reopened) · `3` REFUSED, uncommitted changes overlap the merge or the index is staged (nothing merged, bd untouched; this is not a rejection, so wait for the other session and re-run) · `4` ROLLBACK INCOMPLETE, a gate failed and the merge could not be undone safely (base still carries it; see the message and the bd note for the manual `git revert -m 1`).
 
 Script behavior (`scripts/land-bd-task.sh`):
 
 - Resolves worktree for `bd-<id>.<N>` via `git worktree list --porcelain`.
 - `git checkout <base> && git pull --ff-only` (no-op if no upstream).
-- `git merge --no-ff bd-<id>.<N> -m "merge: bd-<id>.<N>"`.
+- **Shared-tree preflight (auctions-zyvfr).** `$AKM_ROOT` is usually the main worktree, shared with parallel sessions. It compares the paths the merge will touch (`git diff --name-only $(merge-base) bd-<id>.<N>`) with every uncommitted path (unstaged, staged, untracked). Any overlap → exit 3 listing the paths, before merging. A staged index → exit 3 too, because git refuses a non-ff merge over a dirty index (that used to surface as git's own exit 2, which callers read as REJECTED). Dirty paths outside the merge are left alone and survive both a land and a rollback.
+- `git merge --no-ff bd-<id>.<N> -m "merge: bd-<id>.<N>"`. A conflicting merge is `git merge --abort`ed (exit 1), so base is never left half-merged.
+- **Rollback, on any failing post-merge step (dep sync, Go rebuild, test gate), is never `reset --hard`:** `git reset --merge <pre-merge sha>` if HEAD is still our merge commit (it keeps unrelated local changes, and refuses rather than overwrite a conflicting one); `git revert -m 1 <merge>` if another session has committed on top meanwhile. If neither is safe → exit 4 with a loud message and bd note. The script does not escalate.
 - **Syncs deps if the merge changed a lockfile**, before the test gate. A task that adds a dependency leaves base's installed deps stale — the tree declares a package that isn't on disk — so the gate fails at config/import time (e.g. vitest `ERR_MODULE_NOT_FOUND`) and rolls back a perfectly good merge as a false `POST-MERGE FAIL`. Detected per ecosystem from the changed lockfile's name: `package-lock.json`/`npm-shrinkwrap.json` → `npm ci`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `go.sum`, `Gemfile.lock`, `composer.lock`, `uv.lock`, `poetry.lock`, `Pipfile.lock`. (`Cargo.lock` is deliberately excluded — `cargo test` resolves deps itself.) Only fires when a lockfile actually changed; this is not a blanket install on every land. A failing sync rolls back and reports `POST-MERGE FAIL (dep sync)`, distinguishing "the dependency change is broken" from "the tests failed". Env: `LAND_INSTALL_CMD` overrides *what* runs (never *whether* — still gated on a lockfile change), `LAND_LOCKFILES="a.lock b.lock"` teaches it unrecognised ecosystems, `LAND_SKIP_INSTALL=1` opts out.
 - **Rebuilds stale Go artifacts for modules the merge touched**, after dep sync and before the test gate (dotfiles-xwg0). Six `dot.yaml` files build a Go binary that then lives outside source control (`agent-monitor`, `akm-graph`, `preview`, `hotkeyd`, `gopass` ×2, `d2`); `go test` — the usual `<test-command>` — exercises the *source*, not that installed binary, so a merge that changes Go source can otherwise land clean while the artifact everyone actually runs silently keeps the old build (this bit twice in one session before this gate existed — a human caught it both times, not a gate). Runs `go-stale rebuild --repo "$AKM_ROOT" --since ORIG_HEAD` (`nushell/actions/go-stale`), scoped by `--since` to only the module(s) this merge's diff actually touched — not all six/seven on every land. A build failure rolls back and reports `POST-MERGE FAIL (go rebuild)`, same contract as the dep-sync and test gates: the merge itself is what's broken, not a pre-existing test. No-op (never blocks) if `go-stale` isn't present or executable, or `nu` isn't on PATH. Env: `LAND_SKIP_GO_REBUILD=1` opts out.
 - Runs `<test-command>` if provided.
-  - **Fail (exit 2):** `git reset --hard ORIG_HEAD`, reopens task as `in_progress` with `POST-MERGE FAIL` note, leaves worktree intact, exits 2. work-merge propagates this as REJECTED back to work-audit.
+  - **Fail (exit 2):** undoes the merge as above (exit 4 if it cannot), reopens task as `in_progress` with `POST-MERGE FAIL` note, leaves worktree intact, exits 2. work-merge propagates this as REJECTED back to work-audit.
   - **Pass:** continues.
 - Removes the approved worktree (`git worktree remove`, no `--force`) and deletes the approved branch (`git branch -d`).
 - **Sweeps sibling iterations:** any other `bd-<id>.*` branches (rejected earlier attempts whose cleanup was skipped) get their worktrees removed `--force` and branches deleted `-D`. Rejected iterations never merge into base, so `-D` is required and safe.
@@ -233,6 +254,8 @@ Next: run spec-retro for sp### — it refreshes the AKM graph and pushes everyth
 
 - **Task not yet closed by work-audit** → block; this skill is post-approval only. The implementer should be running `work-audit` first.
 - **Branch `bd-<id>.<N>` doesn't exist** → block; the implementer didn't follow the naming convention. Manual recovery: have implementer rename the branch, then re-run.
+- **Land refused (exit 3)** → the main worktree has someone's uncommitted changes on paths this merge touches, or a staged index. Do NOT stash or discard them: they belong to another session. Wait for it to commit, then re-run the land. The task stays closed, and nothing is rejected.
+- **Rollback incomplete (exit 4)** → base still carries the merge. Follow the message: once the conflicting local change is committed or stashed by its owner, `git revert -m 1 <merge sha>`.
 - **Post-merge tests fail** → script rolls back, reopens task, returns REJECTED. work-audit (or the user) re-dispatches the implementer.
 - **Worktree has uncommitted changes** → `git worktree remove` refuses. Investigate before forcing — usually an in-flight discovery that wasn't filed as a separate task. File it, commit / stash / discard, then re-run.
 - **Epic finale fires but `sp###` id can't be resolved from epic notes** → escalate; finale needs the spec id to flip statuses. Manual recovery: provide the id, re-run with explicit sp.
