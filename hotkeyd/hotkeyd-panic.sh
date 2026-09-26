@@ -1,7 +1,21 @@
 #!/bin/sh
 # hotkeyd-panic.sh — give the keyboard back to i3 (sp020 Task 10, ft011).
 #
-# usage: hotkeyd-panic.sh panic|resume|status [display]
+# usage: hotkeyd-panic.sh recover|panic|resume|status [display]
+#
+# `recover` IS THE ONE YOU PRESS ($mod+Shift+r, part of the i3 reload -
+# dotfiles-3m12). "Something is wrong, get me back", escalating only as far as
+# it has to:
+#
+#   recover: release every HELD modifier key and re-apply the layout (clears
+#            locks) -> resume if panicked, else hotkeyd.sh restart
+#         -> hotkeyd.sh status (the --health verdict) until it serves
+#         -> still not serving, on an i3 display: panic, so i3 has the keyboard
+#
+# The first step is not decoration. An RDP reconnect's KbdSync once left
+# ISO_Level5_Shift (keycode 8, on Mod3) held in xrdp's server; Mod3 then rode on
+# every key and NO passive grab matched - the daemon's, i3's and the old panic
+# chord's alike. Neither a restart nor panic can fix that; a release can.
 #
 # THE ESCAPE HATCH, REPLACING `hotkeyd.sh restart`. A restart helps when the
 # daemon is DEAD and not at all when it is alive and WRONG — misgrabbing, stuck
@@ -131,6 +145,8 @@ DPY="${2:-${DISPLAY:-}}"
 DPY_BASE="${DPY%.*}"
 
 die() { printf 'hotkeyd-panic.sh: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+SELF="$HERE/$(basename -- "$0")"
 
 linked() { [ -L "$LINK" ] || [ -e "$LINK" ]; }
 
@@ -324,6 +340,72 @@ case "$VERB" in
         printf 'hotkeyd: resumed on %s\n' "$(printf '%s' "$targets" | tr '\n' ' ')"
         ;;
 
+    recover)
+        [ -n "$DPY_BASE" ] || die "no display: pass one, or set DISPLAY" 2
+
+        # 1. Unstick. By the server's MODIFIER MAP, never a keysym list: the
+        # key that stuck was a keycode nobody would have listed. Every held key
+        # in that map gets a press+release through XTEST - a lone release is
+        # dropped, the XTEST device never pressed it - which clears it on the
+        # master keyboard the grabs are matched against. Best-effort: with no
+        # python-xlib this step is skipped out loud, not fatal.
+        DISPLAY="$DPY_BASE" python3 - <<'EOF' 2>/dev/null \
+            || printf 'hotkeyd: recover: could not check for stuck modifiers on %s\n' "$DPY_BASE"
+import sys
+from Xlib import X, display as xdisplay
+from Xlib.ext import xtest
+d = xdisplay.Display()
+down = d.query_keymap()
+held = sorted({c for grp in d.get_modifier_mapping() for c in grp
+               if c and down[c // 8] & (1 << (c % 8))})
+for c in held:
+    xtest.fake_input(d, X.KeyPress, c)
+    xtest.fake_input(d, X.KeyRelease, c)
+d.sync()
+if held:
+    print("hotkeyd: recover: released stuck modifier key(s): %s" % " ".join(map(str, held)))
+EOF
+        # Locks (the ISO_Level5 LOCK variant of the same fault): recompiling
+        # the keymap resets the locked state. Re-apply exactly what is loaded -
+        # layout, variant, model and options - so recover never changes it.
+        if command -v setxkbmap >/dev/null 2>&1; then
+            q="$(DISPLAY="$DPY_BASE" setxkbmap -query 2>/dev/null)"
+            field() { printf '%s\n' "$q" | sed -n "s/^$1: *//p"; }
+            l="$(field layout)"; v="$(field variant)"; m="$(field model)"; o="$(field options)"
+            [ -n "$l" ] && DISPLAY="$DPY_BASE" setxkbmap -layout "$l" \
+                ${v:+-variant "$v"} ${m:+-model "$m"} -option "" ${o:+-option "$o"} 2>/dev/null
+        fi
+
+        # 2. Resume if panicked - `start` is refused while the link is there -
+        # else restart.
+        if linked; then
+            "$SELF" resume "$DPY_BASE"
+        else
+            "$LAUNCHER" restart "$DPY_BASE"
+        fi
+
+        # 3. The verdict is the launcher's own status (heartbeat, grabs,
+        # display), not an exit code: a daemon can start and not serve.
+        n=0
+        while :; do
+            "$LAUNCHER" status "$DPY_BASE" >/dev/null 2>&1 && {
+                printf 'hotkeyd: recovered on %s\n' "$DPY_BASE"; exit 0; }
+            n=$((n + 1)); [ "$n" -ge 10 ] && break
+            sleep 0.5
+        done
+
+        # 4. Still not serving. On an i3 display, panic: i3 takes the keyboard
+        # from the fallback. A kwi3 display reads no i3 config (kwi3-8wb.1), so
+        # there is nothing to fall back TO - say so rather than link uselessly.
+        ver="$(env -u I3SOCK DISPLAY="$DPY_BASE" timeout 2 i3-msg -t get_version 2>/dev/null)"
+        case "$ver" in
+            *'"human_readable"'*kwi3*|'')
+                die "hotkeyd is not serving on $DPY_BASE and this display has no i3 to fall back to" 1 ;;
+        esac
+        "$SELF" panic "$DPY_BASE"
+        die "hotkeyd did not come back on $DPY_BASE - PANICKED, i3 has the keyboard" 1
+        ;;
+
     status)
         if linked; then
             printf 'hotkeyd: PANICKED — fallback linked at %s\n' "$LINK"
@@ -334,6 +416,6 @@ case "$VERB" in
         ;;
 
     *)
-        die "unknown verb: $VERB (panic|resume|status)" 64
+        die "unknown verb: $VERB (recover|panic|resume|status)" 64
         ;;
 esac

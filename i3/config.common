@@ -342,8 +342,9 @@ for_window [urgent=latest] focus
 # See the note there for why a bare reload is not enough.)
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-# Bound to $mod+Shift+c in i3/config. $mod+Shift+r is the HAMMER and
-# $mod+Ctrl+Shift+r is PANIC — see the block further down. Also available as
+# Bound to $mod+Shift+c in i3/config. $mod+Shift+r is RECOVER (reload, unstick,
+# restart or resume, panic only if it must) — see the block further down. Also
+# available as
 #   i3-msg restart
 
 # exit i3 (logs you out of your X session)
@@ -427,68 +428,54 @@ for_window [urgent=latest] focus
 #
 # i3 keeps its global $mod+hjkl focus/move binds. They are NOT migrated and do
 # not need to be.
-# hotkeyd PANIC BIND (sp020 Task 10, ft011) — the one bind that never migrates.
+# hotkeyd PANIC BIND (sp020 Task 10, ft011; dotfiles-3m12) — the one bind that
+# never migrates, and since dotfiles-3m12 it is ONE chord: $mod+Shift+r, the i3
+# reload. Press it when something is wrong; it gets you back.
 #
-# The Python hotkey layer owns its binds via per-key XGrabKey, and X grabs die
-# with the process. So if hotkeyd crashes while holding the bind table, every
-# migrated key stops working at once and there is no way to bring it back —
-# unless one key is still handled by i3 itself. This is that key.
+# Every migrated key is the daemon's, and X grabs die with the process, so one
+# key has to stay with i3 itself or a dead daemon takes the whole keyboard with
+# it. This is that key. It reloads i3, then runs `hotkeyd-panic.sh recover`,
+# which escalates only as far as it has to:
 #
-# It used to call `hotkeyd.sh restart`, which was the wrong recovery: a restart
-# helps when the daemon is DEAD and not at all when it is alive and WRONG —
-# misgrabbing, stuck in a layer, or serving a table whose chords collide with
-# i3's. It also reinstates the very table that broke the session. So this bind
-# now hands the keyboard BACK to i3: stop the daemon everywhere, link
-# i3/config.d/zz-fallback-binds.conf, reload. Resume from a terminal with
-# `~/.dotfiles/hotkeyd/hotkeyd-panic.sh resume` — once panic has run i3 owns
-# the whole keyboard again, so a terminal is reachable and resume needs no
-# emergency chord of its own.
+#   1. release every HELD modifier key and re-apply the layout (clears locks)
+#   2. resume if panicked, else restart this display's daemon
+#   3. `hotkeyd.sh status` (the --health verdict) until it serves
+#   4. still not serving: panic — stop the daemon everywhere, link
+#      i3/config.d/zz-fallback-binds.conf, reload, and i3 has the keyboard
 #
-# hotkeyd/test-launcher.sh asserts this exact string exists here, so the bind
-# and the script cannot drift apart and be discovered mid-outage.
+# Pressed again while panicked, step 2 resumes, so the same key is also the way
+# back. Only a daemon that is alive, serving and WRONG gets past it; for that,
+# `~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic` from a terminal.
 #
-# The daemon's validator REFUSES any table that binds this chord, under every
-# modifier spelling ($mod, Mod4+, Mod1+) — see `bind.ReservedChords` in
-# hotkeyd/internal/bind/chord.go and its check in validate.go (this was
-# `binds.RESERVED_CHORDS` before the Go cutover, dotfiles-ylmp.16). A
-# display-agnostic token check alone would leave it stealable on one display.
+# WHY ONE CHORD, reversing sp020's "hammer and panic must be different keys".
+# Jan: panic "should be part of $mod+S+r", "part of i3 reload", and "$mod+S+r
+# should be itself force". The separate $mod+Ctrl+Shift+r panic chord was also
+# measured useless in the case it existed for: an RDP reconnect's KbdSync left
+# ISO_Level5_Shift (keycode 8, Mod3) HELD in xrdp's server, Mod3 rode on every
+# key, and no grab matched — the daemon's, i3's, and panic's own. A restart
+# cannot fix that and neither can panic; step 1 can. And a plain
+# `hotkeyd.sh restart` bind did nothing at all while panicked, because the latch
+# refuses `start` — which is how "I pressed it and it stayed in panic" happened.
 #
-# CHORD CHOICE: $mod+Ctrl+Shift+r, and reachability beats accident-resistance.
+# THE Mod3/Mod5 COPIES ARE THE SAME BIND. i3's passive grabs allow for NumLock
+# and CapsLock only, so a stuck Mod3 (ISO_Level5) or Mod5 (ISO_Level3) would
+# otherwise block the very key that clears it.
 #
-# This was $mod+Shift+F12, chosen to be awkward on the theory that a
-# comfortable emergency chord gets pressed by accident. That theory assumed a
-# full keyboard. The primary :10 client is an Android RDP client with NO F12
-# key, so the one control that recovers a broken keyboard was unreachable on
-# the device most likely to need it. An emergency control that cannot be
-# pressed is not an emergency control.
+# hotkeyd/test-launcher.sh reads the chord out of bind.PanicChord
+# (hotkeyd/internal/bind/chord.go) and asserts these lines, so the bind and the
+# reservation cannot drift apart and be discovered mid-outage. The daemon's
+# validator REFUSES any table that binds this chord, under every modifier
+# spelling ($mod, Mod4+, Mod1+) — see `bind.ReservedChords`.
 #
-# $mod+Shift+r previously ran i3 `restart`, then panic, and now the hammer
-# below. Panic moved ONE MODIFIER OUT rather than away: it is still reachable
-# without an F12 row, which was the whole reason it left $mod+Shift+F12.
-bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
-
-# THE HAMMER. One chord for "my session is wrong, reset it" — the intent that
-# used to be spread across four chords (i3 restart, i3 reload + bar, bar alone,
-# daemon restart-by-terminal). Reload first, then this display's daemon, then
-# the bar.
+# CHORD HISTORY: $mod+Shift+F12 (unreachable on the Android RDP client, which
+# has no F12), then $mod+Ctrl+Shift+r beside a $mod+Shift+r "hammer", now the
+# hammer alone. $mod+Ctrl+Shift+r is an ordinary, unbound chord again.
 #
-# NOT the same thing as panic, which is why they are different chords rather
-# than one escalating chord: the hammer RESTARTS the daemon, panic STOPS it and
-# gives the keyboard back to i3. If the daemon is the problem, restarting it
-# reinstates the problem — that is exactly when you want the other chord, and
-# needing to press it is not the moment to discover it shares a key.
+# `recover` takes no display: it falls back to $DISPLAY, so each session's i3
+# recovers only its OWN daemon. The env pair is spelled out because
+# config.common cannot see i3/config's $qsbarenv — i3 scopes variables per file.
 #
-# i3-OWNED, and it must stay that way. A restart-everything bind that the
-# daemon owned could not restart a WEDGED daemon, which is most of why you
-# would reach for it. The daemon's table (hotkeyd/cmd/hotkeyd/config.go) may not
-# bind this chord for the same reason it may not bind panic's.
-#
-# `hotkeyd.sh restart` takes no display: it falls back to $DISPLAY, so each
-# session's i3 restarts only its OWN daemon (:0 and :10 are separate daemons
-# with separate grabs). The env pair is spelled out because config.common
-# cannot see i3/config's $qsbarenv — i3 scopes variables per file.
-#
-# THE DOUBLE QUOTES AROUND `sh -c '...'` ARE LOad-BEARING. i3's command parser
+# THE DOUBLE QUOTES AROUND `sh -c '...'` ARE LOAD-BEARING. i3's command parser
 # treats `,` and `;` as command separators and does NOT recognise SINGLE quotes
 # as quoting — only double. Written with single quotes alone, i3 splits this
 # line at the `;`, runs the first half, and tries to parse `env QS_BAR_...` as
@@ -501,13 +488,15 @@ bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic
 # line, which is why config.d/native.conf's `sh -c 'nitrogen --restore; sleep 1;
 # ...'` is fine unquoted — do not "fix" that one by copying this.
 #
-# `;` and not `&&`: the bar restart must happen whether or not the daemon
-# restart succeeded. A wedged daemon is one of the reasons to press this, and
-# `&&` would skip the half most likely to still work.
+# `;` and not `&&`: the bar restart must happen whether or not recover
+# succeeded. A daemon that will not come back is one of the reasons to press
+# this, and `&&` would skip the half most likely to still work.
 #
 # $HOME (not ~) inside the quotes: i3 substitutes only names declared with
 # `set`, so $HOME reaches sh untouched and sh expands it — verified end to end.
-bindsym $mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
+bindsym $mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd-panic.sh recover; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
+bindsym Mod3+$mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd-panic.sh recover; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
+bindsym Mod5+$mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd-panic.sh recover; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
 
 # Lock screen
 # $mod+9 (blurlock) moved to hotkeyd/cmd/hotkeyd/config.go with the apps +

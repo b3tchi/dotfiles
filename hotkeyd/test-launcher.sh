@@ -274,7 +274,8 @@ n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 # insufficient bind were still there.
 # The CHORD is read from the daemon's own source rather than written here, so
 # this check survives the chord moving — which it has done twice
-# ($mod+Shift+F12 -> $mod+Shift+r -> $mod+Ctrl+Shift+r, the last when the
+# ($mod+Shift+F12 -> $mod+Shift+r -> $mod+Ctrl+Shift+r -> $mod+Shift+r again
+# at dotfiles-3m12, as recover; the $mod+Ctrl+Shift+r step came when the
 # restart verbs consolidated onto $mod+Shift+r as the hammer). A hardcoded
 # chord makes this assertion fail on the commit that MOVES the bind, which is
 # noise, while silently passing if the bind and the reservation ever
@@ -290,47 +291,47 @@ COMMON="$HERE/../i3/config.common"
 CHORD_GO="$HERE/internal/bind/chord.go"
 PANIC_CHORD="$(sed -n 's/^const PanicChord = "\(.*\)"$/\1/p' "$CHORD_GO")"
 [ -n "$PANIC_CHORD" ] || bad "could not read PanicChord from $CHORD_GO"
+# ONE CHORD SINCE dotfiles-3m12. Jan: panic "should be part of $mod+S+r",
+# "part of i3 reload", and "$mod+S+r should be itself force". So the chord
+# the daemon reserves is the i3 reload, and it runs `recover`: unstick,
+# resume if panicked or else restart, and panic only if the daemon still
+# will not serve. The old "hammer and panic must be different keys" rule is
+# retired with it - recover's health verdict is what separates "restart
+# fixed it" from "give the keyboard to i3" now, not a second chord.
 BIND_LINE="$(grep -nF "bindsym $PANIC_CHORD " "$COMMON" \
-             | grep 'hotkeyd-panic\.sh panic' || true)"
+             | grep 'hotkeyd-panic\.sh recover' || true)"
 if [ -n "$BIND_LINE" ]; then
-    ok "i3 base config binds $PANIC_CHORD to hotkeyd-panic.sh panic"
+    ok "i3 base config binds $PANIC_CHORD to hotkeyd-panic.sh recover"
 else
-    bad "no panic bind calling hotkeyd-panic.sh panic on $PANIC_CHORD in i3/config.common"
+    bad "no bind calling hotkeyd-panic.sh recover on $PANIC_CHORD in i3/config.common"
 fi
+printf '%s' "$BIND_LINE" | grep -q 'reload' \
+    && ok "and it is part of the i3 reload" \
+    || bad "the $PANIC_CHORD bind does not reload i3: $BIND_LINE"
 
-# The hammer must NOT be the panic chord. They are opposite verbs — one
-# restarts the daemon, the other stops it and hands the keyboard back — and a
-# session where the same key does both has no way to recover from a daemon that
-# is alive and wrong.
-HAMMER_LINE="$(grep -n 'bindsym $mod+Shift+r ' "$COMMON" || true)"
-if printf '%s' "$HAMMER_LINE" | grep -q 'hotkeyd-panic\.sh panic'; then
-    bad "the hammer chord \$mod+Shift+r also runs panic — they must stay distinct"
+# A STUCK MODIFIER MUST NOT BLOCK THE WAY OUT. The fault that forced
+# dotfiles-3m12 was a held ISO_Level5_Shift (Mod3) riding on every key: i3's
+# passive grabs only allow for NumLock/CapsLock, so the old panic chord never
+# matched either. The same bind under Mod3 and Mod5 (ISO_Level3_Shift) keeps
+# the chord reachable through either.
+for extra in Mod3 Mod5; do
+    grep -F "bindsym $extra+$PANIC_CHORD " "$COMMON" | grep -q 'hotkeyd-panic\.sh recover' \
+        && ok "and again under a stuck $extra ($extra+$PANIC_CHORD)" \
+        || bad "no $extra+$PANIC_CHORD recover bind - a stuck $extra blocks the way out"
+done
+
+# Nothing else is a way out: no second panic chord (the old $mod+Ctrl+Shift+r
+# is gone), and no bare `hotkeyd.sh restart` bind, which the panic latch refuses
+# and which therefore does nothing on exactly the press that needs it.
+if grep -E '^[[:space:]]*bind(sym|code) ' "$COMMON" | grep -q 'hotkeyd-panic\.sh panic'; then
+    bad "a bind still runs hotkeyd-panic.sh panic directly - recover is the one way out"
 else
-    ok "the hammer chord is distinct from $PANIC_CHORD"
+    ok "no separate panic bind in i3/config.common"
 fi
-
-# `hotkeyd.sh restart` MAY be bound — it is the hammer's first step — but never
-# on the panic chord.
-#
-# This used to demand that restart be bound NOWHERE. That was right while
-# restart was the superseded ESCAPE HATCH: two hatches is one too many, and the
-# restart bind would have looked like the recovery key while reinstating the
-# very table that broke the session. It stopped being right when the restart
-# verbs consolidated onto $mod+Shift+r as a convenience hammer and panic moved
-# to its own chord. The invariant that actually carries the original reasoning
-# is not "restart is unbound" but "restart and panic are never the same key" —
-# because the whole point of panic is that it works when restarting the daemon
-# would only reinstate the fault.
-RESTART_CHORDS="$(grep -E '^[[:space:]]*bind(sym|code) ' "$COMMON" \
-                  | grep 'hotkeyd\.sh restart' \
-                  | awk '{print $2}' || true)"
-if [ -z "$RESTART_CHORDS" ]; then
-    ok "no 'hotkeyd.sh restart' bind in i3/config.common"
-elif printf '%s\n' "$RESTART_CHORDS" | grep -qxF "$PANIC_CHORD"; then
-    bad "'hotkeyd.sh restart' is bound to the panic chord $PANIC_CHORD — \
-restarting a daemon that is alive and wrong reinstates the fault"
+if grep -E '^[[:space:]]*bind(sym|code) ' "$COMMON" | grep -q 'hotkeyd\.sh restart'; then
+    bad "a bind runs bare 'hotkeyd.sh restart', which the panic latch refuses"
 else
-    ok "'hotkeyd.sh restart' is bound ($RESTART_CHORDS), and not on $PANIC_CHORD"
+    ok "no bare 'hotkeyd.sh restart' bind (recover restarts, and resumes when it must)"
 fi
 
 # restart takes the display as an ARGUMENT — the i3 escape-hatch bind runs with

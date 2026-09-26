@@ -80,7 +80,8 @@ set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 # now in the $mod+Shift+r hammer (config.common), which reloads AND restarts
 # the bar AND the daemon, so keeping a second partial version of it here would
 # be a chord that does almost the same thing for no reason. Plain `restart` had
-# been on $mod+Ctrl+Shift+r, which panic now holds.
+# been on $mod+Ctrl+Shift+r, which panic then held; since dotfiles-3m12 panic is
+# folded into $mod+Shift+r (recover) and that chord is unbound.
 #
 # i3 runs exec_always on RESTART only — a plain `reload` re-reads the config and
 # leaves every exec_always process untouched (verified empirically: exec_always

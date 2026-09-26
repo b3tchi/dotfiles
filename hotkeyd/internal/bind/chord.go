@@ -33,9 +33,12 @@ const ModToken = "$mod"
 // DefaultMod is the modifier ModToken resolves to when no mod is supplied.
 const DefaultMod = "Mod4"
 
-// PanicChord is the one chord i3 keeps forever (i3/config.common,
-// hotkeyd-panic.sh panic). See RESERVED_CHORDS.
-const PanicChord = "$mod+Ctrl+Shift+r"
+// PanicChord is the one chord i3 keeps forever: $mod+Shift+r, part of the i3
+// reload (i3/config.common), running hotkeyd-panic.sh recover - release stuck
+// modifiers, resume if panicked or else restart the daemon, panic if it still
+// is not serving (dotfiles-3m12). One chord, and it is the forceful one: the
+// old separate $mod+Ctrl+Shift+r panic chord is gone. See ReservedChords.
+const PanicChord = "$mod+Shift+r"
 
 // ModResolutions enumerates every modifier $mod resolves to on a display
 // this repo runs on: Mod4 on the native :0 session, Mod1 on the xrdp :10
@@ -229,8 +232,8 @@ func canonDisplayMod(raw string) (canon string, ok bool) {
 // ReservedChords holds the panic chord's normalized identity under EVERY
 // $mod resolution this repo runs on. Reserving the literal ModToken alone
 // would leave a hole, because the validator is display-agnostic while $mod
-// is not: a table that spells "Mod1+Ctrl+Shift+r" steals the chord on :10
-// and "Mod4+Ctrl+Shift+r" steals it on :0, and neither is a string match for
+// is not: a table that spells "Mod1+Shift+r" steals the chord on :10
+// and "Mod4+Shift+r" steals it on :0, and neither is a string match for
 // "$mod". Normalising the token under both resolutions closes it in both
 // directions. Alias folding ("Super", "Alt", "win", case) comes free from
 // NormalizeChord.

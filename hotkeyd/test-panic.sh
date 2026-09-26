@@ -756,6 +756,93 @@ sleep 0.5
 kwi3_start stop >/dev/null
 sleep 0.3
 
+# --- 6b: `recover` is the $mod+Shift+r verb (dotfiles-3m12) -----------------
+# The one chord you press when something is wrong. The case that forced it: an
+# RDP reconnect's KbdSync left ISO_Level5_Shift (keycode 8, on Mod3) HELD in the
+# server, so Mod3 rode on every key and no passive grab - the daemon's nor
+# i3's, the old panic chord's included - ever matched. A daemon restart cannot
+# fix that and neither can panic; releasing the key can. So recover escalates:
+# unstick -> resume if panicked, else restart -> and only if the daemon is
+# still not serving, panic.
+echo "panic: recover clears a stuck modifier, restarts, and escalates only if it must"
+cat > "$T/stuck.py" <<'EOF'
+import sys
+from Xlib import X, XK, display as xdisplay
+from Xlib.ext import xtest
+d = xdisplay.Display()
+if sys.argv[1] == "hold":
+    # keycode 8 held and on Mod3, as xorgxrdp had it. Hyper_L, not the
+    # ISO_Level5_Shift xorgxrdp maps there: Xvfb's XKB compat gives Level5 no
+    # Mod3 action, so it would set nothing. The fault is "a HELD key that is in
+    # the modifier map", whatever its keysym - which is also why recover
+    # releases by modifier map, never by a list of keysym names.
+    d.change_keyboard_mapping(8, [[XK.string_to_keysym("Hyper_L")] * 4])
+    m = [list(c) for c in d.get_modifier_mapping()]
+    m[5] = [c for c in m[5] if c] + [8]
+    d.set_modifier_mapping(m)
+    d.sync()
+    xtest.fake_input(d, X.KeyPress, 8)
+    d.sync()
+print(hex(d.screen().root.query_pointer().mask & 0xff))
+EOF
+stuck() { DISPLAY="$XA" python3 "$T/stuck.py" "$1" 2>/dev/null; }
+pid_on() { pgrep -f "$HOTKEYD_PROC_PAT .*--display $1" 2>/dev/null | head -1; }
+
+# (a) not panicked, a modifier stuck: the reported symptom, reproduced first
+mask="$(stuck hold)"
+case "$mask" in
+    0x2?|0x3?) ok "a held modifier key on Mod3 sets it (mask $mask)" ;;
+    *)         bad "could not reproduce the stuck Mod3 (mask $mask)" ;;
+esac
+answer="$(who_answers)"
+[ "$answer" = nobody ] \
+    && ok "and with Mod3 stuck NOBODY answers Mod4+F10 - the reported fault" \
+    || bad "expected a stuck Mod3 to block the grab, got: $answer"
+before="$(pid_on "$XA")"
+out="$(panic recover 2>&1)"; rc=$?
+sleep 0.5
+after="$(pid_on "$XA")"
+[ "$rc" -eq 0 ] || bad "recover exited $rc: $out"
+mask="$(stuck query)"
+[ $(( mask & 0x20 )) -eq 0 ] && ok "recover released the stuck modifier (mask $mask)" \
+    || bad "Mod3 still set after recover (mask $mask): $out"
+[ -n "$after" ] && [ "$after" != "$before" ] \
+    && ok "and restarted the daemon (pid $before -> $after)" \
+    || bad "recover did not restart the daemon (pid $before -> $after): $out"
+[ ! -e "$LINK" ] && [ ! -L "$LINK" ] && ok "and did not panic a healthy daemon" \
+    || bad "recover panicked although the daemon came back serving: $out"
+answer="$(who_answers)"
+[ "$answer" = daemon ] && ok "the DAEMON answers Mod4+F10 again" \
+    || bad "expected the daemon to answer after recover, got: $answer"
+
+# (b) panicked: recover is the way back (a plain restart is refused by the latch)
+panic panic >/dev/null 2>&1
+sleep 0.5
+[ -L "$LINK" ] || bad "could not set up the panicked state"
+out="$(panic recover 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] || bad "recover while panicked exited $rc: $out"
+[ ! -e "$LINK" ] && [ ! -L "$LINK" ] && ok "panicked: recover removed the link" \
+    || bad "recover while panicked left the fallback linked: $out"
+answer="$(who_answers)"
+[ "$answer" = daemon ] && ok "and the DAEMON answers Mod4+F10 again" \
+    || bad "expected the daemon after recover-from-panic, got: $answer"
+
+# (c) a daemon that will not come back: recover escalates to panic, so i3
+# still gives you a keyboard
+printf '#!/bin/sh\nexit 1\n' > "$T/dead-daemon"; chmod +x "$T/dead-daemon"
+out="$(HOTKEYD_GO_DAEMON="$T/dead-daemon" panic recover 2>&1)"; rc=$?
+sleep 0.5
+[ -L "$LINK" ] && ok "a daemon that will not serve: recover escalated to panic" \
+    || bad "recover left a dead daemon and no fallback (rc=$rc): $out"
+[ "$rc" -ne 0 ] && ok "and exits non-zero, because the daemon is NOT back ($rc)" \
+    || bad "recover reported success with the daemon dead"
+answer="$(who_answers)"
+[ "$answer" = i3 ] && ok "and i3 answers Mod4+F10 from the fallback" \
+    || bad "expected i3 to own the chord after the escalation, got: $answer"
+panic resume >/dev/null 2>&1
+sleep 1
+
 # --- 7: panic with the daemon ALREADY DEAD -----------------------------------
 echo "panic: daemon already dead"
 pkill -9 -f "$HOTKEYD_PROC_PAT .*--display $XA"

@@ -102,21 +102,37 @@ func TestValidate_R07b_ReservedPanicChord_ModTokenOnXrdpPass(t *testing.T) {
 }
 
 func TestValidate_R07c_ReservedPanicChord_LiteralMod4(t *testing.T) {
-	binds := []Bind{{Chord: "Mod4+Ctrl+Shift+r", Actions: []Action{Command("noop")}}}
+	binds := []Bind{{Chord: "Mod4+Shift+r", Actions: []Action{Command("noop")}}}
 	p := Validate(binds, noLayers(), "Mod1") // pass mod irrelevant: literal, not the token
 	mustHaveProblemContaining(t, p, "is the panic chord")
 }
 
 func TestValidate_R07d_ReservedPanicChord_LiteralMod1(t *testing.T) {
-	binds := []Bind{{Chord: "Mod1+Ctrl+Shift+r", Actions: []Action{Command("noop")}}}
+	binds := []Bind{{Chord: "Mod1+Shift+r", Actions: []Action{Command("noop")}}}
 	p := Validate(binds, noLayers(), "Mod4") // pass mod irrelevant: literal, not the token
 	mustHaveProblemContaining(t, p, "is the panic chord")
 }
 
 func TestValidate_R07e_ReservedPanicChord_AliasFolded(t *testing.T) {
-	binds := []Bind{{Chord: "Super+Control+Shift+r", Actions: []Action{Command("noop")}}}
+	binds := []Bind{{Chord: "Super+Shift+r", Actions: []Action{Command("noop")}}}
 	p := Validate(binds, noLayers(), "Mod1")
 	mustHaveProblemContaining(t, p, "is the panic chord")
+}
+
+func TestValidate_R07g_NeighbouringChordsStayFree(t *testing.T) {
+	// The reservation is exact: $mod+r (resize) is ordinary, and so is the old
+	// panic chord $mod+Ctrl+Shift+r - dotfiles-3m12 folded panic into recover
+	// on $mod+Shift+r and freed it.
+	for _, chord := range []string{"$mod+r", "$mod+Ctrl+Shift+r"} {
+		for _, m := range ModResolutions {
+			binds := []Bind{{Chord: chord, Actions: []Action{Command("noop")}}}
+			for _, prob := range Validate(binds, noLayers(), m) {
+				if strings.Contains(string(prob), "reserved for i3") {
+					t.Fatalf("[%s] %s reserved: %s", m, chord, prob)
+				}
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
