@@ -13,7 +13,15 @@ fi
 # keybind grabs (which only compensate for NumLock/CapsLock) never match and
 # Alt shortcuts silently leak to the focused window. setxkbmap recompiles the
 # map and resets the locked state to 0.
-setxkbmap -layout us -model pc104 -option ""
+# Layout is re-applied, never chosen: xorgxrdp already loaded the RDP client's
+# keyboard (rdpLoadLayout 0x00010409 -> us(dvorak)) before this runs, and a
+# hard-coded `-layout us` turned a Dvorak client into QWERTY. Only reconnects
+# hid it (they re-run rdpLoadLayout after this file). See kwi3 krdp/phone/config/xinitrc.
+xkb_layout=$(setxkbmap -query 2>/dev/null | sed -n 's/^layout: *//p')
+xkb_variant=$(setxkbmap -query 2>/dev/null | sed -n 's/^variant: *//p')
+setxkbmap -layout "${xkb_layout:-us}" ${xkb_variant:+-variant "$xkb_variant"} \
+    -model pc104 -option ""
+unset xkb_layout xkb_variant
 
 # ------------------------------------------------- the kwi3 leg (kwi3-7m8.7)
 # Set only by the kwi3 xrdp listener's own sesman.ini

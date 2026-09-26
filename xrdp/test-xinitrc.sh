@@ -47,7 +47,14 @@ mkstub() { # mkstub NAME BODY
   chmod +x "$BIN/$1"
 }
 mkstub xrdb      'cat >/dev/null; exit 0'
-mkstub setxkbmap 'exit 0'
+# -query answers with whatever layout xorgxrdp loaded from the RDP client's
+# keyboard (STUB_XKB_LAYOUT / STUB_XKB_VARIANT); unset, it prints no layout.
+mkstub setxkbmap 'if [ "$1" = -query ]; then
+  printf "rules:      base\nmodel:      pc104\n"
+  [ -n "${STUB_XKB_LAYOUT:-}" ] && printf "layout:     %s\n" "$STUB_XKB_LAYOUT"
+  [ -n "${STUB_XKB_VARIANT:-}" ] && printf "variant:    %s\n" "$STUB_XKB_VARIANT"
+fi
+exit 0'
 mkstub i3        'exit 0'
 
 cat > "$FAKE_HOME/.local/bin/kwi3-x11-session" <<EOF
@@ -98,6 +105,17 @@ echo "-- 2. shared preamble runs on the i3 leg too (mod resource + keymap)"
 run_xinitrc XRDP_SESSION=1 >/dev/null
 has "$TRACE" "xrdb -merge" "xrdb -merge ran (Alt-as-mod resource)"
 has "$TRACE" "setxkbmap -layout us -model pc104 -option " "setxkbmap ran (keymap + locked-modifier reset)"
+
+# ===========================================================================
+echo "-- 2b. the keymap reset keeps the RDP client's layout (Dvorak stays Dvorak)"
+# ===========================================================================
+run_xinitrc XRDP_SESSION=1 STUB_XKB_LAYOUT='us(dvorak)' >/dev/null
+has "$TRACE" "setxkbmap -layout us(dvorak) -model pc104 -option " "i3 leg keeps us(dvorak)"
+hasnt "$TRACE" "setxkbmap -layout us -model" "and does not force QWERTY over it"
+run_xinitrc KWI3_SESSION=1 XRDP_SESSION=1 STUB_ENV_MODE=agree STUB_XKB_LAYOUT='us(dvorak)' >/dev/null
+has "$TRACE" "setxkbmap -layout us(dvorak) -model pc104 -option " "kwi3 leg keeps us(dvorak)"
+run_xinitrc STUB_XKB_LAYOUT=us STUB_XKB_VARIANT=dvorak >/dev/null
+has "$TRACE" "setxkbmap -layout us -variant dvorak -model pc104 -option " "layout + variant keeps its variant"
 
 # ===========================================================================
 echo "-- 3. KWI3_SESSION=1, healthy env, launcher present: the kwi3 leg"
