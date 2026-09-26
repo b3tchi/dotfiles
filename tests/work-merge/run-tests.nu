@@ -15,6 +15,7 @@ const SUITES = [
     [label, file];
     ["land", "land-cases.nu"]
     ["safety", "safety-cases.nu"]
+    ["archive", "archive-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {

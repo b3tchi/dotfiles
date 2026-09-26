@@ -214,11 +214,52 @@ fi
 
 START_HEAD="$(git -C "$AKM_ROOT" rev-parse HEAD)"
 BACKUP_DIR="$(mktemp -d)"
+COMMIT_SHA=""   # set right after this script's own commit succeeds, below
+
+# ── Shared-tree safety (auctions-ycr9h, same fix as land-bd-task.sh /
+# auctions-zyvfr) ────────────────────────────────────────────────────────
+# AKM_ROOT is the shared main worktree — parallel sessions have uncommitted
+# work in it. This rollback used to be `git reset --hard -q "$START_HEAD"`
+# whenever HEAD had moved, i.e. whenever this script's own "feat(akm):
+# archive $SP" commit had already landed and something AFTER it (`bd close`)
+# then failed. `--hard` wipes the working tree back to START_HEAD wholesale,
+# discarding any uncommitted edit another session made in AKM_ROOT in the
+# meantime — exactly the hazard land-bd-task.sh's rollback hit and fixed.
+# Replacement contract:
+#   - HEAD still at our own commit → `git reset --merge` (keeps unrelated
+#     local changes, REFUSES rather than overwrite a conflicting one);
+#   - HEAD has moved past our commit (another session committed on top while
+#     we were mid-script, e.g. during the `bd close` call) → `git revert`
+#     our commit instead of resetting past the one that followed it;
+#   - neither is safe → stop loudly (exit 4), leave a note on the epic, and
+#     NEVER escalate to --hard.
+rollback_incomplete () {
+  local how="$1"
+  echo "ROLLBACK INCOMPLETE: ${how}. $AKM_ROOT still carries archive commit ${COMMIT_SHA:0:12} for $SP. NOT escalating to reset --hard (that would destroy uncommitted work in a shared tree). Recover by hand: commit/stash the conflicting local change, then \`git -C $AKM_ROOT revert ${COMMIT_SHA:0:12}\`." >&2
+  bd update "$EPIC" --append-notes "ARCHIVE ROLLBACK INCOMPLETE for $SP: ${how}; $AKM_ROOT still carries archive commit ${COMMIT_SHA:0:12} — manual revert needed." >/dev/null 2>&1 || true
+  rm -rf "$BACKUP_DIR"
+  exit 4
+}
+
 rollback () {
   local code=$?
   trap - ERR
-  if [ "$(git -C "$AKM_ROOT" rev-parse HEAD 2>/dev/null || true)" != "$START_HEAD" ]; then
-    git -C "$AKM_ROOT" reset --hard -q "$START_HEAD" 2>/dev/null || true
+  local head
+  head="$(git -C "$AKM_ROOT" rev-parse HEAD 2>/dev/null || echo "$START_HEAD")"
+  if [ "$head" != "$START_HEAD" ]; then
+    if [ -n "$COMMIT_SHA" ] && [ "$head" = "$COMMIT_SHA" ]; then
+      git -C "$AKM_ROOT" reset --merge -q "$START_HEAD" \
+        || rollback_incomplete "\`git reset --merge ${START_HEAD:0:12}\` refused (a local change overlaps the archive commit)"
+    elif [ -n "$COMMIT_SHA" ] \
+         && git -C "$AKM_ROOT" merge-base --is-ancestor "$COMMIT_SHA" "$head" 2>/dev/null; then
+      echo "Base moved past the archive commit (another session committed on top) — reverting instead of resetting." >&2
+      if ! git -C "$AKM_ROOT" revert --no-edit "$COMMIT_SHA"; then
+        git -C "$AKM_ROOT" revert --abort 2>/dev/null || true
+        rollback_incomplete "\`git revert ${COMMIT_SHA:0:12}\` failed"
+      fi
+    else
+      rollback_incomplete "HEAD ${head:0:12} does not contain a recognizable archive commit to undo"
+    fi
   fi
   for path in "${TOUCH_PATHS[@]}"; do
     rel="${path#$AKM_ROOT/}"
@@ -288,6 +329,7 @@ git -C "$AKM_ROOT" add "$SP_ARCHIVE" "$BOARD" "$ARCHIVE"
 [ "$HAS_STORY" -eq 0 ] || git -C "$AKM_ROOT" add "$US_FILE" "$IM_FILE"
 [ "$HAS_FEATURE" -eq 0 ] || git -C "$AKM_ROOT" add "$FT_FILE"
 git -C "$AKM_ROOT" commit -m "feat(akm): archive $SP"
+COMMIT_SHA="$(git -C "$AKM_ROOT" rev-parse HEAD)"
 
 bd close "$EPIC" --reason "Merged via $SP. All child tasks closed by work-audit." >/dev/null
 
