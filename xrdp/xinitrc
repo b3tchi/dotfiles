@@ -36,11 +36,13 @@ unset xkb_layout xkb_variant
 # discriminator is a second xrdp listener on a different port; here it is
 # this same listener's own sesman, per kwi3-7m8.7).
 if [ -n "${KWI3_SESSION:-}" ]; then
-    # Sourced, not run: the whole job of kwi3-session-env.sh is two exports,
-    # $I3SOCK and $HOTKEYD_I3SOCK — never restated here, because the X11
-    # host computes the same socket path itself (adapters/x11/src/
+    # Sourced, not run: the whole job of kwi3-session-env.sh is one export,
+    # $KWI3SOCK (kwi3's JSON-RPC socket) — never restated here, because the
+    # X11 host computes the same socket path itself (adapters/x11/src/
     # ipcserver.cpp) and two spellings of one path is how a session ends up
-    # exporting a socket nothing serves.
+    # exporting a socket nothing serves. Since kwi3 sp004 Task 18
+    # (kwi3-234.18) kwi3 serves no i3 IPC socket, and the script UNSETS
+    # I3SOCK/HOTKEYD_I3SOCK rather than exporting them.
     ENV_SH="$HOME/.local/bin/kwi3-session-env.sh"
     if [ -r "$ENV_SH" ]; then
         # shellcheck source=/dev/null
@@ -48,17 +50,18 @@ if [ -n "${KWI3_SESSION:-}" ]; then
     fi
 
     # Refuse rather than start half a session: if the env script did not
-    # run, or the two names it exports disagree, hotkeyd and i3-msg would be
-    # talking to two different window managers with no error anywhere
-    # (kwi3-soc.7's measured trap). Falling through to the i3 leg below is
-    # safer than starting kwi3 with a keyboard aimed at nothing.
-    if [ -n "${I3SOCK:-}" ] && [ "$I3SOCK" = "${HOTKEYD_I3SOCK:-}" ] \
-       && [ -x "$HOME/.local/bin/kwi3-x11-session" ]; then
+    # run, or is a stale pre-T18 copy that names kwi3's old i3 socket and no
+    # $KWI3SOCK, nothing in the session knows where kwi3 is - hotkeyd would
+    # dispatch nowhere and the bar would read nothing. Falling through to the
+    # i3 leg below is safer than starting kwi3 with a keyboard aimed at
+    # nothing. (kwi3-x11-session makes the same check again, and also
+    # refuses an i3 variable left set.)
+    if [ -n "${KWI3SOCK:-}" ] && [ -x "$HOME/.local/bin/kwi3-x11-session" ]; then
         exec "$HOME/.local/bin/kwi3-x11-session"
     fi
 
     echo "xinitrc: KWI3_SESSION is set but the launcher is missing, not" \
-         "executable, or I3SOCK/HOTKEYD_I3SOCK disagree - falling through" >&2
+         "executable, or kwi3-session-env.sh exported no KWI3SOCK - falling through" >&2
 fi
 
 # shared config (ft003): ~/.i3/config + ~/.i3/config.d/wsl.conf via rotz

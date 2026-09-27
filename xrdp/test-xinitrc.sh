@@ -8,9 +8,11 @@
 # nothing under test talks to a display. xrdb, setxkbmap, i3 and
 # kwi3-x11-session are all recorder stubs, and kwi3-session-env.sh is a
 # second stub (SOURCED, exactly as the real script sources it) whose
-# STUB_ENV_MODE picks what it exports, so the "I3SOCK/HOTKEYD_I3SOCK
-# disagree" refusal path (kwi3-soc.7's trap) can be driven without a real
-# window manager ever computing a real socket path.
+# STUB_ENV_MODE picks what it exports, so the refusal paths can be driven
+# without a real window manager ever computing a real socket path. Since
+# kwi3 sp004 Task 18 (kwi3-234.18) the env script exports $KWI3SOCK only -
+# kwi3 has no i3 IPC socket - so the healthy shape is KWI3SOCK set; the old
+# I3SOCK/HOTKEYD_I3SOCK pair is what a STALE (pre-T18) install exports.
 #
 # What this does NOT re-test: kwi3-x11-session's own internals (the
 # hotkeyd/bar startup ordering, the ready-marker wait) - that is
@@ -66,17 +68,18 @@ chmod +x "$FAKE_HOME/.local/bin/kwi3-x11-session"
 
 # Sourced, not exec'd, by the real xinitrc - so this has no shebang trap of
 # its own to worry about, only what it exports. STUB_ENV_MODE:
-#   agree     - I3SOCK == HOTKEYD_I3SOCK (the healthy case)
-#   disagree  - the two differ (kwi3-soc.7's trap)
-#   noexport  - the file exists but exports neither (a broken install)
+#   agree     - KWI3SOCK set, no i3 variable (the healthy, post-T18 case)
+#   legacy    - I3SOCK == HOTKEYD_I3SOCK and no KWI3SOCK: a stale pre-T18
+#               kwi3-session-env.sh, naming an i3 socket kwi3 no longer serves
+#   noexport  - the file exists but exports nothing (a broken install)
 cat > "$FAKE_HOME/.local/bin/kwi3-session-env.sh" <<'EOF'
 printf 'kwi3-session-env.sh sourced\n' >> "$TRACE"
 case "${STUB_ENV_MODE:-agree}" in
-  agree)    I3SOCK=/run/user/1000/kwi3-99.sock; HOTKEYD_I3SOCK=/run/user/1000/kwi3-99.sock ;;
-  disagree) I3SOCK=/run/user/1000/kwi3-99.sock; HOTKEYD_I3SOCK=/run/user/1000/other.sock ;;
+  agree)    KWI3SOCK=/run/user/1000/kwi3-99.rpc.sock; export KWI3SOCK ;;
+  legacy)   I3SOCK=/run/user/1000/kwi3-99.sock; HOTKEYD_I3SOCK=/run/user/1000/kwi3-99.sock
+            export I3SOCK HOTKEYD_I3SOCK ;;
   noexport) : ;;
 esac
-export I3SOCK HOTKEYD_I3SOCK
 EOF
 
 # run_xinitrc [extra env assignments...] - runs the real xinitrc as its own
@@ -129,17 +132,22 @@ has "$TRACE" "xrdb -merge" "the shared preamble still ran first (same leg, same 
 has "$TRACE" "setxkbmap -layout us -model pc104 -option " "and the keymap reset too"
 
 # ===========================================================================
-echo "-- 4. KWI3_SESSION=1, I3SOCK/HOTKEYD_I3SOCK disagree: refuses, falls through"
+echo "-- 4. KWI3_SESSION=1, no \$KWI3SOCK exported: refuses, falls through"
 # ===========================================================================
+# A stale, pre-T18 env script (I3SOCK/HOTKEYD_I3SOCK and no KWI3SOCK) and a
+# broken one that exports nothing are the same refusal: nothing in the
+# session would know where kwi3's socket is.
 STATE_ERR="$STATE/stderr"
-: > "$TRACE"
-env -i PATH="$BIN:/usr/bin:/bin" HOME="$FAKE_HOME" TRACE="$TRACE" \
-    KWI3_SESSION=1 STUB_ENV_MODE=disagree \
-    sh "$XINITRC" >/dev/null 2>"$STATE_ERR"
-has "$TRACE" "kwi3-session-env.sh sourced" "still sources the env script"
-hasnt "$TRACE" "kwi3-x11-session" "refuses to exec the kwi3 launcher when the sockets disagree"
-has "$TRACE" "i3 " "falls through to the i3 leg instead"
-has "$STATE_ERR" "disagree" "and says why, on stderr"
+for mode in legacy noexport; do
+  : > "$TRACE"; : > "$STATE_ERR"
+  env -i PATH="$BIN:/usr/bin:/bin" HOME="$FAKE_HOME" TRACE="$TRACE" \
+      KWI3_SESSION=1 STUB_ENV_MODE=$mode \
+      sh "$XINITRC" >/dev/null 2>"$STATE_ERR"
+  has "$TRACE" "kwi3-session-env.sh sourced" "$mode: still sources the env script"
+  hasnt "$TRACE" "kwi3-x11-session" "$mode: refuses to exec the kwi3 launcher with no KWI3SOCK"
+  has "$TRACE" "i3 " "$mode: falls through to the i3 leg instead"
+  has "$STATE_ERR" "KWI3SOCK" "$mode: and says why, on stderr"
+done
 
 # ===========================================================================
 echo "-- 5. KWI3_SESSION=1, launcher missing: falls through, does not crash"
