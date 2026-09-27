@@ -118,13 +118,138 @@ Scope {
         return result
     }
 
-    // MRU focus history — list of i3 container ids, most-recent first.
-    // Maintained by windowSubscriber from live i3 window::focus events.
+    // MRU focus history — list of i3 (or kwi3) container ids, most-recent
+    // first. Maintained by windowSubscriber from live i3 window::focus
+    // events, or by _kwi3Subscribe() below from Kwi3Client's window.focused/
+    // window.removed notifications (sp004 Task 14, kwi3-234.14; ft010) —
+    // same shape either way, so switcherWindows' MRU sort (below) does not
+    // care which backend fed it.
     property var focusHistory: []
+
+    // ── kwi3 backend (sp004 Task 14) ──
+    // Under Kwi3Client.available the switcher is fed by tree.get + the
+    // window.focused/window.removed events instead of `i3-msg -t get_tree` /
+    // `subscribe`, and Enter sends window.focus {id} instead of shelling out
+    // to `[con_id=N] focus`. Subscribed once, for the process's whole life —
+    // the same "subscribe once, never unsubscribe" contract Kwi3Grid follows
+    // (Kwi3Grid.qml's own header) — so a reconnect after kwi3 restarts needs
+    // nothing from this scope either (Kwi3Client re-subscribes on its own).
+    property bool _kwi3Subscribed: false
+
+    function _kwi3Subscribe() {
+        if (root._kwi3Subscribed) return
+        root._kwi3Subscribed = true
+        Kwi3Client.on("window.focused", function (p) {
+            if (!p || typeof p.id !== "number") return
+            var h = root.focusHistory.slice()
+            var idx = h.indexOf(p.id)
+            if (idx >= 0) h.splice(idx, 1)
+            h.unshift(p.id)
+            if (h.length > 50) h.length = 50
+            root.focusHistory = h
+        })
+        Kwi3Client.on("window.removed", function (p) {
+            if (!p || typeof p.id !== "number") return
+            var h2 = root.focusHistory.slice()
+            var idx2 = h2.indexOf(p.id)
+            if (idx2 >= 0) {
+                h2.splice(idx2, 1)
+                root.focusHistory = h2
+            }
+            // Edge case (sp004 T14): a window closed while the switcher is
+            // open must refresh the list, not leave a stale row whose
+            // Enter can only ever answer -32001.
+            if (root.mode === "switcher" || root.mode === "switcher-search") {
+                root._kwi3ScanWindows()
+            }
+        })
+    }
+
+    Connections {
+        target: Kwi3Client
+        function onAvailableChanged() {
+            if (Kwi3Client.available) root._kwi3Subscribe()
+        }
+    }
+
+    Component.onCompleted: {
+        if (Kwi3Client.available) root._kwi3Subscribe()
+    }
+
+    // The kwi3 tree walk mirrors the i3 walk below field for field — kwi3's
+    // tree.get (core/ipc.js jsonCon) is deliberately the i3 GET_TREE shape
+    // (id/type/name/window/nodes/floating_nodes), so the only real
+    // difference is the transport that hands it over.
+    function _kwi3WalkWindows(tree) {
+        var wins = []
+        function walk(node, wsName) {
+            if (node.type === "workspace") wsName = node.name || wsName
+            var isWindow = (node.type === "con" || node.type === "floating_con") &&
+                           node.window && node.name
+            if (isWindow &&
+                node.name !== "quickshell" && node.name !== "qs-switcher" &&
+                node.name !== "qs-launcher" && node.name !== "qs-projects") {
+                wins.push({
+                    id: node.id,
+                    name: node.name,
+                    focused: node.focused,
+                    urgent: node.urgent || false,
+                    cls: (node.window_properties || {})["class"] || "",
+                    ws: wsName || ""
+                })
+            }
+            var children = (node.nodes || []).concat(node.floating_nodes || [])
+            for (var i = 0; i < children.length; i++) walk(children[i], wsName)
+        }
+        walk(tree)
+        return wins
+    }
+
+    // Same MRU sort the i3 windowScanner.onExited uses below — focused
+    // always first, then focusHistory rank, then unseen (9999) — kept as one
+    // function so the two backends can never drift apart on ordering.
+    function _kwi3SortByMru(wins) {
+        var rank = {}
+        for (var r = 0; r < root.focusHistory.length; r++) rank[root.focusHistory[r]] = r
+        wins.sort(function (a, b) {
+            if (a.focused) return -1
+            if (b.focused) return 1
+            var ra = rank[a.id] !== undefined ? rank[a.id] : 9999
+            var rb = rank[b.id] !== undefined ? rank[b.id] : 9999
+            return ra - rb
+        })
+        return wins
+    }
+
+    function _kwi3ScanWindows() {
+        Kwi3Client.call("tree.get", undefined, function (err, tree) {
+            root.switcherWindows = (err || !tree) ? [] : root._kwi3SortByMru(root._kwi3WalkWindows(tree))
+            overlay.visible = true
+            switcherCombo.forceFocus()
+            switcherCombo.setIndex(1)
+        })
+    }
 
     Process {
         id: windowSubscriber
-        running: true
+        // kwi3-234.14 bug (found running the KWI3 PHASE against a stub
+        // i3-msg that exits immediately): the ORIGINAL i3/sway
+        // `onExited: running = true` below is an IMPERATIVE assignment,
+        // and QML permanently drops a property's declarative BINDING the
+        // first time it is imperatively assigned — so under kwi3 the very
+        // first exit of this process (racing Kwi3Client's own connect, and
+        // a stub or a real i3-msg -t subscribe that is not actually i3 will
+        // often exit right away) silently and PERMANENTLY turned
+        // `running: !Kwi3Client.available` into a plain `running = true`
+        // for the rest of the process's life: a tight, unbounded respawn
+        // loop that starved the QML event loop and kept every Overlay
+        // window (switcher/launcher/projects) from ever mapping, with no
+        // error anywhere to point at it. onExited must ask the SAME
+        // question the binding does, every time, so the i3/sway restart
+        // contract (always true there, since Kwi3Client.available never
+        // is) is unchanged and the kwi3 contract (never true once
+        // available) actually holds.
+        running: !Kwi3Client.available
         command: [root.wmMsg, "-t", "subscribe", "-m", '["window"]']
         stdout: SplitParser {
             onRead: data => {
@@ -150,7 +275,14 @@ Scope {
                 } catch(err) {}
             }
         }
-        onExited: running = true
+        // Re-establishing the BINDING (Qt.binding), not assigning a plain
+        // `true`, is what keeps this reactive on every exit rather than
+        // only the first: a plain `running = true` would re-evaluate once,
+        // matching i3/sway's original behaviour that one time, but never
+        // again once QML has dropped the declarative binding for good -
+        // exactly the kwi3-234.14 bug this replaces (see the property's own
+        // comment above).
+        onExited: running = Qt.binding(function () { return !Kwi3Client.available })
     }
 
     // Window scanner — collects JSON then parses
@@ -249,8 +381,13 @@ Scope {
         // 640 is the switcher's documented caller-side width (sp017: wider than
         // the DialogTheme.width dialogs because it shows name + workspace).
         overlay.width = 640
-        windowScanner.running = true
-        // overlay.visible + Combo preselect set in windowScanner.onExited.
+        if (Kwi3Client.available) {
+            root._kwi3ScanWindows()
+        } else {
+            windowScanner.running = true
+        }
+        // overlay.visible + Combo preselect set in windowScanner.onExited,
+        // or (kwi3) at the end of _kwi3ScanWindows() above.
     }
 
     function switcherSearchMode() {
@@ -277,8 +414,17 @@ Scope {
     // index against the unfiltered list).
     function switcherFocus(win) {
         if (win) {
-            focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
-            focusProc.running = true
+            if (Kwi3Client.available) {
+                // Edge case (sp004 T14): the row may name a window that
+                // closed a moment ago (it raced the refresh) — window.focus
+                // answers -32001 for an id that no longer exists, and that
+                // is ignored here exactly like any other reply this scope
+                // does not need.
+                Kwi3Client.call("window.focus", { id: win.id }, function () {})
+            } else {
+                focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
+                focusProc.running = true
+            }
         }
         hide()
     }
@@ -304,6 +450,63 @@ Scope {
 
     property var projectsAll: []      // [{name, workspaces: ["dotfiles", "dotfiles_1"]}]
     property var _projectsBuffer: ""
+
+    // ── kwi3 backend (sp004 Task 14) ──
+    // Same registry (~/.config/project/projects.yaml), but the WORKSPACE
+    // half comes from workspace.list instead of `i3-msg -t get_workspaces`
+    // baked into the same shell one-liner. `_kwi3Workspaces` is kept so
+    // projectsNew() can look a bare workspace's id up for workspace.rename
+    // (rpc's rename takes {id, name}; the registry only ever has names).
+    property var _kwi3ProjectNames: []
+    property var _kwi3Workspaces: []
+
+    Process {
+        id: kwi3ProjectsRegistryScanner
+        running: false
+        command: ["sh", "-c",
+            "grep -E '^  [a-zA-Z]' ~/.config/project/projects.yaml 2>/dev/null | sed 's/^ *//;s/:.*//'"]
+        stdout: SplitParser {
+            onRead: data => {
+                var t = data.trim()
+                if (t !== "") root._kwi3ProjectNames.push(t)
+            }
+        }
+        onExited: {
+            var names = root._kwi3ProjectNames
+            root._kwi3ProjectNames = []
+            root._kwi3FetchWorkspacesForProjects(names)
+        }
+    }
+
+    function _kwi3FetchWorkspacesForProjects(names) {
+        Kwi3Client.call("workspace.list", undefined, function (err, list) {
+            list = (!err && list) ? list : []
+            root._kwi3Workspaces = list
+            var wsNames = list.map(function (w) { return w.name })
+            var focusedRow = list.filter(function (w) { return w.focused })
+            var focused = focusedRow.length ? focusedRow[0].name : ""
+
+            var projects = []
+            for (var i = 0; i < names.length; i++) {
+                var p = names[i]
+                var re = new RegExp("^" + p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(_[0-9]+)?$")
+                var matched = wsNames.filter(function (n) { return re.test(n) })
+                projects.push({ name: p, workspaces: matched })
+            }
+
+            var focusedProject = ""
+            for (var j = 0; j < projects.length && !focusedProject; j++) {
+                var pr = projects[j]
+                if (focused === pr.name) { focusedProject = pr.name; break }
+                for (var k = 0; k < pr.workspaces.length; k++) {
+                    if (pr.workspaces[k] === focused) { focusedProject = pr.name; break }
+                }
+            }
+            root.projectsAll = projects.filter(function (pr) { return pr.name !== focusedProject })
+            overlay.visible = true
+            Qt.callLater(function () { projectsCombo.forceFocus() })
+        })
+    }
 
     // Scans projects.yaml + current workspaces, outputs JSON
     Process {
@@ -363,15 +566,23 @@ Scope {
         _projectsBuffer = ""
         mode = "projects"
         overlay.width = DialogTheme.width
-        projectsScanner.running = true
+        if (Kwi3Client.available) {
+            kwi3ProjectsRegistryScanner.running = true
+        } else {
+            projectsScanner.running = true
+        }
     }
 
     // Confirm handler — receives the selected project ROW OBJECT from Combo.
     function projectsSwitch(p) {
         if (p) {
             var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
-            projectsWmProc.command = [root.wmMsg, "workspace", wsName]
-            projectsWmProc.running = true
+            if (Kwi3Client.available) {
+                Kwi3Client.call("workspace.focus", { name: wsName }, function () {})
+            } else {
+                projectsWmProc.command = [root.wmMsg, "workspace", wsName]
+                projectsWmProc.running = true
+            }
         }
         hide()
     }
@@ -379,30 +590,67 @@ Scope {
     // Alt-confirm handler (Shift+Enter) — receives the selected project ROW.
     function projectsNew(p) {
         if (p) {
-            if (p.workspaces.length === 0) {
-                projectsWmProc.command = [root.wmMsg, "workspace", p.name]
+            if (Kwi3Client.available) {
+                root._kwi3ProjectsNew(p)
             } else {
-                // Rename bare name to _1 if needed, then create next index
-                var cmds = []
-                var hasBare = false
-                var maxIdx = 0
-                for (var i = 0; i < p.workspaces.length; i++) {
-                    if (p.workspaces[i] === p.name) hasBare = true
-                    var m = p.workspaces[i].match(new RegExp("^" + p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "_(\\d+)$"))
-                    if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
-                }
-                if (hasBare) {
-                    cmds.push(root.wmMsg + " rename workspace \\\"" + p.name + "\\\" to \\\"" + p.name + "_1\\\"")
+                if (p.workspaces.length === 0) {
+                    projectsWmProc.command = [root.wmMsg, "workspace", p.name]
+                } else {
+                    // Rename bare name to _1 if needed, then create next index
+                    var cmds = []
+                    var hasBare = false
+                    var maxIdx = 0
+                    for (var i = 0; i < p.workspaces.length; i++) {
+                        if (p.workspaces[i] === p.name) hasBare = true
+                        var m = p.workspaces[i].match(new RegExp("^" + p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "_(\\d+)$"))
+                        if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
+                    }
+                    if (hasBare) {
+                        cmds.push(root.wmMsg + " rename workspace \\\"" + p.name + "\\\" to \\\"" + p.name + "_1\\\"")
 
-                    if (maxIdx < 1) maxIdx = 1
+                        if (maxIdx < 1) maxIdx = 1
+                    }
+                    var next = maxIdx + 1
+                    cmds.push(root.wmMsg + " workspace " + p.name + "_" + next)
+                    projectsWmProc.command = ["sh", "-c", cmds.join(" && ")]
                 }
-                var next = maxIdx + 1
-                cmds.push(root.wmMsg + " workspace " + p.name + "_" + next)
-                projectsWmProc.command = ["sh", "-c", cmds.join(" && ")]
+                projectsWmProc.running = true
             }
-            projectsWmProc.running = true
         }
         hide()
+    }
+
+    // kwi3 path: JSON params need no shell quoting (sp004 T14 edge case — the
+    // \\\" escaping the i3-msg branch above still carries is gone here), and
+    // the rename is awaited before the create/focus step fires, so the two
+    // RPC calls always reach the wire in that order — never fired in
+    // parallel and left to race.
+    function _kwi3ProjectsNew(p) {
+        if (p.workspaces.length === 0) {
+            Kwi3Client.call("workspace.focus", { name: p.name }, function () {})
+            return
+        }
+        var hasBare = false
+        var maxIdx = 0
+        var re = new RegExp("^" + p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "_(\\d+)$")
+        for (var i = 0; i < p.workspaces.length; i++) {
+            if (p.workspaces[i] === p.name) hasBare = true
+            var m = p.workspaces[i].match(re)
+            if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
+        }
+        function focusNext() {
+            Kwi3Client.call("workspace.focus", { name: p.name + "_" + (maxIdx + 1) }, function () {})
+        }
+        if (hasBare) {
+            if (maxIdx < 1) maxIdx = 1   // the rename below claims _1
+            var bareRows = root._kwi3Workspaces.filter(function (w) { return w.name === p.name })
+            if (bareRows.length > 0) {
+                Kwi3Client.call("workspace.rename", { id: bareRows[0].id, name: p.name + "_1" },
+                    function () { focusNext() })
+                return
+            }
+        }
+        focusNext()
     }
 
     // ── IPC ──

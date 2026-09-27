@@ -65,6 +65,11 @@ scenario() { printf '\n[%s]\n' "$1"; }
 assert_eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi; }
 assert_ne() { if [ "$2" != "$3" ]; then pass "$1"; else fail "$1" "anything but '$2'" "$3"; fi; }
 
+# KWI3 PHASE pids (rpc-server.js driver rigs + their own quickshell/Xvfb) —
+# every one this script itself started, killed by exact pid only (AGENTS.md's
+# own "never pkill -f" rule), same discipline as test-kwi3-backend.sh.
+KWI3_PIDS=()
+
 cleanup() {
   # Kill the whole quickshell process group so the i3-msg subscribe stub (a
   # blocking sleep) and any launched marker stub die with it.
@@ -75,6 +80,14 @@ cleanup() {
   sleep 0.3
   [ -n "${OV_XVFB_PID:-}" ] && kill "$OV_XVFB_PID" 2>/dev/null
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
+  # Close any control-fifo fds this script opened for the KWI3 PHASE rigs
+  # before killing the rigs themselves, so the fifo write end never blocks.
+  exec 9>&- 2>/dev/null
+  exec 10>&- 2>/dev/null
+  local p
+  for p in "${KWI3_PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
+  sleep 0.2
+  for p in "${KWI3_PIDS[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null; done
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -92,7 +105,7 @@ dpy_up() { # <display>
   grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
 }
 
-for tool in "$XVFB" "$XDOTOOL" "$QUICKSHELL"; do
+for tool in "$XVFB" "$XDOTOOL" "$QUICKSHELL" node; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "FATAL: $tool not found (XVFB=/XDOTOOL=/QUICKSHELL= to override)" >&2; exit 1; }
 done
@@ -101,6 +114,18 @@ done
 QS_BIN="$(command -v "$QUICKSHELL")"
 [ -r "$OVERLAY_QML" ] || { echo "FATAL: $OVERLAY_QML not readable" >&2; exit 1; }
 [ -d "$COMMON_DIR" ] || { echo "FATAL: $COMMON_DIR not a directory" >&2; exit 1; }
+
+# ── KWI3 PHASE prerequisite (sp004 Task 14, kwi3-234.14) ────────────────────
+# The kwi3 checkout providing i3kwin/test/rpc-server.js and its harness —
+# same convention as test-kwi3-backend.sh's own KWI3_REPO (default matches
+# kwi3/dot.yaml's clone path; override for a dev worktree).
+KWI3_REPO="${KWI3_REPO:-$HOME/.local/src/kwi3}"
+KWI3_RPC_SERVER="$KWI3_REPO/i3kwin/test/rpc-server.js"
+[ -r "$KWI3_RPC_SERVER" ] || {
+  echo "FATAL: $KWI3_RPC_SERVER not found." >&2
+  echo "       Set KWI3_REPO=/path/to/kwi3 (sp004 Task 12's rpc-server.js)." >&2
+  exit 1
+}
 
 mkdir -p "$ENTRY" "$PBIN" "$IMPLS" "$MARKS" "$HOME_S/.config/project" "$I3DIR" \
          "$RUN" "$CFG" "$CCH"
@@ -199,9 +224,35 @@ EOF
 # ── minimal profile hosting Overlay {} ──────────────────────────────────────
 ln -sf "$OVERLAY_QML" "$ENTRY/Overlay.qml"
 ln -sf "$COMMON_DIR"  "$ENTRY/Common"
+# The kwi3test IpcHandler below is test-only scaffolding beside the real
+# Overlay {} — never inside it — for the KWI3 PHASE further down (sp004 T14,
+# kwi3-234.14): a bare "is Kwi3Client connected yet" poll (same shape as
+# test-kwi3-backend.sh's own kwi3test target) and one deliberate direct call
+# for the "stale id -> -32001, ignored, no crash" edge case, which is far too
+# racy to prove by timing a real close against the switcher's own refresh.
 cat > "$ENTRY/shell.qml" <<'EOF'
 import Quickshell
-ShellRoot { Overlay {} }
+import Quickshell.Io
+import "./Common"
+ShellRoot {
+    Overlay {}
+    IpcHandler {
+        target: "kwi3test"
+        function available(tag: string): void {
+            console.log("KWI3TEST available " + tag + " " + (Kwi3Client.available ? "1" : "0"))
+        }
+        function focusStaleId(tag: string, id: int): void {
+            Kwi3Client.call("window.focus", { id: id }, function (err, res) {
+                console.log("KWI3TEST focus-stale " + tag + " " +
+                    JSON.stringify({ err: err, res: res }))
+            })
+        }
+        function gridModule(tag: string): void {
+            console.log("KWI3TEST grid-module " + tag + " " +
+                Kwi3Grid.moduleW + "x" + Kwi3Grid.moduleH + "x" + Kwi3Grid.rowHeight)
+        }
+    }
+}
 EOF
 
 # ── launch quickshell under Xvfb :97 ────────────────────────────────────────
@@ -633,6 +684,506 @@ else
 fi
 
 # ============================================================================
+
+# ============================================================================
+# KWI3 PHASE (sp004 Task 14, kwi3-234.14) — the same Overlay.qml, driven
+# against the REAL kwi3 core (i3kwin/test/rpc-server.js), not a hand-rolled
+# stub — same discipline as i3kwin/test/floating-hooks.js and this repo's own
+# test-kwi3-backend.sh: every criterion below reads what was actually SENT
+# to the rig (a `CALL {...}` line, rpc-server.js's own logCalls), not only
+# the rendered result, so a hook that mutates the UI right but skips/
+# duplicates a call would still fail here.
+#
+# The rig is scripted over a control FIFO (a throwaway node fixture wrapping
+# rpc-server.js's start(), NOT part of either repo) instead of argv/env,
+# because the switcher/projects scenarios need named windows and named
+# workspaces created AFTER quickshell is already up and subscribed — the
+# i3-msg stub above manages this with a canned tree.json; the real core has
+# no such file to swap, so this phase drives it live instead.
+# ============================================================================
+
+K_TMP="$TMP/kwi3"
+mkdir -p "$K_TMP"
+KWI3_DPY=":99"   # $DPY (:97) and $OV_DPY (:98) are both torn down by now.
+# win_on/gone_on/focuswin/key/keyraw/typ/geom_h/geom_w all read the GLOBAL
+# $DPY, not a parameter - reassigning it is what lets this phase reuse them
+# unchanged instead of forking display-parameterised copies of each one.
+DPY="$KWI3_DPY"
+
+cat > "$K_TMP/rig-driver.js" <<'JSEOF'
+'use strict';
+// Throwaway fixture for test-overlay.sh's KWI3 PHASE, NOT part of either
+// repo: a control-fifo wrapper around i3kwin/test/rpc-server.js's start(),
+// so this suite can script the rig (open/close/focus named windows, switch
+// workspaces) the same way it already scripts the i3-msg stub above — one
+// line in, one line out, via a named pipe instead of argv/env.
+//
+// Protocol: one JSON object per line on stdin, one line of output per
+// command on stdout — "OK {...}" or "ERR ...". Every RPC method invocation
+// is ALSO logged ("CALL {...}", rpc-server.js's own opts.logCalls) so the
+// bash suite can grep this same log for what the QML client under test
+// actually sent — the "counted on the rig" success criterion.
+const path = require('path');
+const fs = require('fs');
+const readline = require('readline');
+const [rpcServerPath, sockPath] = process.argv.slice(2);
+const root = path.join(path.dirname(rpcServerPath), '..');
+const sources = fs.readdirSync(path.join(root, 'core'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => path.join(root, 'core', f))
+    .concat([path.join(root, 'adapters/kwin/contents/code/adapter.js')]);
+
+require(rpcServerPath).start(sockPath, sources, { logCalls: true }).then((rig) => {
+    const windows = {};
+    function conId(w) { return rig.ctx.conOf(rig.ctx.windowInfo(w).id).id; }
+
+    function handle(cmd) {
+        switch (cmd.op) {
+            case 'openWindow': {
+                if (cmd.workspace) { rig.ctx.dispatch('workspace:' + cmd.workspace); }
+                const w = rig.openWindow(cmd.title);
+                windows[cmd.title] = w;
+                return { id: conId(w) };
+            }
+            case 'focusWindow': {
+                const w = windows[cmd.title];
+                if (!w) { throw new Error('no such window: ' + cmd.title); }
+                rig.ctx.focusWindowById(conId(w));
+                return {};
+            }
+            case 'closeWindow': {
+                const w = windows[cmd.title];
+                if (!w) { throw new Error('no such window: ' + cmd.title); }
+                rig.closeWindow(w);
+                delete windows[cmd.title];
+                return {};
+            }
+            case 'dispatch': {
+                rig.ctx.dispatch(cmd.action);
+                return {};
+            }
+            default:
+                throw new Error('unknown op: ' + cmd.op);
+        }
+    }
+
+    console.log(sockPath);
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.on('line', (line) => {
+        line = line.trim();
+        if (!line) { return; }
+        let cmd;
+        try { cmd = JSON.parse(line); } catch (e) { console.log('ERR bad json: ' + line); return; }
+        try {
+            const result = handle(cmd);
+            console.log('OK ' + JSON.stringify({ op: cmd.op, result: result }));
+        } catch (e) {
+            console.log('ERR ' + cmd.op + ': ' + e);
+        }
+    });
+
+    process.on('SIGTERM', () => rig.stop().then(() => process.exit(0)));
+}, (err) => { console.error('kwi3-rig-driver: ' + err); process.exit(1); });
+JSEOF
+
+k_wait_socket() { # <path> <timeout-s>
+  local n=$(( ${2:-15} * 10 )) i
+  for i in $(seq 1 "$n"); do [ -S "$1" ] && return 0; sleep 0.1; done
+  return 1
+}
+k_last_id() { sed -n 's/.*"id":\([0-9]*\).*/\1/p' <<<"$1" | tail -1; }
+
+"$XVFB" "$KWI3_DPY" -screen 0 1280x800x24 >"$K_TMP/xvfb.log" 2>&1 &
+KWI3_XVFB_PID=$!
+KWI3_PIDS+=("$KWI3_XVFB_PID")
+for i in $(seq 1 20); do dpy_up "$KWI3_DPY" && break; sleep 0.5; done
+if ! dpy_up "$KWI3_DPY"; then
+  fail "KWI3 PHASE: Xvfb $KWI3_DPY started" "a display" "none"
+else
+
+# ---------------------------------------------------------------------------
+# Rig 1: three real windows (alpha/beta/gamma) — switcher + launcher geometry
+# ---------------------------------------------------------------------------
+K1_SOCK="$K_TMP/rig1.sock"
+K1_LOG="$K_TMP/rig1.log"
+K1_FIFO="$K_TMP/rig1.fifo"
+mkfifo "$K1_FIFO"
+node "$K_TMP/rig-driver.js" "$KWI3_RPC_SERVER" "$K1_SOCK" <"$K1_FIFO" >"$K1_LOG" 2>&1 &
+K1_PID=$!
+KWI3_PIDS+=("$K1_PID")
+exec 9>"$K1_FIFO"
+k1_ctl() { echo "$1" >&9; sleep 0.3; tail -1 "$K1_LOG"; }
+k1_mark() { K1_MARK="$(wc -l <"$K1_LOG" | tr -d ' ')"; }
+k1_since() { tail -n +"$((K1_MARK + 1))" "$K1_LOG"; }
+
+if ! k_wait_socket "$K1_SOCK" 20; then
+  fail "KWI3 PHASE: rig 1 bound $K1_SOCK" "socket present" "missing"
+  cat "$K1_LOG" >&2
+else
+  ALPHA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"alpha"}')")"
+  BETA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"beta","workspace":"mail"}')")"
+  GAMMA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"gamma","workspace":"web"}')")"
+
+  K1_CFG="$K_TMP/cfg1"; K1_RUN="$K_TMP/run1"; K1_CCH="$K_TMP/cache1"; K1_QSLOG="$K_TMP/qs1.log"
+  mkdir -p "$K1_CFG" "$K1_RUN" "$K1_CCH"
+  chmod 700 "$K1_RUN"
+  setsid env -u SWAYSOCK \
+      DISPLAY="$KWI3_DPY" HOME="$HOME_S" PATH="$PBIN" \
+      QS_RDP=1 KWI3SOCK="$K1_SOCK" \
+      XDG_CONFIG_HOME="$K1_CFG" XDG_RUNTIME_DIR="$K1_RUN" XDG_CACHE_HOME="$K1_CCH" \
+      "$QS_BIN" -p "$ENTRY" >"$K1_QSLOG" 2>&1 &
+  K1_QS_PID=$!
+  KWI3_PIDS+=("$K1_QS_PID")
+  k1_ipc() { env XDG_CONFIG_HOME="$K1_CFG" XDG_RUNTIME_DIR="$K1_RUN" XDG_CACHE_HOME="$K1_CCH" \
+                 "$QUICKSHELL" ipc --pid "$K1_QS_PID" "$@" 2>/dev/null; }
+
+  K1_UP=""
+  for i in $(seq 1 40); do
+    n="$(k1_ipc show | grep -c 'kwi3test')"
+    [ "${n:-0}" -gt 0 ] && { K1_UP=1; break; }
+    sleep 0.5
+  done
+  if [ -z "$K1_UP" ]; then
+    fail "KWI3 PHASE: quickshell (rig 1) exposed the kwi3test IPC target" "target up" "not found"
+    tail -30 "$K1_QSLOG" >&2
+  else
+    AVAIL=""
+    for i in $(seq 1 30); do
+      k1_ipc call kwi3test available "boot_$i" >/dev/null 2>&1
+      sleep 0.2
+      grep -aq "KWI3TEST available boot_$i 1" "$K1_QSLOG" && { AVAIL=1; break; }
+    done
+    if [ -z "$AVAIL" ]; then
+      fail "KWI3 PHASE: Kwi3Client.available becomes true against rig 1" "1" "0"
+    else
+      # Seed MRU history AFTER Overlay has subscribed: beta then gamma
+      # focused, in that order — gamma ends up current, beta the MRU-1 spot.
+      k1_ctl '{"op":"focusWindow","title":"beta"}' >/dev/null
+      k1_ctl '{"op":"focusWindow","title":"gamma"}' >/dev/null
+      sleep 0.3
+
+      scenario "kwi3-mru-preselect: switcher lists windows in focus-history order; Enter sends exactly one window.focus {id} (AC1, counted on the rig)"
+      k1_mark
+      k1_ipc call switcher toggle >/dev/null 2>&1
+      KWID="$(win_on qs-switcher)" || fail "kwi3-mru-preselect (switcher map)" "a qs-switcher window" "none"
+      if [ -n "${KWID:-}" ]; then
+        focuswin "$KWID"
+        sleep 0.3
+        k1_ipc call switcher confirm >/dev/null 2>&1
+        gone_on qs-switcher
+        sleep 0.3
+        n_focus="$(k1_since | grep -c '"method":"window.focus"')"
+        assert_eq "exactly one window.focus call reached the rig" "1" "$n_focus"
+        last="$(k1_since | grep '"method":"window.focus"' | tail -1)"
+        assert_eq "it targets beta (con $BETA_ID) — the MRU index-1 preselect, proving the order" \
+          "1" "$(grep -c "\"id\":$BETA_ID" <<<"$last")"
+      fi
+
+      scenario "kwi3-switcher-refreshes-on-close: closing a window while the switcher is open shrinks the list; Enter still lands on a LIVE window, never the closed one (edge case)"
+      k1_ipc call switcher toggle >/dev/null 2>&1
+      KWID="$(win_on qs-switcher)" || fail "kwi3-switcher-refreshes-on-close (switcher map)" "a qs-switcher window" "none"
+      if [ -n "${KWID:-}" ]; then
+        focuswin "$KWID"
+        sleep 0.3
+        H_BEFORE="$(geom_h "$KWID")"
+        k1_mark
+        k1_ctl '{"op":"closeWindow","title":"alpha"}' >/dev/null
+        SHRUNK=""
+        for i in $(seq 1 30); do
+          H_NOW="$(geom_h "$KWID")"
+          [ "${H_NOW:-0}" -lt "${H_BEFORE:-0}" ] 2>/dev/null && { SHRUNK=1; break; }
+          sleep 0.2
+        done
+        [ -n "$SHRUNK" ] && pass "the switcher's own list (and window height) shrinks once the close is seen" \
+          || fail "the switcher's own list shrinks on window.removed" "height < $H_BEFORE" "$H_NOW"
+        k1_ipc call switcher confirm >/dev/null 2>&1
+        gone_on qs-switcher
+        sleep 0.3
+        n_focus="$(k1_since | grep -c '"method":"window.focus"')"
+        assert_eq "exactly one window.focus call reached the rig after the close" "1" "$n_focus"
+        last="$(k1_since | grep '"method":"window.focus"' | tail -1)"
+        assert_eq "the surviving preselect is NOT the closed alpha id" \
+          "0" "$(grep -c "\"id\":$ALPHA_ID" <<<"$last")"
+      fi
+
+      scenario "kwi3-focus-stale-id-ignored: window.focus on an id that no longer exists answers -32001 and is ignored — no crash (edge case)"
+      k1_ipc call kwi3test focusStaleId "staleA" "$ALPHA_ID" >/dev/null 2>&1
+      STALE_FOUND=""
+      for i in $(seq 1 30); do
+        grep -aq "KWI3TEST focus-stale staleA " "$K1_QSLOG" && { STALE_FOUND=1; break; }
+        sleep 0.2
+      done
+      if [ -n "$STALE_FOUND" ]; then
+        line="$(grep -a 'KWI3TEST focus-stale staleA ' "$K1_QSLOG" | tail -1)"
+        case "$line" in
+          *'"code":-32001'*) pass "a stale id's window.focus answers -32001" ;;
+          *) fail "a stale id's window.focus answers -32001" '"code":-32001' "$line" ;;
+        esac
+      else
+        fail "the stale-id focusStaleId hook answered" "a KWI3TEST focus-stale line" "(timed out)"
+      fi
+      targets="$(k1_ipc show)"
+      assert_ne "quickshell is still alive and answering IPC after the stale-id call (ignored, not fatal)" "" "$targets"
+
+      scenario "kwi3-launcher-geometry: width and height are whole multiples of moduleW/moduleH, every row one rowHeight (AC2)"
+      k1_ipc call kwi3test gridModule "g1" >/dev/null 2>&1
+      sleep 0.3
+      dims="$(grep -a 'KWI3TEST grid-module g1 ' "$K1_QSLOG" | tail -1 | awk '{print $NF}')"
+      MW="${dims%%x*}"; rest="${dims#*x}"; MH="${rest%%x*}"; RH="${rest#*x}"
+      k1_ipc call launcher toggle >/dev/null 2>&1
+      LWID="$(win_on qs-launcher)" || fail "kwi3-launcher-geometry (launcher map)" "a qs-launcher window" "none"
+      if [ -n "${LWID:-}" ]; then
+        focuswin "$LWID"
+        for i in $(seq 1 40); do
+          h="$(geom_h "$LWID")"
+          [ "${h:-0}" -gt 40 ] 2>/dev/null && break
+          sleep 0.25
+        done
+        W="$(geom_w "$LWID")"; H="$(geom_h "$LWID")"
+        if [ -n "$MW" ] && [ -n "$MH" ] && [ -n "$RH" ]; then
+          assert_eq "width % moduleW == 0 ($MW)" "0" "$((W % MW))"
+          assert_eq "height % moduleH == 0 ($MH)" "0" "$((H % MH))"
+          cap=$(( SCAN_N < 8 ? SCAN_N : 8 ))
+          pad_cells=$(( (8 * 2 + MH) / (MH * 2) )); [ "$pad_cells" -lt 1 ] && pad_cells=1
+          exp_h=$(( RH + cap * RH + pad_cells * MH ))
+          width_cells=$(( (480 * 2 + MW) / (MW * 2) ))
+          exp_w=$(( width_cells * MW ))
+          assert_eq "height == rowHeight + cap*rowHeight + pad, all whole cells" "$exp_h" "$H"
+          assert_eq "width == whole modules of the historic 480px" "$exp_w" "$W"
+        else
+          fail "moduleW/moduleH/rowHeight were read from Kwi3Grid" "3 numbers" "$dims"
+        fi
+        key Escape
+      fi
+    fi
+  fi
+fi
+kill "$K1_QS_PID" 2>/dev/null
+kill "$K1_PID" 2>/dev/null
+exec 9>&-
+
+# ---------------------------------------------------------------------------
+# Rig 2: projects — Enter -> workspace.focus; Shift+Enter -> rename then
+# focus (AC1c); a project name with spaces AND a quote needs no shell
+# escaping on this path (edge case; the old \\\" escaping is gone here).
+# ---------------------------------------------------------------------------
+K2_SOCK="$K_TMP/rig2.sock"
+K2_LOG="$K_TMP/rig2.log"
+K2_FIFO="$K_TMP/rig2.fifo"
+mkfifo "$K2_FIFO"
+node "$K_TMP/rig-driver.js" "$KWI3_RPC_SERVER" "$K2_SOCK" <"$K2_FIFO" >"$K2_LOG" 2>&1 &
+K2_PID=$!
+KWI3_PIDS+=("$K2_PID")
+exec 10>"$K2_FIFO"
+k2_ctl() { echo "$1" >&10; sleep 0.3; tail -1 "$K2_LOG"; }
+k2_mark() { K2_MARK="$(wc -l <"$K2_LOG" | tr -d ' ')"; }
+k2_since() { tail -n +"$((K2_MARK + 1))" "$K2_LOG"; }
+
+if ! k_wait_socket "$K2_SOCK" 20; then
+  fail "KWI3 PHASE: rig 2 bound $K2_SOCK" "socket present" "missing"
+  cat "$K2_LOG" >&2
+else
+  # workspace "alpha" (a LIVE, non-current workspace with a window so it is
+  # not reaped once we switch away — a project with a bare-name workspace,
+  # for the rename chain) and current "web" (so alpha is not the focused
+  # project and stays listed).
+  k2_ctl '{"op":"dispatch","action":"workspace:alpha"}' >/dev/null
+  k2_ctl '{"op":"openWindow","title":"alpha-term"}' >/dev/null
+  k2_ctl '{"op":"dispatch","action":"workspace:web"}' >/dev/null
+  k2_ctl '{"op":"openWindow","title":"web-term"}' >/dev/null
+
+  K2_HOME="$K_TMP/home2"
+  mkdir -p "$K2_HOME/.config/project"
+  # "my \"proj\"" has no live workspace (projectsSwitch's straight
+  # workspace.focus branch); "alpha" HAS one (the rename-chain branch).
+  # Both a space and a literal quote in one key — the exact edge case named
+  # in sp004 Task 14's edge_cases — flow through with no shell quoting at
+  # all on this path (JSON params, not a shell command line).
+  cat > "$K2_HOME/.config/project/projects.yaml" <<'YAMLEOF'
+projects:
+  alpha: {}
+  my "proj": {}
+YAMLEOF
+
+  K2_CFG="$K_TMP/cfg2"; K2_RUN="$K_TMP/run2"; K2_CCH="$K_TMP/cache2"; K2_QSLOG="$K_TMP/qs2.log"
+  mkdir -p "$K2_CFG" "$K2_RUN" "$K2_CCH"
+  chmod 700 "$K2_RUN"
+  setsid env -u SWAYSOCK \
+      DISPLAY="$KWI3_DPY" HOME="$K2_HOME" PATH="$PBIN" \
+      QS_RDP=1 KWI3SOCK="$K2_SOCK" \
+      XDG_CONFIG_HOME="$K2_CFG" XDG_RUNTIME_DIR="$K2_RUN" XDG_CACHE_HOME="$K2_CCH" \
+      "$QS_BIN" -p "$ENTRY" >"$K2_QSLOG" 2>&1 &
+  K2_QS_PID=$!
+  KWI3_PIDS+=("$K2_QS_PID")
+  k2_ipc() { env XDG_CONFIG_HOME="$K2_CFG" XDG_RUNTIME_DIR="$K2_RUN" XDG_CACHE_HOME="$K2_CCH" \
+                 "$QUICKSHELL" ipc --pid "$K2_QS_PID" "$@" 2>/dev/null; }
+
+  K2_UP=""
+  for i in $(seq 1 40); do
+    n="$(k2_ipc show | grep -c 'kwi3test')"
+    [ "${n:-0}" -gt 0 ] && { K2_UP=1; break; }
+    sleep 0.5
+  done
+  if [ -z "$K2_UP" ]; then
+    fail "KWI3 PHASE: quickshell (rig 2) exposed the kwi3test IPC target" "target up" "not found"
+    tail -30 "$K2_QSLOG" >&2
+  else
+    AVAIL2=""
+    for i in $(seq 1 30); do
+      k2_ipc call kwi3test available "boot_$i" >/dev/null 2>&1
+      sleep 0.2
+      grep -aq "KWI3TEST available boot_$i 1" "$K2_QSLOG" && { AVAIL2=1; break; }
+    done
+    if [ -z "$AVAIL2" ]; then
+      fail "KWI3 PHASE: Kwi3Client.available becomes true against rig 2" "1" "0"
+    else
+      scenario "kwi3-projects-switch-sends-focus: Enter on a project with no live workspace sends workspace.focus {name} — spaces and a literal quote need no escaping (AC1b + edge case)"
+      k2_mark
+      k2_ipc call projects toggle >/dev/null 2>&1
+      PWID="$(win_on qs-projects)" || fail "kwi3-projects-switch-sends-focus (projects map)" "a qs-projects window" "none"
+      if [ -n "${PWID:-}" ]; then
+        focuswin "$PWID"
+        sleep 0.4
+        typ 'proj'   # narrows to "my \"proj\"" — "alpha" has no p/r/o/j subsequence match
+        key Return
+        gone_on qs-projects
+        sleep 0.3
+        n_focus="$(k2_since | grep -c '"method":"workspace.focus"')"
+        assert_eq "exactly one workspace.focus call reached the rig" "1" "$n_focus"
+        last="$(k2_since | grep '"method":"workspace.focus"' | tail -1)"
+        assert_eq 'workspace.focus named "my \"proj\"" verbatim, quote and space intact' \
+          "1" "$(grep -Fc '"name":"my \"proj\""' <<<"$last")"
+      fi
+
+      scenario "kwi3-projects-rename-chain: Shift+Enter on a project with a bare live workspace sends workspace.rename THEN workspace.focus, in that order (AC1c)"
+      k2_mark
+      k2_ipc call projects toggle >/dev/null 2>&1
+      PWID="$(win_on qs-projects)" || fail "kwi3-projects-rename-chain (projects map)" "a qs-projects window" "none"
+      if [ -n "${PWID:-}" ]; then
+        focuswin "$PWID"
+        sleep 0.4
+        typ "alpha"
+        keyraw shift+Return
+        gone_on qs-projects
+        sleep 0.4
+        chain="$(k2_since | grep -E '"method":"(workspace.rename|workspace.focus)"')"
+        n_rename="$(grep -c '"method":"workspace.rename"' <<<"$chain")"
+        n_wfocus="$(grep -c '"method":"workspace.focus"' <<<"$chain")"
+        assert_eq "exactly one workspace.rename call" "1" "$n_rename"
+        assert_eq "exactly one workspace.focus call" "1" "$n_wfocus"
+        rename_line="$(grep -n '"method":"workspace.rename"' <<<"$chain" | head -1 | cut -d: -f1)"
+        focus_line="$(grep -n '"method":"workspace.focus"' <<<"$chain" | head -1 | cut -d: -f1)"
+        if [ -n "$rename_line" ] && [ -n "$focus_line" ]; then
+          [ "$rename_line" -lt "$focus_line" ] \
+            && pass "workspace.rename reached the rig BEFORE workspace.focus" \
+            || fail "workspace.rename reached the rig before workspace.focus" \
+                    "rename line < focus line" "rename=$rename_line focus=$focus_line"
+        fi
+        assert_eq 'the rename targets "alpha_1"' "1" \
+          "$(grep -Fc '"name":"alpha_1"' <<<"$chain")"
+        assert_eq 'the focus targets "alpha_2"' "1" \
+          "$(grep -Fc '"name":"alpha_2"' <<<"$chain")"
+      fi
+    fi
+  fi
+fi
+kill "$K2_QS_PID" 2>/dev/null
+kill "$K2_PID" 2>/dev/null
+exec 10>&-
+
+fi   # dpy_up "$KWI3_DPY"
+
+# ---------------------------------------------------------------------------
+# config.js vs the REAL core (sp004 Task 14 "Extra"): ~/.dotfiles/kwi3/
+# config.js loads through the real kwi3LoadErrors()/onWindowAdded seam with
+# no collected errors, and a window titled qs-launcher managed on a fake-kwin
+# world ends up floating, undecorated, grid-snapped and focused — the same
+# shape i3kwin/test/floating-hooks.js checks its own hooks with, run here
+# against the ACTUAL file this repo ships rather than a fixture.
+# ---------------------------------------------------------------------------
+scenario "kwi3-config-js-vs-real-core: ~/.dotfiles/kwi3/config.js applies Jan's runner rule through the real kwi3 core, with no collected load errors"
+KWI3_CONFIG_JS="$SCRIPT_DIR/../kwi3/config.js"
+cat > "$K_TMP/config-js-check.js" <<'JSEOF'
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const KWI3_REPO = process.argv[2];
+const CONFIG_JS = process.argv[3];
+const h = require(path.join(KWI3_REPO, 'i3kwin/test/harness.js'));
+const fake = require(path.join(KWI3_REPO, 'i3kwin/test/fake-kwin.js'));
+
+const core = fs.readdirSync(path.join(KWI3_REPO, 'i3kwin/core'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => path.join(KWI3_REPO, 'i3kwin/core', f));
+const adapter = path.join(KWI3_REPO, 'i3kwin/adapters/kwin/contents/code/adapter.js');
+
+const ctx = h.load(core.concat([adapter, CONFIG_JS]));
+const world = h.makeWorld(ctx, {});
+ctx.ensureRoot();
+
+let pass = true;
+function ok(cond, label) { if (!cond) { console.error('FAIL: ' + label); pass = false; } }
+function eq(got, want, label) {
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+        console.error('FAIL: ' + label + ' - got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want));
+        pass = false;
+    }
+}
+
+eq(ctx.kwi3LoadErrors(), [], 'kwi3/config.js loads through the real core with no collected errors');
+
+const sent = { geometry: [], decorated: [], activate: [] };
+const realGeom = ctx.host.setFrameGeometry;
+ctx.host.setFrameGeometry = function (id, rect) {
+    sent.geometry.push({ id: id, x: rect.x, y: rect.y, w: rect.width, h: rect.height });
+    return realGeom.call(ctx.host, id, rect);
+};
+const realDecorated = ctx.host.setDecorated;
+ctx.host.setDecorated = function (id, on) {
+    sent.decorated.push({ id: id, on: on });
+    return realDecorated.call(ctx.host, id, on);
+};
+const realActivate = ctx.host.activate;
+ctx.host.activate = function (id) {
+    sent.activate.push(id);
+    return realActivate.call(ctx.host, id);
+};
+
+const w = fake.observe(fake.FakeWindow({
+    caption: 'qs-launcher', output: world.ws.activeScreen,
+    desktops: [world.ws.currentDesktop], frameGeometry: fake.rect(0, 0, 400, 300)
+}), 'window');
+world.ws.windows.push(w);
+ctx.manage(w);
+
+const info = ctx.windowInfo(w);
+const entry = ctx.entryOf(info.id);
+const con = entry ? entry.con : null;
+
+eq(ctx.windowPlacement(info.id), 'floating', 'qs-launcher is floating (w.float())');
+ok(con && con.parent && con.parent.type === 'floating_con', 'wrapped in a floating_con');
+ok(con && con.noFrame === true, 'noFrame() marked the con');
+eq(sent.decorated.filter((e) => e.id === info.id && e.on === false).length, 1,
+   'cmdSetDecorated(id,false) sent exactly once (w.noFrame())');
+
+const originX = ctx.kwi3GridOriginX(), originY = ctx.kwi3GridOriginY();
+const geoms = sent.geometry.filter((e) => e.id === info.id);
+eq(geoms.length, 1, 'exactly one geometry write (w.moveTo(kwi3.grid.center(w)))');
+ok((geoms[0].x - originX) % ctx.MODULE_W === 0, 'x snapped to the tile grid');
+ok((geoms[0].y - originY) % ctx.MODULE_H === 0, 'y snapped to the tile grid');
+
+eq(sent.activate.filter((id) => id === info.id).length, 1, 'cmdActivate(id) sent exactly once (w.focus())');
+ok(world.ws.activeWindow === w, 'the host ends up with qs-launcher active');
+
+if (!pass) { process.exit(1); }
+console.log('OK - kwi3/config.js applies Jan\'s runner rule against the real core');
+JSEOF
+if node "$K_TMP/config-js-check.js" "$KWI3_REPO" "$KWI3_CONFIG_JS" >"$K_TMP/config-js-check.log" 2>&1; then
+  pass "kwi3/config.js applies Jan's runner rule (float/noFrame/moveTo/focus) through the real core, no collected errors"
+else
+  fail "kwi3/config.js applies Jan's runner rule through the real core" "OK (exit 0)" "$(cat "$K_TMP/config-js-check.log")"
+fi
+
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
