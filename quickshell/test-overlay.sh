@@ -820,10 +820,6 @@ if ! k_wait_socket "$K1_SOCK" 20; then
   fail "KWI3 PHASE: rig 1 bound $K1_SOCK" "socket present" "missing"
   cat "$K1_LOG" >&2
 else
-  ALPHA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"alpha"}')")"
-  BETA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"beta","workspace":"mail"}')")"
-  GAMMA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"gamma","workspace":"web"}')")"
-
   K1_CFG="$K_TMP/cfg1"; K1_RUN="$K_TMP/run1"; K1_CCH="$K_TMP/cache1"; K1_QSLOG="$K_TMP/qs1.log"
   mkdir -p "$K1_CFG" "$K1_RUN" "$K1_CCH"
   chmod 700 "$K1_RUN"
@@ -856,6 +852,30 @@ else
     if [ -z "$AVAIL" ]; then
       fail "KWI3 PHASE: Kwi3Client.available becomes true against rig 1" "1" "0"
     else
+      # The rig has NO windows yet: quickshell was started on an empty
+      # world on purpose, so the empty-list edge case runs first.
+      scenario "kwi3-empty-window-list: the switcher opens on an empty tree.get, Enter sends NO window.focus and nothing crashes (edge case)"
+      k1_mark
+      k1_ipc call switcher toggle >/dev/null 2>&1
+      KWID="$(win_on qs-switcher)" || fail "kwi3-empty-window-list (switcher map)" "a qs-switcher window" "none"
+      if [ -n "${KWID:-}" ]; then
+        pass "the switcher maps with an empty window list"
+        assert_eq "exactly one tree.get fed it" "1" "$(k1_since | grep -c '"method":"tree.get"')"
+        k1_ipc call switcher confirm >/dev/null 2>&1
+        sleep 0.5
+        assert_eq "Enter on an empty list sends no window.focus" "0" \
+          "$(k1_since | grep -c '"method":"window.focus"')"
+        assert_ne "quickshell still answers IPC after Enter on an empty list" "" "$(k1_ipc show)"
+        if env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-switcher$' >/dev/null 2>&1; then
+          k1_ipc call switcher toggle >/dev/null 2>&1
+        fi
+        gone_on qs-switcher || fail "kwi3-empty-window-list (switcher closes)" "no qs-switcher" "still mapped"
+      fi
+
+      ALPHA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"alpha"}')")"
+      BETA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"beta","workspace":"mail"}')")"
+      GAMMA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"gamma","workspace":"web"}')")"
+
       # Seed MRU history AFTER Overlay has subscribed: beta then gamma
       # focused, in that order — gamma ends up current, beta the MRU-1 spot.
       k1_ctl '{"op":"focusWindow","title":"beta"}' >/dev/null
