@@ -28,6 +28,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +38,7 @@ import (
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/i3"
+	"hotkeyd/internal/kwi3rpc"
 	"hotkeyd/internal/layer"
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
@@ -394,8 +396,8 @@ type DaemonConfig struct {
 	Engine  *layer.Engine
 	Lock    lockBeater
 
-	// Kwi3 is sp004 Task 16's dispatch seam (kwi3-234.16): non-nil only when
-	// $KWI3SOCK answered at startup (main.go's kwi3rpcResolver). When set,
+	// Kwi3 is sp004 Task 16's dispatch seam (kwi3-234.16): non-nil exactly when
+	// $KWI3SOCK is set and non-empty (main.go). When set,
 	// dispatch() sends every bind.Command through it instead of I3, and
 	// NEVER falls back to I3 even if Kwi3 itself is unreachable — the edge
 	// case this task names is "never send kwi3 chords to another i3". nil
@@ -687,20 +689,25 @@ func (d *Daemon) dispatch(a bind.Action) {
 			d.log(fmt.Sprintf("run %q: %s", v.Cmd, err))
 		}
 	case bind.Command:
-		// sp004 Task 16: when $KWI3SOCK answered at startup, d.kwi3 is set
-		// and EVERY bind.Command goes through it instead — never through
-		// d.i3, even if kwi3rpc itself is currently unreachable (the edge
-		// case this task names: never send kwi3 chords to another i3).
-		// kwi3rpc.Client.Dispatch already logs once (not per chord) while
-		// the socket is down and reconnects transparently on the next
-		// call, so a transport failure here is just one more log line, the
-		// same "logged, loop continues" policy as the Run case above. An
+		// sp004 Task 16: when $KWI3SOCK is set, d.kwi3 is set and EVERY
+		// bind.Command goes through it instead — never through d.i3, even
+		// if kwi3rpc itself is currently unreachable (the edge case this
+		// task names: never send kwi3 chords to another i3). While the
+		// socket cannot be dialled, kwi3rpc.Client logs once (not per
+		// chord) and redials on the next call, so that error is not logged
+		// again here; any other failure (a connection that broke mid-call,
+		// a JSON-RPC error reply) is one log line per chord, the same
+		// "logged, loop continues" policy as the Run case above. An
 		// *kwi3rpc.UnsupportedVerbError (sticky/scratchpad — this daemon's
 		// own decision-point chords, or any future one) is reported the
 		// same way: one log line, nothing sent anywhere, the loop
 		// continues.
 		if d.kwi3 != nil {
-			if err := d.kwi3.Dispatch(string(v)); err != nil {
+			// kwi3rpc.ErrUnreachable (the socket cannot be dialled) is
+			// dropped silently: the client itself logged the transition to
+			// down once, and logging each dropped chord again would break
+			// "set but dead: log once".
+			if err := d.kwi3.Dispatch(string(v)); err != nil && !errors.Is(err, kwi3rpc.ErrUnreachable) {
 				d.log(fmt.Sprintf("kwi3 dispatch error: %q: %s", string(v), err))
 			}
 			return

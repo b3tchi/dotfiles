@@ -3,6 +3,7 @@ package kwi3rpc
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -192,6 +193,24 @@ func TestClientDialFailureIsAnError(t *testing.T) {
 	defer c.Close()
 	if _, err := c.Call("workspace.list", nil); err == nil {
 		t.Fatalf("expected an error dialing a socket that does not exist")
+	}
+}
+
+// A dial failure is marked ErrUnreachable, so the daemon can tell "kwi3 is
+// down - the client already said so once" from every other error (which it
+// logs per chord).
+func TestClientDialFailureIsErrUnreachable(t *testing.T) {
+	c := New(filepath.Join(t.TempDir(), "nosuchsocket"))
+	defer c.Close()
+	_, err := c.Call("workspace.list", nil)
+	if !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("dial failure should wrap ErrUnreachable, got %v", err)
+	}
+	if err := c.Dispatch("focus left"); !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("Dispatch's dial failure should wrap ErrUnreachable, got %v", err)
+	}
+	if _, err := Translate("sticky toggle"); errors.Is(err, ErrUnreachable) {
+		t.Fatalf("an unsupported verb must not read as ErrUnreachable")
 	}
 }
 

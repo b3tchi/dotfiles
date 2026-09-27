@@ -24,6 +24,13 @@ func (e *RPCError) Error() string {
 	return fmt.Sprintf("kwi3rpc: %d %s", e.Code, e.Message)
 }
 
+// ErrUnreachable marks a Call that failed because kwi3's socket could not
+// be dialled at all. The Client logs the transition to "down" exactly once
+// (and the one back up), so a caller should NOT log each such failure
+// again - that is how "$KWI3SOCK set but dead: log once" holds across any
+// number of dropped chords. Test with errors.Is.
+var ErrUnreachable = errors.New("kwi3 unreachable")
+
 type request struct {
 	JSONRPC string      `json:"jsonrpc"`
 	ID      int64       `json:"id"`
@@ -118,9 +125,9 @@ func (c *Client) ensureConnectedLocked() error {
 	if err != nil {
 		if !c.down {
 			c.down = true
-			c.log(fmt.Sprintf("kwi3rpc: cannot reach %s: %s (chords will be dropped, with a log, until it reconnects)", c.addr, err))
+			c.log(fmt.Sprintf("kwi3rpc: cannot reach %s: %s (chords are dropped until it reconnects; logged once, not per chord)", c.addr, err))
 		}
-		return fmt.Errorf("kwi3rpc: dial %s: %w", c.addr, err)
+		return fmt.Errorf("kwi3rpc: dial %s: %w: %w", c.addr, ErrUnreachable, err)
 	}
 	c.conn = conn
 	c.reader = bufio.NewReader(conn)
