@@ -3,5 +3,7 @@ singleton Session 1.0 Session.qml
 singleton Fuzzy 1.0 Fuzzy.qml
 singleton DialogTheme 1.0 DialogTheme.qml
 singleton ModeBarTheme 1.0 ModeBarTheme.qml
+singleton Kwi3Client 1.0 Kwi3Client.qml
+singleton Kwi3Grid 1.0 Kwi3Grid.qml
 Combo 1.0 Combo.qml
 ModeBar 1.0 ModeBar.qml
