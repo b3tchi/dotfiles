@@ -394,6 +394,15 @@ type DaemonConfig struct {
 	Engine  *layer.Engine
 	Lock    lockBeater
 
+	// Kwi3 is sp004 Task 16's dispatch seam (kwi3-234.16): non-nil only when
+	// $KWI3SOCK answered at startup (main.go's kwi3rpcResolver). When set,
+	// dispatch() sends every bind.Command through it instead of I3, and
+	// NEVER falls back to I3 even if Kwi3 itself is unreachable — the edge
+	// case this task names is "never send kwi3 chords to another i3". nil
+	// (the zero value, and every existing caller of NewDaemon) is an i3
+	// session: dispatch() behaves exactly as it did before this task.
+	Kwi3 kwi3Dispatcher
+
 	// Publisher is closed at shutdown if non-nil. nil is a legal,
 	// intentional configuration: see buildPublisher's doc in main.go for
 	// the "log and continue without a publisher" policy on
@@ -457,9 +466,19 @@ type DaemonConfig struct {
 // Daemon is the whole thing wired together: grabs -> engine -> dispatch +
 // state feed, and the run loop that drives it. The Go analogue of
 // hotkeyd.py's Daemon class plus run_daemon's loop body.
+// kwi3Dispatcher is the seam sp004 Task 16 wires in (kwi3-234.16):
+// *kwi3rpc.Client satisfies it, and daemon_test.go substitutes a fake with
+// no real socket at all — the same "interface, not a concrete type"
+// discipline this file's doc names for every other external dependency.
+type kwi3Dispatcher interface {
+	Dispatch(cmd string) error
+	Close() error
+}
+
 type Daemon struct {
 	events  <-chan x11.Event
 	i3      i3.Client
+	kwi3    kwi3Dispatcher
 	grabs   grabSyncer
 	devices deviceAttributor
 	engine  *layer.Engine
@@ -497,6 +516,7 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 	d := &Daemon{
 		events:    cfg.Events,
 		i3:        cfg.I3,
+		kwi3:      cfg.Kwi3,
 		grabs:     cfg.Grabs,
 		devices:   cfg.Devices,
 		engine:    cfg.Engine,
@@ -528,6 +548,20 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 		d.holdTick = HoldPollInterval
 	}
 	d.wireI3Mode()
+	// sp004 Task 16's own decision point (kwi3-234.16): a chord this
+	// daemon's real table binds that kwi3rpc.Translate has no ft010 method
+	// for at ALL — never break Jan's session over it (the daemon still
+	// starts and every OTHER chord still dispatches), but never let it go
+	// unmentioned either. Only relevant once a kwi3 session selected the
+	// Kwi3 dispatch seam at all; an i3 session logs nothing new here.
+	if d.kwi3 != nil {
+		if bad := walkForKwi3Translation(d.binds, d.layers); len(bad) > 0 {
+			for _, c := range bad {
+				d.log(fmt.Sprintf("kwi3: chord %s (%q) has no ft010 method and will be dropped on this kwi3 session: %s",
+					c.Chord, c.Action, c.Err))
+			}
+		}
+	}
 	return d
 }
 
@@ -637,11 +671,12 @@ func (d *Daemon) publishGrabReport() {
 	proc.WriteGrabReport(d.display, wanted, active, missing)
 }
 
-// dispatch routes one action: an i3 Command through the i3 client, a Run
-// through proc.Run (setsid-detached spawn). EnterLayer/ExitLayer/Func
-// never escape engine.run() (internal/layer), so anything else reaching
-// here is a defensive no-op — matching hotkeyd.py's _dispatch, which only
-// ever understood Run and a bare command string.
+// dispatch routes one action: an i3 Command through the i3 client (or, on
+// a kwi3 session, through kwi3rpc instead — sp004 Task 16, kwi3-234.16,
+// see below), a Run through proc.Run (setsid-detached spawn). EnterLayer/
+// ExitLayer/Func never escape engine.run() (internal/layer), so anything
+// else reaching here is a defensive no-op — matching hotkeyd.py's
+// _dispatch, which only ever understood Run and a bare command string.
 func (d *Daemon) dispatch(a bind.Action) {
 	switch v := a.(type) {
 	case bind.Run:
@@ -652,6 +687,24 @@ func (d *Daemon) dispatch(a bind.Action) {
 			d.log(fmt.Sprintf("run %q: %s", v.Cmd, err))
 		}
 	case bind.Command:
+		// sp004 Task 16: when $KWI3SOCK answered at startup, d.kwi3 is set
+		// and EVERY bind.Command goes through it instead — never through
+		// d.i3, even if kwi3rpc itself is currently unreachable (the edge
+		// case this task names: never send kwi3 chords to another i3).
+		// kwi3rpc.Client.Dispatch already logs once (not per chord) while
+		// the socket is down and reconnects transparently on the next
+		// call, so a transport failure here is just one more log line, the
+		// same "logged, loop continues" policy as the Run case above. An
+		// *kwi3rpc.UnsupportedVerbError (sticky/scratchpad — this daemon's
+		// own decision-point chords, or any future one) is reported the
+		// same way: one log line, nothing sent anywhere, the loop
+		// continues.
+		if d.kwi3 != nil {
+			if err := d.kwi3.Dispatch(string(v)); err != nil {
+				d.log(fmt.Sprintf("kwi3 dispatch error: %q: %s", string(v), err))
+			}
+			return
+		}
 		ok, i3Err, err := d.i3.Command(string(v))
 		if err != nil {
 			d.log(fmt.Sprintf("i3 dispatch error: %q: %s", string(v), err))
@@ -807,6 +860,11 @@ func (d *Daemon) shutdown() {
 	}
 	if err := d.i3.Close(); err != nil {
 		d.log(fmt.Sprintf("i3: close: %s", err))
+	}
+	if d.kwi3 != nil {
+		if err := d.kwi3.Close(); err != nil {
+			d.log(fmt.Sprintf("kwi3rpc: close: %s", err))
+		}
 	}
 	if d.xConn != nil {
 		if err := d.xConn.Close(); err != nil {

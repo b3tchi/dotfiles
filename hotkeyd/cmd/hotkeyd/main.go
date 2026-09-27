@@ -24,6 +24,7 @@ import (
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/i3"
+	"hotkeyd/internal/kwi3rpc"
 	"hotkeyd/internal/layer"
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
@@ -159,6 +160,18 @@ func run(argv []string) int {
 		Mod:         mod,
 		Display:     display,
 		Log:         daemonLog,
+	}
+	// sp004 Task 16 (kwi3-234.16): $KWI3SOCK answering at all is what
+	// selects the kwi3 session — daemon.go's dispatch() then sends every
+	// bind.Command through kwi3rpc and NEVER through i3Client above, even
+	// if kwi3rpc itself turns out to be unreachable (never send kwi3
+	// chords to another i3). No $KWI3SOCK (an i3/sway session, or a kwi3
+	// session that has not exported it — a config error on that side, not
+	// this one to guess around) leaves daeCfg.Kwi3 nil, which is the exact
+	// pre-Task-16 behaviour: dispatch() falls through to i3Client as it
+	// always did. kwi3rpc.New does not dial here; the first chord does.
+	if sock := os.Getenv("KWI3SOCK"); sock != "" {
+		daeCfg.Kwi3 = kwi3rpc.New(sock, kwi3rpc.WithLog(daemonLog))
 	}
 	// Assigned inside the guard, never unconditionally: a nil *ControlListener
 	// stored in an io.Closer field is a NON-nil interface holding a nil
