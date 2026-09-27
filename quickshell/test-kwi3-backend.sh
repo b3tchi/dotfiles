@@ -50,6 +50,12 @@ COMMON_DIR="$SCRIPT_DIR/config/Common"
 QUICKSHELL="${QUICKSHELL:-quickshell}"
 KWI3_REPO="${KWI3_REPO:-$HOME/.local/src/kwi3}"
 RPC_SERVER="$KWI3_REPO/i3kwin/test/rpc-server.js"
+# PHASE 6 only (the Bar, sp004 Task 13): a real PanelWindow needs a real
+# layer-shell/X11 backend — "No PanelWindow backend loaded" under
+# QT_QPA_PLATFORM=offscreen, measured while writing that phase — so it is the
+# one phase in this file that runs under Xvfb, same as test-mode-bar.sh.
+XVFB="${XVFB:-Xvfb}"
+BAR_DPY="${BAR_DPY:-:97}"
 
 PASS=0
 FAIL=0
@@ -57,14 +63,16 @@ pass() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n         expected: %s\n         actual:   %s\n' "$1" "$2" "$3"; }
 scenario() { printf '\n[%s]\n' "$1"; }
 
-for tool in "$QUICKSHELL" node; do
+for tool in "$QUICKSHELL" node "$XVFB"; do
   command -v "$tool" >/dev/null 2>&1 \
-    || { echo "FATAL: $tool not found (QUICKSHELL= to override)" >&2; exit 1; }
+    || { echo "FATAL: $tool not found (QUICKSHELL=/XVFB= to override)" >&2; exit 1; }
 done
 [ -d "$COMMON_DIR" ] || { echo "FATAL: $COMMON_DIR not a directory" >&2; exit 1; }
 for f in Kwi3Client.qml Kwi3Grid.qml qmldir; do
   [ -r "$COMMON_DIR/$f" ] || { echo "FATAL: $COMMON_DIR/$f missing" >&2; exit 1; }
 done
+BAR_QML="$SCRIPT_DIR/config/Bar.qml"
+[ -r "$BAR_QML" ] || { echo "FATAL: $BAR_QML missing" >&2; exit 1; }
 [ -r "$RPC_SERVER" ] || {
   echo "FATAL: $RPC_SERVER not found." >&2
   echo "       Set KWI3_REPO=/path/to/kwi3 to a checkout with i3kwin/test/rpc-server.js" >&2
@@ -310,6 +318,14 @@ wait_for_race_results() {
         sleep 0.1
     done
     return 1
+}
+
+# PHASE 6 only: is display <1> up? Both socket namespaces (dotfiles-4ai2),
+# same check test-mode-bar.sh uses — a WSLg /tmp/.X11-unix bind mount only
+# ever gets the abstract socket, never the file.
+dpy_up() { # <display>
+    [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+    grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
 }
 
 # ============================================================================
@@ -775,6 +791,361 @@ else
     kill "$HOST_PID" 2>/dev/null
 fi
 kill "$GRID_PID" 2>/dev/null
+
+# ============================================================================
+# PHASE 6 (sp004 Task 13, kwi3-234.13; ft008/ft010) — the dotfiles Bar itself,
+# on Kwi3Client, sized on the grid. The only phase in this file needing a
+# real display: a PanelWindow refuses to instantiate under
+# QT_QPA_PLATFORM=offscreen ("No PanelWindow backend loaded", measured while
+# writing this phase), so it runs under Xvfb, same discipline as
+# test-mode-bar.sh — its own PATH sandbox has no i3-msg/swaymsg at all (unlike
+# test-mode-bar.sh's own stub), so the pre-existing i3-msg Processes in Bar.qml
+# fail to spawn and can never race root.sortedWorkspaces against the kwi3
+# feed under test; their try/catch already only ever assigns on a
+# successful parse, which a nonexistent binary's silence can never produce.
+#
+# The "3 tabs whose cells do not divide, spare cells to the FIRST" rule
+# (AC2) is checked TWO ways, deliberately: bar._shareEqualCells is called
+# DIRECTLY with chosen integers (deterministic, mutation-provable, no font
+# metrics involved) for the exact-value pin reviewers want, and separately
+# the REAL rendered "a"/"bb"/"ccc" tabs are checked against GENERAL
+# invariants (whole modules, non-increasing cell widths, cumulative x from
+# contentLeft) that hold regardless of this box's actual monospace font
+# metrics — the two together prove the algorithm AND that the real
+# Repeater is wired to it, without the suite depending on exactly what
+# "monospace" measures here.
+# ============================================================================
+
+scenario "PHASE 6 setup: rpc-server.js rig + a real Bar under Xvfb"
+
+"$XVFB" "$BAR_DPY" -screen 0 1024x300x24 >"$TMP/xvfb.log" 2>&1 &
+XVFB_PID=$!
+PIDS+=("$XVFB_PID")
+for i in $(seq 1 50); do dpy_up "$BAR_DPY" && break; sleep 0.1; done
+if ! dpy_up "$BAR_DPY"; then
+    fail "Xvfb $BAR_DPY started" "display up" "not found"
+    cat "$TMP/xvfb.log" >&2
+else
+    BAR_DRIVER="$TMP/bar-driver.js"
+    cat > "$BAR_DRIVER" <<'JSEOF'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const [rpcServer, sockPath] = process.argv.slice(2);
+const root = path.join(path.dirname(rpcServer), '..');
+const sources = fs.readdirSync(path.join(root, 'core'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => path.join(root, 'core', f))
+    .concat([path.join(root, 'adapters/kwin/contents/code/adapter.js')]);
+require(rpcServer).start(sockPath, sources, {}).then((rig) => {
+    console.log('BOOT ' + JSON.stringify(rig.ctx.workspacesJson()));
+
+    // SIGUSR1: three unevenly-named workspaces, "a" focused last — the fixed
+    // input to AC1's list/highlight assertions and AC2's whole-module tabs.
+    // A window ("keeper") on each one BEFORE switching away is required: an
+    // empty workspace switched away from is destroyed (workspace-lifecycle.js
+    // section 1's own "keeper" comment) — without it only the LAST-focused
+    // name would ever survive, which is exactly the failure mode measured
+    // the first time this ran (only "a" persisted).
+    process.on('SIGUSR1', () => {
+        rig.ctx.dispatch('workspace:a');
+        rig.openWindow('a-win');
+        rig.ctx.dispatch('workspace:bb');
+        rig.openWindow('bb-win');
+        rig.ctx.dispatch('workspace:ccc');
+        rig.openWindow('ccc-win');
+        rig.ctx.dispatch('workspace:a');
+        console.log('THREE ' + JSON.stringify(rig.ctx.workspacesJson()));
+    });
+
+    // SIGUSR2: a SECOND "client" — this process, not the bar under test —
+    // focuses "bb" directly through Logic. Proves the bar follows a
+    // workspace.focus notification it did not itself send (AC1).
+    process.on('SIGUSR2', () => {
+        rig.ctx.dispatch('workspace:bb');
+        console.log('FOCUSEDBB ' + JSON.stringify(rig.ctx.workspacesJson()));
+    });
+
+    // Mirrors every workspace.focus call the RPC SOCKET actually received
+    // (rig.calls only wraps RPC_METHODS — ctx.dispatch() above never touches
+    // it) so the click scenario can count them without a signal of its own.
+    let lastLen = 0;
+    setInterval(() => {
+        if (rig.calls.length === lastLen) { return; }
+        lastLen = rig.calls.length;
+        const focusCalls = rig.calls.filter((c) => c.method === 'workspace.focus');
+        console.log('FOCUSCALLS ' + JSON.stringify(focusCalls));
+    }, 50);
+
+    process.on('SIGTERM', () => rig.stop().then(() => process.exit(0)));
+    console.log(sockPath);
+}, (err) => { console.error('bar-driver: ' + err); process.exit(1); });
+JSEOF
+
+    SOCK_BAR="$TMP/kwi3-bar.sock"
+    BAR_RIG_LOG="$TMP/bar-rig.log"
+    node "$BAR_DRIVER" "$RPC_SERVER" "$SOCK_BAR" >"$BAR_RIG_LOG" 2>&1 &
+    BAR_RIG_PID=$!
+    PIDS+=("$BAR_RIG_PID")
+
+    if ! wait_for_socket "$SOCK_BAR" 20; then
+        fail "bar-driver.js bound $SOCK_BAR" "socket present" "missing"
+        cat "$BAR_RIG_LOG" >&2
+    else
+        pass "bar-driver.js bound its socket"
+
+        CFG6="$TMP/cfg6"
+        RUN6="$TMP/run6"
+        CACHE6="$TMP/cache6"
+        PBIN6="$TMP/pbin6"          # sandbox PATH: coreutils only, NO i3-msg
+        HOST6_LOG="$TMP/qs-bar.log"
+        mkdir -p "$CFG6" "$RUN6" "$CACHE6" "$PBIN6"
+        chmod 700 "$RUN6"
+        ln -sf "$COMMON_DIR" "$CFG6/Common"
+        ln -sf "$BAR_QML" "$CFG6/Bar.qml"
+        for t in sh cat sleep tr awk df grep sed cut head; do
+            src="$(command -v "$t")" && ln -sf "$src" "$PBIN6/$t"
+        done
+
+        cat > "$CFG6/shell.qml" <<'QMLEOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+ShellRoot {
+    id: host
+    function emit(n, p) { console.log("KWI3TEST6 " + n + " " + p) }
+
+    function rootOf(w) { return (w && w.contentItem) ? w.contentItem : w }
+    function findAllByName(item, name, out) {
+        if (!item) { return }
+        var kids = item.children
+        for (var i = 0; i < kids.length; i++) {
+            var c = kids[i]
+            if (c.objectName === name) { out.push(c) }
+            findAllByName(c, name, out)
+        }
+    }
+
+    IpcHandler {
+        target: "bar6"
+
+        function geometry(tag: string): void {
+            var r = host.rootOf(bar)
+            var tabs = []
+            host.findAllByName(r, "wsTab", tabs)
+            var out = { count: tabs.length, height: bar.height, exclusiveZone: bar.exclusiveZone, tabs: [] }
+            for (var i = 0; i < tabs.length; i++) {
+                var p = tabs[i].mapToItem(r, 0, 0)
+                out.tabs.push({ x: p.x, width: tabs[i].width })
+            }
+            host.emit("geom", tag + " " + JSON.stringify(out))
+        }
+
+        function rows(tag: string): void {
+            host.emit("rows", tag + " " + JSON.stringify(bar.sortedWorkspaces))
+        }
+
+        function plan(tag: string): void {
+            host.emit("plan", tag + " " + JSON.stringify(bar.tabCellPlan))
+        }
+
+        function shareEqualCells(tag: string, total: int, n: int): void {
+            host.emit("share", tag + " " + JSON.stringify(bar._shareEqualCells(total, n)))
+        }
+
+        // Invokes the REAL MouseArea.clicked handler on the Nth tab — the
+        // same code path a real pointer click reaches.
+        function clickTab(tag: string, index: int): void {
+            var r = host.rootOf(bar)
+            var clicks = []
+            host.findAllByName(r, "wsTabClick", clicks)
+            var ok = (index >= 0 && index < clicks.length)
+            if (ok) { clicks[index].clicked(null) }
+            host.emit("clicked", tag + " " + (ok ? "1" : "0"))
+        }
+    }
+
+    Bar {
+        id: bar
+        screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    }
+}
+QMLEOF
+
+        # Resolve to an absolute path FIRST: PATH is about to be replaced
+        # wholesale for the launched process, so an unqualified "$QUICKSHELL"
+        # would no longer resolve at all (measured — "env: quickshell: No
+        # such file or directory" the first time this ran).
+        QS_BIN6="$(command -v "$QUICKSHELL")"
+        env -u I3SOCK -u SWAYSOCK -u WAYLAND_DISPLAY DISPLAY="$BAR_DPY" \
+            PATH="$PBIN6" HOME="$TMP/home" KWI3SOCK="$SOCK_BAR" \
+            XDG_CONFIG_HOME="$CFG6" XDG_RUNTIME_DIR="$RUN6" XDG_CACHE_HOME="$CACHE6" \
+            "$QS_BIN6" -p "$CFG6" >"$HOST6_LOG" 2>&1 &
+        HOST6_PID=$!
+        PIDS+=("$HOST6_PID")
+
+        ipc6() {
+            env XDG_CONFIG_HOME="$CFG6" XDG_RUNTIME_DIR="$RUN6" XDG_CACHE_HOME="$CACHE6" \
+                "$QUICKSHELL" ipc --pid "$HOST6_PID" "$@" >/dev/null 2>&1
+        }
+        last6() { grep -a "KWI3TEST6 $1 $2 " "$HOST6_LOG" | tail -1 | sed "s/^.*KWI3TEST6 $1 $2 //"; }
+
+        HOST6_UP=""
+        for i in $(seq 1 60); do
+            n="$(env XDG_CONFIG_HOME="$CFG6" XDG_RUNTIME_DIR="$RUN6" XDG_CACHE_HOME="$CACHE6" \
+                     "$QUICKSHELL" ipc --pid "$HOST6_PID" show 2>/dev/null | grep -c 'bar6')"
+            [ "${n:-0}" -gt 0 ] && { HOST6_UP=1; break; }
+            sleep 0.25
+        done
+
+        if [ -z "$HOST6_UP" ]; then
+            fail "the Bar host exposed the 'bar6' IPC target" "a bar6 target" "none"
+            tail -40 "$HOST6_LOG" >&2
+        else
+            pass "the Bar host booted"
+
+            scenario "0 workspaces reported: the bar shows none, no crash (edge case)"
+            ipc6 call bar6 geometry "empty"
+            sleep 0.3
+            geom0="$(last6 geom empty)"
+            case "$geom0" in
+                *'"count":0'*) pass "zero tabs render with zero workspaces" ;;
+                *) fail "zero tabs render with zero workspaces" '"count":0' "$geom0" ;;
+            esac
+            ipc6 call bar6 rows "stillup"
+            sleep 0.2
+            [ -n "$(last6 rows stillup)" ] && pass "the host is still alive (no crash) with zero workspaces" \
+                || fail "the host is still alive with zero workspaces" "a rows reply" "(none)"
+
+            scenario "3 workspaces: listed, focused one highlighted (AC1)"
+            kill -USR1 "$BAR_RIG_PID"
+            THREE=""
+            for i in $(seq 1 30); do
+                THREE="$(grep -a '^THREE ' "$BAR_RIG_LOG" | tail -1 | sed 's/^THREE //')"
+                [ -n "$THREE" ] && break
+                sleep 0.1
+            done
+            [ -n "$THREE" ] && pass "bar-driver.js created the three workspaces" \
+                || fail "bar-driver.js created the three workspaces" "a THREE line" "(timed out)"
+
+            got_rows=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 rows "r$i"
+                sleep 0.15
+                got_rows="$(last6 rows "r$i")"
+                case "$got_rows" in *'"name":"ccc"'*) break ;; esac
+            done
+            case "$got_rows" in
+                *'"name":"a"'*'"name":"bb"'*'"name":"ccc"'*)
+                    pass "the bar lists all three of the rig's workspaces, in number order" ;;
+                *) fail "the bar lists all three of the rig's workspaces" '"a","bb","ccc" in order' "$got_rows" ;;
+            esac
+            case "$got_rows" in
+                *'"name":"a","number":1,"focused":true'*) pass "the focused workspace (a) is flagged focused" ;;
+                *) fail "the focused workspace (a) is flagged focused" '"a" focused:true' "$got_rows" ;;
+            esac
+
+            scenario "whole-module tab geometry (AC2)"
+            ipc6 call bar6 geometry "geom3"
+            sleep 0.2
+            geom3="$(last6 geom geom3)"
+            ipc6 call bar6 plan "plan3"
+            sleep 0.2
+            plan3="$(last6 plan plan3)"
+            [ "$(printf '%s' "$geom3" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const g=JSON.parse(d);console.log(String(g.count))})' 2>/dev/null)" = "3" ] \
+                && pass "three tabs rendered" \
+                || fail "three tabs rendered" "3" "$geom3"
+
+            node -e '
+const geom = JSON.parse(process.argv[1]);
+const plan = JSON.parse(process.argv[2]);
+const moduleW = 8, contentLeft = 8;
+function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
+const cells = plan.cells;
+ok(cells.length === 3, "plan has three cells");
+let x = contentLeft, allWhole = true, cum = true;
+for (let i = 0; i < geom.tabs.length; i++) {
+    const t = geom.tabs[i];
+    if ((t.x - contentLeft) % moduleW !== 0) { allWhole = false; }
+    if (t.width % moduleW !== 0) { allWhole = false; }
+    if (t.x !== x) { cum = false; }
+    x += t.width;
+}
+ok(allWhole, "every tab x and width is a whole multiple of moduleW from contentLeft");
+ok(cum, "each tabs x is the running sum of the ones before it, starting at contentLeft");
+ok(geom.tabs.length && geom.tabs[0].x === contentLeft, "the first tab starts at contentLeft");
+let nonIncreasing = true;
+for (let i = 1; i < cells.length; i++) { if (cells[i] > cells[i - 1]) { nonIncreasing = false; } }
+ok(nonIncreasing, "cell counts are non-increasing left to right (spare cells at the front)");
+const sumWant = plan.wants.reduce((a, b) => a + b, 0);
+const sumCells = cells.reduce((a, b) => a + b, 0);
+ok(sumWant === sumCells, "the shared-out cells add up to exactly the wanted total");
+' "$geom3" "$plan3" > "$TMP/geom-check.out" 2>&1
+            while IFS= read -r line; do
+                case "$line" in
+                    "PASS "*) pass "${line#PASS }" ;;
+                    "FAIL "*) fail "${line#FAIL }" "true" "false" ;;
+                esac
+            done < "$TMP/geom-check.out"
+
+            scenario "shareEqualCells: spare cells go to the FIRST items, exact values (AC2, mutation target)"
+            ipc6 call bar6 shareEqualCells "s14_3" "14" "3"
+            sleep 0.2
+            s1="$(last6 share s14_3)"
+            [ "$s1" = "[5,5,4]" ] && pass "shareEqualCells(14,3) == [5,5,4] (remainder 2, front two get +1)" \
+                || fail "shareEqualCells(14,3) == [5,5,4]" "[5,5,4]" "$s1"
+            ipc6 call bar6 shareEqualCells "s15_3" "15" "3"
+            sleep 0.2
+            s2="$(last6 share s15_3)"
+            [ "$s2" = "[5,5,5]" ] && pass "shareEqualCells(15,3) == [5,5,5] (exact division, no spare)" \
+                || fail "shareEqualCells(15,3) == [5,5,5]" "[5,5,5]" "$s2"
+            ipc6 call bar6 shareEqualCells "s16_3" "16" "3"
+            sleep 0.2
+            s3="$(last6 share s16_3)"
+            [ "$s3" = "[6,5,5]" ] && pass "shareEqualCells(16,3) == [6,5,5] (remainder 1, only the FIRST gets +1)" \
+                || fail "shareEqualCells(16,3) == [6,5,5]" "[6,5,5]" "$s3"
+
+            scenario "a workspace.focus notification from another client is followed within ~1s, well under the old 2s i3-msg timer (AC1)"
+            kill -USR2 "$BAR_RIG_PID"
+            followed=""
+            for i in $(seq 1 10); do
+                ipc6 call bar6 rows "f$i"
+                sleep 0.1
+                r="$(last6 rows "f$i")"
+                case "$r" in *'"name":"bb","number":2,"focused":true'*) followed=1; break ;; esac
+            done
+            [ -n "$followed" ] && pass "the bar re-focused bb after a workspace.focus it did not send" \
+                || fail "the bar followed the other client's workspace.focus" "bb focused:true" "$r"
+
+            scenario "a click sends exactly one workspace.focus {num} (AC1)"
+            : > "$BAR_RIG_LOG.clickmark"
+            CCC_NUM="$(printf '%s' "$got_rows" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const rows=JSON.parse(d);console.log(String(rows.find(r=>r.name==="ccc").number))})' 2>/dev/null)"
+            ipc6 call bar6 clickTab "click1" "2"
+            sleep 0.2
+            clicked="$(last6 clicked click1)"
+            [ "$clicked" = "1" ] && pass "the click harness found a third tab to click" \
+                || fail "the click harness found a third tab to click" "1" "$clicked"
+            calls=""
+            for i in $(seq 1 20); do
+                calls="$(grep -a '^FOCUSCALLS ' "$BAR_RIG_LOG" | tail -1 | sed 's/^FOCUSCALLS //')"
+                [ -n "$calls" ] && break
+                sleep 0.1
+            done
+            n_calls="$(printf '%s' "${calls:-[]}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{console.log(String(JSON.parse(d).length))})' 2>/dev/null)"
+            [ "$n_calls" = "1" ] && pass "exactly one workspace.focus call reached the socket" \
+                || fail "exactly one workspace.focus call reached the socket" "1" "$n_calls"
+            case "$calls" in
+                *"\"num\":$CCC_NUM"*) pass "the call's num matches the clicked tab (ccc)" ;;
+                *) fail "the call's num matches the clicked tab (ccc)" "num:$CCC_NUM" "$calls" ;;
+            esac
+        fi
+        kill "$HOST6_PID" 2>/dev/null
+    fi
+    kill "$BAR_RIG_PID" 2>/dev/null
+fi
+kill "$XVFB_PID" 2>/dev/null
 
 # ============================================================================
 

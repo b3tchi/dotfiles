@@ -161,11 +161,19 @@ PanelWindow {
     readonly property int insetTop:    insetOn ? Session.insetTop : 0
     readonly property bool inset: insetSide > 0 || insetTop > 0
 
-    implicitHeight: Session.barHeight + insetTop
+    // sp004 Task 13 (kwi3-234.13; ft008 kwi3-grid-feed): under kwi3 the bar's
+    // own height, band and exclusive zone come off Kwi3Grid instead of
+    // Session's literals — Kwi3Grid.active stays false for every session
+    // this spec does not touch (no $KWI3SOCK), so Session.barHeight is still
+    // exactly what renders there (AC3).
+    implicitHeight: (Kwi3Grid.active ? Kwi3Grid.rowHeight : Session.barHeight) + insetTop
 
     // Phone (sxmo, sway/Wayland): floating pill at the top via real
     // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
-    // QS_BAR_INSET_* instead.
+    // QS_BAR_INSET_* instead. kwi3 is X11 too, so this margins block is the
+    // same no-op there that it always was; the top band comes from
+    // exclusiveZone below instead (kwi3-12f — the tile grid's margin band,
+    // not a layer-shell margin).
     readonly property bool isPhone: Session.isPhone
     margins {
         top:   isPhone ? 20 : 0
@@ -173,13 +181,21 @@ PanelWindow {
         right: isPhone ? 40 : 0
     }
 
+    // kwi3's own reserve already counts its margin band on top of the bar's
+    // row (kwi3-at2's `reserve` field) — reusing it here rather than adding
+    // the two ourselves keeps this bar and every tile agreeing with the same
+    // one number kwi3 serves. -1 is PanelWindow's own "auto" (matches
+    // implicitHeight), which is what every non-kwi3 session already got
+    // before this property existed.
+    exclusiveZone: Kwi3Grid.active ? Kwi3Grid.reserve : -1
+
     readonly property color barColor: "#000000"
     // Black surround: blends into the Razr's bezel/chin so the pill reads as
     // floating on the hardware edge rather than on a colored strip.
     color: inset ? "#000000" : barColor
 
-    readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: Session.fontSize
+    readonly property string fontFamily: Kwi3Grid.active ? Kwi3Grid.fontFamily : "Iosevka Nerd Font"
+    readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontSize
     readonly property int nativeRender: Text.NativeRendering
 
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
@@ -233,6 +249,104 @@ PanelWindow {
             onRead: data => wsListProc.running = true
         }
         onExited: running = true
+    }
+
+    // ---- kwi3 backend (sp004 Task 13, kwi3-234.13; ft008/ft010) -------------
+    // Under Kwi3Client.available, workspace.list + events.subscribe replace
+    // the i3-msg Processes above as the source of root.sortedWorkspaces — an
+    // ADDITIVE branch, not a rewrite of them: wsListProc/wsEventSub keep
+    // running exactly as before (AC3, "the i3/sway path is untouched"), and
+    // under a real kwi3 session $I3SOCK is unset, so i3-msg's own replies
+    // fail its try/catch above and never overwrite what this branch sets.
+    // Same row shape either way ({name, number, focused, active, urgent,
+    // wsId}) so the Repeater below reads one field set from either feed.
+    function _kwi3Rows(list) {
+        var out = []
+        for (var i = 0; i < list.length; i++) {
+            var w = list[i]
+            out.push({
+                name: w.name, number: w.num, focused: !!w.focused,
+                active: !!w.visible, urgent: !!w.urgent, wsId: w.id
+            })
+        }
+        out.sort(function (a, b) { return a.number - b.number })
+        return out
+    }
+
+    function _kwi3Refresh() {
+        Kwi3Client.call("workspace.list", undefined, function (err, res) {
+            if (err || !res) { return }
+            root.sortedWorkspaces = root._kwi3Rows(res)
+        })
+    }
+
+    Connections {
+        target: Kwi3Client
+        function onAvailableChanged() {
+            if (Kwi3Client.available) { root._kwi3Refresh() }
+        }
+    }
+
+    Component.onCompleted: {
+        // Deltas per ft010 (`workspace.focused/created/destroyed`): any of
+        // them re-lists rather than patching in place, same policy the i3-msg
+        // side takes with its own blunter "workspace" event.
+        Kwi3Client.on("workspace.focused",   function () { root._kwi3Refresh() })
+        Kwi3Client.on("workspace.created",   function () { root._kwi3Refresh() })
+        Kwi3Client.on("workspace.destroyed", function () { root._kwi3Refresh() })
+        if (Kwi3Client.available) { root._kwi3Refresh() }
+    }
+
+    // ---- kwi3 whole-module tab sizing (kwi3-9ut/kwi3-ba2 rule) ---------------
+    // Ported from i3kwin/core/solver.js's shareEqualCells (kwi3-ba2's own
+    // fix for the chrome's tab bar), rather than re-derived: equal cells
+    // shared out exactly, and where the total does not divide evenly the
+    // spare cells go to the FIRST items — "module is priority if tab is
+    // rounding then first item in tab should be +1" (Jan, AGENTS.md).
+    function _shareEqualCells(total, n) {
+        var out = [], base = Math.floor(total / n), spare = total - base * n, i
+        for (i = 0; i < n; i++) { out.push(base + (i < spare ? 1 : 0)) }
+        return out
+    }
+
+    // Cells one tab's own label wants: its rendered width plus one module of
+    // padding each side (i3kwin/bar/shell.qml's tabWidth(), same idea),
+    // capped at 40% of the bar's own width — same cap shell.qml uses,
+    // converted to whole cells — so one long workspace name cannot balloon
+    // every tab once the wants below are shared out (edge case: "a
+    // workspace name wider than the bar").
+    function _tabWantCells(text) {
+        var raw = kwi3TabMetrics.advanceWidth(text)
+        var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 2
+        var cap = Math.max(1, Math.floor((root.width * 0.4) / Kwi3Grid.moduleW))
+        return Math.min(want, cap)
+    }
+
+    FontMetrics {
+        id: kwi3TabMetrics
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize
+    }
+
+    // The plan every tab Rectangle below reads its width from: `cells[i]` is
+    // one entry per row of root.sortedWorkspaces, in the SAME order —
+    // index-aligned (the Repeater's own `index`), not name-keyed. `wants` is
+    // kept alongside it (not re-derived) purely so a test hook can read what
+    // went INTO the shared-out total without re-measuring text itself. null,
+    // not an object with empty arrays, when kwi3 is not the backend, so the
+    // pre-existing content-sized width is untouched (AC3); empty arrays for
+    // zero workspaces (edge case: "0 workspaces reported" — the Repeater
+    // then simply has nothing to draw).
+    readonly property var tabCellPlan: {
+        if (!Kwi3Grid.active) { return null }
+        var n = root.sortedWorkspaces.length
+        if (n === 0) { return { wants: [], cells: [] } }
+        var wants = []
+        for (var i = 0; i < n; i++) {
+            wants.push(root._tabWantCells(root.sortedWorkspaces[i].name))
+        }
+        var total = wants.reduce(function (a, b) { return a + b }, 0)
+        return { wants: wants, cells: root._shareEqualCells(total, n) }
     }
 
     // ------------------------------------------------------- agent census ---
@@ -651,7 +765,10 @@ PanelWindow {
         Row {
             id: leftSide
             visible: root.currentMode === "default"
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
+            // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
+            // starts where the tiles' own titlebars do.
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom
+                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
             spacing: 0
 
             Repeater {
@@ -659,7 +776,15 @@ PanelWindow {
 
                 Rectangle {
                     required property var modelData
-                    width: wsLabel.implicitWidth + 14
+                    required property int index
+                    // objectName purely for test introspection (test-kwi3-
+                    // backend.sh PHASE 6), same convention as wsAgentBadge/
+                    // notifTickerText below.
+                    objectName: "wsTab"
+                    width: (root.tabCellPlan && root.tabCellPlan.cells
+                            && index < root.tabCellPlan.cells.length)
+                         ? root.tabCellPlan.cells[index] * Kwi3Grid.moduleW
+                         : (wsLabel.implicitWidth + 14)
                     height: leftSide.height
                     // Focused tab uses the same highlight as the mod+d launcher
                     // input/selection (#152024, Overlay.qml).
@@ -724,8 +849,19 @@ PanelWindow {
                     }
 
                     MouseArea {
+                        // objectName: same test-introspection convention as
+                        // the Rectangle's own wsTab above — lets PHASE 6
+                        // invoke .clicked() directly, through the real
+                        // handler, without a synthetic pointer event.
+                        objectName: "wsTabClick"
                         anchors.fill: parent
-                        onClicked: I3.dispatch("workspace " + modelData.name)
+                        onClicked: {
+                            if (Kwi3Client.available) {
+                                Kwi3Client.call("workspace.focus", { num: modelData.number })
+                            } else {
+                                I3.dispatch("workspace " + modelData.name)
+                            }
+                        }
                     }
                 }
             }
