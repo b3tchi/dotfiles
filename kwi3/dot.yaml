@@ -5,8 +5,11 @@
 # this dot is the one place that repo and this one meet, and it owns four
 # things: cloning/building it into ~/.local/src/kwi3, linking the built
 # binary and its session scripts into ~/.local/bin, this machine's kwi3
-# config (kwi3/config, linked to ~/.config/kwi3/config, sharing its
-# client.* palette with i3/colors.conf — see that file), and (root, via
+# config (kwi3/config.js, linked to ~/.config/kwi3/config.js — sp004 Task 10,
+# kwi3-234.10, adr0013, migrated from the old i3-syntax kwi3/config; the
+# client.* palette that used to come from i3/colors.conf via an `include` is
+# now copied directly into kwi3.set({palette: {...}}), since config.js has no
+# include mechanism), and (root, via
 # `sudo` inline below) the kwi3/xrdp/* files that give kwi3 its own xrdp
 # listener on 3392, beside the stock i3 listener on 3391 that xrdp/dot.yaml
 # already set up — never touching it. See kwi3/xrdp/xrdp-kwi3.service and
@@ -57,8 +60,8 @@
 # repo, "The binary finds core/ and qml/ via compile-time
 # I3KWIN_SOURCE_DIR".
 #
-# NOT LINKED FROM THE CLONE: kwi3/config (this directory's own file, linked
-# from HERE like any other dot). i3kwin/bar is NOT copied, unlike
+# NOT LINKED FROM THE CLONE: kwi3/config.js (this directory's own file,
+# linked from HERE like any other dot). i3kwin/bar is NOT copied, unlike
 # i3kwin/install.sh's own phone-side "the bar rides along... copied, not
 # built" choice (kwi3-8wb.2) - it is run straight out of the clone, at
 # $SRC/i3kwin/bar/shell.qml, by kwi3-x11-session's own KWI3_BAR_PATH default.
@@ -77,7 +80,7 @@
 # kwi3/test-bar-symlink-safe.sh.
 linux:
   links:
-    config: ~/.config/kwi3/config
+    config.js: ~/.config/kwi3/config.js
 
   installs:
     cmd: |
