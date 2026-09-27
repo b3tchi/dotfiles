@@ -775,12 +775,21 @@ PanelWindow {
                 model: root.sortedWorkspaces
 
                 Rectangle {
+                    id: wsTab
                     required property var modelData
                     required property int index
                     // objectName purely for test introspection (test-kwi3-
                     // backend.sh PHASE 6), same convention as wsAgentBadge/
                     // notifTickerText below.
                     objectName: "wsTab"
+                    // Under kwi3 the tab's width is the plan's, not its
+                    // label's, so a label can be wider than its tab (a long
+                    // name capped by _tabWantCells, then shared out equally).
+                    // wsText below elides to fit; the clip is the backstop so
+                    // nothing - the badge included - ever paints onto the
+                    // next tab. Off under i3/sway, where the tab is sized
+                    // from its label and nothing can overflow (AC3).
+                    clip: root.tabCellPlan !== null
                     width: (root.tabCellPlan && root.tabCellPlan.cells
                             && index < root.tabCellPlan.cells.length)
                          ? root.tabCellPlan.cells[index] * Kwi3Grid.moduleW
@@ -803,7 +812,20 @@ PanelWindow {
 
                         Text {
                             id: wsText
+                            objectName: "wsTabText"
                             text: modelData.name
+                            // kwi3 only: at most the tab's whole-module width
+                            // less one module of padding each side (the same
+                            // +2 cells _tabWantCells adds) and less the agent
+                            // badge if it shows, elided at the right. Under
+                            // i3/sway this is exactly implicitWidth, i.e. the
+                            // Text's own default, so nothing changes there.
+                            width: root.tabCellPlan
+                                 ? Math.min(implicitWidth, Math.max(0,
+                                       wsTab.width - 2 * Kwi3Grid.moduleW
+                                       - (wsBadge.visible ? wsBadge.implicitWidth + wsLabel.spacing : 0)))
+                                 : implicitWidth
+                            elide: root.tabCellPlan ? Text.ElideRight : Text.ElideNone
                             // Focused/urgent tab bright; other project tabs dimmed.
                             color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
                             font.family: root.fontFamily
@@ -824,6 +846,7 @@ PanelWindow {
                         // permanent 0 on every tab trains the eye to skip the
                         // column the badge exists to draw it to.
                         Text {
+                            id: wsBadge
                             objectName: "wsAgentBadge"
                             visible: Census.totalFor(modelData.name) > 0
                             text: Census.totalFor(modelData.name) > 1

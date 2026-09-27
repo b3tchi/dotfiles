@@ -831,14 +831,47 @@ else
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const [rpcServer, sockPath] = process.argv.slice(2);
+const [rpcServer, sockPath, cmdDir, mode] = process.argv.slice(2);
 const root = path.join(path.dirname(rpcServer), '..');
 const sources = fs.readdirSync(path.join(root, 'core'))
     .filter((f) => f.endsWith('.js'))
     .map((f) => path.join(root, 'core', f))
     .concat([path.join(root, 'adapters/kwin/contents/code/adapter.js')]);
 require(rpcServer).start(sockPath, sources, {}).then((rig) => {
+    // mode "restart": the SECOND rig of the kwi3-restart scenario. A fresh
+    // world with a deliberately DIFFERENT workspace set ("x", "yy"), made
+    // before any client connects, so the only way the bar can show it is a
+    // re-list after Kwi3Client reconnects.
+    if (mode === 'restart') {
+        rig.ctx.dispatch('workspace:x');
+        rig.openWindow('x-win');
+        rig.ctx.dispatch('workspace:yy');
+        rig.openWindow('yy-win');
+    }
     console.log('BOOT ' + JSON.stringify(rig.ctx.workspacesJson()));
+    console.log('BOOTGRID ' + JSON.stringify(rig.ctx.rpcGridGet()));
+
+    // Named commands, one file each under cmdDir (processed then deleted):
+    // there are more of these than there are spare signals.
+    //   long - a 200-char workspace (edge case: a name wider than the bar)
+    //   grid - the grid changes under a live bar: module 8x21 -> 10x24
+    //          through configure() + ipcNotify(), PHASE 5's own path
+    setInterval(() => {
+        let names = [];
+        try { names = fs.readdirSync(cmdDir).sort(); } catch (e) { return; }
+        for (const name of names) {
+            try { fs.unlinkSync(path.join(cmdDir, name)); } catch (e) { continue; }
+            if (name === 'long') {
+                rig.ctx.dispatch('workspace:' + 'L'.repeat(200));
+                rig.openWindow('long-win');
+                console.log('LONG ' + JSON.stringify(rig.ctx.workspacesJson()));
+            } else if (name === 'grid') {
+                rig.ctx.configure({ module: '10x24' });
+                rig.ctx.ipcNotify();
+                console.log('GRID ' + JSON.stringify(rig.ctx.rpcGridGet()));
+            }
+        }
+    }, 50);
 
     // SIGUSR1: three unevenly-named workspaces, "a" focused last — the fixed
     // input to AC1's list/highlight assertions and AC2's whole-module tabs.
@@ -884,7 +917,10 @@ JSEOF
 
     SOCK_BAR="$TMP/kwi3-bar.sock"
     BAR_RIG_LOG="$TMP/bar-rig.log"
-    node "$BAR_DRIVER" "$RPC_SERVER" "$SOCK_BAR" >"$BAR_RIG_LOG" 2>&1 &
+    BAR_CMD="$TMP/bar-cmd"
+    mkdir -p "$BAR_CMD"
+    bar_cmd() { : > "$BAR_CMD/$1"; }
+    node "$BAR_DRIVER" "$RPC_SERVER" "$SOCK_BAR" "$BAR_CMD" >"$BAR_RIG_LOG" 2>&1 &
     BAR_RIG_PID=$!
     PIDS+=("$BAR_RIG_PID")
 
@@ -935,16 +971,35 @@ ShellRoot {
             var r = host.rootOf(bar)
             var tabs = []
             host.findAllByName(r, "wsTab", tabs)
-            var out = { count: tabs.length, height: bar.height, exclusiveZone: bar.exclusiveZone, tabs: [] }
+            var out = { count: tabs.length, height: bar.height, exclusiveZone: bar.exclusiveZone,
+                        grid: { active: Kwi3Grid.active, rowHeight: Kwi3Grid.rowHeight,
+                                reserve: Kwi3Grid.reserve, moduleW: Kwi3Grid.moduleW,
+                                contentLeft: Kwi3Grid.contentLeft },
+                        tabs: [] }
             for (var i = 0; i < tabs.length; i++) {
                 var p = tabs[i].mapToItem(r, 0, 0)
-                out.tabs.push({ x: p.x, width: tabs[i].width })
+                // The label as it is actually PAINTED: its own x and painted
+                // width in bar coordinates, so a label that runs past its
+                // tab is visible as numbers (the long-name edge case).
+                var texts = []
+                host.findAllByName(tabs[i], "wsTabText", texts)
+                var t = texts.length ? texts[0] : null
+                var tp = t ? t.mapToItem(r, 0, 0) : null
+                out.tabs.push({ x: p.x, width: tabs[i].width, clip: tabs[i].clip,
+                                textX: tp ? tp.x : null,
+                                textPainted: t ? t.paintedWidth : null,
+                                textWidth: t ? t.width : null,
+                                truncated: t ? t.truncated : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
         }
 
         function rows(tag: string): void {
             host.emit("rows", tag + " " + JSON.stringify(bar.sortedWorkspaces))
+        }
+
+        function avail(tag: string): void {
+            host.emit("avail", tag + " " + (Kwi3Client.available ? "1" : "0"))
         }
 
         function plan(tag: string): void {
@@ -1047,7 +1102,8 @@ QMLEOF
                 *) fail "the focused workspace (a) is flagged focused" '"a" focused:true' "$got_rows" ;;
             esac
 
-            scenario "whole-module tab geometry (AC2)"
+            scenario "whole-module tab geometry, height = one titlebar row (AC2)"
+            BOOTGRID="$(grep -a '^BOOTGRID ' "$BAR_RIG_LOG" | head -1 | sed 's/^BOOTGRID //')"
             ipc6 call bar6 geometry "geom3"
             sleep 0.2
             geom3="$(last6 geom geom3)"
@@ -1082,7 +1138,15 @@ ok(nonIncreasing, "cell counts are non-increasing left to right (spare cells at 
 const sumWant = plan.wants.reduce((a, b) => a + b, 0);
 const sumCells = cells.reduce((a, b) => a + b, 0);
 ok(sumWant === sumCells, "the shared-out cells add up to exactly the wanted total");
-' "$geom3" "$plan3" > "$TMP/geom-check.out" 2>&1
+// AC2, first clause: the bar is exactly one titlebar row tall and reserves
+// exactly what kwi3 serves. Checked against the RIG own grid.get answer
+// (BOOTGRID, printed by the core itself), not only against Kwi3Grid - a
+// Kwi3Grid that mis-read the field would otherwise agree with itself.
+const boot = JSON.parse(process.argv[3]);
+ok(geom.grid.rowHeight === boot.row, "Kwi3Grid.rowHeight equals the core grid.get row (" + boot.row + ")");
+ok(geom.height === boot.row, "the bar height equals Kwi3Grid.rowHeight (" + geom.height + " vs " + boot.row + ")");
+ok(geom.exclusiveZone === boot.reserve, "the bar exclusiveZone equals Kwi3Grid.reserve (" + geom.exclusiveZone + " vs " + boot.reserve + ")");
+' "$geom3" "$plan3" "$BOOTGRID" > "$TMP/geom-check.out" 2>&1
             while IFS= read -r line; do
                 case "$line" in
                     "PASS "*) pass "${line#PASS }" ;;
@@ -1140,6 +1204,188 @@ ok(sumWant === sumCells, "the shared-out cells add up to exactly the wanted tota
                 *"\"num\":$CCC_NUM"*) pass "the call's num matches the clicked tab (ccc)" ;;
                 *) fail "the call's num matches the clicked tab (ccc)" "num:$CCC_NUM" "$calls" ;;
             esac
+
+            # ---- shared checker for the scenarios below: every tab on the
+            # grid the CORE says is current (its own grid.get answer), not
+            # only on what Kwi3Grid mirrored of it.
+            TABCHECK="$TMP/tabcheck.js"
+            cat > "$TABCHECK" <<'JSEOF'
+'use strict';
+const [geomS, planS, gridS] = process.argv.slice(2);
+const geom = JSON.parse(geomS), plan = JSON.parse(planS), grid = JSON.parse(gridS);
+const mw = grid.module.w, left = grid.contentLeft;
+function ok(cond, name) { console.log((cond ? 'PASS ' : 'FAIL ') + name); }
+ok(geom.grid.moduleW === mw, 'Kwi3Grid.moduleW equals the core grid.get module.w (' + geom.grid.moduleW + ' vs ' + mw + ')');
+ok(geom.height === grid.row, 'the bar height equals the core row (' + geom.height + ' vs ' + grid.row + ')');
+ok(geom.exclusiveZone === grid.reserve, 'the bar exclusiveZone equals the core reserve (' + geom.exclusiveZone + ' vs ' + grid.reserve + ')');
+ok(geom.count > 0 && geom.count === plan.cells.length, 'one tab per planned cell count (' + geom.count + ')');
+let x = left, whole = true, cum = true, match = true;
+for (let i = 0; i < geom.tabs.length; i++) {
+    const t = geom.tabs[i];
+    if ((t.x - left) % mw !== 0 || t.width % mw !== 0) { whole = false; }
+    if (t.x !== x) { cum = false; }
+    if (t.width !== plan.cells[i] * mw) { match = false; }
+    x += t.width;
+}
+ok(whole, 'every tab x and width is a whole multiple of ' + mw + ' from contentLeft ' + left);
+ok(cum, 'tabs abut, starting at contentLeft ' + left);
+ok(match, 'every tab is exactly its planned cells x ' + mw + 'px');
+let nonInc = true;
+for (let i = 1; i < plan.cells.length; i++) { if (plan.cells[i] > plan.cells[i - 1]) { nonInc = false; } }
+ok(nonInc, 'spare cells at the front (non-increasing cells)');
+JSEOF
+            tabcheck() { # <label> <geom> <plan> <grid>
+                node "$TABCHECK" "$2" "$3" "$4" > "$TMP/tabcheck.out" 2>&1
+                while IFS= read -r line; do
+                    case "$line" in
+                        "PASS "*) pass "$1: ${line#PASS }" ;;
+                        "FAIL "*) fail "$1: ${line#FAIL }" "true" "false" ;;
+                        *) fail "$1: checker output" "PASS/FAIL lines" "$line" ;;
+                    esac
+                done < "$TMP/tabcheck.out"
+            }
+
+            scenario "a workspace name wider than the bar: capped to whole modules, label stays inside its tab (edge case)"
+            bar_cmd long
+            LONG=""
+            for i in $(seq 1 30); do
+                LONG="$(grep -a '^LONG ' "$BAR_RIG_LOG" | tail -1)"
+                [ -n "$LONG" ] && break
+                sleep 0.1
+            done
+            [ -n "$LONG" ] && pass "bar-driver.js created a 200-char workspace" \
+                || fail "bar-driver.js created a 200-char workspace" "a LONG line" "(timed out)"
+            geomL=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 geometry "gl$i"
+                sleep 0.15
+                geomL="$(last6 geom "gl$i")"
+                case "$geomL" in *'"count":4'*) break ;; esac
+            done
+            sleep 0.2
+            ipc6 call bar6 geometry "glfinal"
+            ipc6 call bar6 plan "plfinal"
+            sleep 0.3
+            geomL="$(last6 geom glfinal)"
+            planL="$(last6 plan plfinal)"
+            tabcheck "long name" "$geomL" "$planL" "$BOOTGRID"
+            node -e '
+const geom = JSON.parse(process.argv[1]);
+const plan = JSON.parse(process.argv[2]);
+const mw = JSON.parse(process.argv[3]).module.w;
+const barW = Number(process.argv[4]);
+function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
+const cap = Math.floor(barW * 0.4 / mw);
+ok(plan.wants.length === 4 && plan.wants[3] === cap,
+   "the long name wants exactly the cap, floor(40% of " + barW + "px / " + mw + ") = " + cap + " cells (wants " + JSON.stringify(plan.wants) + ")");
+let inside = true, padded = true, detail = [];
+for (const t of geom.tabs) {
+    if (typeof t.textX !== "number" || typeof t.textPainted !== "number") {
+        inside = false; padded = false; detail.push("[" + t.x + "] label not found (wsTabText)"); continue;
+    }
+    if (typeof t.textX !== "number" || typeof t.textPainted !== "number") {
+        inside = false; padded = false; detail.push("[" + t.x + "] label not found (wsTabText)"); continue;
+    }
+    const l = t.textX, r = t.textX + t.textPainted;
+    detail.push("[" + t.x + "," + (t.x + t.width) + "] label [" + l.toFixed(1) + "," + r.toFixed(1) + "]");
+    if (l < t.x || r > t.x + t.width) { inside = false; }
+    if (l < t.x + mw - 0.5 || r > t.x + t.width - mw + 0.5) { padded = false; }
+}
+ok(inside, "every painted label lies inside its own tab: " + detail.join(" "));
+ok(padded, "every painted label keeps one module of padding each side");
+const lt = geom.tabs[3];
+ok(lt && lt.truncated === true, "the long label is elided (Text.truncated), not merely clipped");
+ok(lt && lt.clip === true, "the tab clips its children");
+' "$geomL" "$planL" "$BOOTGRID" "1024" > "$TMP/long-check.out" 2>&1
+            while IFS= read -r line; do
+                case "$line" in
+                    "PASS "*) pass "long name: ${line#PASS }" ;;
+                    "FAIL "*) fail "long name: ${line#FAIL }" "true" "false" ;;
+                    *) fail "long name: checker output" "PASS/FAIL lines" "$line" ;;
+                esac
+            done < "$TMP/long-check.out"
+
+            scenario "the grid changes under a live bar: height and tabs relayout on the new grid (edge case)"
+            bar_cmd grid
+            NEWGRID=""
+            for i in $(seq 1 30); do
+                NEWGRID="$(grep -a '^GRID ' "$BAR_RIG_LOG" | tail -1 | sed 's/^GRID //')"
+                [ -n "$NEWGRID" ] && break
+                sleep 0.1
+            done
+            case "$NEWGRID" in
+                *'"module":{"w":10,"h":24}'*) pass "the core's grid really changed to 10x24" ;;
+                *) fail "the core's grid really changed to 10x24" 'module {"w":10,"h":24}' "$NEWGRID" ;;
+            esac
+            relaid=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 geometry "gg$i"
+                sleep 0.15
+                g="$(last6 geom "gg$i")"
+                case "$g" in *'"moduleW":10,'*) relaid=1; break ;; esac
+            done
+            [ -n "$relaid" ] && pass "Kwi3Grid under the bar picked up moduleW 10 (grid.changed)" \
+                || fail "Kwi3Grid under the bar picked up moduleW 10" '"moduleW":10' "$g"
+            sleep 0.2
+            ipc6 call bar6 geometry "ggfinal"
+            ipc6 call bar6 plan "pgfinal"
+            sleep 0.3
+            tabcheck "after grid.changed" "$(last6 geom ggfinal)" "$(last6 plan pgfinal)" "$NEWGRID"
+
+            scenario "kwi3 restarts under a live bar: last rows kept while down, then refreshed (edge case)"
+            ipc6 call bar6 rows "prekill"
+            sleep 0.3
+            PREKILL="$(last6 rows prekill)"
+            case "$PREKILL" in
+                *'"name":"a"'*) pass "rows before the restart hold the first rig's workspaces" ;;
+                *) fail "rows before the restart hold the first rig's workspaces" '"a" among rows' "$PREKILL" ;;
+            esac
+            kill "$BAR_RIG_PID" 2>/dev/null
+            for i in $(seq 1 50); do kill -0 "$BAR_RIG_PID" 2>/dev/null || break; sleep 0.1; done
+            down=""
+            for i in $(seq 1 30); do
+                ipc6 call bar6 avail "down$i"
+                sleep 0.15
+                [ "$(last6 avail "down$i")" = "0" ] && { down=1; break; }
+            done
+            [ -n "$down" ] && pass "the bar's Kwi3Client saw kwi3 go away (available false)" \
+                || fail "the bar's Kwi3Client saw kwi3 go away" "0" "$(last6 avail down1)"
+            kept=1
+            for i in 1 2 3; do
+                sleep 0.3
+                ipc6 call bar6 rows "down_rows$i"
+                sleep 0.2
+                [ "$(last6 rows "down_rows$i")" = "$PREKILL" ] || { kept=""; kept_got="$(last6 rows "down_rows$i")"; }
+            done
+            [ -n "$kept" ] && pass "the bar keeps its last workspace rows while kwi3 is down (3 samples over ~1.5s)" \
+                || fail "the bar keeps its last workspace rows while kwi3 is down" "$PREKILL" "${kept_got:-}"
+
+            BAR_RIG2_LOG="$TMP/bar-rig2.log"
+            node "$BAR_DRIVER" "$RPC_SERVER" "$SOCK_BAR" "$BAR_CMD" restart >"$BAR_RIG2_LOG" 2>&1 &
+            BAR_RIG_PID=$!
+            PIDS+=("$BAR_RIG_PID")
+            if ! wait_for_socket "$SOCK_BAR" 20; then
+                fail "the restarted rig rebound $SOCK_BAR" "socket present" "missing"
+                cat "$BAR_RIG2_LOG" >&2
+            else
+                pass "the restarted rig rebound the same socket"
+                refreshed=""
+                t0=$(date +%s%N)
+                for i in $(seq 1 60); do
+                    ipc6 call bar6 rows "up$i"
+                    sleep 0.15
+                    r="$(last6 rows "up$i")"
+                    case "$r" in *'"name":"x"'*'"name":"yy"'*) refreshed=1; break ;; esac
+                done
+                ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+                [ -n "$refreshed" ] && pass "the bar refreshed to the new rig's workspaces (x, yy) ${ms}ms after the restart" \
+                    || fail "the bar refreshed to the new rig's workspaces" '"x","yy"' "$r"
+                case "$r" in
+                    *'"name":"a"'*|*'"name":"bb"'*|*'"name":"ccc"'*)
+                        fail "no stale row from the first rig survives the refresh" "only x, yy" "$r" ;;
+                    *) pass "no stale row from the first rig survives the refresh" ;;
+                esac
+            fi
         fi
         kill "$HOST6_PID" 2>/dev/null
     fi
