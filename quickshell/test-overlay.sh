@@ -208,7 +208,14 @@ chmod +x "$PBIN/i3-msg"
 # MRU off `id`. Single line: windowScanner's SplitParser strips newlines, so
 # any inter-token newline would be swallowed — keep it flat. TREE_FULL is the
 # default; the zero-windows scenario swaps in an empty workspace and restores.
-TREE_FULL='{"type":"root","nodes":[{"type":"workspace","name":"code","nodes":[{"type":"con","id":101,"window":1001,"name":"alpha","focused":true,"nodes":[]}]},{"type":"workspace","name":"mail","nodes":[{"type":"con","id":102,"window":1002,"name":"beta","focused":false,"nodes":[]}]},{"type":"workspace","name":"web","nodes":[{"type":"con","id":103,"window":1003,"name":"gamma","focused":false,"nodes":[]},{"type":"con","id":999,"window":1999,"name":"qs-launcher","focused":false,"nodes":[]}]}]}'
+# kwi3-234.22: the RAW tree-walk order here is "web" (gamma) BEFORE "mail"
+# (beta) — deliberately NOT alpha/beta/gamma — so the raw order at index 1 is
+# gamma, not beta. FOCUS_EVT below still seeds beta (102) as the sole MRU
+# history entry, so the real sort (focused-first, then MRU rank) still lands
+# on alpha(0) beta(1) gamma(2): a no-op/disabled sort would instead preselect
+# gamma at index 1, which is exactly the mutation this ordering is here to
+# catch (see the mru-preselect-index-1 scenario below).
+TREE_FULL='{"type":"root","nodes":[{"type":"workspace","name":"code","nodes":[{"type":"con","id":101,"window":1001,"name":"alpha","focused":true,"nodes":[]}]},{"type":"workspace","name":"web","nodes":[{"type":"con","id":103,"window":1003,"name":"gamma","focused":false,"nodes":[]},{"type":"con","id":999,"window":1999,"name":"qs-launcher","focused":false,"nodes":[]}]},{"type":"workspace","name":"mail","nodes":[{"type":"con","id":102,"window":1002,"name":"beta","focused":false,"nodes":[]}]}]}'
 TREE_EMPTY='{"type":"root","nodes":[{"type":"workspace","name":"void","nodes":[]}]}'
 printf '%s\n' "$TREE_FULL" > "$I3DIR/tree.json"
 
@@ -489,11 +496,15 @@ mv "$HOME_S/.config/project/projects.yaml.bak" "$HOME_S/.config/project/projects
 # SWITCHER PHASE
 # ============================================================================
 # Canned get_tree: alpha(101,focused) beta(102) gamma(103) + excluded
-# qs-launcher(999). One injected window::focus for 102 seeds the MRU so the scan
-# order is alpha, beta, gamma; setIndex(1) preselects beta(102). Commit paths
-# (IPC confirm / mod release) route through Combo.confirmCurrent(), so the focus
-# argv carries the SELECTED filtered row's con id — never a positional index
-# against the unfiltered list (adr0010).
+# qs-launcher(999) — RAW tree-walk order alpha, gamma, beta (kwi3-234.22: the
+# "web"/gamma workspace comes before "mail"/beta in TREE_FULL on purpose). One
+# injected window::focus for 102 seeds the MRU so the SORTED scan order is
+# alpha, beta, gamma; setIndex(1) preselects beta(102) only because the sort
+# ran — a no-op/disabled sort would leave the raw order and preselect gamma
+# instead. Commit paths (IPC confirm / mod release) route through
+# Combo.confirmCurrent(), so the focus argv carries the SELECTED filtered
+# row's con id — never a positional index against the unfiltered list
+# (adr0010).
 
 confirm_and_capture() { # drives IPC confirm, waits for the switcher to close, echoes argv
   ipc call switcher confirm >/dev/null 2>&1
@@ -872,9 +883,19 @@ else
         gone_on qs-switcher || fail "kwi3-empty-window-list (switcher closes)" "no qs-switcher" "still mapped"
       fi
 
+      # kwi3-234.22: created alpha, THEN gamma, THEN beta — deliberately not
+      # creation-order alpha/beta/gamma — so the RAW tree.get order (windows
+      # walk workspaces in num order, which follows creation order here) is
+      # alpha, gamma, beta and the raw index-1 window is gamma, not beta.
+      # The MRU seed below (focus beta, then focus gamma) makes gamma the
+      # current focus and beta the prior one, so the real sort
+      # (focused-first, then MRU rank) produces gamma(0) beta(1) alpha(2) —
+      # beta still lands at index 1 only because the sort ran. A no-op/
+      # disabled sort would instead leave the raw order's gamma at index 1,
+      # which is exactly the mutation this creation order exists to catch.
       ALPHA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"alpha"}')")"
-      BETA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"beta","workspace":"mail"}')")"
       GAMMA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"gamma","workspace":"web"}')")"
+      BETA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"beta","workspace":"mail"}')")"
 
       # Seed MRU history AFTER Overlay has subscribed: beta then gamma
       # focused, in that order — gamma ends up current, beta the MRU-1 spot.
