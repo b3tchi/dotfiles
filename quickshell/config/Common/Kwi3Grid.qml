@@ -97,13 +97,10 @@ Singleton {
     }
 
     Component.onCompleted: {
-        // `grid.changed` has no emit site yet in core/rpc.js — nothing in
-        // sp004's Task 3/4 slice mutates the grid at runtime; that arrives
-        // with config-api's runtime settings (kwi3-234.19, tracked
-        // separately). Subscribing anyway costs nothing and means the day it
-        // starts firing, Kwi3Grid re-reads with no client-side change at
-        // all — see ft010's own note that the event name exists now so this
-        // subscribe never has to change later.
+        // `grid.changed` is emitted by core/rpc.js's rpcGridDiff()
+        // (kwi3-234.19) whenever what grid.get answers changes, e.g. a
+        // configure() re-run. Kwi3Client re-subscribes it on every
+        // reconnect. test-kwi3-backend.sh PHASE 5 drives this end to end.
         Kwi3Client.on("grid.changed", function () { grid.refresh() })
         if (Kwi3Client.available) { grid.refresh() }
     }
