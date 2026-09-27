@@ -67,5 +67,18 @@ kwi3.set({
 
 // =====================================================================
 // kwi3-234.14: Quickshell runner rules land here (onWindowAdded for
-// qs-launcher / qs-projects / qs-switcher). Nothing below this line yet.
+// qs-launcher / qs-projects / qs-switcher).
+//
+// The three Quickshell runner dialogs are ordinary windows to kwi3 unless
+// told otherwise: floated, undecorated (Overlay.qml draws its own chrome,
+// so a tiler titlebar would double up), centred on the tile grid
+// (kwi3.grid.center - whole cells, ft008/ft009) and focused the moment
+// they are managed (adr0013's own sample).
 // =====================================================================
+
+kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher)$/ }, w => {
+    w.float();
+    w.noFrame();
+    w.moveTo(kwi3.grid.center(w));
+    w.focus();
+});

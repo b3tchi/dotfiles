@@ -270,7 +270,7 @@ dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 # fontSize is the deterministic i3 value; QS_RDP=1 mirrors the main-instance
 # host. (QS_NO_KEYMON is gone with qs-keymon.py — dotfiles-hwds.40 moved the
 # switcher gesture into hotkeyd, so nothing respawns on this display any more.)
-setsid env -u SWAYSOCK \
+setsid env -u SWAYSOCK -u KWI3SOCK \
     DISPLAY="$DPY" HOME="$HOME_S" PATH="$PBIN" \
     QS_RDP=1 \
     XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
@@ -634,7 +634,7 @@ done
 if ! dpy_up "$OV_DPY"; then
   fail "overlay-profile Xvfb $OV_DPY started" "a display" "none"
 else
-  setsid env -u SWAYSOCK -u QS_RDP \
+  setsid env -u SWAYSOCK -u KWI3SOCK -u QS_RDP \
       DISPLAY="$OV_DPY" HOME="$HOME_S" PATH="$PBIN" \
       XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$OV_RUN" XDG_CACHE_HOME="$OV_CCH" \
       "$QS_BIN" -p "$FAKE_LINK" >"$TMP/qs-ov.out" 2>&1 &
