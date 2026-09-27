@@ -249,7 +249,16 @@ Scope {
         // contract (always true there, since Kwi3Client.available never
         // is) is unchanged and the kwi3 contract (never true once
         // available) actually holds.
-        running: !Kwi3Client.available
+        //
+        // kwi3-234.18: gated on `configured` ($KWI3SOCK set), no longer on
+        // `available`. Since sp004 Task 18 a kwi3 display has no i3 IPC
+        // socket, so while Kwi3Client is merely disconnected - before its
+        // first connect, across a kwi3 restart - this i3-msg fails at once
+        // and the rebinding onExited below respawned it in a tight loop for
+        // as long as the socket was down. `configured` is constant for the
+        // process's life, so the i3/sway contract is unchanged (always
+        // running there) and under kwi3 it never runs at all.
+        running: !Kwi3Client.configured
         command: [root.wmMsg, "-t", "subscribe", "-m", '["window"]']
         stdout: SplitParser {
             onRead: data => {
@@ -282,7 +291,7 @@ Scope {
         // again once QML has dropped the declarative binding for good -
         // exactly the kwi3-234.14 bug this replaces (see the property's own
         // comment above).
-        onExited: running = Qt.binding(function () { return !Kwi3Client.available })
+        onExited: running = Qt.binding(function () { return !Kwi3Client.configured })
     }
 
     // Window scanner — collects JSON then parses

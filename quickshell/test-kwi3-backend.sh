@@ -30,6 +30,10 @@
 # real core again, through rpc-server.js's own start(). Every other scenario
 # here runs rpc-server.js as is.
 #
+# PHASE 7 (kwi3-234.18) puts a counting stub i3-msg on the Bar's PATH and
+# proves the Bar spawns NONE under kwi3 - neither before the socket answers
+# nor after - with a no-$KWI3SOCK control that proves the stub is reachable.
+#
 # Safety (AGENTS.md kwi3-icz twin): this script starts rpc-server.js only
 # against socket paths it creates itself under $TMP, kills only PIDs it
 # started (never `pkill -f`), and every quickshell invocation explicitly
@@ -1392,6 +1396,114 @@ ok(lt && lt.clip === true, "the tab clips its children");
     kill "$BAR_RIG_PID" 2>/dev/null
 fi
 kill "$XVFB_PID" 2>/dev/null
+
+# ============================================================================
+# PHASE 7 (kwi3-234.18) — NO i3-msg is ever spawned under kwi3.
+#
+# sp004 Task 18 removed kwi3's i3 IPC socket, so on a kwi3 display every
+# i3-msg fails at once - and Bar.qml's wsEventSub and mode feed restart
+# themselves `onExited`, so an ungated i3 feed respawns i3-msg in a tight loop
+# for the life of the bar (T15 saw exactly that with $I3SOCK unset). The fix
+# gates the whole i3 feed on Kwi3Client.configured ($KWI3SOCK set), not on
+# `available`, because the socket being DOWN is when the loop would spin. So
+# the instrument is a STUB i3-msg on the bar's PATH that counts itself and
+# fails the way a socketless i3-msg does (after a short pause, so the control
+# below cannot spin a core):
+#   7a  $KWI3SOCK set and NOTHING listening on it for ~2.5s (the window before
+#       the first connect), then rpc-server.js comes up and the bar connects
+#       (proved by its own workspace.list reaching the rig): the stub must
+#       have run ZERO times across both halves;
+#   7b  the control - the SAME Bar and stub with no $KWI3SOCK (an i3/sway
+#       session): the stub IS run, so 7a's zero is not a stub nobody could
+#       reach.
+# ============================================================================
+
+BAR7_DPY="${BAR7_DPY:-:96}"
+scenario "PHASE 7 setup: a Bar with a counting stub i3-msg, under Xvfb $BAR7_DPY"
+"$XVFB" "$BAR7_DPY" -screen 0 1024x300x24 >"$TMP/xvfb7.log" 2>&1 &
+XVFB7_PID=$!
+PIDS+=("$XVFB7_PID")
+for i in $(seq 1 50); do dpy_up "$BAR7_DPY" && break; sleep 0.1; done
+if ! dpy_up "$BAR7_DPY"; then
+    fail "Xvfb $BAR7_DPY started" "display up" "not found"
+else
+    CFG7="$TMP/cfg7"; PBIN7="$TMP/pbin7"; I3MSG7_LOG="$TMP/i3msg7.log"
+    mkdir -p "$CFG7" "$PBIN7"
+    ln -sf "$COMMON_DIR" "$CFG7/Common"
+    ln -sf "$BAR_QML" "$CFG7/Bar.qml"
+    cat > "$CFG7/shell.qml" <<'QMLEOF'
+import Quickshell
+import QtQuick
+import "./Common"
+
+ShellRoot {
+    Bar { screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null }
+}
+QMLEOF
+    for t in sh cat sleep tr awk df grep sed cut head; do
+        src="$(command -v "$t")" && ln -sf "$src" "$PBIN7/$t"
+    done
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nsleep 0.5\necho "i3-msg (stub): no i3 socket" >&2\nexit 1\n' \
+        "$I3MSG7_LOG" > "$PBIN7/i3-msg"
+    chmod +x "$PBIN7/i3-msg"
+    QS_BIN7="$(command -v "$QUICKSHELL")"
+    i3msg_runs() { local n; n=$(grep -c . "$I3MSG7_LOG" 2>/dev/null); echo "${n:-0}"; }
+
+    # start_bar7 <name> [KWI3SOCK=...]  ->  BAR7_PID
+    start_bar7() {
+        local name="$1"; shift
+        mkdir -p "$TMP/run7-$name" "$TMP/cache7-$name"; chmod 700 "$TMP/run7-$name"
+        env -u I3SOCK -u SWAYSOCK -u WAYLAND_DISPLAY -u KWI3SOCK "$@" DISPLAY="$BAR7_DPY" \
+            PATH="$PBIN7" HOME="$TMP/home" \
+            XDG_CONFIG_HOME="$CFG7" XDG_RUNTIME_DIR="$TMP/run7-$name" \
+            XDG_CACHE_HOME="$TMP/cache7-$name" \
+            "$QS_BIN7" -p "$CFG7" >"$TMP/qs7-$name.log" 2>&1 &
+        BAR7_PID=$!
+        PIDS+=("$BAR7_PID")
+    }
+
+    scenario "7a: under kwi3 (\$KWI3SOCK set), no i3-msg - neither before the socket answers nor after"
+    SOCK7="$TMP/kwi3-p7.sock"
+    : > "$I3MSG7_LOG"
+    start_bar7 kwi3 KWI3SOCK="$SOCK7"
+    sleep 2.5
+    kill -0 "$BAR7_PID" 2>/dev/null && pass "the bar is up while \$KWI3SOCK names nothing yet" \
+        || { fail "the bar is up while \$KWI3SOCK names nothing yet" "running" "exited"; tail -20 "$TMP/qs7-kwi3.log" >&2; }
+    before="$(i3msg_runs)"
+    KWI3_RIG_LOG_CALLS=1 node "$RPC_SERVER" "$SOCK7" >"$TMP/rig7.log" 2>&1 &
+    RIG7_PID=$!
+    PIDS+=("$RIG7_PID")
+    connected=""
+    if wait_for_socket "$SOCK7" 20; then
+        for i in $(seq 1 60); do
+            grep -aq '"method":"workspace.list"' "$TMP/rig7.log" && { connected=1; break; }
+            sleep 0.1
+        done
+    fi
+    [ -n "$connected" ] && pass "the bar connected once the socket came up (its workspace.list reached the rig)" \
+        || fail "the bar connected once the socket came up" "a workspace.list CALL in the rig log" "$(tail -3 "$TMP/rig7.log")"
+    sleep 2
+    check7a="$(i3msg_runs)"
+    [ "$before" = "0" ] && pass "no i3-msg was spawned while \$KWI3SOCK named nothing (~2.5s: the startup window)" \
+        || fail "no i3-msg while \$KWI3SOCK named nothing" "0 runs" "$before runs: $(head -3 "$I3MSG7_LOG" | tr '\n' '|')"
+    [ "$check7a" = "0" ] && pass "and none once Kwi3Client was connected (~2s more)" \
+        || fail "no i3-msg once connected" "0 runs" "$check7a runs: $(head -3 "$I3MSG7_LOG" | tr '\n' '|')"
+    kill "$BAR7_PID" 2>/dev/null; kill "$RIG7_PID" 2>/dev/null
+    for i in $(seq 1 30); do kill -0 "$BAR7_PID" 2>/dev/null || break; sleep 0.1; done
+
+    scenario "7b: control - no \$KWI3SOCK (i3/sway): the same stub IS spawned"
+    : > "$I3MSG7_LOG"
+    start_bar7 i3
+    ran=""
+    for i in $(seq 1 50); do [ "$(i3msg_runs)" -gt 0 ] && { ran=1; break; }; sleep 0.1; done
+    [ -n "$ran" ] && pass "without \$KWI3SOCK the bar's i3 feed runs the stub i3-msg ($(i3msg_runs) run(s): $(head -1 "$I3MSG7_LOG"))" \
+        || fail "without \$KWI3SOCK the bar's i3 feed runs i3-msg" ">=1 run" "0 runs"
+    grep -q 'subscribe' "$I3MSG7_LOG" && pass "including an i3 subscription - the path 7a proves is off under kwi3" \
+        || fail "the control includes an i3 subscription" "a -t subscribe run" "$(tr '\n' '|' < "$I3MSG7_LOG")"
+    kill "$BAR7_PID" 2>/dev/null
+    for i in $(seq 1 30); do kill -0 "$BAR7_PID" 2>/dev/null || break; sleep 0.1; done
+fi
+kill "$XVFB7_PID" 2>/dev/null
 
 # ============================================================================
 

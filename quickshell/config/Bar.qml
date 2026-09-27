@@ -208,9 +208,22 @@ PanelWindow {
 
     // Fetch full workspace records from i3 IPC. Re-runs on every workspace
     // event (subscribe stream below) plus a 2s safety-net timer.
+    //
+    // NOT under kwi3 (kwi3-234.18): the i3 feed - this, wsEventSub and the
+    // mode subscription below - runs only while Kwi3Client.configured is
+    // false, i.e. on i3/sway. Since sp004 Task 18 a kwi3 display has no i3
+    // IPC socket, so every i3-msg these start there fails at once, and
+    // wsEventSub's and the mode feed's `onExited: running = true` then
+    // respawned i3-msg in a tight loop for the life of the bar (found by
+    // sp004 T15 with $I3SOCK unset). `configured` ($KWI3SOCK set), not
+    // `available`, because the socket being down - before the first connect,
+    // or across a kwi3 restart - is exactly when these would spin. It is a
+    // constant for the process's life, so the imperative restarts in
+    // onExited below cannot drop a binding the way Overlay's windowSubscriber
+    // once did (kwi3-234.14); each still asks the same question it starts on.
     Process {
         id: wsListProc
-        running: true
+        running: !Kwi3Client.configured
         command: ["sh", "-c", root.wmMsg + " -t get_workspaces"]
         stdout: SplitParser {
             property string buf: ""
@@ -235,29 +248,28 @@ PanelWindow {
                 root.sortedWorkspaces = out
             } catch (err) {}
             wsListProc.stdout.buf = ""
-            wsListTimer.restart()
+            if (!Kwi3Client.configured) { wsListTimer.restart() }
         }
     }
-    Timer { id: wsListTimer; interval: 2000; onTriggered: wsListProc.running = true }
+    Timer { id: wsListTimer; interval: 2000; onTriggered: wsListProc.running = !Kwi3Client.configured }
 
     // Refresh on every workspace event (init, focus, empty, urgent, rename, move, restored, reload)
     Process {
         id: wsEventSub
-        running: true
+        running: !Kwi3Client.configured
         command: [root.wmMsg, "-t", "subscribe", "-m", '["workspace"]']
         stdout: SplitParser {
             onRead: data => wsListProc.running = true
         }
-        onExited: running = true
+        onExited: running = !Kwi3Client.configured
     }
 
     // ---- kwi3 backend (sp004 Task 13, kwi3-234.13; ft008/ft010) -------------
     // Under Kwi3Client.available, workspace.list + events.subscribe replace
-    // the i3-msg Processes above as the source of root.sortedWorkspaces — an
-    // ADDITIVE branch, not a rewrite of them: wsListProc/wsEventSub keep
-    // running exactly as before (AC3, "the i3/sway path is untouched"), and
-    // under a real kwi3 session $I3SOCK is unset, so i3-msg's own replies
-    // fail its try/catch above and never overwrite what this branch sets.
+    // the i3-msg Processes above as the source of root.sortedWorkspaces.
+    // Those Processes do not run at all on a kwi3 session (gated on
+    // Kwi3Client.configured since kwi3-234.18, see wsListProc) and run
+    // exactly as before on i3/sway (AC3, "the i3/sway path is untouched").
     // Same row shape either way ({name, number, focused, active, urgent,
     // wsId}) so the Repeater below reads one field set from either feed.
     function _kwi3Rows(list) {
@@ -371,9 +383,11 @@ PanelWindow {
     // layer left i3 entirely and reports its own state (see the layer feed
     // below).
     property string i3Mode: "default"
+    // Not under kwi3 - kwi3 has no i3 binding modes and no i3 socket to ask
+    // (see wsListProc for why this is `configured`, not `available`).
     Process {
         command: [root.wmMsg, "-t", "subscribe", "-m", '["mode"]']
-        running: true
+        running: !Kwi3Client.configured
         stdout: SplitParser {
             onRead: data => {
                 try {
@@ -382,7 +396,7 @@ PanelWindow {
                 } catch(err) {}
             }
         }
-        onExited: running = true
+        onExited: running = !Kwi3Client.configured
     }
 
     // --- Layer feed from hotkeyd (sp020 T7, ft011) ---

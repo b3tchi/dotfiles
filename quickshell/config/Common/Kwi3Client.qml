@@ -38,6 +38,16 @@ Singleton {
     // ---- ft010 client surface ----------------------------------------
     readonly property bool available: _sock !== null && _sock.connected
 
+    // True for the whole life of a kwi3 session - $KWI3SOCK is set - whether
+    // or not the socket is answering right now; false on every i3/sway
+    // session. This, not `available`, is what an i3-msg fallback must be
+    // gated on (kwi3-234.18): since sp004 Task 18 a kwi3 display has no i3
+    // IPC socket at all, so an i3-msg started while Kwi3Client is merely
+    // DISCONNECTED - before its first connect, or across a kwi3 restart - can
+    // only fail at once, and a Process whose onExited restarts it then
+    // respawns i3-msg in a tight loop for as long as the socket is down.
+    readonly property bool configured: _enabled
+
     // call(method, params, cb) — cb(error, result), exactly one of the two
     // non-null. `params` may be omitted (undefined) for a no-params method.
     // Never throws and never requires the caller to check `available` first:
