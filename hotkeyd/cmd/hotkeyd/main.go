@@ -105,9 +105,19 @@ func run(argv []string) int {
 
 	mod := ResolveMod(conn.GetPropertyAll, root)
 
+	// kwi3Sock read ONCE, here, before the table is even validated: which
+	// binds this process grabs (activeBinds, below) and which transport
+	// dispatch() sends them over (daeCfg.Kwi3, further down) are two
+	// questions with the same answer -- "$KWI3SOCK answering at all is what
+	// selects the kwi3 session" (sp004 Task 16, kwi3-234.16) -- so both are
+	// decided from the same read rather than two os.Getenv calls that could
+	// in principle disagree if the environment changed between them.
+	kwi3Sock := os.Getenv("KWI3SOCK")
+	activeBinds := effectiveBinds(kwi3Sock)
+
 	// Table validated BEFORE any grab (us019 AC: refused by name, daemon
 	// does not start on an invalid table).
-	if err := validateTable(Binds, Layers, mod); err != nil {
+	if err := validateTable(activeBinds, Layers, mod); err != nil {
 		daemonLog(err.Error())
 		lock.Release()
 		conn.Close()
@@ -130,7 +140,7 @@ func run(argv []string) int {
 	})
 
 	pub, pubCloser := buildPublisher(display, daemonLog)
-	engine := layer.NewEngine(Binds, Layers, layer.Config{Publisher: pub, Mod: mod})
+	engine := layer.NewEngine(activeBinds, Layers, layer.Config{Publisher: pub, Mod: mod})
 
 	// Control socket: bound AFTER the lock (its stale-socket unlink is only
 	// safe under that guarantee — see NewControlListener) and best-effort
@@ -155,7 +165,7 @@ func run(argv []string) int {
 		Publisher:   pubCloser,
 		XConn:       conn,
 		NewModQuery: newPointerModifierQuery(conn, root),
-		Binds:       Binds,
+		Binds:       activeBinds,
 		Layers:      Layers,
 		Mod:         mod,
 		Display:     display,
@@ -170,8 +180,8 @@ func run(argv []string) int {
 	// this one to guess around) leaves daeCfg.Kwi3 nil, which is the exact
 	// pre-Task-16 behaviour: dispatch() falls through to i3Client as it
 	// always did. kwi3rpc.New does not dial here; the first chord does.
-	if sock := os.Getenv("KWI3SOCK"); sock != "" {
-		daeCfg.Kwi3 = kwi3rpc.New(sock, kwi3rpc.WithLog(daemonLog))
+	if kwi3Sock != "" {
+		daeCfg.Kwi3 = kwi3rpc.New(kwi3Sock, kwi3rpc.WithLog(daemonLog))
 	}
 	// Assigned inside the guard, never unconditionally: a nil *ControlListener
 	// stored in an io.Closer field is a NON-nil interface holding a nil
@@ -231,6 +241,25 @@ func warnIfKeyboardGrabbed(display string, probe func(string) (string, bool), lo
 		"so no bind fires here until it is released. Usual holder: a locked "+
 		"screen. Not a daemon fault and not fixable by restarting it "+
 		"(dotfiles-hwds.30)", display, why))
+}
+
+// effectiveBinds is the grab set this PROCESS actually uses, given the raw
+// $KWI3SOCK value run() read (kwi3Sock — "" for an i3/sway session, or one
+// that has not exported it). Pure and unit-tested directly (bd kwi3-55l.1):
+// Kwi3OnlyBinds (config.go — today just $mod+Shift+q, "kill") is appended
+// ONLY for a kwi3 session, so a plain i3 session's grab set — and therefore
+// `check --ownership` run against the real i3/config.common — is Binds,
+// unchanged, byte for byte. A fresh slice is returned in the kwi3 case so
+// appending here can never alias (and later grow into) Binds's own backing
+// array.
+func effectiveBinds(kwi3Sock string) []bind.Bind {
+	if kwi3Sock == "" {
+		return Binds
+	}
+	out := make([]bind.Bind, 0, len(Binds)+len(Kwi3OnlyBinds))
+	out = append(out, Binds...)
+	out = append(out, Kwi3OnlyBinds...)
+	return out
 }
 
 // validateTable enforces us019's AC: an invalid table is refused BY NAME
