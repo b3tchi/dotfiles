@@ -16,13 +16,14 @@
 # top-level shell.qml exists in a search path, quickshell 0.3.x's own `-c`
 # resolution stops considering subdirectories entirely, so `qs -c kwi3`
 # still failed. The fix removed the copy outright. (KWI3_BAR_PATH and the
-# clone-relative bar it pointed at are themselves gone now too - sp004 Task
-# 18, kwi3-234.18 - and since sp004 Task 15 the bar is the dotfiles main
-# quickshell config, started as a bare `quickshell` with no dependency on
-# $SRC at all; see i3kwin/session/kwi3-x11-session and i3kwin/README.md in
-# the kwi3 repo.) This test is the regression guard: step 3, run for real
-# against a symlinked
-# ~/.config/quickshell, must write NOTHING under the symlink's target.
+# clone-relative bar it pointed at are themselves gone now too: sp004 Task
+# 15, kwi3-234.15, dropped KWI3_BAR_PATH and switched the bar to the
+# dotfiles main quickshell config, started as a bare `quickshell` with no
+# dependency on $SRC at all; sp004 Task 18, kwi3-234.18, then deleted the
+# i3kwin/bar/ directory. See i3kwin/session/kwi3-x11-session and
+# i3kwin/README.md in the kwi3 repo.) This test is the regression guard:
+# step 3, run for real against a symlinked ~/.config/quickshell, must
+# write NOTHING under the symlink's target.
 #
 # ---------------------------------------------------------------------------
 # WHY THIS EXTRACTS THE REAL SCRIPT RATHER THAN RESTATING IT

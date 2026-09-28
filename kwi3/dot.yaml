@@ -61,16 +61,18 @@
 # I3KWIN_SOURCE_DIR".
 #
 # NOT LINKED FROM THE CLONE: kwi3/config.js (this directory's own file,
-# linked from HERE like any other dot). i3kwin/bar itself is gone - sp004
-# Task 18 (kwi3-234.18) deleted it along with the i3 codec and the
-# KWI3_BAR_PATH variable that used to point kwi3-x11-session at
-# $SRC/i3kwin/bar/shell.qml. Since sp004 Task 15 (kwi3-234.15) the bar is
-# the DOTFILES main quickshell config instead - the same
-# quickshell/config/shell.qml every other session runs, linked to
-# ${XDG_CONFIG_HOME:-~/.config}/quickshell/shell.qml - started as a bare
-# `quickshell` with no -p/-c by kwi3-x11-session itself (kwi3 repo,
-# i3kwin/session/kwi3-x11-session). It has no dependency on $SRC at all any
-# more, so there is nothing of the bar's for this dot to link or copy.
+# linked from HERE like any other dot). The clone's bar is gone: sp004
+# Task 15 (kwi3-234.15) dropped the KWI3_BAR_PATH variable that used to
+# point kwi3-x11-session at $SRC/i3kwin/bar/shell.qml and switched the bar
+# to the DOTFILES main quickshell config - the same
+# quickshell/config/shell.qml every other session runs, reached as
+# ${XDG_CONFIG_HOME:-~/.config}/quickshell/shell.qml because quickshell's
+# dot links that whole config directory to ~/.config/quickshell - started
+# as a bare `quickshell` with no -p/-c by kwi3-x11-session itself (kwi3
+# repo, i3kwin/session/kwi3-x11-session). sp004 Task 18 (kwi3-234.18) then
+# deleted the i3kwin/bar/ directory itself along with the i3 codec. The
+# bar has no dependency on $SRC at all any more, so there is nothing of
+# the bar's for this dot to link or copy.
 # What this dot must still never do is write through ~/.config/quickshell
 # (kwi3-8wb.2, history worth keeping): an older install.sh/this dot's step 3
 # used to `cp -a "$SRC/i3kwin/bar/." "$HOME/.config/quickshell/kwi3/"`, and
