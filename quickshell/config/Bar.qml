@@ -204,7 +204,21 @@ PanelWindow {
 
     readonly property string fontFamily: Kwi3Grid.active ? Kwi3Grid.fontFamily : "Iosevka Nerd Font"
     readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontSize
-    readonly property int nativeRender: Text.NativeRendering
+    // kwi3-55l.18: was Text.NativeRendering. Jan (3392, real use): "the
+    // bar's font looks slightly bigger than the other fonts (kwi3 window
+    // titlebars, terminal)". Both sides already share font.family/
+    // font.pixelSize verbatim (core/defaults.js FONT_FAMILY/FONT_PIXEL_SIZE,
+    // no point/pixel conversion anywhere) and paint the SAME logical
+    // contentWidth either way — this was purely a rasterizer choice, and
+    // i3kwin/chrome/Decoration.qml's titlebar text sets no renderType at
+    // all (QtQuick's own default, Text.QtRendering). Measured (not
+    // guessed): rendering the identical string/family/pixelSize/colour/
+    // weight pair through a real X11 (xcb) backend and diffing the painted
+    // pixels showed NativeRendering paints measurably more ink than
+    // QtRendering on Jan's own focused palette (#fdf6e3 on #152024, bold) —
+    // see test-bar-font-render.sh. Matching the chrome's implicit default
+    // here is what makes the two agree.
+    readonly property int nativeRender: Text.QtRendering
 
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
     // I3.workspaces ObjectModel was previously used as the data source, but it
