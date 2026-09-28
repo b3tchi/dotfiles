@@ -1166,6 +1166,43 @@ else
             "$(k1_since | grep '^ATTEMPT ' | grep -c '"m":"window.focus"')"
           assert_eq "switcher confirm after the restart leaves the focus on delta (no stale row focused a colliding new window)" \
             "$DELTA_ID" "$(k_focused)"
+
+          scenario "kwi3-gap-drops-i3-msg-fallback: while Kwi3Client is configured but the reconnect has not completed (configured && !available), a switcher confirm must NOT fall through to wmMsg/i3-msg (kwi3-tkg)"
+          # Populate a real, non-empty switcher row list through the kwi3
+          # path (still available here) so the confirm below has an actual
+          # window to (mis)address if the bug named in kwi3-tkg is present.
+          k1_ipc call switcher toggle >/dev/null 2>&1
+          win_on qs-switcher >/dev/null \
+            || fail "kwi3-gap-drops-i3-msg-fallback (switcher open before the gap)" "a qs-switcher window" "none"
+          k1_ipc call switcher toggle >/dev/null 2>&1   # close; confirm below reads the model, not visibility
+          gone_on qs-switcher
+
+          # Take rig 1's server down WITHOUT rebinding it (unlike the
+          # restart above). $KWI3SOCK is set in THIS quickshell's own
+          # environment for its whole life, so Kwi3Client.configured never
+          # changes — only `available` drops, which is exactly the
+          # reconnect gap the bug report names (as opposed to the restart
+          # scenario above, which exercises the state AFTER available flips
+          # back to true).
+          exec 9>&-
+          kill "$K1_PID" 2>/dev/null
+          wait "$K1_PID" 2>/dev/null
+
+          GAP=""
+          for i in $(seq 1 40); do
+            k1_ipc call kwi3test available "gap_$i" >/dev/null 2>&1
+            sleep 0.2
+            grep -aq "KWI3TEST available gap_$i 0" "$K1_QSLOG" && { GAP=1; break; }
+          done
+          if [ -z "$GAP" ]; then
+            fail "Kwi3Client.available becomes false once the server is killed (gap precondition)" "0" "1"
+          else
+            pass "Kwi3Client.available is false while KWI3SOCK is still set — the reconnect gap (Kwi3Client.configured && !available) is reached"
+            clear_i3log
+            k1_ipc call switcher confirm >/dev/null 2>&1
+            sleep 0.5
+            assert_eq "switcher confirm during the reconnect gap invoked NO i3-msg command at all" "" "$(i3log)"
+          fi
         fi
       fi
     fi
@@ -1296,6 +1333,48 @@ YAMLEOF
           "$(grep -Fc '"name":"alpha_1"' <<<"$chain")"
         assert_eq 'the focus targets "alpha_2"' "1" \
           "$(grep -Fc '"name":"alpha_2"' <<<"$chain")"
+      fi
+
+      scenario "kwi3-projects-gap-drops-i3-msg-fallback: while Kwi3Client is configured but the reconnect has not completed (configured && !available), a projects Enter action must NOT fall through to wmMsg/i3-msg (kwi3-tkg)"
+      # kwi3-projects-rename-chain above left "alpha" (now alpha_1/alpha_2)
+      # as the FOCUSED project, which _kwi3FetchWorkspacesForProjects
+      # excludes from projectsAll entirely — dispatch back to "web" first so
+      # "alpha" is a selectable row again for this scenario's own filter.
+      k2_ctl '{"op":"dispatch","action":"workspace:web"}' >/dev/null
+      k2_ipc call projects toggle >/dev/null 2>&1
+      PWID="$(win_on qs-projects)" || fail "kwi3-projects-gap-drops-i3-msg-fallback (projects map)" "a qs-projects window" "none"
+      if [ -n "${PWID:-}" ]; then
+        focuswin "$PWID"
+        sleep 0.4
+        typ "alpha"   # narrows to the single row named "alpha" (see kwi3-projects-rename-chain above)
+
+        # Take rig 2's server down WITHOUT rebinding it — no restart needed
+        # for this case. $KWI3SOCK stays set in THIS quickshell's own
+        # environment for its whole life, so Kwi3Client.configured never
+        # changes; only `available` drops, exactly the reconnect gap
+        # kwi3-tkg names. The projects window stays open and focused across
+        # it, the same "confirm arrives mid-gap" shape as the switcher's own
+        # kwi3-gap-drops-i3-msg-fallback scenario above (rig 1).
+        exec 10>&-
+        kill "$K2_PID" 2>/dev/null
+        wait "$K2_PID" 2>/dev/null
+
+        GAP2=""
+        for i in $(seq 1 40); do
+          k2_ipc call kwi3test available "gap_$i" >/dev/null 2>&1
+          sleep 0.2
+          grep -aq "KWI3TEST available gap_$i 0" "$K2_QSLOG" && { GAP2=1; break; }
+        done
+        if [ -z "$GAP2" ]; then
+          fail "Kwi3Client.available becomes false once rig 2's server is killed (gap precondition)" "0" "1"
+        else
+          pass "Kwi3Client.available is false while KWI3SOCK is still set — rig 2's reconnect gap is reached"
+          clear_i3log
+          key Return
+          gone_on qs-projects || fail "projects window closes on Enter during the gap (confirm reached the handler)" "no qs-projects" "still mapped"
+          sleep 0.3
+          assert_eq "projects Enter during the reconnect gap invoked NO i3-msg command at all" "" "$(i3log)"
+        fi
       fi
     fi
   fi
