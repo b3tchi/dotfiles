@@ -111,7 +111,7 @@ if ! command -v Xvfb >/dev/null || ! command -v i3 >/dev/null; then
     exit 0
 fi
 
-XA="$(probe_free_display 81)"
+XA="$(probe_free_display "${HOTKEYD_PANIC_BASE:-81}")"
 XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
 # XC is the OUT-OF-SCOPE display: a real X server and a real daemon this suite
 # is not entitled to touch, standing in for the caller's live :0/:10. See the
@@ -1637,6 +1637,93 @@ sleep 0.5
 [ -L "$LINK" ] && ok "and $XA is still held by the fallback" \
     || bad "recover's resume left $XA with neither: $out"
 mix_teardown
+
+# (e) A RECORDED DISPLAY WHOSE X SERVER HAS GONE since the panic - a logout,
+# an ended xrdp session, a kwi3 session that died with its X (kwi3-55l.15
+# rejection #1). It cannot get a daemon back, and it is NOT an i3 display
+# whose start failed: it must not re-panic the live i3 display, and it must
+# not be written back into the record - otherwise every later resume fails
+# the same way until someone edits the record by hand. $XE is a bare Xvfb
+# of this section's own, started here and killed while panicked.
+XE="$(probe_free_display "$(( ${XD#:} + 1 ))")"
+Xvfb "$XE" -screen 0 640x480x24 >/dev/null 2>&1 &
+XE_PID=$!
+XVFB_PIDS+=("$XE_PID")
+for _t in 1 2 3 4 5 6 7 8 9 10; do
+    timeout 2 xset -display "$XE" q >/dev/null 2>&1 && break; sleep 0.3
+done
+MIX_SCOPE="$XA $XE"
+DISPLAY="$XA" "$HERE/hotkeyd.sh" start "$XA" >/dev/null 2>&1
+DISPLAY="$XE" "$HERE/hotkeyd.sh" start "$XE" >/dev/null 2>&1
+sleep 0.5
+mixed "$XA" "$HERE/hotkeyd-panic.sh" panic >/dev/null 2>&1
+sleep 0.5
+grep -qx "$XE" "$STATEF" 2>/dev/null \
+    || bad "setup: panic did not record $XE: $(tr '\n' ' ' < "$STATEF" 2>/dev/null)"
+kill "$XE_PID" 2>/dev/null; wait "$XE_PID" 2>/dev/null
+pkill -f "$HOTKEYD_PROC_PAT .*--display $XE( |\$)" 2>/dev/null
+sleep 0.5
+out="$(mixed "$XA" "$HERE/hotkeyd-panic.sh" resume 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] && ok "resume with a recorded display's X gone exits 0 - a gone session is not a failure to come back" \
+    || bad "resume with $XE's X gone exited $rc: $out"
+[ ! -L "$LINK" ] && ok "and relinked nothing on its account" \
+    || bad "a gone display re-panicked the live i3 display: $out"
+[ "$(daemons_on "$XA")" = 1 ] && ok "and the live i3 display $XA got its daemon back" \
+    || bad "the live i3 display $XA has no daemon: $out"
+grep -qx "$XE" "$STATEF" 2>/dev/null \
+    && bad "the gone display $XE was written back into the panic record" \
+    || ok "and the gone display was dropped from the panic record"
+case "$out" in
+    *"$XE"*gone*) ok "and resume names it as gone" ;;
+    *)            bad "resume did not say it skipped the gone display $XE: $out" ;;
+esac
+out="$(mixed "$XA" "$HERE/hotkeyd-panic.sh" resume 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "a SECOND resume passes too - the record does not wedge" \
+    || bad "the second resume exited $rc: $out"
+mix_teardown
+MIX_SCOPE="$XA $XD"
+
+# (f) A kwi3 display whose X is ALIVE but whose kwi3 is not answering: the
+# conventional socket file is there (a WM killed without unlinking it) and
+# nothing listens. Starting its daemon with KWI3SOCK unset would send its
+# chords to an i3 that does not exist, and every later start would report
+# "already running". So it is skipped loudly, resume exits 1, the i3 display
+# keeps its daemon and is NOT re-panicked, and the record keeps the kwi3
+# display so the resume after its WM is back restarts it.
+rm -f "$CONV_RPC"
+python3 -c 'import socket, sys
+socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).bind(sys.argv[1])' "$CONV_RPC"
+mix_setup
+out="$(mixed "$XA" "$HERE/hotkeyd-panic.sh" resume 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -ne 0 ] && ok "resume with the kwi3 display's WM not answering exits non-zero ($rc)" \
+    || bad "resume reported success with $XD's kwi3 dead: $out"
+[ "$(daemons_on "$XD")" = 0 ] && ok "and started NO daemon on $XD with KWI3SOCK unset" \
+    || bad "a daemon was started on $XD with its kwi3 dead"
+case "$out" in
+    *"$XD"*) ok "and names the display it skipped" ;;
+    *)       bad "resume did not name the skipped display $XD: $out" ;;
+esac
+[ "$(daemons_on "$XA")" = 1 ] && ok "and the i3 display $XA keeps the daemon it got back" \
+    || bad "the i3 display $XA was left without a daemon for $XD's sake: $out"
+[ ! -L "$LINK" ] && ok "and nothing was relinked for a display the fallback cannot rescue" \
+    || bad "an unanswering kwi3 display re-panicked the i3 display: $out"
+grep -qx "$XD" "$STATEF" 2>/dev/null \
+    && ok "and the record keeps $XD so a later resume retries it" \
+    || bad "the skipped kwi3 display was dropped from the record"
+rm -f "$CONV_RPC"
+python3 "$T/rpcwm.py" "$CONV_RPC" rpc >"$T/rpcwm-conv.log" 2>&1 &
+FAKECONV_PID=$!
+for _t in 1 2 3 4 5 6 7 8 9 10; do [ -S "$CONV_RPC" ] && break; sleep 0.2; done
+out="$(mixed "$XA" "$HERE/hotkeyd-panic.sh" resume 2>&1)"; rc=$?
+sleep 0.5
+pd="$(pid_on "$XD")"; v=""; [ -n "$pd" ] && v="$(env_of "$pd" KWI3SOCK)"
+[ "$rc" -eq 0 ] && [ "$v" = "$CONV_RPC" ] \
+    && ok "with its kwi3 back, the next resume restarts $XD on its socket" \
+    || bad "retry resume: rc=$rc, $XD pid '$pd' KWI3SOCK='$v': $out"
+mix_teardown
+kill "$FAKECONV_PID" 2>/dev/null; FAKECONV_PID=""
 
 # The mirrored JSON-RPC probe (rpc_answers() in hotkeyd-panic.sh,
 # kwi3_answers() in hotkeyd.sh) must not drift: one identifying kwi3 where the
