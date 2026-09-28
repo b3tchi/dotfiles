@@ -170,13 +170,21 @@ PanelWindow {
 
     // Phone (sxmo, sway/Wayland): floating pill at the top via real
     // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
-    // QS_BAR_INSET_* instead. kwi3 is X11 too, so this margins block is the
-    // same no-op there that it always was; the top band comes from
-    // exclusiveZone below instead (kwi3-12f — the tile grid's margin band,
-    // not a layer-shell margin).
+    // QS_BAR_INSET_* instead.
+    //
+    // kwi3 (kwi3-55l.17, Jan: "1/2 gap then bar then 1/2 gap"): the bar is
+    // the vertical exception to the tile gap rule - half the visible tile
+    // gap above it, the bar, the other half below it, then the first
+    // titlebar. kwi3 serves the top half as grid.get's `edgeMargin` (the
+    // spare pixel of an odd module goes above), and Quickshell's X11
+    // PanelWindow places the window that far down (it did for i3kwin/bar,
+    // kwi3-12f, and bar-follows-focus-x11-e2e.sh reads the y back off the
+    // server). The strut stays exclusiveZone = `reserve` below, measured
+    // from the screen edge, so the tiles do not move; the bottom half is
+    // simply what is left between the bar and kwi3's own top margin.
     readonly property bool isPhone: Session.isPhone
     margins {
-        top:   isPhone ? 20 : 0
+        top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         left:  isPhone ? 40 : 0
         right: isPhone ? 40 : 0
     }
