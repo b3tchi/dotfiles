@@ -1135,12 +1135,18 @@ exec 10>&-
 fi   # dpy_up "$KWI3_DPY"
 
 # ---------------------------------------------------------------------------
-# config.js vs the REAL core (sp004 Task 14 "Extra"): ~/.dotfiles/kwi3/
-# config.js loads through the real kwi3LoadErrors()/onWindowAdded seam with
-# no collected errors, and a window titled qs-launcher managed on a fake-kwin
-# world ends up floating, undecorated, grid-snapped and focused — the same
-# shape i3kwin/test/floating-hooks.js checks its own hooks with, run here
-# against the ACTUAL file this repo ships rather than a fixture.
+# config.js vs the REAL core (sp004 Task 14 "Extra"; widened by kwi3-55l.2):
+# ~/.dotfiles/kwi3/config.js loads through the real kwi3LoadErrors()/
+# onWindowAdded seam with no collected errors, and a window titled
+# qs-launcher/qs-projects/qs-switcher/qs-clip/qs-notif managed on a
+# fake-kwin world ends up floating, undecorated, grid-snapped and focused —
+# the same shape i3kwin/test/floating-hooks.js checks its own hooks with,
+# run here against the ACTUAL file this repo ships rather than a fixture.
+# qs-clip/qs-notif (the clipboard picker and notification-history browser,
+# kwi3-55l.2) were added to this list because they used to open TILED on
+# kwi3 — the rule's regex stopped at "switcher" — even though i3's own
+# for_window rules have always floated them (i3/config.common: "qs-clip",
+# "qs-notif", identical treatment to the launcher/projects/switcher lines).
 # ---------------------------------------------------------------------------
 scenario "kwi3-config-js-vs-real-core: ~/.dotfiles/kwi3/config.js applies Jan's runner rule through the real kwi3 core, with no collected load errors"
 KWI3_CONFIG_JS="$SCRIPT_DIR/../kwi3/config.js"
@@ -1173,6 +1179,13 @@ function eq(got, want, label) {
 
 eq(ctx.kwi3LoadErrors(), [], 'kwi3/config.js loads through the real core with no collected errors');
 
+// Every title the runner rule is supposed to cover today (kwi3-55l.2 added
+// clip/notif to the original launcher/projects/switcher set) - one window
+// per title, all managed on the SAME world, the way "two runners in a row"
+// is exercised elsewhere: this also proves a later title in the list is not
+// somehow shadowed by an earlier one matching first.
+const TITLES = ['qs-launcher', 'qs-projects', 'qs-switcher', 'qs-clip', 'qs-notif'];
+
 const sent = { geometry: [], decorated: [], activate: [] };
 const realGeom = ctx.host.setFrameGeometry;
 ctx.host.setFrameGeometry = function (id, rect) {
@@ -1190,37 +1203,40 @@ ctx.host.activate = function (id) {
     return realActivate.call(ctx.host, id);
 };
 
-const w = fake.observe(fake.FakeWindow({
-    caption: 'qs-launcher', output: world.ws.activeScreen,
-    desktops: [world.ws.currentDesktop], frameGeometry: fake.rect(0, 0, 400, 300)
-}), 'window');
-world.ws.windows.push(w);
-ctx.manage(w);
+TITLES.forEach(function (title) {
+    const w = fake.observe(fake.FakeWindow({
+        caption: title, output: world.ws.activeScreen,
+        desktops: [world.ws.currentDesktop], frameGeometry: fake.rect(0, 0, 400, 300)
+    }), 'window');
+    world.ws.windows.push(w);
+    ctx.manage(w);
 
-const info = ctx.windowInfo(w);
-const entry = ctx.entryOf(info.id);
-const con = entry ? entry.con : null;
+    const info = ctx.windowInfo(w);
+    const entry = ctx.entryOf(info.id);
+    const con = entry ? entry.con : null;
 
-eq(ctx.windowPlacement(info.id), 'floating', 'qs-launcher is floating (w.float())');
-ok(con && con.parent && con.parent.type === 'floating_con', 'wrapped in a floating_con');
-ok(con && con.noFrame === true, 'noFrame() marked the con');
-eq(sent.decorated.filter((e) => e.id === info.id && e.on === false).length, 1,
-   'cmdSetDecorated(id,false) sent exactly once (w.noFrame())');
+    eq(ctx.windowPlacement(info.id), 'floating', title + ' is floating (w.float())');
+    ok(con && con.parent && con.parent.type === 'floating_con', title + ': wrapped in a floating_con');
+    ok(con && con.noFrame === true, title + ': noFrame() marked the con');
+    eq(sent.decorated.filter((e) => e.id === info.id && e.on === false).length, 1,
+       title + ': cmdSetDecorated(id,false) sent exactly once (w.noFrame())');
 
-const originX = ctx.kwi3GridOriginX(), originY = ctx.kwi3GridOriginY();
-const geoms = sent.geometry.filter((e) => e.id === info.id);
-eq(geoms.length, 1, 'exactly one geometry write (w.moveTo(kwi3.grid.center(w)))');
-ok((geoms[0].x - originX) % ctx.MODULE_W === 0, 'x snapped to the tile grid');
-ok((geoms[0].y - originY) % ctx.MODULE_H === 0, 'y snapped to the tile grid');
+    const originX = ctx.kwi3GridOriginX(), originY = ctx.kwi3GridOriginY();
+    const geoms = sent.geometry.filter((e) => e.id === info.id);
+    eq(geoms.length, 1, title + ': exactly one geometry write (w.moveTo(kwi3.grid.center(w)))');
+    ok((geoms[0].x - originX) % ctx.MODULE_W === 0, title + ': x snapped to the tile grid');
+    ok((geoms[0].y - originY) % ctx.MODULE_H === 0, title + ': y snapped to the tile grid');
 
-eq(sent.activate.filter((id) => id === info.id).length, 1, 'cmdActivate(id) sent exactly once (w.focus())');
-ok(world.ws.activeWindow === w, 'the host ends up with qs-launcher active');
+    eq(sent.activate.filter((id) => id === info.id).length, 1,
+       title + ': cmdActivate(id) sent exactly once (w.focus())');
+    ok(world.ws.activeWindow === w, title + ': the host ends up with it active');
+});
 
 if (!pass) { process.exit(1); }
-console.log('OK - kwi3/config.js applies Jan\'s runner rule against the real core');
+console.log('OK - kwi3/config.js applies Jan\'s runner rule against the real core (' + TITLES.join(', ') + ')');
 JSEOF
 if node "$K_TMP/config-js-check.js" "$KWI3_REPO" "$KWI3_CONFIG_JS" >"$K_TMP/config-js-check.log" 2>&1; then
-  pass "kwi3/config.js applies Jan's runner rule (float/noFrame/moveTo/focus) through the real core, no collected errors"
+  pass "kwi3/config.js applies Jan's runner rule (float/noFrame/moveTo/focus) through the real core to launcher/projects/switcher/clip/notif, no collected errors"
 else
   fail "kwi3/config.js applies Jan's runner rule through the real core" "OK (exit 0)" "$(cat "$K_TMP/config-js-check.log")"
 fi
