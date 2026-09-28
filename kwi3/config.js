@@ -67,16 +67,29 @@ kwi3.set({
 
 // =====================================================================
 // kwi3-234.14: Quickshell runner rules land here (onWindowAdded for
-// qs-launcher / qs-projects / qs-switcher).
+// qs-launcher / qs-projects / qs-switcher). kwi3-55l.2 widened the same
+// rule to qs-clip / qs-notif (the clipboard picker and the notification
+// history browser, quickshell/config/ClipHistory.qml + NotifHistory.qml) -
+// they open as plain top-level Qt windows exactly like the other three
+// (FramelessWindowHint, no dialog/utility window-type hint kwi3 could float
+// on automatically - see i3kwin/core/classify.js's `dialog`/`special`
+// checks, which never fire for any of these five), so i3 has always needed
+// an explicit for_window title rule for them too: i3/config.common's
+// `for_window [title="qs-clip"] floating enable, border none, move
+// position center` and the identical `qs-notif` line, right beside the
+// launcher/projects/switcher ones this rule already mirrors. Before this
+// fix the two were tiled on kwi3 - stealing a tile like any ordinary
+// window - because the regex below stopped at `switcher`.
 //
-// The three Quickshell runner dialogs are ordinary windows to kwi3 unless
-// told otherwise: floated, undecorated (Overlay.qml draws its own chrome,
+// All five Quickshell runner/picker windows are ordinary windows to kwi3
+// unless told otherwise: floated, undecorated (each draws its own chrome,
 // so a tiler titlebar would double up), centred on the tile grid
-// (kwi3.grid.center - whole cells, ft008/ft009) and focused the moment
-// they are managed (adr0013's own sample).
+// (kwi3.grid.center - whole cells, ft008/ft009, matching i3's own `move
+// position center`) and focused the moment they are managed (adr0013's own
+// sample).
 // =====================================================================
 
-kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher)$/ }, w => {
+kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher|clip|notif)$/ }, w => {
     w.float();
     w.noFrame();
     w.moveTo(kwi3.grid.center(w));
