@@ -138,6 +138,45 @@ func (c *Client) ensureConnectedLocked() error {
 	return nil
 }
 
+// writeLocked writes one already-framed request line to c.conn, retrying
+// ONCE on a freshly dialled connection if the write itself fails.
+//
+// This retry is safe specifically because a write failure means the
+// request was never delivered anywhere - never partially, never twice.
+// That is true on this transport (a unix domain SOCK_STREAM) in a way it
+// would NOT be on plain TCP: measured empirically (see kwi3-5a8's task
+// notes for the experiment), a write against a connection whose peer has
+// already closed fails immediately with EPIPE/ECONNRESET on Linux rather
+// than succeeding into a local send buffer first and only surfacing the
+// failure on a later write or on read - 0/200 trials of "close the peer,
+// then write with no delay" produced a silent success. So "the write
+// failed" is a trustworthy "definitely not sent" signal here, and this is
+// exactly the kwi3-5a8 bug: after kwi3 restarts, the Client's cached
+// connection is already dead, the first chord's write fails against it,
+// and without this retry the chord was dropped even though kwi3 was
+// already back up and ready to accept a fresh connection.
+//
+// A failure on the SECOND (post-redial) write is returned as-is - two
+// failures in a row means the fresh dial itself is not helping (e.g. kwi3
+// is still down), so there is nothing more to retry.
+//
+// This must never be reached for a READ failure - see Call, which treats
+// read failures as terminal (no retry), because kwi3 may already have run
+// the command before the connection died.
+func (c *Client) writeLocked(line []byte) error {
+	if _, err := c.conn.Write(line); err != nil {
+		c.closeLocked()
+		if dialErr := c.ensureConnectedLocked(); dialErr != nil {
+			return dialErr
+		}
+		if _, err2 := c.conn.Write(line); err2 != nil {
+			c.closeLocked()
+			return fmt.Errorf("kwi3rpc: write to %s: %w (retry on a fresh connection also failed: %s)", c.addr, err, err2)
+		}
+	}
+	return nil
+}
+
 // Call sends one JSON-RPC 2.0 request and waits for its matching reply.
 // params may be nil (a method that takes none, e.g. window.close with no
 // id). The returned error is either a transport failure (dial refused,
@@ -146,6 +185,13 @@ func (c *Client) ensureConnectedLocked() error {
 // an *RPCError (the connection is untouched - kwi3 answered, just with an
 // error object, exactly as core/rpc.js's own throw guard promises: "the
 // connection stays open after every one of these").
+//
+// A WRITE failure gets one transparent retry on a freshly dialled
+// connection (see writeLocked) - kwi3-5a8: without it, the first chord
+// issued after kwi3 restarts wrote to the connection Call had cached from
+// before the restart, failed, and was dropped even though kwi3 was already
+// back up. A READ failure is never retried: kwi3 may already have run the
+// command before dying, and resending it would risk running it twice.
 func (c *Client) Call(method string, params interface{}) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -162,9 +208,8 @@ func (c *Client) Call(method string, params interface{}) (json.RawMessage, error
 	}
 	line = append(line, '\n')
 
-	if _, err := c.conn.Write(line); err != nil {
-		c.closeLocked()
-		return nil, fmt.Errorf("kwi3rpc: write to %s: %w", c.addr, err)
+	if err := c.writeLocked(line); err != nil {
+		return nil, err
 	}
 
 	raw, err := c.reader.ReadBytes('\n')
