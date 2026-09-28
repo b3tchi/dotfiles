@@ -3,9 +3,27 @@
 # Session-scoped via qs-session.sh: with concurrent sessions (local + xrdp)
 # a bare `quickshell msg` is ambiguous about which instance it reaches, so
 # messages resolve THIS display's instance pid and target it via `ipc --pid`.
-. "$HOME/.dotfiles/quickshell/qs-session.sh"
+#
+# SELF-LOCATING, NOT $HOME-DEPENDENT (kwi3-55l.16, defense in depth). hotkeyd
+# runs this via `/bin/sh -c "~/.dotfiles/quickshell/qs-overlay.sh <verb>"`
+# (internal/proc/spawn.go Run(): no cmd.Env override, so the child inherits
+# whatever environment the DAEMON happens to have, not necessarily a normal
+# login shell's — a live session was checked while investigating this task
+# and $HOME turned out fine there, so this was NOT the cause of that
+# particular repro, but the gap is real regardless: the leading `~` in that
+# command line resolves even with $HOME unset (bash's tilde expansion falls
+# back to the passwd entry), so this script would start and even open the
+# picker, while the very next line used to read literal `$HOME` as a shell
+# VARIABLE, which gets none of that fallback — an empty $HOME would turn
+# `"$HOME/.dotfiles/..."` into "/.dotfiles/...", a nonexistent path, and the
+# failure would go to /dev/null (Run()'s spawned child has no captured
+# stdout/stderr): Enter on a project would silently do nothing, no workspace,
+# no log line anywhere. Deriving SELF_DIR from $0 instead needs no
+# environment variable at all; same idiom as qs-clip.sh.
+SELF_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+. "$SELF_DIR/qs-session.sh"
 
-OVERLAY="$HOME/.dotfiles/quickshell/overlay"
+OVERLAY="$SELF_DIR/overlay"
 
 # Pid of the instance hosting the overlay for this display. Two session shapes:
 # on desktop a separate `quickshell -p overlay` process hosts it; over RDP the

@@ -659,12 +659,31 @@ Scope {
         }
     }
 
+    // kwi3-55l.16: every kwi3-path workspace.focus/rename call below used to
+    // pass `function () {}` as its callback — cb(err, result), so a real RPC
+    // ERROR (a stale con id after a race with a destroy, a rejected param
+    // shape, anything rpc.js itself refuses) was silently swallowed with no
+    // trace anywhere: Kwi3Client itself only logs the special "not
+    // connected" case, and the caller here discarded everything else. Enter
+    // would still look like it worked (the picker closes either way - see
+    // hide() below) while nothing happened on kwi3. This helper is the one
+    // place that now gets told.
+    function _kwi3LogFailure(tag, method, params) {
+        return function (err) {
+            if (err) {
+                console.warn("[Overlay] " + tag + ": " + method + " " +
+                    JSON.stringify(params) + " failed: " + JSON.stringify(err))
+            }
+        }
+    }
+
     // Confirm handler — receives the selected project ROW OBJECT from Combo.
     function projectsSwitch(p) {
         if (p) {
             var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
             if (Kwi3Client.available) {
-                Kwi3Client.call("workspace.focus", { name: wsName }, function () {})
+                Kwi3Client.call("workspace.focus", { name: wsName },
+                    root._kwi3LogFailure("projectsSwitch", "workspace.focus", { name: wsName }))
             } else if (root._kwi3Gap) {
                 // kwi3-tkg: mid-reconnect — see switcherFocus()'s own
                 // comment. Drop rather than run `wmMsg workspace <name>`
@@ -723,7 +742,8 @@ Scope {
     // parallel and left to race.
     function _kwi3ProjectsNew(p) {
         if (p.workspaces.length === 0) {
-            Kwi3Client.call("workspace.focus", { name: p.name }, function () {})
+            Kwi3Client.call("workspace.focus", { name: p.name },
+                root._kwi3LogFailure("projectsNew", "workspace.focus", { name: p.name }))
             return
         }
         var hasBare = false
@@ -735,14 +755,22 @@ Scope {
             if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
         }
         function focusNext() {
-            Kwi3Client.call("workspace.focus", { name: p.name + "_" + (maxIdx + 1) }, function () {})
+            var params = { name: p.name + "_" + (maxIdx + 1) }
+            Kwi3Client.call("workspace.focus", params,
+                root._kwi3LogFailure("projectsNew", "workspace.focus", params))
         }
         if (hasBare) {
             if (maxIdx < 1) maxIdx = 1   // the rename below claims _1
             var bareRows = root._kwi3Workspaces.filter(function (w) { return w.name === p.name })
             if (bareRows.length > 0) {
-                Kwi3Client.call("workspace.rename", { id: bareRows[0].id, name: p.name + "_1" },
-                    function () { focusNext() })
+                var renameParams = { id: bareRows[0].id, name: p.name + "_1" }
+                Kwi3Client.call("workspace.rename", renameParams, function (err) {
+                    // Logged, not fatal to the chain: focusNext() still runs
+                    // on a failed rename, exactly as it always has - only
+                    // the silence around the failure is what changed here.
+                    root._kwi3LogFailure("projectsNew", "workspace.rename", renameParams)(err)
+                    focusNext()
+                })
                 return
             }
         }

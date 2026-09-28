@@ -1245,13 +1245,17 @@ else
   K2_HOME="$K_TMP/home2"
   mkdir -p "$K2_HOME/.config/project"
   # "my \"proj\"" has no live workspace (projectsSwitch's straight
-  # workspace.focus branch); "alpha" HAS one (the rename-chain branch).
+  # workspace.focus branch); "alpha" HAS one (the rename-chain branch);
+  # "beta" HAS one too, kept separate from "alpha" so kwi3-55l.16's
+  # stale-id scenario (below) can destroy ITS workspace without disturbing
+  # the "alpha" state the later gap-drops-i3-msg-fallback scenario expects.
   # Both a space and a literal quote in one key — the exact edge case named
   # in sp004 Task 14's edge_cases — flow through with no shell quoting at
   # all on this path (JSON params, not a shell command line).
   cat > "$K2_HOME/.config/project/projects.yaml" <<'YAMLEOF'
 projects:
   alpha: {}
+  beta: {}
   my "proj": {}
 YAMLEOF
 
@@ -1333,6 +1337,70 @@ YAMLEOF
           "$(grep -Fc '"name":"alpha_1"' <<<"$chain")"
         assert_eq 'the focus targets "alpha_2"' "1" \
           "$(grep -Fc '"name":"alpha_2"' <<<"$chain")"
+      fi
+
+      # -----------------------------------------------------------------
+      # kwi3-55l.16: a live 3392 session showed the projects picker opening
+      # and Enter/Shift+Enter apparently doing nothing on kwi3 - no
+      # workspace created, nothing anywhere in any log. Overlay.qml's own
+      # kwi3-path RPC calls (workspace.focus/rename) all passed
+      # `function () {}` as their callback, so a real RPC ERROR - not just
+      # "Kwi3Client not connected", which IS logged - vanished with no
+      # trace. This reproduces the shape most likely to hit it live: the
+      # picker's own registry scan (projectsShow) caches workspace ids
+      # ONCE, at open time; if the con named in that cache is destroyed
+      # before Shift+Enter fires (a project's one window closes, or the
+      # user switches through and back off an otherwise-empty workspace,
+      # both ordinary session activity), workspace.rename then names a
+      # STALE id and rpc.js answers -32001 "no such workspace" - which
+      # used to go nowhere.
+      # -----------------------------------------------------------------
+      scenario "kwi3-55l.16: a stale con id at Shift+Enter (destroyed after the picker's registry scan) is a LOGGED rpc.js error, not silence"
+      k2_ctl '{"op":"dispatch","action":"workspace:beta"}' >/dev/null
+      k2_ctl '{"op":"openWindow","title":"beta-term"}' >/dev/null
+      k2_ctl '{"op":"dispatch","action":"workspace:web"}' >/dev/null
+      Q2_MARK="$(wc -l <"$K2_QSLOG" | tr -d ' ')"
+      q2_since() { tail -n +"$((Q2_MARK + 1))" "$K2_QSLOG"; }
+      k2_mark
+      k2_ipc call projects toggle >/dev/null 2>&1
+      PWID="$(win_on qs-projects)" || fail "kwi3-55l.16-stale-id (projects map)" "a qs-projects window" "none"
+      if [ -n "${PWID:-}" ]; then
+        focuswin "$PWID"
+        sleep 0.4
+        # The registry scan above has already cached "beta"'s live con id
+        # (projectsShow's own workspace.list, at open time) into
+        # root._kwi3Workspaces. Destroy it from under the now-open picker:
+        # close its one window, then switch onto and back off the
+        # (now-empty) workspace so core/tree.js's switch-away-when-empty
+        # rule reaps it - its con id is stale from here on.
+        k2_ctl '{"op":"closeWindow","title":"beta-term"}' >/dev/null
+        k2_ctl '{"op":"dispatch","action":"workspace:beta"}' >/dev/null
+        k2_ctl '{"op":"dispatch","action":"workspace:web"}' >/dev/null
+        typ "beta"
+        keyraw shift+Return
+        gone_on qs-projects
+        sleep 0.4
+        # kwi3-55l.14's own lesson: rpc-server.js's "CALL ..." line is
+        # written only after a method's run() RETURNS, so a call that
+        # THROWS (exactly the stale-id case here) never appears there at
+        # all - "ATTEMPT {\"m\":...}" is logged before run() either way,
+        # which is the one that can prove a failing call still reached the
+        # rig rather than never being sent.
+        attempts="$(k2_since | grep -E '"m":"(workspace.rename|workspace.focus)"')"
+        assert_eq "the stale rename still reached the rig (rpc.js, not the client, is what refuses it)" \
+          "1" "$(grep -c '"m":"workspace.rename"' <<<"$attempts")"
+        warn="$(q2_since | grep -F '[Overlay] projectsNew: workspace.rename')"
+        assert_ne "the failed rename is LOGGED by Overlay.qml, not swallowed" "" "$warn"
+        case "$warn" in
+          *'"code":-32001'*|*'no such workspace'*)
+            pass "the logged failure carries rpc.js's own -32001 \"no such workspace\" error" ;;
+          *) fail "the logged failure carries rpc.js's own error" '"code":-32001 / "no such workspace"' "$warn" ;;
+        esac
+        # The chain is logged, not fatal (comment at the _kwi3ProjectsNew
+        # call site): the picker still goes on to focus the NEXT index
+        # rather than getting stuck on the failed rename.
+        assert_eq "the chain still proceeds to workspace.focus after the logged rename failure" \
+          "1" "$(grep -c '"m":"workspace.focus"' <<<"$attempts")"
       fi
 
       scenario "kwi3-projects-gap-drops-i3-msg-fallback: while Kwi3Client is configured but the reconnect has not completed (configured && !available), a projects Enter action must NOT fall through to wmMsg/i3-msg (kwi3-tkg)"
