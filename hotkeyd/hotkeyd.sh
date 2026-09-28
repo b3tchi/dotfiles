@@ -58,6 +58,7 @@ CONFIG_GO="$HERE/cmd/hotkeyd/config.go"
 VERB="${1:-status}"
 DPY="${2:-${DISPLAY:-}}"
 DPY_BASE="${DPY%.*}"
+DPY_NUM="${DPY_BASE#:}"
 TAG="$(printf %s "${DPY_BASE#:}" | tr -c 'A-Za-z0-9' '_')"
 
 # The panic latch (hotkeyd-panic.sh). While this link exists i3 is serving the
@@ -138,13 +139,16 @@ linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 # latch is about i3's config.d, and it holds on every display where i3 has
 # claimed the root, whatever the environment names.
 #
-# Step 2 is NOT checked to be on the same display. workspace.list names no
-# display, and the socket path (kwi3-<n>.rpc.sock) is a convention of
-# kwi3-session-env.sh, not something the WM attests. It does not need to be:
-# once step 1 has ruled i3 out, no bind table on $DPY_BASE can take the
-# fallback's chords, so there is nothing for a daemon to contest there. A
-# daemon on a no-i3 display dispatching to another display's kwi3 is a
-# misrouting, not a latch breach — kwi3-vfg.
+# Step 2 is NOT checked to be on the same display, for the LATCH decision:
+# workspace.list names no display, and once step 1 has ruled i3 out, no bind
+# table on $DPY_BASE can take the fallback's chords, so there is nothing for
+# a daemon to contest there. A daemon on a no-i3 display dispatching to
+# another display's kwi3 is a misrouting, not a latch breach, and it is a
+# SEPARATE refusal from this one — kwi3sock_names_display(), checked
+# unconditionally in the `start)` case below, whether or not the latch is
+# even linked (kwi3-vfg). It DOES compare $KWI3SOCK's path against
+# $DPY_BASE, using the same "kwi3-<n>.rpc.sock" convention this comment used
+# to say nothing here attested.
 #
 # ASKED, NOT CONFIGURED. An env flag like HOTKEYD_WM=kwi3 would be a second
 # statement of a fact the WM already makes, and one that can be wrong: a
@@ -195,6 +199,54 @@ ok = (isinstance(r, dict) and r.get("jsonrpc") == "2.0" and r.get("id") == 1
       and r.get("error") is None and isinstance(r.get("result"), list))
 sys.exit(0 if ok else 1)
 PY
+}
+
+# Does $KWI3SOCK's own PATH name THIS display? (kwi3-vfg)
+#
+# latch_applies()/kwi3_answers() above decide whether i3's fallback should
+# hold a display — they say nothing about whose kwi3 a daemon that starts
+# HERE would actually talk to. kwi3-session-env.sh exports $KWI3SOCK into
+# every process a kwi3 session spawns, which can reach the systemd user
+# manager's own environment (`systemctl --user show-environment`) and outlive
+# the session that set it — so `hotkeyd.sh start :41` run from a shell or
+# unit still carrying :40's export inherits a socket that answers for :40,
+# not :41. main.go then dispatches every chord through whatever $KWI3SOCK
+# names, unconditionally (sp004 Task 16, kwi3-234.16) — with no display check
+# of its own, since the daemon has no way to learn which display a socket it
+# was simply handed belongs to. Left unchecked, the daemon this spawns on :41
+# moves windows on :40 (kwi3-8wb.1's discovery, kwi3-vfg).
+#
+# Checked by PATH, not by asking the socket to identify itself: kwi3's
+# JSON-RPC surface has no session.info/workspace.list field naming its own
+# display (ft010's read methods stop at workspace/window/tree/binding
+# queries), so there is nothing to ask that would answer the question — the
+# WM-attested check this comment used to want does not exist to call.
+# kwi3-session-env.sh's own kwi3_rpcsock_path() names every socket it
+# computes "kwi3-<n>.rpc.sock", <n> being the display it serves, and the X11
+# host binds to exactly that path (X11RpcServer::defaultPath(), ft010's
+# api_surface) — the two ends already have to agree on this convention for
+# a kwi3 session to work at all, so relying on it here costs one shell
+# parameter expansion and no round trip.
+#
+# BASENAME ONLY, not the directory: the convention's directory is
+# $XDG_RUNTIME_DIR (ft010's own default, /tmp with none set), but kwi3
+# accepts --rpc-socket/$I3KWIN_RPCSOCK overrides and this repo's own test
+# doubles (test-panic.sh's rpcwm.py) bind theirs under a throwaway dir —
+# pinning the directory too would call an override, or a fixture, foreign on
+# its own display for no reason the misrouting this exists to catch cares
+# about.
+#
+# FAILS CLOSED: a $KWI3SOCK whose basename does not spell out exactly this
+# display's number — unset entirely (this function is not even called then),
+# another display's, or a name the convention would never produce — is
+# refused rather than guessed at. An unconventional name is not proof of a
+# misroute, but there is no way from here to prove it is NOT one either, and
+# "not identified" already fails toward refusal everywhere else in this file.
+kwi3sock_names_display() {
+    case "$(basename -- "$1" 2>/dev/null)" in
+        "kwi3-$DPY_NUM.rpc.sock") return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 latch_applies() {
@@ -332,6 +384,19 @@ run hotkeyd-panic.sh resume" 4
             printf 'hotkeyd.sh: the i3 panic fallback (linked at %s) does '\
 'not apply on %s -- its window manager is kwi3, which reads no i3 config; '\
 'starting\n' "$FALLBACK_LINK" "$DPY_BASE" >&2
+        fi
+        # Refuses a $KWI3SOCK inherited from another display BEFORE the
+        # daemon is ever spawned — see kwi3sock_names_display()'s own comment
+        # for why this cannot be folded into the latch checks above (kwi3-vfg).
+        # Not checked when unset: an i3/sway session with no kwi3 anywhere
+        # near it exports nothing here, and that is the unaffected common case.
+        if [ -n "${KWI3SOCK:-}" ] && ! kwi3sock_names_display "$KWI3SOCK"; then
+            die "\$KWI3SOCK ($KWI3SOCK) does not name $DPY_BASE -- \
+kwi3-session-env.sh would have called it kwi3-$DPY_NUM.rpc.sock; starting a \
+daemon here would dispatch every chord typed on $DPY_BASE to whatever \
+display that socket actually belongs to (kwi3-vfg). Source \
+kwi3-session-env.sh $DPY_BASE for this display, or unset KWI3SOCK, before \
+starting" 78
         fi
         pid="$(daemon_pid)"
         if [ -n "$pid" ]; then

@@ -382,6 +382,54 @@ out="$(run "$XA" stop 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "stop when not running exits cleanly" \
     || bad "stop on a stopped daemon exited $rc: $out"
 
+# --- KWI3SOCK naming another display (kwi3-vfg) ------------------------------
+# kwi3 sessions export $KWI3SOCK into every process they spawn, which can
+# reach the systemd user manager itself (`systemctl --user show-environment`)
+# and outlive the session that set it. A shell or unit still carrying :40's
+# $KWI3SOCK that runs `hotkeyd.sh start :41` used to start a :41 daemon anyway
+# -- main.go dispatches every chord through whatever $KWI3SOCK names,
+# unconditionally (sp004 Task 16) -- so every chord typed on :41 moved
+# windows on :40. $XA here stands for the non-i3, non-kwi3 display: neither
+# Xvfb display in this suite runs i3 or kwi3, which is exactly the case
+# latch_applies() cannot catch (it is about i3's OWN fallback, not about
+# whose kwi3 the daemon dispatches to).
+#
+# No JSON-RPC fake is needed: the check under test is a PATH comparison
+# (kwi3-session-env.sh names every socket "kwi3-<n>.rpc.sock"), not a round
+# trip, so a value that merely fails to name $XA is enough to exercise it —
+# nothing needs to be listening on the far end.
+echo "launcher: KWI3SOCK naming another display refuses to start (kwi3-vfg)"
+out="$(DISPLAY="$XA" XDG_RUNTIME_DIR="$RUNTIME" \
+       KWI3SOCK="$RUNTIME/kwi3-${TAG_B}.rpc.sock" \
+       "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?
+[ "$rc" -eq 78 ] && ok "start refuses a KWI3SOCK naming $XB while starting $XA (rc=78)" \
+    || bad "start on $XA with $XB's KWI3SOCK exited $rc (want 78): $out"
+[ -z "$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null)" ] \
+    && ok "and nothing was spawned on $XA" \
+    || { bad "a daemon was spawned on $XA behind a foreign KWI3SOCK"; run "$XA" stop >/dev/null 2>&1; }
+case "$out" in
+    *KWI3SOCK*"$XA"*) ok "and the refusal names both the variable and the display" ;;
+    *) bad "the refusal did not name KWI3SOCK and $XA: $out" ;;
+esac
+
+out="$(DISPLAY="$XA" XDG_RUNTIME_DIR="$RUNTIME" \
+       KWI3SOCK="$RUNTIME/not-even-kwi3-shaped.sock" \
+       "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?
+[ "$rc" -eq 78 ] && ok "start refuses a KWI3SOCK whose name matches no display at all (rc=78)" \
+    || { bad "start on $XA with an unconventional KWI3SOCK exited $rc (want 78): $out"; \
+         run "$XA" stop >/dev/null 2>&1; }
+
+out="$(DISPLAY="$XA" XDG_RUNTIME_DIR="$RUNTIME" \
+       KWI3SOCK="$RUNTIME/kwi3-${TAG_A}.rpc.sock" \
+       "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?
+sleep 1
+n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
+[ "$rc" -eq 0 ] && [ "$n" = 1 ] \
+    && ok "a KWI3SOCK correctly named for $XA still starts (rc=0)" \
+    || bad "start on $XA with its OWN KWI3SOCK name was refused (rc=$rc, n=$n): $out"
+run "$XA" stop >/dev/null 2>&1
+sleep 0.3
+
 # --- check ------------------------------------------------------------------
 echo "launcher: check"
 run "$XA" check >/dev/null 2>&1 && ok "check validates the shipped table" \
