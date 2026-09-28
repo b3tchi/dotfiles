@@ -291,6 +291,9 @@ Scope {
         // again once QML has dropped the declarative binding for good -
         // exactly the kwi3-234.14 bug this replaces (see the property's own
         // comment above).
+        // Test: quickshell/test-overlay-respawn.sh (headless Xvfb; splices
+        // this line and `running:` above into a fixture - keep each on ONE
+        // line, the test refuses to run if it cannot find them).
         onExited: running = Qt.binding(function () { return !Kwi3Client.configured })
     }
 
