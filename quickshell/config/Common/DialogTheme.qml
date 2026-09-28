@@ -41,6 +41,11 @@ Singleton {
     readonly property int _fallbackPad: 8           // list vertical padding (+8)
     readonly property string _fallbackFont: "Iosevka Nerd Font"
     readonly property int _fallbackFontSize: isSway ? 14 : 16
+    // kwi3-55l.19: the pre-kwi3 AC1 literal for the row/input left inset —
+    // never derived from any grid, i3/sway has none to derive it from. It
+    // is NOT a whole multiple of the fallback dialogs' own font metrics
+    // either; it was simply the pixel value that looked right under i3.
+    readonly property int _fallbackTextLeftMargin: 12
 
     readonly property int width: Kwi3Grid.active
         ? Kwi3Grid.cells(_fallbackWidth, Kwi3Grid.moduleW) * Kwi3Grid.moduleW
@@ -62,5 +67,20 @@ Singleton {
     readonly property string accent: "#16a085"   // selection bar + match hi
     readonly property string muted: "#707880"    // placeholder / ws / focused
     readonly property string urgent: "#CB4B16"   // urgent-window accent
-    readonly property int textLeftMargin: 12      // row/input left inset
+
+    // kwi3-55l.19: row/input left inset. Every other whole-cell property
+    // above (width/rowHeight/pad) was already re-derived from Kwi3Grid when
+    // a kwi3 session is live (sp004 T14) — this was the one left as the
+    // bare _fallbackTextLeftMargin (12px) even under Kwi3Grid.active, so the
+    // dialog's own first glyph column (Overlay.qml/Combo.qml anchor every
+    // Text/TextInput's left edge off this) landed 12px in against a module
+    // that is only 8px on Jan's session (12 is 1.5 cells) — bigger than one
+    // module AND off the grid by a half cell, rather than aligned with the
+    // tab/titlebar text one module in that this dialog sits beside. One
+    // whole module (Kwi3Grid.moduleW) is exactly what the other dialog
+    // insets already use as their unit (Kwi3Grid.cells() rounds width/pad
+    // onto it) — this is the same rule applied to the one property that had
+    // been left out. i3/sway (Kwi3Grid.active never true there) keeps the
+    // unchanged 12px fallback.
+    readonly property int textLeftMargin: Kwi3Grid.active ? Kwi3Grid.moduleW : _fallbackTextLeftMargin
 }

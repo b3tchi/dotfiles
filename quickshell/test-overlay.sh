@@ -258,6 +258,16 @@ ShellRoot {
             console.log("KWI3TEST grid-module " + tag + " " +
                 Kwi3Grid.moduleW + "x" + Kwi3Grid.moduleH + "x" + Kwi3Grid.rowHeight)
         }
+        // kwi3-55l.19: DialogTheme.textLeftMargin is the pixel inset from a
+        // dialog window's OWN left edge to its first glyph column (every
+        // Text/TextInput in Overlay.qml/Combo.qml anchors off it) — logged
+        // beside Kwi3Grid.moduleW so the suite can assert the two are equal
+        // (the inset is exactly one module) rather than trusting a literal
+        // that happened to look right.
+        function dialogInset(tag: string): void {
+            console.log("KWI3TEST dialog-inset " + tag + " " +
+                DialogTheme.textLeftMargin + "x" + Kwi3Grid.moduleW)
+        }
         // kwi3-55l.14: dumps Overlay's own con-id caches (focusHistory, the
         // switcher's own window list) so the restart-reconnect scenario can
         // assert a stale generation's ids are gone WITHOUT guessing at
@@ -1029,6 +1039,17 @@ else
         key Escape
       fi
 
+      scenario "kwi3-launcher-dialog-inset: the launcher's (\$mod+d) inner content starts exactly one module in from the dialog edge (kwi3-55l.19)"
+      k1_ipc call kwi3test dialogInset "i1" >/dev/null 2>&1
+      sleep 0.3
+      ins="$(grep -a 'KWI3TEST dialog-inset i1 ' "$K1_QSLOG" | tail -1 | awk '{print $NF}')"
+      TLM="${ins%%x*}"; MW2="${ins#*x}"
+      if [ -n "$TLM" ] && [ -n "$MW2" ]; then
+        assert_eq "DialogTheme.textLeftMargin == Kwi3Grid.moduleW (one whole cell, not a stray literal)" "$MW2" "$TLM"
+      else
+        fail "textLeftMargin/moduleW were read from the singletons" "2 numbers" "$ins"
+      fi
+
       scenario "kwi3-restart-clears-stale-ids: a kwi3 process restart (con ids restart at 1, sp004/ft010) must not leave focusHistory or an open switcher row holding stale ids (kwi3-55l.14)"
       # Extracted as a bare "[id,id,...]" array, anchored on the literal
       # marker text — NOT matched against the raw log line, which quickshell
@@ -1307,6 +1328,17 @@ YAMLEOF
         last="$(k2_since | grep '"method":"workspace.focus"' | tail -1)"
         assert_eq 'workspace.focus named "my \"proj\"" verbatim, quote and space intact' \
           "1" "$(grep -Fc '"name":"my \"proj\""' <<<"$last")"
+      fi
+
+      scenario "kwi3-projects-dialog-inset: the projects picker's (\$mod+p) inner content starts exactly one module in from the dialog edge (kwi3-55l.19)"
+      k2_ipc call kwi3test dialogInset "i2" >/dev/null 2>&1
+      sleep 0.3
+      ins2="$(grep -a 'KWI3TEST dialog-inset i2 ' "$K2_QSLOG" | tail -1 | awk '{print $NF}')"
+      TLM2="${ins2%%x*}"; MW3="${ins2#*x}"
+      if [ -n "$TLM2" ] && [ -n "$MW3" ]; then
+        assert_eq "DialogTheme.textLeftMargin == Kwi3Grid.moduleW on the projects picker too (same singleton, checked independently)" "$MW3" "$TLM2"
+      else
+        fail "textLeftMargin/moduleW were read from the singletons (rig 2)" "2 numbers" "$ins2"
       fi
 
       scenario "kwi3-projects-rename-chain: Shift+Enter on a project with a bare live workspace sends workspace.rename THEN workspace.focus, in that order (AC1c)"
