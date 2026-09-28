@@ -808,16 +808,20 @@ kill "$GRID_PID" 2>/dev/null
 # feed under test; their try/catch already only ever assigns on a
 # successful parse, which a nonexistent binary's silence can never produce.
 #
-# The "3 tabs whose cells do not divide, spare cells to the FIRST" rule
-# (AC2) is checked TWO ways, deliberately: bar._shareEqualCells is called
-# DIRECTLY with chosen integers (deterministic, mutation-provable, no font
-# metrics involved) for the exact-value pin reviewers want, and separately
-# the REAL rendered "a"/"bb"/"ccc" tabs are checked against GENERAL
-# invariants (whole modules, non-increasing cell widths, cumulative x from
-# contentLeft) that hold regardless of this box's actual monospace font
-# metrics — the two together prove the algorithm AND that the real
-# Repeater is wired to it, without the suite depending on exactly what
-# "monospace" measures here.
+# AC2's "whole modules" half is checked TWO ways, deliberately:
+# bar._shareEqualCells (the equal-FIXED-total primitive, still real and
+# still used for the chrome's own tab GROUPS - see its own comment in
+# Bar.qml) is called DIRECTLY with chosen integers (deterministic,
+# mutation-provable, no font metrics involved) for the exact-value pin
+# reviewers want, and separately the REAL rendered "a"/"bb"/"ccc" tabs are
+# checked against GENERAL invariants (whole modules, cumulative x from
+# contentLeft, EVERY tab's cell count equal to its own want - kwi3-55l.16,
+# not shared out of a total) that hold regardless of this box's actual
+# monospace font metrics — the two together prove the algorithm AND that
+# the real Repeater is wired to it, without the suite depending on exactly
+# what "monospace" measures here. kwi3-55l.16's own scenario (below) is
+# what actually proves a tab never gets LESS than it asked for, under a
+# realistic mix of workspace-name lengths and Jan's own font/module.
 # ============================================================================
 
 scenario "PHASE 6 setup: rpc-server.js rig + a real Bar under Xvfb"
@@ -862,6 +866,9 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
     //             through configure() + ipcNotify(), PHASE 5's own path
     //   project - the dotfiles projects picker's own RPC pair
     //             (kwi3-55l.16, below)
+    //   realistic - Jan's OWN font/module (kwi3-55l.16: the live bug -
+    //             mixed bare-numbered and project-named workspaces, sized
+    //             with his real font, not "monospace")
     setInterval(() => {
         let names = [];
         try { names = fs.readdirSync(cmdDir).sort(); } catch (e) { return; }
@@ -894,6 +901,27 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
                 rig.openWindow('alpha2-keeper'); // keeper: switching away must not reap it
                 rig.ctx.RPC_METHODS['workspace.focus'].run(null, { name: 'gamma' });
                 console.log('PROJECT ' + JSON.stringify(rig.ctx.workspacesJson()));
+            } else if (name === 'realistic') {
+                // Jan's OWN production settings (~/.dotfiles/kwi3/config.js:
+                // font 'Iosevka 16', module [8, 21]) - not the neutral
+                // built-in default this rig otherwise boots on, and not the
+                // 10x24 the 'grid' command above leaves behind. A mix of a
+                // bare-numbered workspace (what $mod+<n> names one) and
+                // several project-named ones, matching the exact shape of
+                // Jan's real session on 3392: short digits beside
+                // multi-character project names.
+                rig.ctx.configure({ font: 'Iosevka 16', module: '8x21' });
+                rig.ctx.ipcNotify();
+                rig.ctx.dispatch('workspace:9');
+                rig.openWindow('nine-keeper');
+                rig.ctx.dispatch('workspace:asahi');
+                rig.openWindow('asahi-keeper');
+                rig.ctx.dispatch('workspace:kwi3');
+                rig.openWindow('kwi3-keeper');
+                rig.ctx.dispatch('workspace:dotfiles');
+                rig.openWindow('dotfiles-keeper');
+                console.log('REALISTIC ' + JSON.stringify(rig.ctx.workspacesJson()));
+                console.log('REALISTICGRID ' + JSON.stringify(rig.ctx.rpcGridGet()));
             }
         }
     }, 50);
@@ -999,7 +1027,9 @@ ShellRoot {
             var out = { count: tabs.length, height: bar.height, exclusiveZone: bar.exclusiveZone,
                         grid: { active: Kwi3Grid.active, rowHeight: Kwi3Grid.rowHeight,
                                 reserve: Kwi3Grid.reserve, moduleW: Kwi3Grid.moduleW,
-                                contentLeft: Kwi3Grid.contentLeft },
+                                contentLeft: Kwi3Grid.contentLeft,
+                                fontFamily: Kwi3Grid.fontFamily,
+                                fontPixelSize: Kwi3Grid.fontPixelSize },
                         tabs: [] }
             for (var i = 0; i < tabs.length; i++) {
                 var p = tabs[i].mapToItem(r, 0, 0)
@@ -1010,6 +1040,13 @@ ShellRoot {
                 host.findAllByName(tabs[i], "wsTabText", texts)
                 var t = texts.length ? texts[0] : null
                 var tp = t ? t.mapToItem(r, 0, 0) : null
+                // The agent-census badge beside the name (kwi3-55l.16): read
+                // alongside the name text so a scenario can prove BOTH are
+                // visible at once, not merely that the badge exists while
+                // the name it sits beside has collapsed to nothing.
+                var badges = []
+                host.findAllByName(tabs[i], "wsAgentBadge", badges)
+                var bdg = badges.length ? badges[0] : null
                 out.tabs.push({ x: p.x, width: tabs[i].width, clip: tabs[i].clip,
                                 textX: tp ? tp.x : null,
                                 textPainted: t ? t.paintedWidth : null,
@@ -1019,7 +1056,9 @@ ShellRoot {
                                 // proves the tab's Text.text is the project
                                 // name itself, not merely that sortedWorkspaces
                                 // carries it.
-                                text: t ? t.text : null })
+                                text: t ? t.text : null,
+                                badgeVisible: bdg ? bdg.visible : false,
+                                badgeText: bdg ? bdg.text : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
         }
@@ -1064,8 +1103,23 @@ QMLEOF
         # would no longer resolve at all (measured — "env: quickshell: No
         # such file or directory" the first time this ran).
         QS_BIN6="$(command -v "$QUICKSHELL")"
+
+        # kwi3-55l.16: a fixed census fixture (QS_CENSUS_CMD, the same
+        # override Census.qml's own header describes) - "asahi" always
+        # shows 2 working agents, so the badge (wsBadge, "●2") is ALWAYS
+        # visible for that one tab, reproducing exactly the live shape that
+        # made the name collapse to invisible (a badge Bar.qml's tab-width
+        # calc never reserved room for).
+        CENSUS_STUB="$TMP/census-stub.sh"
+        cat > "$CENSUS_STUB" <<'CENSUSEOF'
+#!/bin/sh
+printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0}]\n'
+CENSUSEOF
+        chmod +x "$CENSUS_STUB"
+
         env -u I3SOCK -u SWAYSOCK -u WAYLAND_DISPLAY DISPLAY="$BAR_DPY" \
             PATH="$PBIN6" HOME="$TMP/home" KWI3SOCK="$SOCK_BAR" \
+            QS_CENSUS_CMD="$CENSUS_STUB" \
             XDG_CONFIG_HOME="$CFG6" XDG_RUNTIME_DIR="$RUN6" XDG_CACHE_HOME="$CACHE6" \
             "$QS_BIN6" -p "$CFG6" >"$HOST6_LOG" 2>&1 &
         HOST6_PID=$!
@@ -1162,12 +1216,18 @@ for (let i = 0; i < geom.tabs.length; i++) {
 ok(allWhole, "every tab x and width is a whole multiple of moduleW from contentLeft");
 ok(cum, "each tabs x is the running sum of the ones before it, starting at contentLeft");
 ok(geom.tabs.length && geom.tabs[0].x === contentLeft, "the first tab starts at contentLeft");
-let nonIncreasing = true;
-for (let i = 1; i < cells.length; i++) { if (cells[i] > cells[i - 1]) { nonIncreasing = false; } }
-ok(nonIncreasing, "cell counts are non-increasing left to right (spare cells at the front)");
+// kwi3-55l.16: cells is wants now, not a shared-out total (see Bar.qml own
+// own tabCellPlan comment) - the invariant this used to check ("spare
+// cells at the front") was really just a symptom of averaging sum(wants)
+// across n tabs, which starved any tab whose want was above the average.
+// The correct, and now load-bearing, invariant is that EVERY tab gets
+// no less than what it asked for.
+let noneStarved = true;
+for (let i = 0; i < cells.length; i++) { if (cells[i] < plan.wants[i]) { noneStarved = false; } }
+ok(noneStarved, "no tab has fewer cells than its own want (kwi3-55l.16)");
 const sumWant = plan.wants.reduce((a, b) => a + b, 0);
 const sumCells = cells.reduce((a, b) => a + b, 0);
-ok(sumWant === sumCells, "the shared-out cells add up to exactly the wanted total");
+ok(sumWant === sumCells, "cells equal wants exactly, so the totals agree too");
 // AC2, first clause: the bar is exactly one titlebar row tall and reserves
 // exactly what kwi3 serves. Checked against the RIG own grid.get answer
 // (BOOTGRID, printed by the core itself), not only against Kwi3Grid - a
@@ -1260,9 +1320,13 @@ for (let i = 0; i < geom.tabs.length; i++) {
 ok(whole, 'every tab x and width is a whole multiple of ' + mw + ' from contentLeft ' + left);
 ok(cum, 'tabs abut, starting at contentLeft ' + left);
 ok(match, 'every tab is exactly its planned cells x ' + mw + 'px');
-let nonInc = true;
-for (let i = 1; i < plan.cells.length; i++) { if (plan.cells[i] > plan.cells[i - 1]) { nonInc = false; } }
-ok(nonInc, 'spare cells at the front (non-increasing cells)');
+// kwi3-55l.16: cells is wants now (Bar.qml's own tabCellPlan comment) -
+// the old "non-increasing left to right" check only ever held because
+// sum(wants) was averaged across every tab; the invariant that actually
+// matters is that no tab's allocation falls below what it asked for.
+let noneStarved = true;
+for (let i = 0; i < plan.cells.length; i++) { if (plan.cells[i] < plan.wants[i]) { noneStarved = false; } }
+ok(noneStarved, "no tab has fewer cells than its own want (kwi3-55l.16)");
 JSEOF
             tabcheck() { # <label> <geom> <plan> <grid>
                 node "$TABCHECK" "$2" "$3" "$4" > "$TMP/tabcheck.out" 2>&1
@@ -1426,6 +1490,18 @@ ok(texts.includes("alpha_1"), "a tab is literally labelled alpha_1 (" + JSON.str
 ok(texts.includes("alpha_2"), "a tab is literally labelled alpha_2 (" + JSON.stringify(texts) + ")");
 ok(texts.includes("gamma"), "a tab is literally labelled gamma (" + JSON.stringify(texts) + ")");
 ok(!texts.some((t) => /^[0-9]+$/.test(t || "")), "no project tab is a bare number (" + JSON.stringify(texts) + ")");
+// kwi3-55l.16: the actual live symptom was not a number or a missing
+// workspace, it was an ELIDED label ("...") sitting among short numbered
+// tabs - a check on .text alone (above) cannot see that, since Text.text
+// keeps the full string even when elide: Text.ElideRight is painting "..."
+// over most of it. .truncated is what the widget itself reports. The
+// 200-char fixture tab is excluded on purpose - THAT one is supposed to
+// truncate (its own scenario asserts so), this is about the ordinary
+// project names beside it.
+for (const name of ["alpha_1", "alpha_2", "gamma"]) {
+    const t = geom.tabs.find((x) => x.text === name);
+    ok(t && t.truncated === false, "the " + name + " tab is NOT truncated (" + (t ? t.truncated : "tab not found") + ")");
+}
 ' "$projgeom" > "$TMP/project-label-check.out" 2>&1
             while IFS= read -r line; do
                 case "$line" in
@@ -1434,6 +1510,102 @@ ok(!texts.some((t) => /^[0-9]+$/.test(t || "")), "no project tab is a bare numbe
                     *) fail "project names: checker output" "PASS/FAIL lines" "$line" ;;
                 esac
             done < "$TMP/project-label-check.out"
+
+            # ------------------------------------------------------------------
+            # kwi3-55l.16 (Jan's own report, precise this time): the tab did not
+            # show a bare number and did not go missing - it showed "…". Every
+            # kwi3-path Kwi3Client.call had already been proven to reach the
+            # wire with the right name (the scenario above); the label was
+            # simply ELIDED, because tabCellPlan used to share sum(wants)
+            # EQUALLY across every tab (bar._shareEqualCells) rather than
+            # giving each its own want - a short "9" and a longer "asahi" each
+            # got the AVERAGE, so "asahi" had less width than its own
+            # Text.implicitWidth and elide: Text.ElideRight painted "…" over
+            # it. This scenario reconfigures the rig to Jan's OWN production
+            # font/module (~/.dotfiles/kwi3/config.js: font 'Iosevka 16',
+            # module [8, 21] - not the neutral "monospace"/8x21 default the
+            # rest of this phase runs on, and not the 10x24 the earlier 'grid'
+            # command left behind) and mixes a bare-numbered workspace with
+            # several real project names, the exact shape of his session.
+            # ------------------------------------------------------------------
+            scenario "kwi3-55l.16: a project name beside a bare-numbered workspace is never elided, under Jan's own font/module (Iosevka 16, 8x21)"
+            bar_cmd realistic
+            REALISTIC=""
+            for i in $(seq 1 40); do
+                REALISTIC="$(grep -a '^REALISTIC ' "$BAR_RIG_LOG" | tail -1)"
+                [ -n "$REALISTIC" ] && break
+                sleep 0.1
+            done
+            [ -n "$REALISTIC" ] && pass "bar-driver.js reconfigured to Jan's font/module and created the mixed workspace set" \
+                || fail "bar-driver.js reconfigured and created the mixed workspace set" "a REALISTIC line" "(timed out)"
+            REALGRID="$(grep -a '^REALISTICGRID ' "$BAR_RIG_LOG" | tail -1 | sed 's/^REALISTICGRID //')"
+            case "$REALGRID" in
+                *'"family":"Iosevka"'*'"pixelSize":16'*)
+                    pass "the core's grid.get reports Jan's own font (Iosevka 16)" ;;
+                *) fail "the core's grid.get reports Jan's own font (Iosevka 16)" '"family":"Iosevka","pixelSize":16' "$REALGRID" ;;
+            esac
+
+            fontUp=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 geometry "font$i"
+                sleep 0.15
+                fg="$(last6 geom "font$i")"
+                case "$fg" in *'"fontFamily":"Iosevka"'*'"fontPixelSize":16'*) fontUp=1; break ;; esac
+            done
+            [ -n "$fontUp" ] && pass "Kwi3Grid under the bar picked up Jan's font (Iosevka 16) via grid.changed" \
+                || fail "Kwi3Grid under the bar picked up Jan's font" '"fontFamily":"Iosevka","fontPixelSize":16' "${fg:-}"
+
+            if [ -n "$fontUp" ]; then
+                # The census stub (QS_CENSUS_CMD) polls on its own timer -
+                # wait for its first successful read to actually reach the
+                # "asahi" badge before capturing geometry, rather than
+                # racing it.
+                censusUp=""
+                for i in $(seq 1 40); do
+                    ipc6 call bar6 geometry "cen$i"
+                    sleep 0.15
+                    cg="$(last6 geom "cen$i")"
+                    case "$cg" in *'"text":"asahi"'*'"badgeVisible":true'*) censusUp=1; break ;; esac
+                done
+                [ -n "$censusUp" ] && pass "the census stub's badge (asahi, 2 working) reached the bar" \
+                    || fail "the census stub's badge reached the bar" '"text":"asahi",...,"badgeVisible":true' "${cg:-}"
+
+                sleep 0.2
+                ipc6 call bar6 geometry "realgeom"
+                ipc6 call bar6 plan "realplan"
+                sleep 0.3
+                realgeom="$(last6 geom realgeom)"
+                realplan="$(last6 plan realplan)"
+                tabcheck "realistic font" "$realgeom" "$realplan" "$REALGRID"
+                node -e '
+const geom = JSON.parse(process.argv[1]);
+function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
+for (const name of ["9", "asahi", "kwi3", "dotfiles"]) {
+    const t = geom.tabs.find((x) => x.text === name);
+    ok(!!t, "a tab literally labelled " + JSON.stringify(name) + " exists (" + JSON.stringify(geom.tabs.map((x) => x.text)) + ")");
+    ok(t && t.truncated === false, "the " + name + " tab is NOT truncated under Jan'"'"'s own font (" + (t ? t.truncated : "tab not found") + ")");
+    ok(t && t.textPainted <= t.width, "the " + name + " tab'"'"'s painted label fits inside its own tab (" + (t ? t.textPainted : "?") + " <= " + (t ? t.width : "?") + ")");
+}
+// kwi3-55l.16 - the DECISIVE live symptom (Jan, after a bar restart): a
+// project tab did not merely elide, it painted its census badge ALONE,
+// the name text collapsed to nothing (_tabWantCells never reserved room
+// for the badge). "asahi" carries a live QS_CENSUS_CMD stub badge
+// (2 working agents) for exactly this reason: both the name and the
+// badge must be visible together, neither one crowding the other out.
+const asahi = geom.tabs.find((x) => x.text === "asahi");
+ok(asahi && asahi.badgeVisible === true, "asahi'"'"'s census badge is visible (" + (asahi ? asahi.badgeVisible : "tab not found") + ")");
+ok(asahi && asahi.badgeText === "●2", "asahi'"'"'s badge reads ●2 (two working agents), got " + JSON.stringify(asahi ? asahi.badgeText : null));
+ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
+   "asahi'"'"'s NAME is still fully visible beside its badge, not swallowed by it (text=" + JSON.stringify(asahi ? asahi.text : null) + " truncated=" + (asahi ? asahi.truncated : "?") + ")");
+' "$realgeom" > "$TMP/realistic-check.out" 2>&1
+                while IFS= read -r line; do
+                    case "$line" in
+                        "PASS "*) pass "realistic font: ${line#PASS }" ;;
+                        "FAIL "*) fail "realistic font: ${line#FAIL }" "true" "false" ;;
+                        *) fail "realistic font: checker output" "PASS/FAIL lines" "$line" ;;
+                    esac
+                done < "$TMP/realistic-check.out"
+            fi
 
             scenario "kwi3 restarts under a live bar: last rows kept while down, then refreshed (edge case)"
             ipc6 call bar6 rows "prekill"

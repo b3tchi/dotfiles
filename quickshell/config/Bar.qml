@@ -324,24 +324,57 @@ PanelWindow {
 
     // ---- kwi3 whole-module tab sizing (kwi3-9ut/kwi3-ba2 rule) ---------------
     // Ported from i3kwin/core/solver.js's shareEqualCells (kwi3-ba2's own
-    // fix for the chrome's tab bar), rather than re-derived: equal cells
-    // shared out exactly, and where the total does not divide evenly the
-    // spare cells go to the FIRST items — "module is priority if tab is
-    // rounding then first item in tab should be +1" (Jan, AGENTS.md).
+    // fix for the chrome's tab bar): equal cells shared out of a FIXED
+    // total, and where it does not divide evenly the spare cells go to the
+    // FIRST items — "module is priority if tab is rounding then first item
+    // in tab should be +1" (Jan, AGENTS.md). That fixed-total case is real
+    // in the CHROME (a tab GROUP's children all occupy the SAME content
+    // area, so there genuinely is one width to divide among equal-priority
+    // buttons) — kept here, and still exercised directly by its own
+    // "AC2, mutation target" scenario, in case a future equal-slot case in
+    // THIS file ever needs it again.
+    //
+    // kwi3-55l.16: it is NOT what tabCellPlan below wants, and was a real
+    // bug from kwi3-234.13 porting it in unchanged. There is no fixed width
+    // the workspace strip must fill edge-to-edge — every tab has its OWN
+    // label — so calling this on sum(wants) discarded exactly the
+    // information wants existed to carry: a short numeric workspace ("1")
+    // and a longer project name ("asahi") sitting side by side each got the
+    // AVERAGE of the two wants, not their own, so the longer name's Text
+    // had less width than its own implicitWidth and `elide: Text.ElideRight`
+    // silently kicked in — invisible in this file's own fixtures ("a","bb",
+    // "ccc": three lengths close enough that averaging happened not to
+    // starve any of them) and only visible on a real session with a mix of
+    // bare-numbered and project-named workspaces (Jan, 3392, kwi3-55l.16).
     function _shareEqualCells(total, n) {
         var out = [], base = Math.floor(total / n), spare = total - base * n, i
         for (i = 0; i < n; i++) { out.push(base + (i < spare ? 1 : 0)) }
         return out
     }
 
-    // Cells one tab's own label wants: its rendered width plus one module of
-    // padding each side (i3kwin/bar/shell.qml's tabWidth(), same idea),
-    // capped at 40% of the bar's own width — same cap shell.qml uses,
-    // converted to whole cells — so one long workspace name cannot balloon
-    // every tab once the wants below are shared out (edge case: "a
-    // workspace name wider than the bar").
+    // Cells one tab's own label wants: its rendered width, PLUS the census
+    // badge beside it if one will actually show (kwi3-55l.16 - a real live
+    // symptom, not a guess: a project's tab went from "…" elided to
+    // showing ONLY its agent-count badge, e.g. a workspace named "asahi"
+    // painting as "2", once that project had a live claude agent making
+    // wsBadge visible. The delegate's own wsText.width formula already
+    // subtracts `wsBadge.implicitWidth + wsLabel.spacing` from what it
+    // hands the name - measuring only the raw name here and never
+    // reserving that space up front is what let a NAME text collapse to a
+    // width of zero the moment a badge appeared, at which point the name
+    // paints nothing at all and the badge is the only thing left in the
+    // tab), PLUS one module of padding each side (i3kwin/bar/shell.qml's
+    // tabWidth(), same idea), capped at 40% of the bar's own width — same
+    // cap shell.qml uses, converted to whole cells — so one long workspace
+    // name cannot balloon every tab once the wants below are shared out
+    // (edge case: "a workspace name wider than the bar").
     function _tabWantCells(text) {
         var raw = kwi3TabMetrics.advanceWidth(text)
+        var count = Census.totalFor(text)
+        if (count > 0) {
+            var badgeText = count > 1 ? ("●" + count) : "●"
+            raw += kwi3TabMetrics.advanceWidth(badgeText) + 4 // wsLabel.spacing
+        }
         var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 2
         var cap = Math.max(1, Math.floor((root.width * 0.4) / Kwi3Grid.moduleW))
         return Math.min(want, cap)
@@ -355,13 +388,22 @@ PanelWindow {
 
     // The plan every tab Rectangle below reads its width from: `cells[i]` is
     // one entry per row of root.sortedWorkspaces, in the SAME order —
-    // index-aligned (the Repeater's own `index`), not name-keyed. `wants` is
-    // kept alongside it (not re-derived) purely so a test hook can read what
-    // went INTO the shared-out total without re-measuring text itself. null,
-    // not an object with empty arrays, when kwi3 is not the backend, so the
-    // pre-existing content-sized width is untouched (AC3); empty arrays for
-    // zero workspaces (edge case: "0 workspaces reported" — the Repeater
-    // then simply has nothing to draw).
+    // index-aligned (the Repeater's own `index`), not name-keyed.
+    //
+    // kwi3-55l.16: `cells` IS `wants` — every tab gets exactly what its own
+    // label needs (already in whole modules, already padded, already capped
+    // at 40% of the bar by _tabWantCells), never less. There is no fixed
+    // total to divide among tabs here (unlike the chrome's tab GROUP, where
+    // every child shares one tile's content width) — sharing sum(wants)
+    // equally among n tabs was the bug (see _shareEqualCells's own comment):
+    // it silently elided any tab whose own want was above the average while
+    // handing unused space to every tab below it. `wants` is kept as its own
+    // array (not folded into `cells`) purely so a test hook can read what
+    // each tab asked for without re-measuring text itself, and so the two
+    // stay easy to compare directly. null, not an object with empty arrays,
+    // when kwi3 is not the backend, so the pre-existing content-sized width
+    // is untouched (AC3); empty arrays for zero workspaces (edge case: "0
+    // workspaces reported" — the Repeater then simply has nothing to draw).
     readonly property var tabCellPlan: {
         if (!Kwi3Grid.active) { return null }
         var n = root.sortedWorkspaces.length
@@ -370,8 +412,7 @@ PanelWindow {
         for (var i = 0; i < n; i++) {
             wants.push(root._tabWantCells(root.sortedWorkspaces[i].name))
         }
-        var total = wants.reduce(function (a, b) { return a + b }, 0)
-        return { wants: wants, cells: root._shareEqualCells(total, n) }
+        return { wants: wants, cells: wants.slice() }
     }
 
     // ------------------------------------------------------- agent census ---
