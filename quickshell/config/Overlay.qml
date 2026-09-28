@@ -168,7 +168,48 @@ Scope {
     Connections {
         target: Kwi3Client
         function onAvailableChanged() {
-            if (Kwi3Client.available) root._kwi3Subscribe()
+            if (Kwi3Client.available) {
+                // kwi3-55l.14: `available` flips true on every (re)connect,
+                // including the one after an X11 kwi3 restart — and a
+                // restart resets core/tree.js's module-scope `var conId = 0`
+                // (kwi3-55l.13), while THIS quickshell process (and this
+                // Overlay) lives on across it (Kwi3Client reconnects with
+                // backoff; see its own file header). Any con id cached from
+                // the previous generation collides with the new one's
+                // 1..N — so every id cache this scope keeps gets dropped
+                // right here, unconditionally: harmless on the very first
+                // connect (both are already empty then), and the only
+                // choke point every reconnect passes through.
+                //
+                // focusHistory: the MRU list itself — a stale entry would
+                // otherwise rank a same-numbered NEW window by an OLD
+                // window's recency.
+                //
+                // switcherWindows: the switcher's own last-scanned row
+                // list. This one has teeth beyond the rendered UI: `confirm`
+                // (switcherCommit() -> Combo.confirmCurrent()) reads
+                // whatever this array holds with no regard for whether the
+                // overlay is even visible — hotkeyd sends it on a held-$mod
+                // release the instant it happens to land, restart or not
+                // (Overlay.qml's own IpcHandler{target:"switcher"} above).
+                // Left uncleared, a confirm arriving after a restart could
+                // send window.focus for a row that predates it, now
+                // resolved against a DIFFERENT window that happens to hold
+                // that id in the new generation.
+                root.focusHistory = []
+                root.switcherWindows = []
+                // A switcher (or its search variant) left open across the
+                // boundary is built entirely from the old generation's ids
+                // and the scan that fed it is gone — closing it is the
+                // simple half of the fix (no core epoch/generation needed):
+                // the next switcherShow() re-scans the NEW world from
+                // scratch. The launcher and projects modes never carry a
+                // con id (name-addressed), so they are left alone.
+                if (root.mode === "switcher" || root.mode === "switcher-search") {
+                    root.hide()
+                }
+                root._kwi3Subscribe()
+            }
         }
     }
 

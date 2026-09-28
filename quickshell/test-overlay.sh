@@ -242,7 +242,7 @@ import Quickshell
 import Quickshell.Io
 import "./Common"
 ShellRoot {
-    Overlay {}
+    Overlay { id: ov }
     IpcHandler {
         target: "kwi3test"
         function available(tag: string): void {
@@ -257,6 +257,15 @@ ShellRoot {
         function gridModule(tag: string): void {
             console.log("KWI3TEST grid-module " + tag + " " +
                 Kwi3Grid.moduleW + "x" + Kwi3Grid.moduleH + "x" + Kwi3Grid.rowHeight)
+        }
+        // kwi3-55l.14: dumps Overlay's own con-id caches (focusHistory, the
+        // switcher's own window list) so the restart-reconnect scenario can
+        // assert a stale generation's ids are gone WITHOUT guessing at
+        // timing from the rendered UI alone.
+        function focusHistoryDump(tag: string): void {
+            console.log("KWI3TEST focus-history " + tag + " " +
+                JSON.stringify(ov.focusHistory) + " switcherWindows=" +
+                JSON.stringify(ov.switcherWindows.map((w) => w.id)))
         }
     }
 }
@@ -995,6 +1004,92 @@ else
           fail "moduleW/moduleH/rowHeight were read from Kwi3Grid" "3 numbers" "$dims"
         fi
         key Escape
+      fi
+
+      scenario "kwi3-restart-clears-stale-ids: a kwi3 process restart (con ids restart at 1, sp004/ft010) must not leave focusHistory or an open switcher row holding stale ids (kwi3-55l.14)"
+      # Extracted as a bare "[id,id,...]" array, anchored on the literal
+      # marker text — NOT matched against the raw log line, which quickshell
+      # prefixes with ANSI colour codes ("\e[34m DEBUG\e[97m qml\e[0m: ...")
+      # that can themselves contain any of these decimal ids as a substring
+      # (id 9 inside "\e[97m", id 4 inside "\e[34m", ...) and produce a false
+      # PASS/FAIL with no bug behind it.
+      k1_ipc call kwi3test focusHistoryDump "pre_restart" >/dev/null 2>&1
+      sleep 0.2
+      PRE_HIST="$(grep -a 'KWI3TEST focus-history pre_restart ' "$K1_QSLOG" | tail -1 | \
+        sed -n 's/.*KWI3TEST focus-history pre_restart \(\[[^]]*\]\).*/\1/p')"
+      PRE_HIST_N=",$(tr -d '[]' <<<"$PRE_HIST"),"
+      case "$PRE_HIST_N" in
+        *",$BETA_ID,"*|*",$GAMMA_ID,"*) pass "focusHistory holds pre-restart ids before the restart (sanity)" ;;
+        *) fail "focusHistory holds pre-restart ids before the restart (sanity)" "contains $BETA_ID or $GAMMA_ID" "$PRE_HIST" ;;
+      esac
+
+      # Leave a switcher row open ACROSS the restart — the dangerous case
+      # the bug report names: a row list built from the OLD generation's
+      # ids, still live when the process comes back with ids restarted at 1.
+      k1_ipc call switcher toggle >/dev/null 2>&1
+      win_on qs-switcher >/dev/null || fail "kwi3-restart-clears-stale-ids (switcher open before restart)" "a qs-switcher window" "none"
+
+      # Kill rig 1's server (simulates an X11 kwi3 restart) and rebind a
+      # FRESH world on the SAME socket path — a brand-new rpc-server.js ctx,
+      # so its con ids restart from 1 exactly like the real host
+      # (core/tree.js's module-scope `var conId = 0`). fd 9 must be closed
+      # and reopened, not reused: once rig 1's process exits, the old read
+      # end is gone and a write on the stale fd would just get EPIPE.
+      exec 9>&-
+      kill "$K1_PID" 2>/dev/null
+      wait "$K1_PID" 2>/dev/null
+      rm -f "$K1_SOCK" "$K1_FIFO"
+      mkfifo "$K1_FIFO"
+      node "$K_TMP/rig-driver.js" "$KWI3_RPC_SERVER" "$K1_SOCK" <"$K1_FIFO" >>"$K1_LOG" 2>&1 &
+      K1_PID=$!
+      KWI3_PIDS+=("$K1_PID")
+      exec 9>"$K1_FIFO"
+
+      if ! k_wait_socket "$K1_SOCK" 20; then
+        fail "KWI3 PHASE: rig 1 re-bound $K1_SOCK after the restart" "socket present" "missing"
+      else
+        RECONNECTED=""
+        for i in $(seq 1 40); do
+          k1_ipc call kwi3test available "reconnect_$i" >/dev/null 2>&1
+          sleep 0.2
+          grep -aq "KWI3TEST available reconnect_$i 1" "$K1_QSLOG" && { RECONNECTED=1; break; }
+        done
+        if [ -z "$RECONNECTED" ]; then
+          fail "Kwi3Client.available becomes true again after the restart" "1" "0"
+        else
+          pass "Kwi3Client reconnects to the fresh rig after the restart"
+
+          # The new world's first window collides on id with the OLD
+          # alpha/beta/gamma range (both generations start at 1) — the
+          # exact collision the bug report names.
+          DELTA_ID="$(k_last_id "$(k1_ctl '{"op":"openWindow","title":"delta"}')")"
+          k1_ctl '{"op":"focusWindow","title":"delta"}' >/dev/null
+          sleep 0.3
+
+          k1_ipc call kwi3test focusHistoryDump "post_reconnect" >/dev/null 2>&1
+          sleep 0.2
+          POST_HIST="$(grep -a 'KWI3TEST focus-history post_reconnect ' "$K1_QSLOG" | tail -1 | \
+            sed -n 's/.*KWI3TEST focus-history post_reconnect \(\[[^]]*\]\).*/\1/p')"
+          POST_HIST_N=",$(tr -d '[]' <<<"$POST_HIST"),"
+          case "$POST_HIST_N" in
+            *",$BETA_ID,"*|*",$GAMMA_ID,"*)
+              fail "focusHistory no longer holds a pre-restart id after the reconnect" "no $BETA_ID/$GAMMA_ID" "$POST_HIST" ;;
+            *) pass "focusHistory holds no pre-restart id after the reconnect" ;;
+          esac
+
+          gone_on qs-switcher || fail "the switcher row left open across the restart is gone (closed rather than left stale)" "no qs-switcher" "still mapped"
+
+          # The teeth: even calling switcher confirm directly over IPC —
+          # exactly what hotkeyd sends on a held-$mod release, with no
+          # regard for whether the overlay window is currently mapped —
+          # must not resurrect a window.focus built from the stale
+          # pre-restart row list.
+          k1_mark
+          k1_ipc call switcher confirm >/dev/null 2>&1
+          sleep 0.3
+          assert_eq "switcher confirm after the restart sends NO stale window.focus" "0" \
+            "$(k1_since | grep -c '"method":"window.focus"')"
+        fi
       fi
     fi
   fi
