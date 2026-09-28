@@ -89,6 +89,12 @@ Singleton {
     property var _listeners: ({})   // event name -> [callback, ...]
     property int _nextId: 1
 
+    // kwi3-6oi: event names the server has ever refused (unknown method
+    // param), so a refusal is logged once for the life of this singleton,
+    // not once per (re)connect - _resubscribeAll() retries every name on
+    // every reconnect regardless, in case a redeployed kwi3 now knows it.
+    property var _refusedSubscribes: ({})
+
     // The live connection attempt, recreated from scratch (see the file
     // header) every time _connect() runs — never the same object twice.
     property var _sock: null
@@ -144,11 +150,48 @@ Singleton {
         client._sock.flush()
     }
 
+    // kwi3-6oi: ONE events.subscribe call per name, never a batch. core/
+    // rpc.js's rpcSubscribeValidate() (~l.497) refuses the WHOLE params
+    // array if any single name in it is unknown, and _resubscribeAll()
+    // below sends every event any caller has ever asked for in one shot on
+    // every (re)connect - so a single newer name (workspace.urgent,
+    // kwi3-11m; grid.changed, kwi3-234.19) cost every other subscription
+    // too against a kwi3 that predates it (Jan's own running session until
+    // restarted, or the phone before its next deploy). This is the fix that
+    // helps against an already-deployed older kwi3 - the server stays
+    // strict on purpose (docs/notes/ft010.md's contract), so the client is
+    // what has to stop batching.
+    //
+    // Sent as a REQUEST (an id), not the old best-effort notification: a
+    // bare notification gets no reply either way (JSON-RPC 2.0 - no
+    // Response object for a notification), so a refusal could never be
+    // observed to log it. `call()` already does the right thing with no
+    // socket / mid-reconnect (fires the callback async with an error, no
+    // send attempted) so this is safe to call from _resubscribeAll() the
+    // moment `connected` flips true.
+    //
+    // Idempotency: a name already held is a no-op on the server
+    // (core/rpc.js's own doc comment on events.subscribe - "subscribing to
+    // a name already held just leaves the set as it is"), and every
+    // (re)connect is a NEW server-side connection object with its own empty
+    // subscription set, so re-sending the full name list on each reconnect
+    // never double-registers a name on one connection and never causes a
+    // notification to be dispatched twice for one event.
+    function _subscribeOne(name) {
+        client.call("events.subscribe", [name], function (err) {
+            if (err && !client._refusedSubscribes[name]) {
+                client._refusedSubscribes[name] = true
+                console.warn("Kwi3Client: server refused events.subscribe for '" +
+                    name + "': " + err.message +
+                    " (older kwi3? other event subscriptions are unaffected)")
+            }
+        })
+    }
+
     function _subscribe(names) {
-        if (!names.length) { return }
-        // A notification (no "id"): core/rpc.js executes it and does not
-        // reply — there is nothing to dispatch on the way back.
-        client._send({ jsonrpc: "2.0", method: "events.subscribe", params: names })
+        for (var i = 0; i < names.length; i++) {
+            client._subscribeOne(names[i])
+        }
     }
 
     function _resubscribeAll() {

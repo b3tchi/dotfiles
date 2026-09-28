@@ -1506,6 +1506,255 @@ fi
 kill "$XVFB7_PID" 2>/dev/null
 
 # ============================================================================
+# PHASE 8 (kwi3-6oi) — a batched events.subscribe loses EVERY name when one
+# is unknown to the server. Bar.qml/Kwi3Grid have subscribed to
+# "workspace.urgent" (kwi3-11m) and "grid.changed" (kwi3-234.19) for a while
+# now, and Kwi3Client._resubscribeAll() used to send every listened-for name
+# in ONE events.subscribe call. core/rpc.js's rpcSubscribeValidate()
+# (~l.497) refuses the WHOLE params array if any one name is unknown, so a
+# kwi3 built before either of those events existed (Jan's own running 3392
+# session until restarted, or the phone before its next deploy) silently
+# lost workspace.focused/created/destroyed too, not just the new name. The
+# fixture below plays that exact old server: it knows workspace.focused/
+# created/destroyed and NOTHING newer, and enforces the same all-or-nothing
+# rule core/rpc.js does. It is deliberately NOT a real kwi3 checkout —
+# reproducing an exact pre-kwi3-11m rpc.js would mean pinning a commit tree
+# here, and the behaviour under test (all-or-nothing on ONE bad name) is
+# fully captured by a fixture this small.
+# ============================================================================
+
+scenario "PHASE 8 setup: an old-kwi3 fixture that has never heard of workspace.urgent"
+# Deliberately choose a socket path with NOTHING listening on it yet, and
+# start the harness (both listeners registered) BEFORE the fixture server
+# ever exists - the same shape PHASE 7a uses. This is load-bearing, not
+# cosmetic: on a fast local AF_UNIX connect it is possible for on()'s own
+# immediate branch (`if (_sock && _sock.connected) { _subscribe([event]) }`)
+# to win the race and send each name as its OWN single-item call before
+# _resubscribeAll() ever runs - which would make this scenario pass by
+# accident whether or not the real bug (the BATCH _resubscribeAll sends on
+# every (re)connect) is fixed. Registering both listeners against a socket
+# that is not there yet guarantees neither can be "already connected" when
+# on() runs, so the connection that eventually succeeds is unambiguously the
+# one _resubscribeAll() drives - the only path this task changes.
+OLDFIXTURE="$TMP/fake-old-kwi3-server.js"
+cat > "$OLDFIXTURE" <<'JSEOF'
+'use strict';
+// Throwaway fixture, NOT part of the kwi3 repo (kwi3-6oi): a stand-in for a
+// kwi3 built before kwi3-11m/kwi3-234.19 - one that has never heard of
+// "workspace.urgent" or "grid.changed". Mirrors core/rpc.js's real contract
+// for the one thing this test cares about: rpcSubscribeValidate() checks
+// the WHOLE params array before rpcSubscribeRun() ever runs, so one bad
+// name in a BATCHED events.subscribe call refuses every name in that same
+// call - never partial.
+const net = require('net');
+const fs = require('fs');
+const sockPath = process.argv[2];
+try { fs.unlinkSync(sockPath); } catch (e) { /* not there */ }
+
+// The event vocabulary of the OLD server this fixture plays.
+const KNOWN = { 'workspace.focused': true, 'workspace.created': true, 'workspace.destroyed': true };
+
+const server = net.createServer((sock) => {
+    const subs = {};
+    let buf = '';
+    const reply = (id, obj) => {
+        if (id === undefined) { return; }   // notification: JSON-RPC 2.0 never replies
+        sock.write(JSON.stringify(Object.assign({ jsonrpc: '2.0', id: id }, obj)) + '\n');
+    };
+    sock.on('data', (chunk) => {
+        buf += chunk.toString('utf8');
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            if (!line.trim()) { continue; }
+            let req;
+            try { req = JSON.parse(line); } catch (e) { continue; }
+            if (!req || typeof req !== 'object' || typeof req.method !== 'string') { continue; }
+            const id = ('id' in req) ? req.id : undefined;
+            if (req.method === 'events.subscribe') {
+                const names = Array.isArray(req.params) ? req.params : [];
+                const bad = names.find((n) => !KNOWN[String(n)]);
+                if (bad !== undefined) {
+                    reply(id, { error: { code: -32602, message: 'unknown event name: ' + bad } });
+                    continue;               // all-or-nothing: nothing in this call is added
+                }
+                for (const n of names) { subs[n] = true; }
+                reply(id, { result: {} });
+            } else if (req.method === 'workspace.focus') {
+                reply(id, { result: {} });
+                if (subs['workspace.focused']) {
+                    sock.write(JSON.stringify({ jsonrpc: '2.0', method: 'workspace.focused',
+                        params: { id: 1, num: (req.params && req.params.num) || 0 } }) + '\n');
+                }
+            } else {
+                reply(id, { result: null });
+            }
+        }
+    });
+});
+server.listen(sockPath, () => { console.log(sockPath); });
+JSEOF
+
+SOCK_OLD="$TMP/kwi3-old.sock"
+CFG8="$TMP/cfg8"
+mkdir -p "$CFG8" "$TMP/run8" "$TMP/cache8"
+ln -sf "$COMMON_DIR" "$CFG8/Common"
+cat > "$CFG8/shell.qml" <<'QMLEOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+// Mirrors the real dotfiles Bar's own registration shape post kwi3-11m: a
+// listener for the LONG-STANDING event (workspace.focused) and one for the
+// NEWER event an older server does not know (workspace.urgent), both
+// registered before any connection exists (KWI3SOCK names nothing yet when
+// this boots - see the setup comment above).
+ShellRoot {
+    id: host
+    function emit(name, payload) { console.log("KWI3TEST8 " + name + " " + payload) }
+
+    property int focusedCount: 0
+    property int urgentCount: 0
+
+    Component.onCompleted: {
+        Kwi3Client.on("workspace.focused", function (p) { host.focusedCount++ })
+        Kwi3Client.on("workspace.urgent", function (p) { host.urgentCount++ })
+    }
+
+    IpcHandler {
+        target: "kwi3test8"
+
+        function avail(tag: string): void {
+            host.emit("avail", tag + " " + (Kwi3Client.available ? "1" : "0"))
+        }
+        function counts(tag: string): void {
+            host.emit("counts", tag + " " + host.focusedCount + " " + host.urgentCount)
+        }
+        function focus(tag: string, num: int): void {
+            Kwi3Client.call("workspace.focus", { num: num }, function (err, res) {
+                host.emit("focus-done", tag + " " + JSON.stringify({ err: err, res: res }))
+            })
+        }
+    }
+}
+QMLEOF
+
+HOST8_LOG="$TMP/qs-old.log"
+env -u I3SOCK -u SWAYSOCK -u WAYLAND_DISPLAY -u DISPLAY \
+    HOME="$TMP/home" KWI3SOCK="$SOCK_OLD" QT_QPA_PLATFORM=offscreen \
+    XDG_CONFIG_HOME="$CFG8" XDG_RUNTIME_DIR="$TMP/run8" XDG_CACHE_HOME="$TMP/cache8" \
+    "$QUICKSHELL" -p "$CFG8" >"$HOST8_LOG" 2>&1 &
+HOST8_PID=$!
+PIDS+=("$HOST8_PID")
+
+ipc8() {
+    env XDG_CONFIG_HOME="$CFG8" XDG_RUNTIME_DIR="$TMP/run8" XDG_CACHE_HOME="$TMP/cache8" \
+        "$QUICKSHELL" ipc --pid "$HOST8_PID" "$@" >/dev/null 2>&1
+}
+last8() { grep -a "KWI3TEST8 $1 $2 " "$HOST8_LOG" | tail -1 | sed "s/^.*KWI3TEST8 $1 $2 //"; }
+poll_avail8() { # <prefix> <expect 0|1> <timeout-s>
+    local prefix="$1" expect="$2" n=$(( ${3:-10} * 5 )) i tag got
+    for i in $(seq 1 "$n"); do
+        tag="${prefix}_$i"
+        ipc8 call kwi3test8 avail "$tag"
+        sleep 0.15
+        got="$(last8 avail "$tag")"
+        [ "$got" = "$expect" ] && return 0
+    done
+    return 1
+}
+
+HOST8_UP=""
+for i in $(seq 1 60); do
+    n="$(env XDG_CONFIG_HOME="$CFG8" XDG_RUNTIME_DIR="$TMP/run8" XDG_CACHE_HOME="$TMP/cache8" \
+             "$QUICKSHELL" ipc --pid "$HOST8_PID" show 2>/dev/null | grep -c 'kwi3test8')"
+    [ "${n:-0}" -gt 0 ] && { HOST8_UP=1; break; }
+    sleep 0.25
+done
+
+if [ -z "$HOST8_UP" ]; then
+    fail "the old-kwi3 harness exposed the kwi3test8 IPC target" "a kwi3test8 target" "none"
+    tail -40 "$HOST8_LOG" >&2
+else
+    pass "the old-kwi3 harness booted with both listeners registered against nothing listening yet"
+    if poll_avail8 "pre" "0" 3; then
+        pass "Kwi3Client.available is false before the old-kwi3 fixture exists"
+    else
+        fail "Kwi3Client.available is false before the fixture exists" "0" "$(last8 avail pre_1)"
+    fi
+
+    OLD_LOG_A="$TMP/old-a.log"
+    node "$OLDFIXTURE" "$SOCK_OLD" >"$OLD_LOG_A" 2>&1 &
+    OLD_PID=$!
+    PIDS+=("$OLD_PID")
+
+    if ! wait_for_socket "$SOCK_OLD" 10; then
+        fail "old-kwi3 fixture bound $SOCK_OLD" "socket present" "missing"
+        cat "$OLD_LOG_A" >&2
+    elif ! poll_avail8 "up" "1" 10; then
+        fail "Kwi3Client connects to the old-kwi3 fixture" "available=1" "$(last8 avail up_1)"
+    else
+        pass "old-kwi3 fixture bound its socket and Kwi3Client connected to it (the FIRST connect, driven entirely by _resubscribeAll - both listeners were registered before this socket existed)"
+
+        scenario "an unknown name (workspace.urgent) in the subscribe set must not cost workspace.focused too (kwi3-6oi)"
+        ipc8 call kwi3test8 focus "focus1" "2"
+        got=""
+        for i in $(seq 1 30); do
+            ipc8 call kwi3test8 counts "c$i"
+            sleep 0.15
+            got="$(last8 counts "c$i")"
+            case "$got" in "1 "*) break ;; esac
+        done
+        case "$got" in
+            "1 "*) pass "workspace.focused still arrives even though workspace.urgent is unknown to this server" ;;
+            *) fail "workspace.focused still arrives even though workspace.urgent is unknown to this server" \
+                    "focusedCount=1" "counts=$got" ;;
+        esac
+
+        refused_n="$(grep -aic 'workspace.urgent' "$HOST8_LOG" | tr -d ' ')"
+        [ "${refused_n:-0}" -ge 1 ] && pass "the refusal of the unknown name is observable client-side (not silently eaten)" \
+            || fail "the refusal of the unknown name is observable client-side" ">=1 mention of workspace.urgent" "$refused_n"
+        [ "${refused_n:-0}" -le 1 ] && pass "the refusal is logged ONCE, not spammed" \
+            || fail "the refusal is logged once, not spammed" "<=1 mention" "$refused_n"
+
+        scenario "reconnect to the same old server: still no spam, workspace.focused keeps working (idempotent resubscribe, kwi3-6oi)"
+        kill "$OLD_PID" 2>/dev/null
+        for i in $(seq 1 30); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 0.1; done
+        poll_avail8 "down" "0" 10 >/dev/null
+        OLD_LOG_B="$TMP/old-b.log"
+        node "$OLDFIXTURE" "$SOCK_OLD" >"$OLD_LOG_B" 2>&1 &
+        OLD_PID=$!
+        PIDS+=("$OLD_PID")
+        if ! wait_for_socket "$SOCK_OLD" 15; then
+            fail "the restarted old-kwi3 fixture rebound $SOCK_OLD" "socket present" "missing"
+        elif ! poll_avail8 "reup" "1" 15; then
+            fail "Kwi3Client reconnects to the restarted old-kwi3 fixture" "available=1" "$(last8 avail reup_1)"
+        else
+            pass "Kwi3Client reconnected to the restarted old-kwi3 fixture"
+            ipc8 call kwi3test8 focus "focus2" "3"
+            got2=""
+            for i in $(seq 1 30); do
+                ipc8 call kwi3test8 counts "d$i"
+                sleep 0.15
+                got2="$(last8 counts "d$i")"
+                case "$got2" in "2 "*) break ;; esac
+            done
+            case "$got2" in
+                "2 "*) pass "workspace.focused keeps arriving after a reconnect to the same old server" ;;
+                *) fail "workspace.focused keeps arriving after a reconnect" "focusedCount=2" "counts=$got2" ;;
+            esac
+            refused_total="$(grep -aic 'workspace.urgent' "$HOST8_LOG" | tr -d ' ')"
+            [ "${refused_total:-0}" -le 1 ] && pass "the refusal is still logged only once across the reconnect (no spam)" \
+                || fail "the refusal is logged once total, not once per reconnect" "<=1 mention" "$refused_total"
+        fi
+    fi
+fi
+kill "$HOST8_PID" 2>/dev/null
+kill "$OLD_PID" 2>/dev/null
+
+# ============================================================================
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
