@@ -857,9 +857,11 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
 
     // Named commands, one file each under cmdDir (processed then deleted):
     // there are more of these than there are spare signals.
-    //   long - a 200-char workspace (edge case: a name wider than the bar)
-    //   grid - the grid changes under a live bar: module 8x21 -> 10x24
-    //          through configure() + ipcNotify(), PHASE 5's own path
+    //   long    - a 200-char workspace (edge case: a name wider than the bar)
+    //   grid    - the grid changes under a live bar: module 8x21 -> 10x24
+    //             through configure() + ipcNotify(), PHASE 5's own path
+    //   project - the dotfiles projects picker's own RPC pair
+    //             (kwi3-55l.16, below)
     setInterval(() => {
         let names = [];
         try { names = fs.readdirSync(cmdDir).sort(); } catch (e) { return; }
@@ -873,6 +875,25 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
                 rig.ctx.configure({ module: '10x24' });
                 rig.ctx.ipcNotify();
                 console.log('GRID ' + JSON.stringify(rig.ctx.rpcGridGet()));
+            } else if (name === 'project') {
+                // Exactly the two RPC pairs Overlay.qml's kwi3 path
+                // (projectsSwitch/_kwi3ProjectsNew) sends, run through the
+                // same RPC_METHODS table a real socket call would reach
+                // (kwi3-55l.16): a project with a pre-existing BARE
+                // workspace ("alpha") goes through workspace.rename
+                // (bare -> alpha_1) then workspace.focus (alpha_2) -
+                // Shift+Enter's rename chain (AC1c); a brand-new project
+                // with no live workspace ("gamma") goes through
+                // workspace.focus alone - Enter's (and Shift+Enter's own)
+                // zero-workspaces branch.
+                rig.ctx.dispatch('workspace:alpha');
+                rig.openWindow('alpha-keeper'); // keeper: switching away must not reap it
+                const bare = rig.ctx.rpcWorkspaceList().find((w) => w.name === 'alpha');
+                rig.ctx.RPC_METHODS['workspace.rename'].run(null, { id: bare.id, name: 'alpha_1' });
+                rig.ctx.RPC_METHODS['workspace.focus'].run(null, { name: 'alpha_2' });
+                rig.openWindow('alpha2-keeper'); // keeper: switching away must not reap it
+                rig.ctx.RPC_METHODS['workspace.focus'].run(null, { name: 'gamma' });
+                console.log('PROJECT ' + JSON.stringify(rig.ctx.workspacesJson()));
             }
         }
     }, 50);
@@ -993,7 +1014,12 @@ ShellRoot {
                                 textX: tp ? tp.x : null,
                                 textPainted: t ? t.paintedWidth : null,
                                 textWidth: t ? t.width : null,
-                                truncated: t ? t.truncated : null })
+                                truncated: t ? t.truncated : null,
+                                // The string actually painted (kwi3-55l.16):
+                                // proves the tab's Text.text is the project
+                                // name itself, not merely that sortedWorkspaces
+                                // carries it.
+                                text: t ? t.text : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
         }
@@ -1335,6 +1361,79 @@ ok(lt && lt.clip === true, "the tab clips its children");
             ipc6 call bar6 plan "pgfinal"
             sleep 0.3
             tabcheck "after grid.changed" "$(last6 geom ggfinal)" "$(last6 plan pgfinal)" "$NEWGRID"
+
+            # ------------------------------------------------------------------
+            # kwi3-55l.16 — the dotfiles $mod+p projects picker's own RPC pair
+            # (Overlay.qml projectsSwitch/_kwi3ProjectsNew) must leave the BAR
+            # tab showing the project's name, not a bare workspace number. The
+            # rig below issues exactly the RPC calls the picker sends: a
+            # pre-existing bare workspace ("alpha") is renamed to "alpha_1"
+            # then the picker focuses the next index "alpha_2" (Shift+Enter's
+            # chain, AC1c); a brand-new project with no live workspace
+            # ("gamma") goes straight through workspace.focus (Enter's own
+            # zero-workspaces branch). Checked two ways: core's own
+            # workspace.list (PROJECT line) and the REAL rendered tab text
+            # (wsTabText.text) through the same whole-module tab-sizing rule
+            # every other name in this phase is held to.
+            # ------------------------------------------------------------------
+            scenario "kwi3-55l.16: the projects-picker RPC pair names workspaces after the project, and the bar tab shows that name"
+            bar_cmd project
+            PROJECT=""
+            for i in $(seq 1 30); do
+                PROJECT="$(grep -a '^PROJECT ' "$BAR_RIG_LOG" | tail -1 | sed 's/^PROJECT //')"
+                [ -n "$PROJECT" ] && break
+                sleep 0.1
+            done
+            [ -n "$PROJECT" ] && pass "the rig ran the projects-picker RPC pair" \
+                || fail "the rig ran the projects-picker RPC pair" "a PROJECT line" "(timed out)"
+            case "$PROJECT" in
+                *'"name":"alpha_1"'*'"name":"alpha_2"'*'"name":"gamma"'*)
+                    pass "core: workspace.list carries the project's own names (alpha_1, alpha_2, gamma), not bare numbers" ;;
+                *) fail "core: workspace.list carries the project's own names" '"alpha_1","alpha_2","gamma"' "$PROJECT" ;;
+            esac
+
+            got_proj_rows=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 rows "proj$i"
+                sleep 0.15
+                got_proj_rows="$(last6 rows "proj$i")"
+                case "$got_proj_rows" in *'"name":"gamma"'*) break ;; esac
+            done
+            case "$got_proj_rows" in
+                *'"name":"alpha_1"'*) pass "the bar's own row list carries the renamed project tab (alpha_1)" ;;
+                *) fail "the bar's own row list carries the renamed project tab (alpha_1)" '"name":"alpha_1"' "$got_proj_rows" ;;
+            esac
+            case "$got_proj_rows" in
+                *'"name":"alpha_2"'*) pass "the bar's own row list carries the second indexed project tab (alpha_2)" ;;
+                *) fail "the bar's own row list carries the second indexed project tab (alpha_2)" '"name":"alpha_2"' "$got_proj_rows" ;;
+            esac
+            case "$got_proj_rows" in
+                *'"name":"gamma"'*'"focused":true'*) pass "the bar's own row list carries the brand-new project tab (gamma), focused" ;;
+                *) fail "the bar's own row list carries the brand-new project tab (gamma), focused" '"name":"gamma",...,"focused":true' "$got_proj_rows" ;;
+            esac
+
+            ipc6 call bar6 geometry "projgeom"
+            ipc6 call bar6 plan "projplan"
+            sleep 0.3
+            projgeom="$(last6 geom projgeom)"
+            projplan="$(last6 plan projplan)"
+            tabcheck "project names" "$projgeom" "$projplan" "$NEWGRID"
+            node -e '
+const geom = JSON.parse(process.argv[1]);
+function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
+const texts = geom.tabs.map((t) => t.text);
+ok(texts.includes("alpha_1"), "a tab is literally labelled alpha_1 (" + JSON.stringify(texts) + ")");
+ok(texts.includes("alpha_2"), "a tab is literally labelled alpha_2 (" + JSON.stringify(texts) + ")");
+ok(texts.includes("gamma"), "a tab is literally labelled gamma (" + JSON.stringify(texts) + ")");
+ok(!texts.some((t) => /^[0-9]+$/.test(t || "")), "no project tab is a bare number (" + JSON.stringify(texts) + ")");
+' "$projgeom" > "$TMP/project-label-check.out" 2>&1
+            while IFS= read -r line; do
+                case "$line" in
+                    "PASS "*) pass "project names: ${line#PASS }" ;;
+                    "FAIL "*) fail "project names: ${line#FAIL }" "true" "false" ;;
+                    *) fail "project names: checker output" "PASS/FAIL lines" "$line" ;;
+                esac
+            done < "$TMP/project-label-check.out"
 
             scenario "kwi3 restarts under a live bar: last rows kept while down, then refreshed (edge case)"
             ipc6 call bar6 rows "prekill"
