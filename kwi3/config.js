@@ -95,3 +95,83 @@ kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher|clip|notif)$/ }, w 
     w.moveTo(kwi3.grid.center(w));
     w.focus();
 });
+
+// =====================================================================
+// kwi3-55l.9 (discovered auditing kwi3-55l.2): the rest of i3/config.common's
+// `for_window [...] floating enable` rules — i3/config.common:316-342, every
+// non-Quickshell app i3 has ever floated by class/title — mirrored here so
+// the same ~27 windows float on kwi3 instead of stealing a tile. Without
+// this table only the dialog/utility window-type hint core/classify.js
+// already recognises kept a window off the grid; none of these apps carry
+// one, so on a kwi3 session every one of them used to tile.
+//
+// JAN DECISION 2026-09-28 (kwi3-55l.9): port ALL of these, one row per
+// i3/config.common `for_window` line, translated faithfully:
+//   - i3 criteria are UNANCHORED PCRE substring matches against WM_CLASS
+//     class/instance or the window title (i3's own semantics, unrelated to
+//     kwi3) — so each RegExp below carries no ^/$, matching
+//     core/config-api.js's kwi3MatchField(), which runs pattern.test(value)
+//     with no anchoring of its own either.
+//   - i3's case-insensitive `(?i)` prefix (System-config-printer.py,
+//     virtualbox) becomes the RegExp's own `i` flag — JS regex syntax has no
+//     inline (?i) group (confirmed: it throws "Invalid group"), so the flag
+//     is the only faithful equivalent.
+//   - ONE deliberate narrowing: i3's `System-config-printer.py` has an
+//     UNESCAPED `.` (PCRE: any character), ported as `\.` (a literal dot),
+//     so e.g. class `System-config-printerXpy` floats on i3 but tiles here.
+//     Every other pattern is character-for-character i3's.
+//   - i3's per-rule `sticky enable` (i3_help, Lxappearance, Nitrogen, qt5ct,
+//     Qtconfig-qt4) is NOT ported — kwi3.onWindowAdded's hook handle
+//     (core/reconcile.js kwi3WindowHandle: float/noFrame/moveTo/focus only)
+//     has no sticky-equivalent method yet, blocked on kwi3-8kr. Marked
+//     `sticky: true` below as a marker for whoever wires kwi3-8kr up; the
+//     loop below ignores that field today.
+//   - Oblogout's i3 rule is `fullscreen enable`, not `floating enable` — the
+//     hook handle has no fullscreen() method either (only float/noFrame/
+//     moveTo/focus), so it is floated like the rest of the table instead of
+//     dropped. Not a faithful port of "fullscreen", just the closest thing
+//     kwi3's hook API can do today; note it if kwi3 ever grows a fullscreen
+//     hook method.
+//   - i3's per-rule `border ...` clause (pixel 1 / normal / none) has no
+//     onWindowAdded equivalent (no border method on the hook handle) and is
+//     dropped; a floated window keeps kwi3's normal float decoration.
+//   - `for_window [urgent=latest] focus` (i3/config.common:346) is
+//     deliberately excluded per the same 2026-09-28 decision — kwi3 has no
+//     urgent-window match key and no such auto-focus-on-urgent policy is
+//     wanted here.
+// =====================================================================
+
+var KWI3_I3_FLOAT_RULES = [
+    // match                                              i3 source line   sticky in i3? (kwi3-8kr, not ported)
+    { match: { title: /alsamixer/ } },                                  // :316
+    { match: { class: /calamares/ } },                                  // :317
+    { match: { class: /Clipgrab/ } },                                   // :318
+    { match: { title: /File Transfer*/ } },                             // :319
+    { match: { class: /fpakman/ } },                                    // :320
+    { match: { class: /Galculator/ } },                                 // :321
+    { match: { class: /GParted/ } },                                    // :322
+    { match: { title: /i3_help/ }, sticky: true },                      // :323
+    { match: { class: /Lightdm-settings/ } },                           // :324
+    { match: { class: /Lxappearance/ }, sticky: true },                 // :325
+    { match: { class: /Manjaro-hello/ } },                              // :326
+    { match: { class: /Manjaro Settings Manager/ } },                   // :327
+    { match: { title: /MuseScore: Play Panel/ } },                      // :328
+    { match: { class: /Nitrogen/ }, sticky: true },                     // :329
+    { match: { class: /Oblogout/ } },                                   // :330 (i3: fullscreen enable — floated instead, see above)
+    { match: { class: /octopi/ } },                                     // :331
+    { match: { title: /About Pale Moon/ } },                            // :332
+    { match: { class: /Pamac-manager/ } },                              // :333
+    { match: { class: /Pavucontrol/ } },                                // :334
+    { match: { class: /qt5ct/ }, sticky: true },                        // :335
+    { match: { class: /Qtconfig-qt4/ }, sticky: true },                 // :336
+    { match: { class: /Simple-scan/ } },                                // :337
+    { match: { class: /System-config-printer\.py/i } },                 // :338 (i3: (?i))
+    { match: { class: /Skype/ } },                                      // :339
+    { match: { class: /Timeset-gui/ } },                                // :340
+    { match: { class: /virtualbox/i } },                                // :341 (i3: (?i))
+    { match: { class: /Xfburn/ } }                                      // :342
+];
+
+KWI3_I3_FLOAT_RULES.forEach(function (rule) {
+    kwi3.onWindowAdded(rule.match, w => { w.float(); });
+});

@@ -1241,6 +1241,160 @@ else
   fail "kwi3/config.js applies Jan's runner rule through the real core" "OK (exit 0)" "$(cat "$K_TMP/config-js-check.log")"
 fi
 
+# ---------------------------------------------------------------------------
+# kwi3-55l.9: the non-Quickshell app float table (i3/config.common:316-342,
+# ported into kwi3/config.js as KWI3_I3_FLOAT_RULES) applies against the REAL
+# kwi3 core, same discipline as the runner-rule check just above.
+#
+# Driven from an EXPECTED table written here independently of config.js (the
+# i3 source line, the i3 criterion key, the literal i3 string, whether i3 had
+# `(?i)`), covering all 27 rows. Each row is proven to be keyed on the RIGHT
+# field, not merely to match something (review rejection #1 of kwi3-55l.9:
+# a title equal to the class let `class`->`title` swaps pass):
+#   class rows: WM_CLASS class = the string, instance and title unrelated ->
+#               floats; the string ONLY in the title (class/instance "foot")
+#               -> tiles.
+#   title rows: title = the string, class/instance "foot" -> floats; the
+#               string ONLY in class AND instance (title "foot") -> tiles.
+#   (?i) rows:  the positive uses a differently-cased value, so the `i` flag
+#               has to be there; every other row's case-swapped value must
+#               tile, so no stray `i` flag either.
+# Plus a cross-check that config.js's table has exactly these 27 rows, each
+# with exactly the expected single key, and the xterm negative control.
+# ---------------------------------------------------------------------------
+scenario "kwi3-i3-float-rules-vs-real-core: i3/config.common's non-Quickshell floating-enable rules (kwi3-55l.9) apply through the real kwi3 core, each keyed on the right field"
+cat > "$K_TMP/i3-float-rules-check.js" <<'JSEOF'
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const KWI3_REPO = process.argv[2];
+const CONFIG_JS = process.argv[3];
+const h = require(path.join(KWI3_REPO, 'i3kwin/test/harness.js'));
+const fake = require(path.join(KWI3_REPO, 'i3kwin/test/fake-kwin.js'));
+
+const core = fs.readdirSync(path.join(KWI3_REPO, 'i3kwin/core'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => path.join(KWI3_REPO, 'i3kwin/core', f));
+const adapter = path.join(KWI3_REPO, 'i3kwin/adapters/kwin/contents/code/adapter.js');
+const SOURCES = core.concat([adapter, CONFIG_JS]);
+
+let pass = true;
+let checks = 0;
+function eq(got, want, label) {
+    checks++;
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+        console.error('FAIL: ' + label + ' - got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want));
+        pass = false;
+    }
+}
+
+// Transcribed by hand from i3/config.common:316-342 - NOT read from
+// config.js. `value` is the i3 criterion string used literally as a window
+// property; for `File Transfer*` the literal (with its `*`) is a string the
+// unanchored regex matches, just as i3's PCRE does.
+const EXPECTED = [
+    { line: 316, key: 'title', value: 'alsamixer' },
+    { line: 317, key: 'class', value: 'calamares' },
+    { line: 318, key: 'class', value: 'Clipgrab' },
+    { line: 319, key: 'title', value: 'File Transfer' },
+    { line: 320, key: 'class', value: 'fpakman' },
+    { line: 321, key: 'class', value: 'Galculator' },
+    { line: 322, key: 'class', value: 'GParted' },
+    { line: 323, key: 'title', value: 'i3_help' },
+    { line: 324, key: 'class', value: 'Lightdm-settings' },
+    { line: 325, key: 'class', value: 'Lxappearance' },
+    { line: 326, key: 'class', value: 'Manjaro-hello' },
+    { line: 327, key: 'class', value: 'Manjaro Settings Manager' },
+    { line: 328, key: 'title', value: 'MuseScore: Play Panel' },
+    { line: 329, key: 'class', value: 'Nitrogen' },
+    { line: 330, key: 'class', value: 'Oblogout' },
+    { line: 331, key: 'class', value: 'octopi' },
+    { line: 332, key: 'title', value: 'About Pale Moon' },
+    { line: 333, key: 'class', value: 'Pamac-manager' },
+    { line: 334, key: 'class', value: 'Pavucontrol' },
+    { line: 335, key: 'class', value: 'qt5ct' },
+    { line: 336, key: 'class', value: 'Qtconfig-qt4' },
+    { line: 337, key: 'class', value: 'Simple-scan' },
+    { line: 338, key: 'class', value: 'System-config-printer.py', ci: true },
+    { line: 339, key: 'class', value: 'Skype' },
+    { line: 340, key: 'class', value: 'Timeset-gui' },
+    { line: 341, key: 'class', value: 'virtualbox', ci: true },
+    { line: 342, key: 'class', value: 'Xfburn' }
+];
+
+function swapCase(s) {
+    return s.split('').map((c) => c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()).join('');
+}
+
+// One fresh world per window: a placement answer can never be an artefact
+// of an earlier window in the same run.
+function placementOf(props) {
+    const ctx = h.load(SOURCES);
+    const world = h.makeWorld(ctx, {});
+    ctx.ensureRoot();
+    const w = fake.observe(fake.FakeWindow(Object.assign({
+        output: world.ws.activeScreen,
+        desktops: [world.ws.currentDesktop],
+        frameGeometry: fake.rect(0, 0, 400, 300)
+    }, props)), 'window');
+    world.ws.windows.push(w);
+    ctx.manage(w);
+    return ctx.windowPlacement(ctx.windowInfo(w).id);
+}
+
+// --- cross-check against config.js's own table ---
+const ctx0 = h.load(SOURCES);
+h.makeWorld(ctx0, {});
+ctx0.ensureRoot();
+eq(ctx0.kwi3LoadErrors(), [], 'kwi3/config.js loads through the real core with no collected errors');
+const TABLE = ctx0.KWI3_I3_FLOAT_RULES;
+eq(Array.isArray(TABLE) ? TABLE.length : TABLE, EXPECTED.length, 'KWI3_I3_FLOAT_RULES has one row per i3 rule');
+EXPECTED.forEach(function (e, i) {
+    const row = TABLE && TABLE[i];
+    eq(row ? Object.keys(row.match) : null, [e.key], ':' + e.line + ' row is keyed on exactly ' + e.key);
+});
+
+// --- behaviour, every row ---
+const NEUTRAL = 'foot';
+EXPECTED.forEach(function (e) {
+    const tag = ':' + e.line + ' ' + e.key + '=' + JSON.stringify(e.value);
+    const posValue = e.ci ? swapCase(e.value) : e.value;
+    let pos, neg;
+    if (e.key === 'class') {
+        pos = { resourceClass: posValue, resourceName: 'unrelatedinst', caption: 'Unrelated window' };
+        neg = { resourceClass: NEUTRAL, resourceName: NEUTRAL, caption: e.value };
+    } else {
+        pos = { resourceClass: NEUTRAL, resourceName: NEUTRAL, caption: posValue };
+        neg = { resourceClass: e.value, resourceName: e.value, caption: NEUTRAL };
+    }
+    eq(placementOf(pos), 'floating', tag + ': the ' + e.key + (e.ci ? ' (differently cased: ' + JSON.stringify(posValue) + ')' : '') + ' floats it');
+    eq(placementOf(neg), 'tiled', tag + ': the string only in the ' + (e.key === 'class' ? 'title' : 'class/instance') + ' leaves it tiled');
+
+    if (!e.ci) {
+        const swapped = Object.assign({}, pos);
+        if (e.key === 'class') { swapped.resourceClass = swapCase(e.value); }
+        else { swapped.caption = swapCase(e.value); }
+        eq(placementOf(swapped), 'tiled', tag + ': case-sensitive in i3, so ' + JSON.stringify(swapCase(e.value)) + ' stays tiled');
+    }
+});
+
+// The one deliberate narrowing: i3's `.` in System-config-printer.py is an
+// unescaped PCRE dot (any char); config.js escapes it.
+eq(placementOf({ resourceClass: 'System-config-printerXpy', resourceName: 'x', caption: 'x' }), 'tiled',
+   ':338 escaped dot (deliberate narrowing vs i3): System-config-printerXpy stays tiled');
+
+// Negative control: an ordinary xterm matches none of the rows.
+eq(placementOf({ resourceClass: 'xterm', resourceName: 'xterm', caption: 'xterm' }), 'tiled',
+   'xterm (non-matching control) stays tiled');
+
+if (!pass) { process.exit(1); }
+console.log('OK - kwi3/config.js\'s ported i3 float-rule table: ' + checks + ' checks over ' + EXPECTED.length + ' rows');
+JSEOF
+if node "$K_TMP/i3-float-rules-check.js" "$KWI3_REPO" "$KWI3_CONFIG_JS" >"$K_TMP/i3-float-rules-check.log" 2>&1; then
+  pass "kwi3/config.js's ported i3/config.common float-rule table (kwi3-55l.9): all 27 rows float on the right field only, case rules hold, xterm tiles ($(tail -1 "$K_TMP/i3-float-rules-check.log"))"
+else
+  fail "kwi3/config.js's ported i3/config.common float-rule table applies through the real core, each row keyed on the right field" "OK (exit 0)" "$(cat "$K_TMP/i3-float-rules-check.log")"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
