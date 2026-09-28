@@ -25,7 +25,12 @@
 #   panic:   hotkeyd.sh stop (every display)
 #         -> link i3/config.d/zz-fallback-binds.conf into ~/.i3/config.d/
 #         -> i3-msg reload
-#   resume:  unlink -> i3-msg reload -> hotkeyd.sh start
+#   resume:  classify each recorded display (classify_display(), kwi3-55l.15)
+#         -> unlink -> i3-msg reload -> hotkeyd.sh start, each display in its
+#            OWN environment; X gone: skipped and forgotten; WM unanswering:
+#            skipped and remembered
+#         -> an i3 display did not come back: stop the i3 displays' daemons,
+#            relink, reload - never leave an i3 display with neither
 #
 # NO CONTESTED-CHORD WINDOW. X drops a client's passive grabs when the client
 # goes, so stopping the daemon frees every chord it held before i3 is asked to
@@ -249,9 +254,143 @@ reload_i3() {
         # holding stale binds. Unset, i3-msg resolves the socket from the root
         # window of the DISPLAY it was given, which is per-display by
         # construction.
-        env -u I3SOCK DISPLAY="$d" i3-msg reload >/dev/null 2>&1 \
+        # `timeout 5` (kwi3-3m9): an i3-msg aimed at a display whose server is
+        # gone does not fail, it hangs on the connect - minutes, not seconds -
+        # and this loop runs in the middle of an outage.
+        env -u I3SOCK DISPLAY="$d" timeout 5 i3-msg reload >/dev/null 2>&1 \
             && printf 'hotkeyd-panic: reloaded i3 on %s\n' "$d"
     done
+}
+
+# WHICH WM EACH RECORDED DISPLAY RUNS, AND SO WHICH ENVIRONMENT ITS DAEMON
+# GETS (kwi3-55l.15). `resume` restarts every display panic recorded, and it
+# used to do so in the CALLER's environment. The caller's $KWI3SOCK names the
+# caller's kwi3 and nobody else's: reached from kwi3's panic chord on :40
+# (recover -> resume), it was handed to `start :0` and `start :10` too.
+# Before kwi3-vfg those daemons then dispatched every chord typed on :0/:10 to
+# :40's kwi3; since kwi3-vfg `start` refuses them (78) - AFTER resume had
+# already unlinked the fallback, so both i3 displays ended with neither the
+# fallback's binds nor a daemon.
+#
+# So each display is CLASSIFIED, before anything is torn down, and each class
+# gets its own treatment in `resume` below. classify_display() prints one of:
+#
+#   gone          its X server does not answer at all (x_state) - the session
+#                 ended since the panic (logout, xrdp session closed, a kwi3
+#                 session that died with its X). Nothing to give a keyboard
+#                 back to: skipped, named, DROPPED from the panic record, and
+#                 never a reason to re-panic anyone. Checked FIRST, so no
+#                 other probe waits on a dead server.
+#   i3            its own i3 answers (DISPLAY pinned, no I3SOCK, as
+#                 latch_applies() asks). Started with $KWI3SOCK UNSET, the i3
+#                 IPC path. The ONLY class whose failed start may relink the
+#                 fallback: the link is what rescues an i3 display, and nothing
+#                 else.
+#   kwi3 <sock>   no i3, and the socket kwi3-session-env.sh's
+#                 kwi3_rpcsock_path() would compute for it,
+#                 "kwi3-<n>.rpc.sock", ANSWERS JSON-RPC as kwi3 - looked for
+#                 beside the caller's $KWI3SOCK first (when the caller IS this
+#                 display, that is the caller's own socket: the single-display
+#                 resume; and a kwi3 started with a non-default directory puts
+#                 every session's socket there), then in
+#                 ${XDG_RUNTIME_DIR:-/tmp}, the convention's own default.
+#                 Started with $KWI3SOCK = <sock>.
+#   unknown       X answers (or refuses us authorization), but no i3 answers
+#                 and a kwi3 socket FILE for it exists and does not answer -
+#                 a kwi3 session whose WM died - or the X server would not
+#                 let us in. A daemon started with $KWI3SOCK unset there sends
+#                 its chords nowhere, and every later `start` then reports
+#                 "already running". So it is NOT started: skipped loudly,
+#                 kept in the record so a later `resume` retries it, resume
+#                 exits 1 - and the i3 displays are NOT re-panicked for it.
+#   none          X answers, no i3, no kwi3 socket for it at all - a bare X
+#                 display (test-panic.sh's second display, or a session whose
+#                 WM this script has no probe for). Started exactly as before
+#                 kwi3-55l.15, $KWI3SOCK unset; its failure is reported (rc 1)
+#                 but, not being i3, relinks nothing.
+#
+# Asked, never inherited: a set-but-foreign $KWI3SOCK is exactly the misroute
+# above.
+#
+# MIRRORED, NOT SOURCED - the same rule as target_displays(): this script runs
+# when the session is already broken, and kwi3-session-env.sh lives in the
+# kwi3 checkout (and exports as a side effect). rpc_answers()'s python body is
+# hotkeyd.sh's kwi3_answers() body; test-panic.sh guards the two against
+# drifting apart.
+CALLER_KWI3SOCK="${KWI3SOCK:-}"
+
+rpc_answers() { # <socket path>
+    [ -S "$1" ] || return 1
+    timeout 2 python3 - "$1" >/dev/null 2>&1 <<'PY'
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1.5)
+s.connect(sys.argv[1])
+s.sendall(b'{"jsonrpc":"2.0","id":1,"method":"workspace.list"}\n')
+buf = b""
+while b"\n" not in buf and len(buf) < 1 << 20:
+    chunk = s.recv(65536)
+    if not chunk:
+        sys.exit(1)
+    buf += chunk
+r = json.loads(buf.split(b"\n", 1)[0].decode("utf-8"))
+ok = (isinstance(r, dict) and r.get("jsonrpc") == "2.0" and r.get("id") == 1
+      and r.get("error") is None and isinstance(r.get("result"), list))
+sys.exit(0 if ok else 1)
+PY
+}
+
+# Is <display>'s X server there? Prints alive | gone | noauth.
+#
+# BOUNDED, because an X connection to a server that is gone does not fail -
+# it HANGS: xlib falls back from the unix socket to TCP and waits on a connect
+# nothing answers (measured: `xset -display :<unused> q` and python-xlib both
+# sat until killed). 2s is the same cap every other probe here uses.
+#
+# An AUTHORIZATION refusal is a server that IS there and would not let us in
+# (another user's session, a missing XAUTHORITY) - it prints "Authorization
+# required" and exits at once. That must not read as gone: gone drops the
+# display from the panic record, and a live session dropped from it never gets
+# its daemon back. No xset on the box: "alive", i.e. no display is ever
+# dropped on the strength of a missing tool.
+x_state() { # <display>
+    command -v xset >/dev/null 2>&1 || { echo alive; return 0; }
+    _o="$(timeout 2 xset -display "$1" q 2>&1 >/dev/null)" && {
+        echo alive; return 0; }
+    case "$_o" in
+        *[Aa]uthoriz*) echo noauth ;;
+        *)             echo gone ;;
+    esac
+}
+
+classify_display() { # <display>
+    _x="$(x_state "$1")"
+    [ "$_x" = gone ] && { echo gone; return 0; }
+    [ "$_x" = noauth ] && { echo unknown; return 0; }
+    _n="${1#:}"; _n="${_n%%.*}"
+    _name="kwi3-$_n.rpc.sock"
+    env -u I3SOCK DISPLAY="$1" timeout 2 i3-msg -t get_version \
+        >/dev/null 2>&1 && { echo i3; return 0; }
+    _dead=0
+    for _c in ${CALLER_KWI3SOCK:+"$(dirname -- "$CALLER_KWI3SOCK")/$_name"} \
+              "${XDG_RUNTIME_DIR:-/tmp}/$_name"; do
+        rpc_answers "$_c" && { printf 'kwi3 %s\n' "$_c"; return 0; }
+        [ -S "$_c" ] && _dead=1
+    done
+    [ "$_dead" -eq 1 ] && echo unknown || echo none
+}
+
+# Starts <display>'s daemon with $KWI3SOCK = <sock>, or unset when <sock> is
+# empty. The caller's $HOTKEYD_I3SOCK (main.go's i3 socket override) is
+# dropped for every display but the caller's own, for the same reason: it
+# names ONE display's WM.
+start_for() { # <display> <kwi3sock or empty>
+    if [ "$1" = "$DPY_BASE" ]; then _drop=""; else _drop="-u HOTKEYD_I3SOCK"; fi
+    if [ -n "$2" ]; then
+        env $_drop KWI3SOCK="$2" "$LAUNCHER" start "$1"
+    else
+        env $_drop -u KWI3SOCK "$LAUNCHER" start "$1"
+    fi
 }
 
 case "$VERB" in
@@ -298,6 +437,20 @@ case "$VERB" in
         targets="$(printf '%s\n' "$targets" | scoped)"
         [ -n "$targets" ] || die "no display: pass one, or set DISPLAY" 2
 
+        # Each display's class, decided BEFORE the unlink - see
+        # classify_display(). One "<display> <class> [<kwi3sock>]" line each.
+        plan=""; gone=""
+        for d in $targets; do
+            c="$(classify_display "$d")"
+            plan="$plan$d $c
+"
+            case "$c" in gone) gone="$gone $d" ;; esac
+        done
+        # The displays still worth reloading, remembering and re-panicking: a
+        # gone one is none of those (and an `i3-msg` at it is a wait on a
+        # server that will not answer - kwi3-3m9).
+        live="$(printf '%s\n' "$plan" | awk 'NF && $2 != "gone" {print $1}')"
+
         # Unlink FIRST, then reload: i3 must have dropped the fallback's grabs
         # before a daemon is allowed to ask for them. NOT because the daemon
         # would be refused if it asked first — dotfiles-f224 measured core and
@@ -326,18 +479,73 @@ case "$VERB" in
         # reloading one that did is the contested state. So the reload set is the
         # union, and it stays a superset of the RESTART set below — resume must
         # not start a daemon on a display that never had one.
-        reload_i3 "$(printf '%s\n%s\n' "$targets" "$(all_displays)" | sort -u)"
-        rc=0
-        for d in $targets; do
-            "$LAUNCHER" start "$d"
+        reload_i3 "$(printf '%s\n%s\n' "$live" "$(all_displays)" | sort -u)"
+        rc=0; failed=""; skipped=""; relink=0
+        while read -r d c s; do
+            [ -n "$d" ] || continue
+            case "$c" in
+                gone)
+                    printf 'hotkeyd-panic: %s: its X server is gone -- skipped, '\
+'and dropped from the panic record\n' "$d" >&2
+                    continue ;;
+                unknown)
+                    printf 'hotkeyd-panic: %s: X is up but neither its i3 nor '\
+'its kwi3 answers -- NOT starting a daemon that would send its keys nowhere; '\
+'kept in the panic record, resume again once its window manager is back\n' \
+                        "$d" >&2
+                    rc=1; skipped="$skipped $d"
+                    continue ;;
+            esac
+            start_for "$d" "$s"
             # 3 is the launcher's "already running", which is the state resume
             # is trying to reach — a resume that was never preceded by a panic,
             # or one run twice, must not report failure for having found the
             # daemon already up. Anything else is a real failure to come back.
-            case $? in 0|3) ;; *) rc=1 ;; esac
-        done
-        [ "$rc" -eq 0 ] || die "the daemon did not come back on every display" 1
-        printf 'hotkeyd: resumed on %s\n' "$(printf '%s' "$targets" | tr '\n' ' ')"
+            case $? in
+                0|3) ;;
+                *)  rc=1; failed="$failed $d"
+                    # Only a display POSITIVELY identified as i3 is one the
+                    # fallback can rescue - and so the only kind whose failure
+                    # may put it back for everyone.
+                    [ "$c" = i3 ] && relink=1 ;;
+            esac
+        done <<PLAN
+$plan
+PLAN
+        if [ "$relink" -eq 1 ]; then
+            # NEVER NEITHER (kwi3-55l.15). The unlink had to come first (see
+            # above), so an i3 display whose start then failed holds nothing:
+            # no daemon, and a fallback its i3 has just reloaded away. The
+            # link is ONE machine-wide file, so it cannot be restored for that
+            # display alone - and restoring it while any i3 display's daemon
+            # is up is the contested state. So the i3 half of the panic is
+            # re-applied the way `panic` applies it: stop the daemon on every
+            # i3 display, THEN link, record, reload. Every other class keeps
+            # its daemon: the link reaches only i3's config (kwi3-8wb.1), so
+            # nothing there can contest it. The record is every LIVE target -
+            # a gone display is not written back, so it cannot make the next
+            # resume fail the same way forever.
+            while read -r d c s; do
+                [ "$c" = i3 ] || continue
+                "$LAUNCHER" stop "$d" >/dev/null 2>&1
+            done <<PLAN
+$plan
+PLAN
+            ln -sfn "$FALLBACK_SRC" "$LINK" \
+                || die "the daemon did not come back on$failed, and $LINK could not be relinked" 1
+            printf '%s\n' "$live" > "$STATE" 2>/dev/null || true
+            reload_i3 "$(printf '%s\n%s\n' "$live" "$(all_displays)" | sort -u)"
+            die "the daemon did not come back on the i3 display(s)$failed -- \
+the i3 fallback is linked again, so i3 keeps the keyboard on every i3 \
+display; resume again once that is fixed" 1
+        fi
+        # An `unknown` display is remembered so a later resume retries it; it
+        # is the only thing left to resume, so it is all the record holds.
+        [ -z "$skipped" ] \
+            || printf '%s\n' $skipped > "$STATE" 2>/dev/null || true
+        [ "$rc" -eq 0 ] || die "the daemon did not come back on$failed$skipped" 1
+        printf 'hotkeyd: resumed on %s\n' "$(printf '%s' "$live" | tr '\n' ' ')"
+        [ -z "$gone" ] || printf 'hotkeyd: skipped (X server gone):%s\n' "$gone"
         ;;
 
     recover)
@@ -378,8 +586,13 @@ EOF
 
         # 2. Resume if panicked - `start` is refused while the link is there -
         # else restart.
+        # resume's own verdict is KEPT (kwi3-55l.15): it restarts every display
+        # panic recorded, and step 3 below asks only about this one. A resume
+        # that left another display without its daemon must not let recover
+        # exit 0 on the strength of this display alone.
+        resume_rc=0
         if linked; then
-            "$SELF" resume "$DPY_BASE"
+            "$SELF" resume "$DPY_BASE" || resume_rc=$?
         else
             "$LAUNCHER" restart "$DPY_BASE"
         fi
@@ -389,6 +602,8 @@ EOF
         n=0
         while :; do
             "$LAUNCHER" status "$DPY_BASE" >/dev/null 2>&1 && {
+                [ "$resume_rc" -eq 0 ] || die "serving again on $DPY_BASE, \
+but resume did not bring every recorded display back (see above)" 1
                 printf 'hotkeyd: recovered on %s\n' "$DPY_BASE"; exit 0; }
             n=$((n + 1)); [ "$n" -ge 10 ] && break
             sleep 0.5

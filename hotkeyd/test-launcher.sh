@@ -56,7 +56,7 @@ probe_free_display() { # <start-number>
     done
     printf ':%s' "$n"
 }
-XA="$(probe_free_display 71)"
+XA="$(probe_free_display "${HOTKEYD_LAUNCHER_BASE:-71}")"
 XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
 TAG_A="${XA#:}"
 TAG_B="${XB#:}"
