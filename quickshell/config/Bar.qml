@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Services.SystemTray
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Window
 import "./Common"
 
 PanelWindow {
@@ -411,6 +412,62 @@ PanelWindow {
             wants.push(root._tabWantCells(root.sortedWorkspaces[i].name))
         }
         return { wants: wants, cells: wants.slice() }
+    }
+
+    // ---- focused-tab highlight, drawn OUTSIDE this window (kwi3-55l.20) ----
+    // Jan, 3392: "bar workspace highlight should be above bar same as is
+    // window highlight" / "workspace tab should be only top border" — NOT a
+    // full ring (no side/bottom, no radius: a single top line has no corners
+    // to round), a top border only, in the half-gap band above the bar
+    // (kwi3-55l.17's 11px), spanning the focused tab's width. Mirrors a
+    // window's own focus treatment: the titlebar keeps its own focused
+    // colour (wsTab's existing "#152024" fill, unchanged) and the RING moves
+    // outside the rect it decorates, exactly like core/solver.js draws a
+    // tiled window's ring outside the tile rather than inside it.
+    //
+    // Absolute SCREEN coordinates, not an Item's local ones: the strip has
+    // to occupy the gap ABOVE this window's own rect, which no Item inside
+    // this window could ever paint into — see wsFocusHighlight below, a
+    // second, override-redirect top-level window.
+    readonly property var focusedTabScreenRect: {
+        if (!Kwi3Grid.active) { return null }
+        var plan = root.tabCellPlan
+        if (!plan || !plan.cells || plan.cells.length === 0) { return null }
+        var idx = -1
+        for (var i = 0; i < root.sortedWorkspaces.length; i++) {
+            if (root.sortedWorkspaces[i].focused) { idx = i; break }
+        }
+        if (idx < 0 || idx >= plan.cells.length) { return null }
+        var xOff = 0
+        for (var j = 0; j < idx; j++) { xOff += plan.cells[j] * Kwi3Grid.moduleW }
+        // Same offsets leftSide/the content Item itself use to place the
+        // first tab (root.inset's pill margin, root.insetTop) — worked out
+        // here rather than read back off the Item, so this stays a plain
+        // reactive property instead of an imperative mapToGlobal() call that
+        // would not re-run when the tab layout changes under it.
+        //
+        // root.screen.geometry.x/y (QScreen's OWN geometry - its absolute
+        // position on the virtual desktop; the attached `Screen` type's
+        // virtualX/virtualY are a DIFFERENT, Item-only API and do not exist
+        // on a plain Window.screen, which read back as NaN/null here the
+        // first time this was measured) anchor this to the right monitor;
+        // marginsTop is worked out from the SAME inputs the `margins {
+        // top: ... }` group above uses, not read back off root.y/
+        // root.margins.top - this PanelWindow positions itself through the
+        // anchors/margins/exclusiveZone strut machinery, and on this X11
+        // back-end neither of those properties tracks the actual placement
+        // (found the hard way - the ring landed at the screen's absolute
+        // top, 11px too high, every time this was measured against a real
+        // host, margins.top included).
+        var screenX = (root.screen && root.screen.geometry) ? root.screen.geometry.x : 0
+        var screenY = (root.screen && root.screen.geometry) ? root.screen.geometry.y : 0
+        var contentX = root.inset ? (root.insetSide + 10) : 0
+        var marginsTop = root.isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
+        return {
+            x: screenX + contentX + Kwi3Grid.contentLeft + xOff,
+            y: screenY + marginsTop + root.insetTop,
+            w: plan.cells[idx] * Kwi3Grid.moduleW
+        }
     }
 
     // ------------------------------------------------------- agent census ---
@@ -929,12 +986,19 @@ PanelWindow {
                         }
                     }
 
+                    // kwi3-55l.20 (Jan, 3392: "bar workspace highlight should
+                    // be above bar same as is window highlight" / "workspace
+                    // tab should be only top border"): the FOCUSED tab's own
+                    // top-border ring moved OUTSIDE this window entirely, into
+                    // the half-gap band above the bar - see wsFocusHighlight
+                    // below, an override-redirect popup no Item inside this
+                    // window could paint into. This strip now only marks a
+                    // tab that is visible on another output but not focused
+                    // here (unrelated to the ring).
                     Rectangle {
                         anchors { top: parent.top; left: parent.left; right: parent.right }
                         height: 2
-                        color: modelData.focused                    ? "#16a085"
-                             : (modelData.active && !modelData.focused) ? "#454948"
-                             : "transparent"
+                        color: (modelData.active && !modelData.focused) ? "#454948" : "transparent"
                     }
 
                     MouseArea {
@@ -1194,6 +1258,52 @@ PanelWindow {
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
                 Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
+            }
+        }
+    }
+
+    // kwi3-55l.20: the focused-tab ring itself. A DIRECT child of this
+    // PanelWindow (a second top-level window, not an Item in the tree
+    // above) because it must occupy the gap ABOVE this window's own rect.
+    // Qt.BypassWindowManagerHint makes the X11 QPA back-end create it
+    // override_redirect - invisible to kwi3's tiling entirely (adapters/x11
+    // wm.cpp/window.cpp treat override_redirect as untouchable, the same
+    // guarantee kwi3's own chrome relies on) - so it never gets a titlebar,
+    // never steals focus and is never a con a runner rule or the default
+    // new-window policy has to know about. Only instantiated under kwi3
+    // (Loader gated on Kwi3Grid.active): a plain i3/sway session creates no
+    // extra window at all.
+    Loader {
+        active: Kwi3Grid.active
+        sourceComponent: Component {
+            Window {
+                id: wsFocusHighlight
+                readonly property var rect: root.focusedTabScreenRect
+                readonly property int thickness: Kwi3Grid.frameThickness
+                // Off entirely when the window ring itself is off
+                // (focusFrame: false) or there is no focused tab to mark -
+                // "unfocused tabs have none" generalised to "none at all
+                // fires none".
+                visible: Kwi3Grid.frameEnabled && rect !== null && thickness > 0
+                x: rect ? rect.x : 0
+                y: rect ? rect.y - thickness : 0
+                width: rect ? Math.max(1, rect.w) : 1
+                height: Math.max(1, thickness)
+                flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
+                title: "kwi3-bar-focus-ring"
+                color: "transparent"
+
+                // An opaque fill Rectangle, not this Window's own `color`:
+                // Overlay.qml's own note applies here too - a Window's
+                // `color` is not always honoured as the opaque clear colour
+                // under X11/FramelessWindowHint, which would leave this
+                // strip showing through to whatever the compositor-less
+                // "transparent" actually renders as. Square ends (no
+                // radius): a single top line has no corners to round.
+                Rectangle {
+                    anchors.fill: parent
+                    color: Kwi3Grid.frameColor
+                }
             }
         }
     }

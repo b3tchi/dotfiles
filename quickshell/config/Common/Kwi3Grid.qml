@@ -28,6 +28,15 @@ Singleton {
     property string fontFamily: ""
     property int fontPixelSize: 0
     property var colors: ({})
+    // kwi3-55l.20: the window focus ring's own config (core/defaults.js
+    // FRAME_THICKNESS/FRAME_RADIUS/FRAME_COLOR/FRAME, grid.get's `frame`
+    // field) - so a consumer that mirrors the ring (Bar's focused-tab
+    // highlight) never carries its own literal and stays off exactly when
+    // the window ring is off (focusFrame: false).
+    property int frameThickness: 0
+    property int frameRadius: 0
+    property string frameColor: "#000000"
+    property bool frameEnabled: false
 
     // Whole-module sizing for a client's own width AND height: the same
     // function serves both axes because the caller passes the axis's own
@@ -68,6 +77,15 @@ Singleton {
             grid.fontFamily = result.font.family
             grid.fontPixelSize = result.font.pixelSize
             grid.colors = result.colors
+            // `frame` is guarded (not just destructured) so an older kwi3
+            // that has not yet grown this field still loads the rest of the
+            // grid instead of throwing out of this callback.
+            if (result.frame) {
+                grid.frameThickness = result.frame.thickness
+                grid.frameRadius = result.frame.radius
+                grid.frameColor = result.frame.color
+                grid.frameEnabled = result.frame.enabled
+            }
             grid._loaded = true
         })
     }
