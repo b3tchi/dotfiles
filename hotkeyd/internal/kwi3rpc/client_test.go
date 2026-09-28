@@ -357,7 +357,6 @@ func TestClientFirstCallAfterRestartLandsWithoutExternalRetry(t *testing.T) {
 	go serveOnce(ln1)
 
 	c := New(addr)
-	defer c.Close()
 	if _, err := c.Call("workspace.list", nil); err != nil {
 		t.Fatalf("first call: %s", err)
 	}
@@ -373,10 +372,61 @@ func TestClientFirstCallAfterRestartLandsWithoutExternalRetry(t *testing.T) {
 		t.Fatalf("re-listen: %s", err)
 	}
 	defer ln2.Close()
-	go serveOnce(ln2)
+
+	// kwi3-55l.11: unlike ln1's serveOnce (which stops reading after its
+	// one expected line, so it cannot see a second one), this handler
+	// keeps reading every line the client sends on THIS connection until
+	// the client closes it. writeLocked's post-redial retry dials fresh
+	// and writes to ln2's listener - a mutant that sent the retried
+	// request TWICE would land the duplicate as a second line on this
+	// exact connection, and only a handler that keeps reading (and a test
+	// that demands exactly one) would catch it; serveOnce's "read one
+	// line, reply, close" shape is blind to a double-send by construction.
+	requestsOnFreshConn := make(chan int, 1)
+	go func() {
+		conn, err := ln2.Accept()
+		if err != nil {
+			requestsOnFreshConn <- 0
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		n := 0
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				break
+			}
+			n++
+			if n == 1 {
+				var req struct {
+					ID int64 `json:"id"`
+				}
+				json.Unmarshal(line, &req)
+				reply, _ := json.Marshal(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": map[string]interface{}{}})
+				conn.Write(append(reply, '\n'))
+			}
+		}
+		requestsOnFreshConn <- n
+	}()
 
 	if _, err := c.Call("workspace.list", nil); err != nil {
 		t.Fatalf("the first chord after kwi3 restarts must land, not be dropped: %s", err)
+	}
+	// Close the client now (rather than deferring it, as the earlier calls
+	// in this test did) so the fresh conn's read loop above sees EOF and
+	// can report its final count - a double-sent duplicate line is already
+	// on the wire by the time Call returns (writeLocked writes before Call
+	// reads the reply), so closing here does not race the assertion.
+	c.Close()
+
+	select {
+	case n := <-requestsOnFreshConn:
+		if n != 1 {
+			t.Fatalf("the write retry must land the request on the fresh connection exactly once, got %d (a write-retry mutant that double-sends would show up here)", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for the fresh connection's request count")
 	}
 }
 
