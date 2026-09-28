@@ -414,38 +414,36 @@ PanelWindow {
         return { wants: wants, cells: wants.slice() }
     }
 
-    // ---- focused-tab highlight, drawn OUTSIDE this window (kwi3-55l.20) ----
-    // Jan, 3392: "bar workspace highlight should be above bar same as is
-    // window highlight" / "workspace tab should be only top border" — NOT a
-    // full ring (no side/bottom, no radius: a single top line has no corners
-    // to round), a top border only, in the half-gap band above the bar
-    // (kwi3-55l.17's 11px), spanning the focused tab's width. Mirrors a
+    // ---- focused-tab / mode-segment highlight, drawn OUTSIDE this window
+    // (kwi3-55l.20, extended kwi3-55l.24) ----
+    // Jan, 3392 (.20): "bar workspace highlight should be above bar same as
+    // is window highlight" / "workspace tab should be only top border" — NOT
+    // a full ring (no side/bottom, no radius: a single top line has no
+    // corners to round), a top border only, in the half-gap band above the
+    // bar (kwi3-55l.17's 11px), spanning the focused tab's width. Mirrors a
     // window's own focus treatment: the titlebar keeps its own focused
     // colour (wsTab's existing "#152024" fill, unchanged) and the RING moves
     // outside the rect it decorates, exactly like core/solver.js draws a
     // tiled window's ring outside the tile rather than inside it.
     //
+    // Jan, 3392 (.24): "good highlight and name of workspace looks good one
+    // issue it is visible in resize/screenshot all this modes also these
+    // modes should have similar highlight of to top". While a hotkeyd
+    // mode/layer is up, `leftSide` (the workspace tabs, focusedTabScreenRect
+    // included) is INVISIBLE (see `visible: root.currentMode === "default"`
+    // above the Repeater) and ModeBar takes its place — but the ring window
+    // below used to keep rendering over the now-hidden tab's old position
+    // regardless, which is exactly the bug: a highlight floating over
+    // nothing while the real content underneath it had moved to ModeBar.
+    // `ringScreenRect` picks whichever of the two is the thing actually on
+    // screen, and the Window below just follows it — one companion window,
+    // never two.
+    //
     // Absolute SCREEN coordinates, not an Item's local ones: the strip has
     // to occupy the gap ABOVE this window's own rect, which no Item inside
     // this window could ever paint into — see wsFocusHighlight below, a
     // second, override-redirect top-level window.
-    readonly property var focusedTabScreenRect: {
-        if (!Kwi3Grid.active) { return null }
-        var plan = root.tabCellPlan
-        if (!plan || !plan.cells || plan.cells.length === 0) { return null }
-        var idx = -1
-        for (var i = 0; i < root.sortedWorkspaces.length; i++) {
-            if (root.sortedWorkspaces[i].focused) { idx = i; break }
-        }
-        if (idx < 0 || idx >= plan.cells.length) { return null }
-        var xOff = 0
-        for (var j = 0; j < idx; j++) { xOff += plan.cells[j] * Kwi3Grid.moduleW }
-        // Same offsets leftSide/the content Item itself use to place the
-        // first tab (root.inset's pill margin, root.insetTop) — worked out
-        // here rather than read back off the Item, so this stays a plain
-        // reactive property instead of an imperative mapToGlobal() call that
-        // would not re-run when the tab layout changes under it.
-        //
+    function _ringOrigin() {
         // root.screen.geometry.x/y (QScreen's OWN geometry - its absolute
         // position on the virtual desktop; the attached `Screen` type's
         // virtualX/virtualY are a DIFFERENT, Item-only API and do not exist
@@ -463,12 +461,54 @@ PanelWindow {
         var screenY = (root.screen && root.screen.geometry) ? root.screen.geometry.y : 0
         var contentX = root.inset ? (root.insetSide + 10) : 0
         var marginsTop = root.isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
+        return { x: screenX + contentX, y: screenY + marginsTop + root.insetTop }
+    }
+
+    readonly property var focusedTabScreenRect: {
+        if (!Kwi3Grid.active) { return null }
+        var plan = root.tabCellPlan
+        if (!plan || !plan.cells || plan.cells.length === 0) { return null }
+        var idx = -1
+        for (var i = 0; i < root.sortedWorkspaces.length; i++) {
+            if (root.sortedWorkspaces[i].focused) { idx = i; break }
+        }
+        if (idx < 0 || idx >= plan.cells.length) { return null }
+        var xOff = 0
+        for (var j = 0; j < idx; j++) { xOff += plan.cells[j] * Kwi3Grid.moduleW }
+        // Same offsets leftSide/the content Item itself use to place the
+        // first tab (root.inset's pill margin, root.insetTop) — worked out
+        // here rather than read back off the Item, so this stays a plain
+        // reactive property instead of an imperative mapToGlobal() call that
+        // would not re-run when the tab layout changes under it.
+        var origin = root._ringOrigin()
         return {
-            x: screenX + contentX + Kwi3Grid.contentLeft + xOff,
-            y: screenY + marginsTop + root.insetTop,
+            x: origin.x + Kwi3Grid.contentLeft + xOff,
+            y: origin.y,
             w: plan.cells[idx] * Kwi3Grid.moduleW
         }
     }
+
+    // kwi3-55l.24: the mode segment's own screen rect, same band, spanning
+    // ModeBar's rendered width. Unlike the tab case above, ModeBar (`mb`
+    // below) is a single real Item rather than a Repeater of cells with a
+    // hand-tracked plan, so its own `x` (anchored, kept in sync by the
+    // engine) and `implicitWidth` (ModeBar's own api_surface-adjacent
+    // geometry, `strip.implicitWidth`) are read directly rather than
+    // re-derived — there is no separate "plan" to duplicate here the way
+    // tabCellPlan exists for the workspace tabs.
+    readonly property var modeSegmentScreenRect: {
+        if (!Kwi3Grid.active) { return null }
+        if (root.currentMode === "default" || !mb.visible) { return null }
+        var origin = root._ringOrigin()
+        return { x: origin.x + mb.x, y: origin.y, w: mb.implicitWidth }
+    }
+
+    // Whichever of the two is the thing actually rendered where `leftSide`
+    // used to be: the workspace tab at rest, the mode segment while a
+    // hotkeyd layer/i3 mode is up. Never both — leftSide and ModeBar are
+    // already mutually exclusive on `currentMode`, and this just follows.
+    readonly property var ringScreenRect: root.currentMode === "default"
+        ? root.focusedTabScreenRect : root.modeSegmentScreenRect
 
     // ------------------------------------------------------- agent census ---
     // Per-project claude-agent counts (ft012 / `agent-census`), rendered as a
@@ -1030,6 +1070,11 @@ PanelWindow {
         // each modifier's face becomes visible without widening ft009's
         // two-prop api_surface — the registry carries all three rows.
         ModeBar {
+            // id (kwi3-55l.24): read directly by modeSegmentScreenRect above
+            // (`mb.x`/`mb.implicitWidth`) — the mode-highlight window needs
+            // to know exactly where this renders, the same way the tab
+            // Repeater's own geometry feeds focusedTabScreenRect.
+            id: mb
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
             mode: root.inNavMode ? root.navLayerSticky : root.currentMode
             fontSize: root.fontSize
@@ -1262,26 +1307,32 @@ PanelWindow {
         }
     }
 
-    // kwi3-55l.20: the focused-tab ring itself. A DIRECT child of this
-    // PanelWindow (a second top-level window, not an Item in the tree
-    // above) because it must occupy the gap ABOVE this window's own rect.
-    // Qt.BypassWindowManagerHint makes the X11 QPA back-end create it
-    // override_redirect - invisible to kwi3's tiling entirely (adapters/x11
-    // wm.cpp/window.cpp treat override_redirect as untouchable, the same
-    // guarantee kwi3's own chrome relies on) - so it never gets a titlebar,
-    // never steals focus and is never a con a runner rule or the default
-    // new-window policy has to know about. Only instantiated under kwi3
-    // (Loader gated on Kwi3Grid.active): a plain i3/sway session creates no
-    // extra window at all.
+    // kwi3-55l.20 (extended kwi3-55l.24): the focused-tab / mode-segment ring
+    // itself. A DIRECT child of this PanelWindow (a second top-level window,
+    // not an Item in the tree above) because it must occupy the gap ABOVE
+    // this window's own rect. Qt.BypassWindowManagerHint makes the X11 QPA
+    // back-end create it override_redirect - invisible to kwi3's tiling
+    // entirely (adapters/x11 wm.cpp/window.cpp treat override_redirect as
+    // untouchable, the same guarantee kwi3's own chrome relies on) - so it
+    // never gets a titlebar, never steals focus and is never a con a runner
+    // rule or the default new-window policy has to know about. Only
+    // instantiated under kwi3 (Loader gated on Kwi3Grid.active): a plain
+    // i3/sway session creates no extra window at all.
+    //
+    // ONE companion window, not two (kwi3-55l.24's own preference over a
+    // second override-redirect popup): `rect` follows `ringScreenRect`,
+    // which already picked the workspace tab or the mode segment above, so
+    // this Window neither knows nor cares which one it is currently over.
     Loader {
         active: Kwi3Grid.active
         sourceComponent: Component {
             Window {
                 id: wsFocusHighlight
-                readonly property var rect: root.focusedTabScreenRect
+                readonly property var rect: root.ringScreenRect
                 readonly property int thickness: Kwi3Grid.frameThickness
                 // Off entirely when the window ring itself is off
-                // (focusFrame: false) or there is no focused tab to mark -
+                // (focusFrame: false) or there is nothing to mark (no focused
+                // tab at rest, no visible mode segment while a layer is up) -
                 // "unfocused tabs have none" generalised to "none at all
                 // fires none".
                 visible: Kwi3Grid.frameEnabled && rect !== null && thickness > 0
