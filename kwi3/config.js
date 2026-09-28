@@ -116,6 +116,10 @@ kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher|clip|notif)$/ }, w 
 //     virtualbox) becomes the RegExp's own `i` flag — JS regex syntax has no
 //     inline (?i) group (confirmed: it throws "Invalid group"), so the flag
 //     is the only faithful equivalent.
+//   - ONE deliberate narrowing: i3's `System-config-printer.py` has an
+//     UNESCAPED `.` (PCRE: any character), ported as `\.` (a literal dot),
+//     so e.g. class `System-config-printerXpy` floats on i3 but tiles here.
+//     Every other pattern is character-for-character i3's.
 //   - i3's per-rule `sticky enable` (i3_help, Lxappearance, Nitrogen, qt5ct,
 //     Qtconfig-qt4) is NOT ported — kwi3.onWindowAdded's hook handle
 //     (core/reconcile.js kwi3WindowHandle: float/noFrame/moveTo/focus only)
