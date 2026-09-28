@@ -126,6 +126,23 @@ Scope {
     // care which backend fed it.
     property var focusHistory: []
 
+    // kwi3-tkg: every `if (Kwi3Client.available) {...} else {...}` fallback
+    // below used `available` alone to pick between the kwi3 RPC path and the
+    // wmMsg (i3-msg/swaymsg) path — so a kwi3 session mid-reconnect
+    // (Kwi3Client.configured stays true the whole session; `available` drops
+    // for the gap between a disconnect and the next successful connect, see
+    // Kwi3Client.qml's own header) fell straight through to the wmMsg path
+    // instead of dropping the action. Since sp004 Task 18 a kwi3 display
+    // publishes no i3 IPC socket, so that fallback is USUALLY a harmless
+    // failure — but it is still the wrong backend, addressed by a con id or
+    // workspace name that belongs to this world, not whatever (if anything)
+    // wmMsg happens to find. `configured`, not `available`, is what every
+    // wmMsg fallback here must be gated on (the same rule Bar.qml's own i3
+    // fallbacks already follow, kwi3-234.18): reached only when this IS a
+    // kwi3 session (so the kwi3 branch cannot be used) and it is NOT
+    // currently connected — i.e. exactly the reconnect gap.
+    readonly property bool _kwi3Gap: Kwi3Client.configured && !Kwi3Client.available
+
     // ── kwi3 backend (sp004 Task 14) ──
     // Under Kwi3Client.available the switcher is fed by tree.get + the
     // window.focused/window.removed events instead of `i3-msg -t get_tree` /
@@ -436,6 +453,12 @@ Scope {
         overlay.width = 640
         if (Kwi3Client.available) {
             root._kwi3ScanWindows()
+        } else if (root._kwi3Gap) {
+            // kwi3-tkg: mid-reconnect — a kwi3 session has no i3 socket, so
+            // a wmMsg get_tree here would only fail; drop the scan and leave
+            // whatever this scope was already showing alone rather than
+            // shelling out to the wrong backend.
+            console.log("[Overlay] switcherShow: dropped scan (Kwi3Client reconnecting)")
         } else {
             windowScanner.running = true
         }
@@ -474,6 +497,13 @@ Scope {
                 // is ignored here exactly like any other reply this scope
                 // does not need.
                 Kwi3Client.call("window.focus", { id: win.id }, function () {})
+            } else if (root._kwi3Gap) {
+                // kwi3-tkg: mid-reconnect (configured && !available) — a
+                // kwi3 session has no i3 socket, so wmMsg here would address
+                // whatever (if anything) it found instead of the row's own
+                // window. Drop the confirm rather than run it against the
+                // wrong backend.
+                console.log("[Overlay] switcherFocus: dropped confirm (Kwi3Client reconnecting)")
             } else {
                 focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
                 focusProc.running = true
@@ -621,6 +651,9 @@ Scope {
         overlay.width = DialogTheme.width
         if (Kwi3Client.available) {
             kwi3ProjectsRegistryScanner.running = true
+        } else if (root._kwi3Gap) {
+            // kwi3-tkg: mid-reconnect — see switcherShow()'s own comment.
+            console.log("[Overlay] projectsShow: dropped scan (Kwi3Client reconnecting)")
         } else {
             projectsScanner.running = true
         }
@@ -632,6 +665,11 @@ Scope {
             var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
             if (Kwi3Client.available) {
                 Kwi3Client.call("workspace.focus", { name: wsName }, function () {})
+            } else if (root._kwi3Gap) {
+                // kwi3-tkg: mid-reconnect — see switcherFocus()'s own
+                // comment. Drop rather than run `wmMsg workspace <name>`
+                // against whatever (if anything) it finds.
+                console.log("[Overlay] projectsSwitch: dropped (Kwi3Client reconnecting)")
             } else {
                 projectsWmProc.command = [root.wmMsg, "workspace", wsName]
                 projectsWmProc.running = true
@@ -645,6 +683,11 @@ Scope {
         if (p) {
             if (Kwi3Client.available) {
                 root._kwi3ProjectsNew(p)
+            } else if (root._kwi3Gap) {
+                // kwi3-tkg: mid-reconnect — see switcherFocus()'s own
+                // comment. Drop rather than run the rename/create wmMsg
+                // chain against whatever (if anything) it finds.
+                console.log("[Overlay] projectsNew: dropped (Kwi3Client reconnecting)")
             } else {
                 if (p.workspaces.length === 0) {
                     projectsWmProc.command = [root.wmMsg, "workspace", p.name]
