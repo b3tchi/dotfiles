@@ -151,13 +151,9 @@ func run(argv []string) int {
 	// ever drives a real Subscribe/PollEvents -- the onEvent closure reads
 	// dae at CALL time, not at closure-creation time.
 	var dae *Daemon
-	i3Client := i3.NewClient(i3SocketResolver(display), func(kind uint32, data map[string]any) {
-		dae.onI3Event(kind, data)
-	})
 
 	daeCfg := DaemonConfig{
 		Events:      conn.Events,
-		I3:          i3Client,
 		Grabs:       grabs,
 		Devices:     devices,
 		Engine:      engine,
@@ -171,17 +167,30 @@ func run(argv []string) int {
 		Display:     display,
 		Log:         daemonLog,
 	}
-	// sp004 Task 16 (kwi3-234.16): $KWI3SOCK answering at all is what
-	// selects the kwi3 session — daemon.go's dispatch() then sends every
-	// bind.Command through kwi3rpc and NEVER through i3Client above, even
-	// if kwi3rpc itself turns out to be unreachable (never send kwi3
-	// chords to another i3). No $KWI3SOCK (an i3/sway session, or a kwi3
-	// session that has not exported it — a config error on that side, not
-	// this one to guess around) leaves daeCfg.Kwi3 nil, which is the exact
-	// pre-Task-16 behaviour: dispatch() falls through to i3Client as it
-	// always did. kwi3rpc.New does not dial here; the first chord does.
+	// sp004 Task 16 (kwi3-234.16) / kwi3-55l.22: $KWI3SOCK answering at all
+	// is what selects the kwi3 session -- daemon.go's dispatch() then sends
+	// every bind.Command through kwi3rpc and NEVER through an i3.Client,
+	// even if kwi3rpc itself turns out to be unreachable (never send kwi3
+	// chords to another i3). A kwi3 session has no i3 to talk to AT ALL, so
+	// kwi3-55l.22 stops constructing an i3.Client here in that case: no
+	// i3.NewClient, so nothing ever execs `i3 --get-socketpath`, and
+	// nothing arms the reconnect-backoff retry loop that was writing
+	// "i3 ipc: resolving socket path: ... exit status 1" to the log every
+	// 5s (8841 lines measured on :40 -- see daemon.go's wireI3Mode/pumpI3
+	// nil-guards for the Daemon-side half of this fix, which also holds
+	// even if a future caller wires an i3.Client and Kwi3 together, as the
+	// kwi3dispatch_test.go fakes deliberately do). No $KWI3SOCK (an i3/sway
+	// session, or a kwi3 session that has not exported it — a config error
+	// on that side, not this one to guess around) constructs the real
+	// i3.Client exactly as before Task 16, and leaves daeCfg.Kwi3 nil, so
+	// dispatch() falls through to it as it always did. kwi3rpc.New does not
+	// dial here; the first chord does.
 	if kwi3Sock != "" {
 		daeCfg.Kwi3 = kwi3rpc.New(kwi3Sock, kwi3rpc.WithLog(daemonLog))
+	} else {
+		daeCfg.I3 = i3.NewClient(i3SocketResolver(display), func(kind uint32, data map[string]any) {
+			dae.onI3Event(kind, data)
+		})
 	}
 	// Assigned inside the guard, never unconditionally: a nil *ControlListener
 	// stored in an io.Closer field is a NON-nil interface holding a nil

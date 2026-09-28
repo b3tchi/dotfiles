@@ -587,7 +587,22 @@ func (d *Daemon) onI3Event(kind uint32, data map[string]any) {
 // wireI3Mode subscribes to `mode` events and seeds the engine with
 // whatever mode i3 is in right now — needed because i3 never sends a
 // `mode` event for a mode it was already in before Subscribe was called.
+//
+// kwi3-55l.22: i3 "mode" is an i3-only concept — kwi3 has no modes, the
+// same reason kwi3rpc.Translate refuses "sticky toggle"/scratchpad chords
+// by name elsewhere in this daemon — so a kwi3 session (d.kwi3 != nil,
+// the same $KWI3SOCK signal that selected the kwi3rpc dispatch seam and
+// Kwi3OnlyBinds via effectiveBinds) never subscribes at all: one log line
+// here explains why, instead of Subscribe/BindingState ever running against
+// a display with no i3 to answer them. This is checked on d.kwi3, not on
+// d.i3 being nil, so the guard holds even where a test wires both (see
+// kwi3dispatch_test.go's fakeI3Client) — kwi3 being the active transport is
+// what must disable i3 IPC, never merely "happens to have no i3.Client".
 func (d *Daemon) wireI3Mode() {
+	if d.kwi3 != nil {
+		d.log("i3: kwi3 session ($KWI3SOCK set) -- kwi3 has no i3 `mode` concept, so no i3 IPC client is started (kwi3-55l.22)")
+		return
+	}
 	if err := d.i3.Subscribe("mode"); err != nil {
 		d.log(fmt.Sprintf("i3: subscribe: %s", err))
 		return
@@ -617,7 +632,18 @@ func (d *Daemon) idleTimeout() time.Duration {
 // every run-loop iteration, so an i3 mode change (or a lost/regained i3)
 // takes the keyboard back within one iteration. Ported from hotkeyd.py's
 // Daemon.pump_i3.
+//
+// kwi3-55l.22: a kwi3 session (d.kwi3 != nil) never had i3 IPC wired up by
+// wireI3Mode above, so there is nothing here to poll -- returning
+// immediately (no log; wireI3Mode already said why once) is what actually
+// stops the 8841-line/session "i3 ipc: resolving socket path: ... exit
+// status 1" spam this bug tracked: this func runs on every X event AND
+// every idle tick, so a per-call log here would just move the flood rather
+// than remove it.
 func (d *Daemon) pumpI3() {
+	if d.kwi3 != nil {
+		return
+	}
 	before := d.engine.State().Layer
 	reconnected, err := d.i3.PollEvents()
 	if err != nil {
@@ -865,8 +891,13 @@ func (d *Daemon) shutdown() {
 			d.log(fmt.Sprintf("state publisher: close: %s", err))
 		}
 	}
-	if err := d.i3.Close(); err != nil {
-		d.log(fmt.Sprintf("i3: close: %s", err))
+	// kwi3-55l.22: d.i3 is a genuine nil interface on a kwi3 session now
+	// (main.go no longer constructs an i3.Client at all when $KWI3SOCK is
+	// set) -- calling Close() on it unguarded would panic every shutdown.
+	if d.i3 != nil {
+		if err := d.i3.Close(); err != nil {
+			d.log(fmt.Sprintf("i3: close: %s", err))
+		}
 	}
 	if d.kwi3 != nil {
 		if err := d.kwi3.Close(); err != nil {
