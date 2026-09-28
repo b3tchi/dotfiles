@@ -93,16 +93,15 @@ need_runtime() {
 # so cannot disagree today; a predicate copied twice is one that eventually does.
 linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 
-# Does the panic latch REACH this display? (kwi3-8wb.1)
+# Does the panic latch REACH this display? (kwi3-8wb.1, kwi3-a8o)
 #
 # The latch is an i3 bind table in i3's config.d. It rescues a display by
 # having THAT display's i3 re-parse config.d and take the chords back, so it
 # only means anything where i3 is the window manager. A display run by kwi3
-# (the i3kwin X11 host) serves the i3 IPC socket but has no bind table and
-# reads no i3 config — the daemon IS its keyboard, apart from the one panic
-# chord kwi3 grabs itself. Refusing to start there hands the keyboard to
-# nobody: observed live, a panic on the i3 session :10 left the kwi3 session
-# :40 with no keyboard at all.
+# (the i3kwin X11 host) has no bind table and reads no i3 config — the daemon
+# IS its keyboard, apart from the one panic chord kwi3 grabs itself. Refusing
+# to start there hands the keyboard to nobody: observed live, a panic on the
+# i3 session :10 left the kwi3 session :40 with no keyboard at all.
 #
 # TWO QUESTIONS, BOTH MUST SAY "NOT i3" (rejection #1 of kwi3-8wb.1).
 #
@@ -114,22 +113,33 @@ linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 #      determine i3 socket path"). That exact refusal is the ONLY answer that
 #      clears this step. An i3 answering, a claimed socket that does not
 #      answer, a hang past the timeout, a missing i3-msg: all keep the latch.
-#   2. THE WM THE DAEMON WOULD DISPATCH TO — $HOTKEYD_I3SOCK when set, else
-#      the display-pinned resolution, the order main.go's i3SocketResolver
-#      uses — must positively answer GET_VERSION with a `human_readable`
-#      starting "kwi3" ("kwi3 (i3 IPC 4.24 compatible)", i3kwin
-#      core/i3ipc.js ipcVersion()).
+#   2. THE WM THE DAEMON WOULD DISPATCH TO must positively identify itself as
+#      kwi3: a well-formed JSON-RPC 2.0 reply to `workspace.list` on
+#      $KWI3SOCK (ft010), with a list result and no error — kwi3_answers().
 #
-# Step 2 alone was the first cut, and it was wrong: HOTKEYD_I3SOCK is
-# exported by every kwi3 session and pushed into the systemd user manager by
-# kwi3-x11-session, so `hotkeyd.sh start :10` from a :40 terminal or a user
-# unit asked :40's kwi3, heard "kwi3", and started a daemon behind :10's live
+# Step 2 USED to ask $HOTKEYD_I3SOCK for i3 GET_VERSION and look for a
+# human_readable of "kwi3 ...". kwi3-234.18 removed kwi3's i3 socket and that
+# variable (kwi3 sessions now export $KWI3SOCK and nothing i3), so that probe
+# could only ever fail — the latch held on every kwi3 display and kwi3-8wb.1
+# was back (kwi3-a8o). $KWI3SOCK is the RIGHT socket to ask anyway: since sp004
+# Task 16 it is exactly what selects the daemon's kwi3rpc dispatch (main.go
+# reads it; this launcher passes it through untouched), so the WM asked here
+# is the WM the daemon's chords will reach. $HOTKEYD_I3SOCK is no longer read
+# by this function at all — it cannot lift the latch, whatever answers on it.
+# A session from before kwi3-234.18 exports $KWI3SOCK too (since sp004 Task 5),
+# so it is identified by the same probe; a kwi3 older than that exports no
+# $KWI3SOCK, is not identified, and stays latched — fails toward the refusal.
+#
+# Step 2 alone was the first cut of kwi3-8wb.1, and it was wrong: the kwi3
+# socket variable is exported by every kwi3 session and can reach the systemd
+# user manager, so `hotkeyd.sh start :10` from a :40 terminal or a user unit
+# asked :40's kwi3, heard "kwi3", and started a daemon behind :10's live
 # fallback — CONTESTED. Step 1 is what binds the answer to $DPY_BASE: the
-# latch is about i3's config.d, and it now holds on every display where i3
-# has claimed the root, whatever the environment names.
+# latch is about i3's config.d, and it holds on every display where i3 has
+# claimed the root, whatever the environment names.
 #
-# Step 2 is NOT checked to be on the same display. kwi3's GET_VERSION does
-# not name one, and the socket path (kwi3-<n>.sock) is a convention of
+# Step 2 is NOT checked to be on the same display. workspace.list names no
+# display, and the socket path (kwi3-<n>.rpc.sock) is a convention of
 # kwi3-session-env.sh, not something the WM attests. It does not need to be:
 # once step 1 has ruled i3 out, no bind table on $DPY_BASE can take the
 # fallback's chords, so there is nothing for a daemon to contest there. A
@@ -139,17 +149,54 @@ linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 # ASKED, NOT CONFIGURED. An env flag like HOTKEYD_WM=kwi3 would be a second
 # statement of a fact the WM already makes, and one that can be wrong: a
 # session that exports it and then runs i3 would start a daemon behind i3's
-# live fallback. HOTKEYD_I3SOCK being SET is not the signal either —
-# livecheck and dispatchmatrix point it at a real i3.
+# live fallback. $KWI3SOCK being SET is not the signal either — a dead run's
+# leftover path, or one pointed at the wrong server, is set and says nothing.
 #
 # THE INVARIANT. The latch is lifted only on a display whose root carries no
-# i3 socket path AND whose dispatch WM says it is kwi3. Every other outcome
-# — including every failure of either probe — is exactly the refusal every
+# i3 socket path AND whose $KWI3SOCK answers as kwi3. Every other outcome —
+# including every failure of either probe — is exactly the refusal every
 # display had before kwi3-8wb.1. A stale I3_SOCKET_PATH (an i3 that died and
 # left the property behind) therefore keeps the latch too; that costs a kwi3
 # started on a display i3 once ran, and fails toward the refusal.
 # Probed ONLY when the link exists: the unpanicked start path, which is every
 # i3 `exec_always`, pays nothing.
+
+# Does $KWI3SOCK answer as kwi3? One JSON-RPC 2.0 NDJSON round trip (ft010,
+# kwi3 core/rpc.js): `workspace.list` must come back as a JSON object with
+# jsonrpc "2.0", the id we sent, no error, and a LIST result. Anything else —
+# unset, missing path, nothing listening, garbage, i3's binary framing (i3
+# drops a request without its magic; kwi3's old i3 codec would too), a
+# JSON-RPC error, a hang — is "not identified", and not identified keeps the
+# latch.
+#
+# INLINE, NOT kwi3-msg. kwi3-msg is the protocol's CLI, but it lives in the
+# kwi3 repo and its installer puts it on the PHONE's PATH only; the box whose
+# kwi3 X11 session hit kwi3-8wb.1 has no kwi3-msg at all, so depending on it
+# would fail closed on exactly that session. It is also looser than this
+# needs: it exits 0 for any error-free JSON object. python3 is already a
+# hard dependency of this directory's X clients (adr0015) and of
+# hotkeyd-panic.sh's recover; a box without it fails closed here too.
+kwi3_answers() {
+    [ -n "${KWI3SOCK:-}" ] || return 1
+    timeout 2 python3 - "$KWI3SOCK" >/dev/null 2>&1 <<'PY'
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1.5)
+s.connect(sys.argv[1])
+s.sendall(b'{"jsonrpc":"2.0","id":1,"method":"workspace.list"}\n')
+buf = b""
+while b"\n" not in buf and len(buf) < 1 << 20:
+    chunk = s.recv(65536)
+    if not chunk:
+        sys.exit(1)
+    buf += chunk
+r = json.loads(buf.split(b"\n", 1)[0].decode("utf-8"))
+ok = (isinstance(r, dict) and r.get("jsonrpc") == "2.0" and r.get("id") == 1
+      and r.get("error") is None and isinstance(r.get("result"), list))
+sys.exit(0 if ok else 1)
+PY
+}
+
 latch_applies() {
     # `env -u I3SOCK` for the dotfiles-hwds.6 reason start gives below: an
     # inherited I3SOCK is some OTHER display's i3, and would answer for it.
@@ -168,16 +215,7 @@ latch_applies() {
             *) return 0 ;;
         esac
     fi
-    if [ -n "${HOTKEYD_I3SOCK:-}" ]; then
-        set -- -s "$HOTKEYD_I3SOCK"
-    else
-        set --
-    fi
-    ver="$(env -u I3SOCK DISPLAY="$DPY_BASE" timeout 2 \
-           i3-msg "$@" -t get_version 2>/dev/null)" || return 0
-    case "$ver" in
-        *'"human_readable":"kwi3'*|*'"human_readable": "kwi3'*) return 1 ;;
-    esac
+    kwi3_answers && return 1
     return 0
 }
 

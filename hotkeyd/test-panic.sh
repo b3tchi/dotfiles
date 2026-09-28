@@ -57,6 +57,14 @@ export PYTHONDONTWRITEBYTECODE=1
 # Unset, i3-msg resolves the socket from the root window of whatever DISPLAY it
 # is handed, which is the throwaway one.
 unset I3SOCK
+# The same, for the two variables that route the DAEMON (kwi3-a8o). Run from a
+# terminal inside a kwi3 session, the suite inherits $KWI3SOCK (and, before
+# kwi3-234.18, $HOTKEYD_I3SOCK); hotkeyd.sh passes both through to every daemon
+# it starts, so the oracle's `workspace daemon-owns-it` would be dispatched to
+# the caller's LIVE kwi3 and switch its workspaces, and the launcher's latch
+# probe would ask that live kwi3 who it is. Section 5c sets them explicitly,
+# per call, on the fakes it owns.
+unset KWI3SOCK HOTKEYD_I3SOCK
 
 T="$(mktemp -d)"
 XVFB_PIDS=()
@@ -90,6 +98,8 @@ cleanup() {
     # stops it — by display, like every other reap here.
     DISPLAY="$XD" "$HERE/hotkeyd.sh" stop "$XD" >/dev/null 2>&1
     [ -n "${FAKEWM_PID:-}" ] && kill "$FAKEWM_PID" 2>/dev/null
+    [ -n "${FAKERPC_PID:-}" ] && kill "$FAKERPC_PID" 2>/dev/null
+    [ -n "${FAKEJUNK_PID:-}" ] && kill "$FAKEJUNK_PID" 2>/dev/null
     for p in "${I3_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     for p in "${XVFB_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     rm -rf "$T"
@@ -107,8 +117,9 @@ XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
 # sentinel block below.
 XC="$(probe_free_display "$(( ${XB#:} + 1 ))")"
 # XD is a display whose window manager is NOT i3 — a kwi3 session (section 5c,
-# kwi3-8wb.1). Its "WM" is a fake i3-IPC server the suite starts; there is no
-# i3 on it, so nothing there can read config.d.
+# kwi3-8wb.1). Its "WM" is a fake JSON-RPC server the suite starts, reached
+# through $KWI3SOCK as a real kwi3 session reaches its WM (kwi3-a8o); there is
+# no i3 on it, so nothing there can read config.d.
 XD="$(probe_free_display "$(( ${XC#:} + 1 ))")"
 trap cleanup EXIT
 
@@ -243,12 +254,14 @@ for inc in d.get("included_configs", []):
     print(inc.get("variable_replaced_contents") or inc.get("raw_contents", ""))
 EOF
 
-# A window manager that speaks i3 IPC and is NOT i3 (section 5c). It answers
-# GET_VERSION (type 7) with the human_readable it is given — kwi3's is
-# "kwi3 (i3 IPC 4.24 compatible)", i3kwin core/i3ipc.js ipcVersion() — and
-# every other request with a bare success, which is all the daemon needs from
-# it to start. One thread per connection: the daemon holds its own open while
-# the launcher's probe comes and goes.
+# A window manager that speaks i3 IPC and CLAIMS to be kwi3 (section 5c). It
+# answers GET_VERSION (type 7) with the human_readable it is given — the old
+# kwi3 i3 codec's was "kwi3 (i3 IPC 4.24 compatible)", i3kwin core/i3ipc.js
+# ipcVersion() — and every other request with a bare success. Until kwi3-a8o
+# this WAS the suite's kwi3, and that answer on $HOTKEYD_I3SOCK lifted the
+# latch. kwi3-234.18 deleted kwi3's i3 codec, so it is now a DECOY: the latch
+# must hold whether it is named by $HOTKEYD_I3SOCK or by $KWI3SOCK. One thread
+# per connection.
 cat > "$T/fakewm.py" <<'EOF'
 import json, os, socket, struct, sys, threading
 path, human = sys.argv[1], sys.argv[2]
@@ -285,6 +298,51 @@ def serve(c):
                 reply(c, kind, [{"success": True}])
             else:
                 reply(c, kind, {"success": True})
+    except OSError:
+        return
+    finally:
+        c.close()
+while True:
+    conn, _ = srv.accept()
+    threading.Thread(target=serve, args=(conn,), daemon=True).start()
+EOF
+
+# kwi3 as the launcher and the daemon reach it now (section 5c, kwi3-a8o): a
+# JSON-RPC 2.0 NDJSON server on $KWI3SOCK (ft010, i3kwin core/rpc.js). In
+# mode `rpc` it answers `workspace.list` with a list, the way core/rpc.js
+# does, and any other method with an empty result — the daemon only dials on
+# its first chord and this suite presses none on $XD, but a fake that errors
+# on the daemon would be testing the fake. In mode `junk` it answers every
+# line with a line that is not JSON at all: something is listening, and it is
+# not kwi3. A stand-in rather than i3kwin/test/rpc-server.js on purpose: that
+# rig is node plus the kwi3 checkout, and this suite runs from dotfiles alone.
+cat > "$T/rpcwm.py" <<'EOF'
+import json, os, socket, sys, threading
+path, mode = sys.argv[1], sys.argv[2]
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(path)
+srv.listen(8)
+def serve(c):
+    try:
+        for line in c.makefile("rb"):
+            if mode == "junk":
+                c.sendall(b"this is not json-rpc\n")
+                continue
+            try:
+                req = json.loads(line)
+            except ValueError:
+                continue
+            if req.get("method") == "workspace.list":
+                res = [{"id": 1, "num": 1, "name": "1", "focused": True,
+                        "visible": True, "urgent": False}]
+            else:
+                res = {}
+            c.sendall((json.dumps({"jsonrpc": "2.0", "id": req.get("id"),
+                                   "result": res}) + "\n").encode())
     except OSError:
         return
     finally:
@@ -623,34 +681,50 @@ sleep 0.5
 # --- 5c: the latch is an i3 bind table; a kwi3 display is not i3 (kwi3-8wb.1)
 # The fallback rescues a display by having ITS i3 re-parse config.d and take
 # the chords back. That rescue only exists where i3 is the window manager. On
-# a kwi3 display (the i3kwin X11 host: it serves the i3 IPC socket, has NO
-# bind table, and grabs only the panic chord) nothing reads config.d, so
-# refusing to start the daemon there does not hand the keyboard to anyone —
-# it leaves that display with no keyboard at all. Observed live: a panic on
-# the i3 session :10 left the kwi3 session :40 unable to start its daemon.
+# a kwi3 display (the i3kwin X11 host: NO bind table, and it grabs only the
+# panic chord) nothing reads config.d, so refusing to start the daemon there
+# does not hand the keyboard to anyone — it leaves that display with no
+# keyboard at all. Observed live: a panic on the i3 session :10 left the kwi3
+# session :40 unable to start its daemon.
 #
-# $XD stands for that display. Its "window manager" is a fake i3-IPC server
-# answering GET_VERSION with kwi3's reply (i3kwin core/i3ipc.js ipcVersion()),
-# reached the way the kwi3 session reaches its real one: HOTKEYD_I3SOCK.
-# Every assertion is made WHILE THE LINK IS SET (sections 4-5b left it so).
+# $XD stands for that display. Its "window manager" is a fake JSON-RPC server
+# (rpcwm.py), reached the way a kwi3 session reaches its real one since
+# kwi3-234.18: $KWI3SOCK, and NO i3 socket or $HOTKEYD_I3SOCK at all. That
+# is the variable the daemon's kwi3rpc dispatch reads (sp004 Task 16), so the
+# WM the launcher identifies is the WM the chords go to (kwi3-a8o). Every
+# assertion is made WHILE THE LINK IS SET (sections 4-5b left it so).
 echo "panic: the latch does not reach a display whose WM is not i3 (kwi3)"
-KWI3_SOCK="$T/kwi3-${XD#:}.sock"
-python3 "$T/fakewm.py" "$KWI3_SOCK" \
+KWI3_RPC="$T/kwi3-${XD#:}.rpc.sock"
+python3 "$T/rpcwm.py" "$KWI3_RPC" rpc >"$T/rpcwm.log" 2>&1 &
+FAKERPC_PID=$!
+JUNK_SOCK="$T/junk.sock"
+python3 "$T/rpcwm.py" "$JUNK_SOCK" junk >"$T/rpcwm-junk.log" 2>&1 &
+FAKEJUNK_PID=$!
+KWI3_I3FRAMED="$T/kwi3-${XD#:}.i3.sock"
+python3 "$T/fakewm.py" "$KWI3_I3FRAMED" \
     'kwi3 (i3 IPC 4.24 compatible)' >"$T/fakewm.log" 2>&1 &
 FAKEWM_PID=$!
+# A dead run's leftover: a socket FILE with nothing listening behind it. The
+# binding process exits without unlinking, which is what a SIGKILLed WM leaves.
+STALE_SOCK="$T/stale.rpc.sock"
+python3 -c 'import socket, sys
+socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).bind(sys.argv[1])' "$STALE_SOCK"
 for _t in 1 2 3 4 5 6 7 8 9 10; do
-    [ -S "$KWI3_SOCK" ] && break
+    [ -S "$KWI3_RPC" ] && [ -S "$JUNK_SOCK" ] && [ -S "$KWI3_I3FRAMED" ] && break
     sleep 0.2
 done
+[ -S "$KWI3_RPC" ] && [ -S "$JUNK_SOCK" ] && [ -S "$KWI3_I3FRAMED" ] \
+    && [ -S "$STALE_SOCK" ] \
+    || bad "setup: 5c's fake sockets did not all come up"
 [ -L "$LINK" ] || bad "setup: 5c expects the panic link to still be set"
 kwi3_start() {
-    DISPLAY="$XD" HOTKEYD_I3SOCK="$KWI3_SOCK" "$HERE/hotkeyd.sh" "$@" "$XD" 2>&1
+    DISPLAY="$XD" KWI3SOCK="$KWI3_RPC" "$HERE/hotkeyd.sh" "$@" "$XD" 2>&1
 }
 
 out="$(kwi3_start start)"; rc=$?
 sleep 0.5
 [ "$rc" -eq 0 ] \
-    && ok "start on a kwi3 display succeeds while i3 is panicked (rc=0)" \
+    && ok "start on a kwi3 display (KWI3SOCK answers JSON-RPC) succeeds while i3 is panicked (rc=0)" \
     || bad "start on a kwi3 display was latched by i3's fallback (rc=$rc): $out"
 [ "$(daemons_on "$XD")" = 1 ] && ok "and a daemon is serving $XD" \
     || bad "no daemon on the kwi3 display $XD"
@@ -674,53 +748,83 @@ kwi3_start stop >/dev/null
 sleep 0.3
 [ "$(daemons_on "$XD")" = 0 ] || bad "teardown: the kwi3 daemon on $XD survived"
 
-# FAIL CLOSED. The gate is lifted only on a POSITIVE answer from the WM the
-# daemon would dispatch to. Nothing answering (no HOTKEYD_I3SOCK and no i3 on
-# $XD) is "unknown", and unknown keeps today's refusal.
-out="$(DISPLAY="$XD" "$HERE/hotkeyd.sh" start "$XD" 2>&1)"; rc=$?
-[ "$rc" -eq 4 ] \
-    && ok "with no WM answering on $XD, start still refuses (rc=4)" \
-    || bad "start lifted the latch with no WM identified (rc=$rc): $out"
-[ "$(daemons_on "$XD")" = 0 ] || bad "a daemon was spawned with no WM identified"
-
-# The decision is read from the REPLY, not from HOTKEYD_I3SOCK being set:
-# the test rigs (livecheck, dispatchmatrix) point that variable at real i3.
-# Pointed at this suite's real i3 on $XA, the latch holds exactly as before.
-out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$SOCK_A" \
-       "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
-[ "$rc" -eq 4 ] \
-    && ok "HOTKEYD_I3SOCK naming a real i3 is still latched (rc=4)" \
-    || bad "HOTKEYD_I3SOCK at real i3 lifted the latch (rc=$rc): $out"
-[ "$(daemons_on "$XA")" = 0 ] || bad "a daemon was spawned behind i3's fallback"
-
-# The kwi3 answer must be about THIS display. HOTKEYD_I3SOCK is exported by
-# every kwi3 session, and kwi3-x11-session also pushes it into the systemd
-# user manager — so `hotkeyd.sh start :10` typed in a :40 terminal, or run
-# from any user unit, arrives at the i3 display carrying a socket that names
-# ANOTHER display's kwi3. Asking only that socket said "kwi3" and lifted the
-# latch on the i3 display: a daemon behind i3's live fallback, the CONTESTED
-# state itself (rejection #1 of kwi3-8wb.1). The display's own i3 answering
-# must keep the latch whatever HOTKEYD_I3SOCK names.
-out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
-       "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
-sleep 0.5
-[ "$rc" -eq 4 ] \
-    && ok "an i3 display stays latched when HOTKEYD_I3SOCK names another display's kwi3 (rc=4)" \
-    || bad "HOTKEYD_I3SOCK at a foreign kwi3 lifted the latch on i3's display (rc=$rc): $out"
-if [ "$(daemons_on "$XA")" = 0 ]; then
-    ok "and nothing was spawned behind i3's fallback"
-else
-    bad "a daemon was spawned on the i3 display behind its fallback"
-    DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+# FAIL CLOSED. The gate is lifted only on a POSITIVE JSON-RPC answer on
+# $KWI3SOCK. Each case below is "not identified", and not identified keeps
+# today's refusal — rc=4 and no daemon. A daemon that did start is stopped
+# again so it cannot mask the next case.
+latched_on() { # <display> <description> [VAR=value ...]
+    local dpy="$1" what="$2"; shift 2
+    out="$(env DISPLAY="$dpy" "$@" "$HERE/hotkeyd.sh" start "$dpy" 2>&1)"; rc=$?
     sleep 0.5
-fi
-out="$(DISPLAY="$XA" HOTKEYD_I3SOCK="$KWI3_SOCK" \
+    [ "$rc" -eq 4 ] && ok "$what: start still refuses (rc=4)" \
+        || bad "$what: start lifted the latch (rc=$rc): $out"
+    if [ "$(daemons_on "$dpy")" = 0 ]; then
+        ok "$what: and nothing was spawned"
+    else
+        bad "$what: a daemon was spawned on $dpy behind the fallback"
+        DISPLAY="$dpy" "$HERE/hotkeyd.sh" stop "$dpy" >/dev/null 2>&1
+        sleep 0.5
+    fi
+}
+
+latched_on "$XD" "no KWI3SOCK and no i3 on $XD"
+latched_on "$XD" "KWI3SOCK naming a path that does not exist" \
+    KWI3SOCK="$T/no-such.rpc.sock"
+latched_on "$XD" "KWI3SOCK naming a stale socket nothing listens on" \
+    KWI3SOCK="$STALE_SOCK"
+latched_on "$XD" "KWI3SOCK at a server that answers garbage" \
+    KWI3SOCK="$JUNK_SOCK"
+# i3 framing on the rpc socket, twice: this suite's REAL i3 (which drops a
+# request without its magic) and a fake that answers in i3 framing claiming
+# to BE kwi3. Neither is a JSON-RPC answer, so neither identifies kwi3.
+latched_on "$XD" "KWI3SOCK at a real i3's socket (i3 framing)" \
+    KWI3SOCK="$SOCK_A"
+latched_on "$XD" "KWI3SOCK at an i3-framed server claiming to be kwi3" \
+    KWI3SOCK="$KWI3_I3FRAMED"
+# The RETIRED identification (kwi3-8wb.1 to kwi3-a8o): i3 GET_VERSION saying
+# "kwi3" on $HOTKEYD_I3SOCK. kwi3-234.18 removed kwi3's i3 socket and that
+# variable, and the launcher no longer reads it, so it must lift nothing.
+latched_on "$XD" "only HOTKEYD_I3SOCK answering i3 GET_VERSION as kwi3" \
+    HOTKEYD_I3SOCK="$KWI3_I3FRAMED"
+
+# The decision is read from the i3 DISPLAY's own root first: pointed at this
+# suite's real i3 on $XA, the latch holds exactly as before.
+latched_on "$XA" "HOTKEYD_I3SOCK naming a real i3 on $XA" \
+    HOTKEYD_I3SOCK="$SOCK_A"
+
+# The kwi3 answer must not lift the latch on an i3 display. $KWI3SOCK is
+# exported by every kwi3 session, so `hotkeyd.sh start :10` typed in a :40
+# terminal, or run from a user unit that inherited it, arrives at the i3
+# display carrying a socket that names ANOTHER display's kwi3 — and that
+# socket answers, truthfully, "kwi3". Asking only it would put a daemon behind
+# i3's live fallback: the CONTESTED state itself (rejection #1 of kwi3-8wb.1).
+# The display's own i3 answering must keep the latch whatever the environment
+# names — both variables, since a pre-kwi3-234.18 session exported both.
+latched_on "$XA" "KWI3SOCK naming another display's kwi3, on the i3 display" \
+    KWI3SOCK="$KWI3_RPC"
+latched_on "$XA" "KWI3SOCK and HOTKEYD_I3SOCK both naming a foreign kwi3, on the i3 display" \
+    KWI3SOCK="$KWI3_RPC" HOTKEYD_I3SOCK="$KWI3_I3FRAMED"
+out="$(DISPLAY="$XA" KWI3SOCK="$KWI3_RPC" \
        "$HERE/hotkeyd.sh" status "$XA" 2>&1)"; rc=$?
 case "$out" in
     *PANICKED*"$LINK"*resume*)
         ok "and status on the i3 display still reports PANICKED" ;;
     *)  bad "status on the i3 display dropped the latch for a foreign kwi3: $out" ;;
 esac
+
+# The world BEFORE kwi3-234.18: a kwi3 session exported $KWI3SOCK AND
+# $HOTKEYD_I3SOCK. Decided (kwi3-a8o): it keeps working, because it is
+# identified by its $KWI3SOCK like any other; $HOTKEYD_I3SOCK is simply not
+# consulted.
+out="$(DISPLAY="$XD" KWI3SOCK="$KWI3_RPC" HOTKEYD_I3SOCK="$KWI3_I3FRAMED" \
+       "$HERE/hotkeyd.sh" start "$XD" 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] && [ "$(daemons_on "$XD")" = 1 ] \
+    && ok "a pre-kwi3-234.18 session (KWI3SOCK and HOTKEYD_I3SOCK both set) starts on $XD" \
+    || bad "a session exporting both variables was latched on $XD (rc=$rc): $out"
+kwi3_start stop >/dev/null
+sleep 0.3
+[ "$(daemons_on "$XD")" = 0 ] || bad "teardown: the kwi3 daemon on $XD survived"
 
 # --- 6: resume round-trip ----------------------------------------------------
 echo "panic: resume"
