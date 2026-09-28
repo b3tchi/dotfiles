@@ -322,35 +322,19 @@ PanelWindow {
         if (Kwi3Client.available) { root._kwi3Refresh() }
     }
 
-    // ---- kwi3 whole-module tab sizing (kwi3-9ut/kwi3-ba2 rule) ---------------
-    // Ported from i3kwin/core/solver.js's shareEqualCells (kwi3-ba2's own
-    // fix for the chrome's tab bar): equal cells shared out of a FIXED
-    // total, and where it does not divide evenly the spare cells go to the
-    // FIRST items — "module is priority if tab is rounding then first item
-    // in tab should be +1" (Jan, AGENTS.md). That fixed-total case is real
-    // in the CHROME (a tab GROUP's children all occupy the SAME content
-    // area, so there genuinely is one width to divide among equal-priority
-    // buttons) — kept here, and still exercised directly by its own
-    // "AC2, mutation target" scenario, in case a future equal-slot case in
-    // THIS file ever needs it again.
+    // ---- kwi3 whole-module tab sizing (kwi3-9ut rule) ------------------------
+    // Every workspace tab is a whole number of module cells wide, and each
+    // tab gets the cells its OWN label wants (see tabCellPlan below).
     //
-    // kwi3-55l.16: it is NOT what tabCellPlan below wants, and was a real
-    // bug from kwi3-234.13 porting it in unchanged. There is no fixed width
-    // the workspace strip must fill edge-to-edge — every tab has its OWN
-    // label — so calling this on sum(wants) discarded exactly the
-    // information wants existed to carry: a short numeric workspace ("1")
-    // and a longer project name ("asahi") sitting side by side each got the
-    // AVERAGE of the two wants, not their own, so the longer name's Text
-    // had less width than its own implicitWidth and `elide: Text.ElideRight`
-    // silently kicked in — invisible in this file's own fixtures ("a","bb",
-    // "ccc": three lengths close enough that averaging happened not to
-    // starve any of them) and only visible on a real session with a mix of
-    // bare-numbered and project-named workspaces (Jan, 3392, kwi3-55l.16).
-    function _shareEqualCells(total, n) {
-        var out = [], base = Math.floor(total / n), spare = total - base * n, i
-        for (i = 0; i < n; i++) { out.push(base + (i < spare ? 1 : 0)) }
-        return out
-    }
+    // kwi3-55l.16: kwi3-234.13 originally ported i3kwin/core/solver.js's
+    // shareEqualCells here and divided sum(wants) equally among the tabs.
+    // That equal-share rule belongs to kwi3's chrome (a tab GROUP's children
+    // all share one tile's content width, and the chrome runs solver.js, not
+    // this file); the bar has no fixed width to fill, so averaging handed a
+    // short numeric workspace ("1") and a longer project name ("asahi") each
+    // the MEAN of their wants, eliding the longer one (Jan, 3392). The
+    // equal-share helper was removed with that fix - nothing here divides a
+    // fixed total any more.
 
     // Cells one tab's own label wants: its rendered width, PLUS the census
     // badge beside it if one will actually show (kwi3-55l.16 - a real live
@@ -366,8 +350,8 @@ PanelWindow {
     // tab), PLUS one module of padding each side (i3kwin/bar/shell.qml's
     // tabWidth(), same idea), capped at 40% of the bar's own width — same
     // cap shell.qml uses, converted to whole cells — so one long workspace
-    // name cannot balloon every tab once the wants below are shared out
-    // (edge case: "a workspace name wider than the bar").
+    // name cannot take over the bar (edge case: "a workspace name wider
+    // than the bar").
     function _tabWantCells(text) {
         var raw = kwi3TabMetrics.advanceWidth(text)
         var count = Census.totalFor(text)
@@ -395,7 +379,7 @@ PanelWindow {
     // at 40% of the bar by _tabWantCells), never less. There is no fixed
     // total to divide among tabs here (unlike the chrome's tab GROUP, where
     // every child shares one tile's content width) — sharing sum(wants)
-    // equally among n tabs was the bug (see _shareEqualCells's own comment):
+    // equally among n tabs was the bug (see the section header above):
     // it silently elided any tab whose own want was above the average while
     // handing unused space to every tab below it. `wants` is kept as its own
     // array (not folded into `cells`) purely so a test hook can read what
@@ -852,7 +836,7 @@ PanelWindow {
                     objectName: "wsTab"
                     // Under kwi3 the tab's width is the plan's, not its
                     // label's, so a label can be wider than its tab (a long
-                    // name capped by _tabWantCells, then shared out equally).
+                    // name capped at 40% of the bar by _tabWantCells).
                     // wsText below elides to fit; the clip is the backstop so
                     // nothing - the badge included - ever paints onto the
                     // next tab. Off under i3/sway, where the tab is sized

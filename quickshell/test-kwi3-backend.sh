@@ -808,19 +808,17 @@ kill "$GRID_PID" 2>/dev/null
 # feed under test; their try/catch already only ever assigns on a
 # successful parse, which a nonexistent binary's silence can never produce.
 #
-# AC2's "whole modules" half is checked TWO ways, deliberately:
-# bar._shareEqualCells (the equal-FIXED-total primitive, still real and
-# still used for the chrome's own tab GROUPS - see its own comment in
-# Bar.qml) is called DIRECTLY with chosen integers (deterministic,
-# mutation-provable, no font metrics involved) for the exact-value pin
-# reviewers want, and separately the REAL rendered "a"/"bb"/"ccc" tabs are
-# checked against GENERAL invariants (whole modules, cumulative x from
-# contentLeft, EVERY tab's cell count equal to its own want - kwi3-55l.16,
-# not shared out of a total) that hold regardless of this box's actual
-# monospace font metrics — the two together prove the algorithm AND that
-# the real Repeater is wired to it, without the suite depending on exactly
-# what "monospace" measures here. kwi3-55l.16's own scenario (below) is
-# what actually proves a tab never gets LESS than it asked for, under a
+# AC2's "whole modules" half is checked against the REAL rendered
+# "a"/"bb"/"ccc" tabs with GENERAL invariants (whole modules, cumulative x
+# from contentLeft, EVERY tab's cell count equal to its own want -
+# kwi3-55l.16, not shared out of a total) that hold regardless of this
+# box's actual monospace font metrics, so the suite does not depend on
+# exactly what "monospace" measures here. (Until kwi3-55l.16 it was also
+# pinned through a direct call to an equal-share helper in Bar.qml; that
+# helper had no production caller left once tabCellPlan stopped sharing a
+# total, and was removed with its pin - the chrome's own tab GROUPS run
+# i3kwin/core/solver.js, never Bar.qml.) kwi3-55l.16's own scenario
+# (below) is what proves a tab never gets LESS than it asked for, under a
 # realistic mix of workspace-name lengths and Jan's own font/module.
 # ============================================================================
 
@@ -1075,10 +1073,6 @@ ShellRoot {
             host.emit("plan", tag + " " + JSON.stringify(bar.tabCellPlan))
         }
 
-        function shareEqualCells(tag: string, total: int, n: int): void {
-            host.emit("share", tag + " " + JSON.stringify(bar._shareEqualCells(total, n)))
-        }
-
         // Invokes the REAL MouseArea.clicked handler on the Nth tab — the
         // same code path a real pointer click reaches.
         function clickTab(tag: string, index: int): void {
@@ -1243,23 +1237,6 @@ ok(geom.exclusiveZone === boot.reserve, "the bar exclusiveZone equals Kwi3Grid.r
                     "FAIL "*) fail "${line#FAIL }" "true" "false" ;;
                 esac
             done < "$TMP/geom-check.out"
-
-            scenario "shareEqualCells: spare cells go to the FIRST items, exact values (AC2, mutation target)"
-            ipc6 call bar6 shareEqualCells "s14_3" "14" "3"
-            sleep 0.2
-            s1="$(last6 share s14_3)"
-            [ "$s1" = "[5,5,4]" ] && pass "shareEqualCells(14,3) == [5,5,4] (remainder 2, front two get +1)" \
-                || fail "shareEqualCells(14,3) == [5,5,4]" "[5,5,4]" "$s1"
-            ipc6 call bar6 shareEqualCells "s15_3" "15" "3"
-            sleep 0.2
-            s2="$(last6 share s15_3)"
-            [ "$s2" = "[5,5,5]" ] && pass "shareEqualCells(15,3) == [5,5,5] (exact division, no spare)" \
-                || fail "shareEqualCells(15,3) == [5,5,5]" "[5,5,5]" "$s2"
-            ipc6 call bar6 shareEqualCells "s16_3" "16" "3"
-            sleep 0.2
-            s3="$(last6 share s16_3)"
-            [ "$s3" = "[6,5,5]" ] && pass "shareEqualCells(16,3) == [6,5,5] (remainder 1, only the FIRST gets +1)" \
-                || fail "shareEqualCells(16,3) == [6,5,5]" "[6,5,5]" "$s3"
 
             scenario "a workspace.focus notification from another client is followed within ~1s, well under the old 2s i3-msg timer (AC1)"
             kill -USR2 "$BAR_RIG_PID"
@@ -1517,7 +1494,7 @@ for (const name of ["alpha_1", "alpha_2", "gamma"]) {
             # kwi3-path Kwi3Client.call had already been proven to reach the
             # wire with the right name (the scenario above); the label was
             # simply ELIDED, because tabCellPlan used to share sum(wants)
-            # EQUALLY across every tab (bar._shareEqualCells) rather than
+            # EQUALLY across every tab (a since-removed helper) rather than
             # giving each its own want - a short "9" and a longer "asahi" each
             # got the AVERAGE, so "asahi" had less width than its own
             # Text.implicitWidth and elide: Text.ElideRight painted "…" over
