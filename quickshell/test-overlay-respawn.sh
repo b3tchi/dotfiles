@@ -44,8 +44,11 @@
 # actually says — the fix, a future variant, or a reversion back to a plain
 # assignment — is what gets spliced into the fixture and exercised here.
 #
-# Sandboxing discipline matches test-overlay.sh: its own Xvfb display, its own
-# isolated $HOME/$XDG_*_HOME (never Jan's), never touches a live display.
+# Sandboxing discipline matches test-overlay.sh: its own Xvfb display (a FREE
+# number from :190 up, refused unless our own Xvfb is the one answering), its
+# own isolated $HOME/$XDG_*_HOME (never Jan's), never touches a live display,
+# and every quickshell's whole process group is killed on the way out - the
+# last scenario asserts that nothing it started survives.
 #
 # usage: quickshell/test-overlay-respawn.sh
 # env:   XVFB= QUICKSHELL=   (default: from PATH)
@@ -105,11 +108,39 @@ echo "extracted from Overlay.qml: $ONEXITED_LINE"
 TMP="/tmp/qs-overlay-respawn-test.$$"
 mkdir -p "$TMP"
 KILL_PIDS=()
-cleanup() {
+# Process groups of every quickshell this script launched. quickshell runs
+# under `setsid`, so it leads a group of its own and every stub its Process
+# spawns (including scenario 1/3's `exec sleep 300`) is a member. Killing
+# only quickshell's pid orphans that sleep under init - kwi3-55l.5 review
+# #1 found three of them - so the GROUP is what gets killed, the same fix
+# test-overlay.sh's cleanup() documents for its identical stub.
+QS_PGIDS=()
+MY_PGID="$(ps -o pgid= -p $$ | tr -d ' ')"
+kill_groups() { # <signal>
+  local g
+  for g in "${QS_PGIDS[@]:-}"; do
+    # Never signal our own group (a pgid that failed to resolve, or setsid
+    # somehow not taking effect, must not take this shell down with it).
+    [ -n "$g" ] && [ "$g" != "$MY_PGID" ] && kill -"$1" -- -"$g" 2>/dev/null
+  done
+}
+group_survivors() { # -> prints "pid cmd" for anything left in our groups
+  local g
+  for g in "${QS_PGIDS[@]:-}"; do
+    [ -n "$g" ] && [ "$g" != "$MY_PGID" ] && pgrep -a -g "$g" 2>/dev/null
+  done
+}
+stop_all() {
   local p
+  kill_groups TERM
   for p in "${KILL_PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
-  sleep 0.2
+  sleep 0.3
+  kill_groups KILL
   for p in "${KILL_PIDS[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null; done
+  sleep 0.1
+}
+cleanup() {
+  stop_all
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -122,7 +153,23 @@ dpy_up() { # <display>
   grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
 }
 
-DPY_BASE=190
+# Display numbers are CHOSEN, never assumed: a number whose socket (file or
+# abstract) or lock file already exists belongs to some other server - on
+# this box :10 is Jan's live session - and a quickshell pointed at it would
+# attach to that server. pick_free_display skips every such number, and
+# run_case additionally requires the Xvfb IT started to still be alive once
+# the display answers, so a server that won a race for the same number is
+# refused rather than used.
+DPY_NEXT=190
+pick_free_display() { # -> sets CASE_DPY, or returns 1
+  local n
+  for n in $(seq "$DPY_NEXT" $((DPY_NEXT + 200))); do
+    if ! dpy_up ":$n" && [ ! -e "/tmp/.X$n-lock" ]; then
+      CASE_DPY=":$n"; DPY_NEXT=$((n + 1)); return 0
+    fi
+  done
+  return 1
+}
 
 # run_case <case-name> <extra-qml-block> <stub-shell-body>
 # Builds a minimal ShellRoot around ONE Process carrying the extracted
@@ -151,31 +198,57 @@ run_case() { # <name> <qml-preamble-lines> <stub-body>
     printf '}\n'
   } > "$dir/entry/shell.qml"
 
-  DPY_BASE=$((DPY_BASE + 1))
-  CASE_DPY=":$DPY_BASE"
-  "$XVFB" "$CASE_DPY" -screen 0 320x240x24 >"$dir/xvfb.log" 2>&1 &
+  if ! pick_free_display; then
+    fail "$name (a free display number)" "one in :$DPY_NEXT..+200" "none free"
+    return 1
+  fi
+  "$XVFB" "$CASE_DPY" -nolisten tcp -screen 0 320x240x24 >"$dir/xvfb.log" 2>&1 &
   CASE_XVFB_PID=$!
   KILL_PIDS+=("$CASE_XVFB_PID")
   local i
-  for i in $(seq 1 20); do dpy_up "$CASE_DPY" && break; sleep 0.3; done
+  for i in $(seq 1 20); do
+    kill -0 "$CASE_XVFB_PID" 2>/dev/null || break
+    dpy_up "$CASE_DPY" && break
+    sleep 0.3
+  done
+  # The display answering is not enough: it must be answered by OUR Xvfb.
+  if ! kill -0 "$CASE_XVFB_PID" 2>/dev/null; then
+    fail "$name (Xvfb $CASE_DPY is ours)" "our Xvfb alive on $CASE_DPY" \
+      "it exited ($(tail -1 "$dir/xvfb.log" 2>/dev/null)) - refusing to start quickshell on a display we do not own"
+    return 1
+  fi
   if ! dpy_up "$CASE_DPY"; then
     fail "$name (Xvfb $CASE_DPY started)" "a display" "none"
     return 1
   fi
 
-  setsid env -u SWAYSOCK -u KWI3SOCK \
+  # --wait keeps the launcher alive for quickshell's whole life, so the pid
+  # we resolve the group from cannot have exited (and been reused) by the
+  # time we ask. Whether setsid execs in place or forks (it forks when it is
+  # already a group leader), the new session's pgid is the pid of whichever
+  # process became quickshell.
+  setsid --wait env -u SWAYSOCK -u KWI3SOCK \
       DISPLAY="$CASE_DPY" HOME="$dir/home" LOGFILE="$CASE_LOG" \
       XDG_RUNTIME_DIR="$dir/run" XDG_CACHE_HOME="$dir/cch" XDG_CONFIG_HOME="$dir/cfg" \
       "$QUICKSHELL" -p "$dir/entry" >"$dir/qs.log" 2>&1 &
   local launcher_pid=$!
   KILL_PIDS+=("$launcher_pid")
-  # setsid forks rather than exec-replacing in some sandboxes (observed here:
-  # the backgrounded launcher stays a distinct process from quickshell) — so
-  # resolve the real child if there is one, and track BOTH pids for cleanup.
-  sleep 0.3
-  local child
-  child="$(pgrep -P "$launcher_pid" 2>/dev/null | head -1)"
-  if [ -n "$child" ]; then KILL_PIDS+=("$child"); fi
+  local g="" child="" i
+  for i in $(seq 1 20); do
+    g="$(ps -o pgid= -p "$launcher_pid" 2>/dev/null | tr -d ' ')"
+    [ -n "$g" ] && [ "$g" != "$MY_PGID" ] && break
+    child="$(pgrep -P "$launcher_pid" 2>/dev/null | head -1)"
+    if [ -n "$child" ]; then
+      g="$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' ')"
+      [ -n "$g" ] && [ "$g" != "$MY_PGID" ] && break
+    fi
+    sleep 0.1
+  done
+  if [ -z "$g" ] || [ "$g" = "$MY_PGID" ]; then
+    fail "$name (quickshell in its own process group)" "a pgid != ours ($MY_PGID)" "'$g'"
+    return 1
+  fi
+  QS_PGIDS+=("$g")
   return 0
 }
 
@@ -255,6 +328,66 @@ if run_case "regression" "$PREAMBLE2" "$STUB2"; then
   else
     fail "the process started at all" "a 1st invocation within 5s" "timed out"
   fi
+fi
+
+# ============================================================================
+# Scenario 3: the guard flips WHILE a respawned process is still running.
+# This is what separates a re-armed binding from a one-shot snapshot of the
+# guard (`onExited: running = !kwi3Client.configured`): both say "true" at
+# the instant of the first exit, so scenarios 1 and 2 cannot tell them apart
+# when the flip lands after the loop has already been left, but only the
+# binding is still listening when the guard later says stop. With the fix,
+# running follows the guard to false and quickshell terminates the live
+# process; with a snapshot or a plain `running = true`, the binding is gone
+# and the process is left running (and would be respawned forever under i3).
+# ============================================================================
+scenario "flip-while-running-stops-process: a guard flip during a live (respawned) process stops it"
+STUB3='c=$(( $(wc -l < $LOGFILE 2>/dev/null || echo 0) + 1 )); echo invoked $c >> $LOGFILE; if [ $c -le 1 ]; then sleep 0.1; exit 0; else echo $$ > $LOGFILE.pid; exec sleep 300; fi'
+PREAMBLE3='    QtObject { id: kwi3Client; property bool configured: false }
+    Timer { interval: 2000; running: true; repeat: false; onTriggered: kwi3Client.configured = true }'
+if run_case "flip-running" "$PREAMBLE3" "$STUB3"; then
+  if wait_for_count "$CASE_LOG" 2 5 && wait_for_count "$CASE_LOG.pid" 1 2; then
+    live_pid="$(cat "$CASE_LOG.pid")"
+    if kill -0 "$live_pid" 2>/dev/null; then
+      pass "respawned process $live_pid is running before the guard flips"
+    else
+      fail "respawned process is running before the guard flips" "pid $live_pid alive" "already gone (flip landed too early?)"
+    fi
+    # Timer fires 2s after load; allow it plus quickshell's terminate.
+    stopped=""
+    for i in $(seq 1 25); do
+      kill -0 "$live_pid" 2>/dev/null || { stopped=1; break; }
+      sleep 0.2
+    done
+    if [ -n "$stopped" ]; then
+      pass "the live process was stopped once the guard flipped (binding re-armed)"
+    else
+      fail "the live process was stopped once the guard flipped" "pid $live_pid gone within 5s" "still running - onExited left a frozen value, not a binding"
+    fi
+    sleep 0.5
+    c3="$(count_of "$CASE_LOG")"
+    if [ "$c3" = "2" ]; then
+      pass "no respawn after the guard flipped (2 invocations total)"
+    else
+      fail "no respawn after the guard flipped" "2" "$c3"
+    fi
+  else
+    fail "the process respawned once and the respawn started" "invocation 2 + pid file within 7s" "timed out (count $(count_of "$CASE_LOG"))"
+  fi
+fi
+
+# ============================================================================
+# Teardown is itself asserted: every process group this script started must
+# be empty afterwards. A stub's `exec sleep 300` that outlives quickshell is
+# reparented to init and runs on for five minutes (kwi3-55l.5 review #1).
+# ============================================================================
+scenario "teardown: nothing this script started survives it"
+stop_all
+left="$(group_survivors)"
+if [ -z "$left" ]; then
+  pass "all ${#QS_PGIDS[@]} quickshell process group(s) are empty"
+else
+  fail "all quickshell process groups are empty" "no survivors" "$(printf '%s' "$left" | tr '\n' ';')"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
