@@ -13,7 +13,22 @@ elif command -v i3 >/dev/null 2>&1; then
     # restart issued from a shell inside the xrdp session targeting the
     # desktop display — which paints one session's focus frames / workspaces
     # onto the other session's bar and screen.
-    _i3sock="$(i3 --get-socketpath 2>/dev/null)"
+    #
+    # `|| _i3sock=""` is load-bearing (dotfiles-kwi3-55l.21): a kwi3 X11
+    # session is a DIFFERENT window manager, but the phone still keeps the
+    # `i3` binary installed (kwi3 repo AGENTS.md's own tools list), so
+    # `command -v i3` above succeeds there too and this line actually RUNS —
+    # against a live display with no i3 socket to announce (kwi3's own IPC is
+    # JSON-RPC on $KWI3SOCK, not i3's; see docs/notes/ft010.md in the kwi3
+    # repo), so it exits 1. A plain failing assignment is not "no socket, try
+    # something else" here: qs-screenshot.sh runs this file under `set -e`
+    # (only `-u` is toggled around the source, never `-e`), so an unguarded
+    # failure aborts the WHOLE caller on the spot, silently — no hint strip,
+    # no red ring, no capture, no message anywhere. Confirmed against the live
+    # kwi3-40 hotkeyd log, which is full of exactly this failure from its own
+    # i3-ipc probing: "i3 --get-socketpath: exit status 1". Treat "no
+    # socketpath" the same as "no i3 at all" instead.
+    _i3sock="$(i3 --get-socketpath 2>/dev/null)" || _i3sock=""
     [ -n "$_i3sock" ] && export I3SOCK="$_i3sock"
 fi
 

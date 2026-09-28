@@ -148,19 +148,39 @@ def is_selection(w, h):
     return w >= MIN_SEL and h >= MIN_SEL
 
 
+def get_tree():
+    """The window tree, in i3's get_tree JSON shape.
+
+    A kwi3 X11 session speaks JSON-RPC on $KWI3SOCK, not i3 IPC at all (kwi3
+    repo docs/notes/ft010.md) -- kwi3 announces no i3 socket and runs no i3
+    codec since sp004 Task 18, so a hardcoded `i3-msg -t get_tree` fails
+    outright there, uncaught, crashing the selector with a traceback while its
+    own seat grab is still held (dotfiles-kwi3-55l.21). `kwi3-msg tree.get`
+    answers the identical get_tree shape instead (the same equivalence
+    i3act/i3tree rely on, kwi3 AGENTS.md) -- dispatch on $KWI3SOCK exactly
+    like wm-ipc.nu's kwi3-state/ipc-cmd: KWI3SOCK set means kwi3, full stop,
+    never a fallback to i3-msg.
+    """
+    if os.environ.get('KWI3SOCK'):
+        return json.loads(
+            subprocess.check_output(['kwi3-msg', 'tree.get']).decode())
+    return json.loads(
+        subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode())
+
+
 def focused_window_rect():
-    """The i3-focused window's (x, y, w, h) in root coordinates, or None if
+    """The focused window's (x, y, w, h) in root coordinates, or None if
     nothing is focused (an empty workspace).
 
-    Read from the i3 TREE, not X11 WM hints (_NET_ACTIVE_WINDOW) -- the same
-    source of truth qs-focus-border.py's border overlay uses. This overlay's
-    own window is an override-redirect POPUP, so it is never part of the i3
-    tree and never shows up as "focused" here regardless of whether it is
-    still mapped when this runs -- no need to hide it first, unlike _shoot's
-    scrot capture, which must never grab the outline itself.
+    Read from the WM TREE (get_tree(); i3's own on i3, kwi3-msg's on kwi3),
+    not X11 WM hints (_NET_ACTIVE_WINDOW) -- the same source of truth
+    qs-focus-border.py's border overlay uses. This overlay's own window is an
+    override-redirect POPUP, so it is never part of that tree and never shows
+    up as "focused" here regardless of whether it is still mapped when this
+    runs -- no need to hide it first, unlike _shoot's scrot capture, which
+    must never grab the outline itself.
     """
-    tree = json.loads(
-        subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode())
+    tree = get_tree()
 
     def walk(node):
         if node.get('focused') and node.get('window'):

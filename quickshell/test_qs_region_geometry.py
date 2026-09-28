@@ -120,6 +120,71 @@ check("ACCENT_HEX agrees with the painted tuple (single source of truth)",
 check("painted colour is NOT the #16a085 workspace green",
       qsr.ACCENT != (0x16 / 255, 0xa0 / 255, 0x85 / 255))
 
+print("get_tree()/focused_window_rect(): kwi3 X11 session (dotfiles-kwi3-55l.21)")
+# The 'w' capture-focused-window path (_shoot_window -> focused_window_rect)
+# used to hardcode `i3-msg -t get_tree`. A kwi3 X11 session speaks JSON-RPC on
+# $KWI3SOCK, not i3 IPC at all (kwi3 repo docs/notes/ft010.md; kwi3's i3 codec
+# and $I3SOCK export are gone since sp004 Task 18) - kwi3 announces no i3
+# socket, so `i3-msg -t get_tree` fails outright there, uncaught, crashing the
+# selector with a traceback while its own seat grab is still held.
+# `kwi3-msg tree.get` answers the identical get_tree shape instead (the same
+# equivalence i3act/i3tree rely on, kwi3 AGENTS.md) - use it whenever
+# $KWI3SOCK is set, exactly like wm-ipc.nu's kwi3-state/ipc-cmd dispatch.
+import os as _os
+import subprocess as _subprocess
+
+_KWI3_TREE = (
+    b'{"id":1,"type":"root","focused":false,"nodes":[{"id":2,"type":"con",'
+    b'"focused":true,"window":123,"rect":{"x":10,"y":20,"width":300,'
+    b'"height":400},"nodes":[],"floating_nodes":[]}],"floating_nodes":[]}'
+)
+_I3_TREE = (
+    b'{"id":1,"type":"root","focused":false,"nodes":[{"id":2,"type":"con",'
+    b'"focused":true,"window":123,"rect":{"x":1,"y":2,"width":3,"height":4},'
+    b'"nodes":[],"floating_nodes":[]}],"floating_nodes":[]}'
+)
+_calls = []
+
+
+def _fake_check_output(cmd, *a, **k):
+    _calls.append(list(cmd))
+    if cmd[0] == "kwi3-msg":
+        return _KWI3_TREE
+    if cmd[0] == "i3-msg":
+        return _I3_TREE
+    raise AssertionError("unexpected command %r" % (cmd,))
+
+
+_real_check_output = _subprocess.check_output
+qsr.subprocess.check_output = _fake_check_output
+_had_kwi3sock = "KWI3SOCK" in _os.environ
+_saved_kwi3sock = _os.environ.get("KWI3SOCK")
+
+try:
+    _os.environ["KWI3SOCK"] = "/tmp/fake-kwi3-55l21.sock"
+    _calls.clear()
+    rect = qsr.focused_window_rect()
+    check("KWI3SOCK set: calls kwi3-msg",
+          bool(_calls) and _calls[0][0] == "kwi3-msg", _calls)
+    check("KWI3SOCK set: never falls back to i3-msg",
+          not any(c[0] == "i3-msg" for c in _calls), _calls)
+    check("KWI3SOCK set: parses kwi3-msg's tree.get rect",
+          rect == (10, 20, 300, 400), rect)
+
+    del _os.environ["KWI3SOCK"]
+    _calls.clear()
+    rect = qsr.focused_window_rect()
+    check("KWI3SOCK unset: falls back to real i3's get_tree",
+          bool(_calls) and _calls[0][0] == "i3-msg", _calls)
+    check("KWI3SOCK unset: parses i3-msg's get_tree rect",
+          rect == (1, 2, 3, 4), rect)
+finally:
+    qsr.subprocess.check_output = _real_check_output
+    if _had_kwi3sock:
+        _os.environ["KWI3SOCK"] = _saved_kwi3sock
+    else:
+        _os.environ.pop("KWI3SOCK", None)
+
 print("shot_path(): matches ft006's api_surface contract")
 p = qsr.shot_path("/tmp/xyz")
 check("dir honoured + shot_<ts>.png shape",

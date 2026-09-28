@@ -130,5 +130,78 @@ else
 fi
 teardown
 
+# --- case 3: kwi3 X11 session shape (dotfiles-kwi3-55l.21) -------------------
+# kwi3 is a *different* window manager (kwi3 repo AGENTS.md) — no real i3 ever
+# runs there — but the phone still keeps the `i3`/`i3-msg` binaries installed
+# (kwi3 AGENTS.md's own tools list). So on kwi3 `command -v i3` succeeds and
+# `i3 --get-socketpath` actually RUNS, against a live X display that has no i3
+# socket to announce, and exits 1. Confirmed against the live kwi3-40
+# hotkeyd log, which is full of exactly this:
+#   hotkeyd: i3: i3 ipc: resolving socket path: i3 --get-socketpath: exit status 1
+#
+# This launcher runs under `set -eu` (line 34 of qs-screenshot.sh), and only
+# `-u` is toggled off/on around sourcing qs-session.sh — `-e` stays live the
+# whole time. qs-session.sh's `_i3sock="$(i3 --get-socketpath 2>/dev/null)"`
+# is a plain assignment with no `||`/`if` around it, so its failure aborts the
+# WHOLE launcher on the spot, silently: nothing reaches $LOG, no hint strip,
+# no red ring, no capture, no message anywhere. That silent full stop is
+# exactly Jan's "the screenshot tool does not work" report (3392).
+#
+# Deliberately does NOT reuse the stub qs-session.sh from setup() above — that
+# stub bypasses the very code path this case exists to exercise. It sources
+# the REAL qs-session.sh, with its own fake `i3` standing in for "installed,
+# but not the WM", the one behaviour that matters here.
+setup_kwi3() {
+    TMP="$(mktemp -d)"
+    LOG="$TMP/layer.log"
+    : > "$LOG"
+
+    mkdir -p "$TMP/home/.dotfiles/hotkeyd"
+    cat > "$TMP/home/.dotfiles/hotkeyd/hotkeyd" <<EOF
+#!/bin/sh
+[ "\$1" = "set-layer" ] && printf '%s\n' "\$2" >> "$LOG"
+exit 0
+EOF
+    chmod +x "$TMP/home/.dotfiles/hotkeyd/hotkeyd"
+
+    mkdir -p "$TMP/qs"
+    cp "$QS_DIR/qs-session.sh" "$TMP/qs/qs-session.sh"
+    cat > "$TMP/qs/qs-region.py" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+    chmod +x "$TMP/qs/qs-region.py"
+    cp "$LAUNCHER" "$TMP/qs/qs-screenshot.sh"
+    chmod +x "$TMP/qs/qs-screenshot.sh"
+
+    # `i3` present on PATH (as it is on the phone) but not the running WM:
+    # `--get-socketpath` fails exactly like the live kwi3-40 log shows.
+    mkdir -p "$TMP/fakebin"
+    cat > "$TMP/fakebin/i3" <<'EOF'
+#!/bin/sh
+[ "$1" = "--get-socketpath" ] && exit 1
+exit 0
+EOF
+    chmod +x "$TMP/fakebin/i3"
+}
+
+setup_kwi3
+# This whole test script runs under `set -eu` too (line 18) — a non-zero exit
+# from the launcher under test must not take the HARNESS down with it, or a
+# RED result here would silently stop the suite instead of reporting FAIL.
+set +e
+env PATH="$TMP/fakebin:$PATH" HOME="$TMP/home" DISPLAY=":99" \
+    XDG_RUNTIME_DIR="$TMP" "$TMP/qs/qs-screenshot.sh" >/dev/null 2>&1
+status=$?
+set -e
+got="$(tr '\n' ' ' < "$LOG" | sed 's/ *$//')"
+if [ "$got" = "screenshot default" ] && [ "$status" -eq 0 ]; then
+    ok "kwi3 shape: i3 installed-but-not-the-WM does not abort the launcher"
+else
+    no "kwi3 shape: i3 installed-but-not-the-WM does not abort the launcher" \
+       "want 'screenshot default' exit 0, got '$got' exit $status"
+fi
+teardown
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
