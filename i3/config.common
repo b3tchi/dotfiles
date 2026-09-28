@@ -252,6 +252,14 @@ workspace_auto_back_and_forth yes
 # (reload) in the entry point — a key whose job is to deal with a window that
 # is ALREADY misbehaving belongs in the engine that cannot lose its grabs.
 #
+# That argument only holds where i3 IS the engine. A kwi3 X11 session has no
+# i3 process at all, so this chord reached nobody there — bd kwi3-55l.1,
+# "does nothing" on 3392. `hotkeyd/cmd/hotkeyd/config.go`'s Kwi3OnlyBinds
+# gives the daemon that same chord (kill -> internal/kwi3rpc -> ft010
+# window.close{}), but ONLY on a kwi3 session (main.go's effectiveBinds,
+# gated on $KWI3SOCK) — a plain i3 session's grab set, and this line, are
+# unaffected.
+#
 # Not in the group at all, despite sharing keysyms: $mod+Shift+s (region
 # screenshot, hotkeyd's) and $mod+Shift+e (exit, hotkeyd's since
 # dotfiles-hwds.46). A passive grab matches its modifier mask exactly, so those

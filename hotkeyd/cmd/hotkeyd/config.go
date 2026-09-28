@@ -454,3 +454,35 @@ func buildBinds() []bind.Bind {
 
 	return out
 }
+
+// Kwi3OnlyBinds is grabbed ONLY on a kwi3 session (main.go merges it into
+// the active table whenever $KWI3SOCK is set, never for a plain i3/sway
+// session) — bd kwi3-55l.1.
+//
+// $mod+Shift+q (i3's "kill") is deliberately absent from Binds/buildBinds()
+// above: i3/config.common's own comment calls it out as "STILL i3's, on
+// purpose... a key whose job is to deal with a window that is already
+// misbehaving belongs in the engine that cannot lose its grabs" — the same
+// argument $mod+Shift+c (reload) and the panic chord get. On a REAL i3
+// session that reasoning holds: i3's native `bindsym $mod+Shift+q kill`
+// keeps working even if this daemon crashes, and Binds staying silent on
+// that chord is what keeps `check --ownership` from ever reporting it as a
+// BOTH collision (ownership_test.go; the daemon must own a chord XOR i3
+// does, never both — a chord bound in both places double-fires with no
+// BadAccess to warn, internal/bind's own doc).
+//
+// A kwi3 session has no i3 process at all, so that fallback is not merely
+// redundant there, it is ABSENT — $mod+Shift+q reached nobody (kwi3-55l.1:
+// "does nothing" on 3392). This daemon IS the engine that cannot lose its
+// grabs on that display (same argument, different engine), so it takes
+// ownership of the chord for kwi3 sessions specifically, translated by
+// internal/kwi3rpc (kill -> window.close{}, i.e. the FOCUSED window — see
+// translate.go) exactly like every other chord this daemon already routes
+// over $KWI3SOCK. Kept out of the base Binds table (rather than adding it
+// there unconditionally) so a real i3 session's grab set — and therefore
+// `check --ownership` run against the real i3/config.common — is completely
+// unaffected; main.go's effectiveBinds is the only thing that ever sees
+// both slices at once.
+var Kwi3OnlyBinds = []bind.Bind{
+	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
+}
