@@ -1241,6 +1241,93 @@ else
   fail "kwi3/config.js applies Jan's runner rule through the real core" "OK (exit 0)" "$(cat "$K_TMP/config-js-check.log")"
 fi
 
+# ---------------------------------------------------------------------------
+# kwi3-55l.9: the non-Quickshell app float table (i3/config.common:316-342,
+# ported into kwi3/config.js as KWI3_I3_FLOAT_RULES) applies against the REAL
+# kwi3 core, same discipline as the runner-rule check just above — a handful
+# of representative class/title matches (including the two case-insensitive
+# `(?i)` rules and Oblogout, whose i3 rule is `fullscreen enable` rather than
+# `floating enable` but has no fullscreen hook method to port to) end up
+# floating, and one non-matching window (an ordinary xterm, matching none of
+# the table's ~27 rows) is left tiled — the negative control that proves the
+# table is not simply floating everything.
+# ---------------------------------------------------------------------------
+scenario "kwi3-i3-float-rules-vs-real-core: i3/config.common's non-Quickshell floating-enable rules (kwi3-55l.9) apply through the real kwi3 core"
+cat > "$K_TMP/i3-float-rules-check.js" <<'JSEOF'
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const KWI3_REPO = process.argv[2];
+const CONFIG_JS = process.argv[3];
+const h = require(path.join(KWI3_REPO, 'i3kwin/test/harness.js'));
+const fake = require(path.join(KWI3_REPO, 'i3kwin/test/fake-kwin.js'));
+
+const core = fs.readdirSync(path.join(KWI3_REPO, 'i3kwin/core'))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => path.join(KWI3_REPO, 'i3kwin/core', f));
+const adapter = path.join(KWI3_REPO, 'i3kwin/adapters/kwin/contents/code/adapter.js');
+
+const ctx = h.load(core.concat([adapter, CONFIG_JS]));
+const world = h.makeWorld(ctx, {});
+ctx.ensureRoot();
+
+let pass = true;
+function eq(got, want, label) {
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+        console.error('FAIL: ' + label + ' - got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want));
+        pass = false;
+    }
+}
+
+eq(ctx.kwi3LoadErrors(), [], 'kwi3/config.js loads through the real core with no collected errors');
+
+// A representative slice of the ~27-row table: a title match, plain class
+// matches, a class with an embedded space (Manjaro Settings Manager), the
+// sticky-in-i3-but-not-ported case (Nitrogen), Oblogout (i3: fullscreen
+// enable, no such hook method here — floated instead) and both `(?i)`
+// case-insensitive rows, exercised with a DIFFERENTLY-cased value than the
+// pattern itself to prove the `i` flag actually took.
+const FLOATING_CASES = [
+    { label: 'alsamixer (title match)',            opts: { caption: 'alsamixer' } },
+    { label: 'GParted (class match)',               opts: { resourceClass: 'GParted', caption: 'GParted' } },
+    { label: 'Manjaro Settings Manager (class w/ space)', opts: { resourceClass: 'Manjaro Settings Manager', caption: 'Manjaro Settings Manager' } },
+    { label: 'Nitrogen (class match, sticky not ported)', opts: { resourceClass: 'Nitrogen', caption: 'Nitrogen' } },
+    { label: 'Oblogout (i3: fullscreen enable, floated here)', opts: { resourceClass: 'Oblogout', caption: 'Oblogout' } },
+    { label: 'SYSTEM-CONFIG-PRINTER.PY (case-insensitive)', opts: { resourceClass: 'SYSTEM-CONFIG-PRINTER.PY', caption: 'system-config-printer.py' } },
+    { label: 'VirtualBox Manager (case-insensitive)', opts: { resourceClass: 'VirtualBox Manager', caption: 'VirtualBox Manager' } }
+];
+
+FLOATING_CASES.forEach(function (c) {
+    const w = fake.observe(fake.FakeWindow(Object.assign({
+        output: world.ws.activeScreen,
+        desktops: [world.ws.currentDesktop],
+        frameGeometry: fake.rect(0, 0, 400, 300)
+    }, c.opts)), 'window');
+    world.ws.windows.push(w);
+    ctx.manage(w);
+    const info = ctx.windowInfo(w);
+    eq(ctx.windowPlacement(info.id), 'floating', c.label + ' floats');
+});
+
+// Negative control: an ordinary xterm matches none of the ~27 rows and none
+// of the Quickshell runner titles either, so it must still tile.
+const control = fake.observe(fake.FakeWindow({
+    resourceClass: 'xterm', caption: 'xterm',
+    output: world.ws.activeScreen, desktops: [world.ws.currentDesktop],
+    frameGeometry: fake.rect(0, 0, 400, 300)
+}), 'window');
+world.ws.windows.push(control);
+ctx.manage(control);
+eq(ctx.windowPlacement(ctx.windowInfo(control).id), 'tiled', 'xterm (non-matching control) stays tiled');
+
+if (!pass) { process.exit(1); }
+console.log('OK - kwi3/config.js\'s ported i3 float-rule table applies against the real core');
+JSEOF
+if node "$K_TMP/i3-float-rules-check.js" "$KWI3_REPO" "$KWI3_CONFIG_JS" >"$K_TMP/i3-float-rules-check.log" 2>&1; then
+  pass "kwi3/config.js's ported i3/config.common float-rule table (kwi3-55l.9) floats representative apps and leaves a non-matching window tiled"
+else
+  fail "kwi3/config.js's ported i3/config.common float-rule table applies through the real core" "OK (exit 0)" "$(cat "$K_TMP/i3-float-rules-check.log")"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
