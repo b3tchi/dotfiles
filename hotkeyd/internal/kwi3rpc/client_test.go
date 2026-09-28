@@ -311,6 +311,124 @@ func TestClientReconnectsAfterServerRestart(t *testing.T) {
 	}
 }
 
+// TestClientFirstCallAfterRestartLandsWithoutExternalRetry is the kwi3-5a8
+// regression: the OLD behaviour left the dead connection cached until a
+// Call failed on it, so the very first chord issued after kwi3 restarts
+// wrote to the dead connection, failed, and was DROPPED even though kwi3
+// was already back up and ready to accept. This test issues exactly one
+// Call immediately after the restart - no external retry loop, unlike
+// TestClientReconnectsAfterServerRestart above - and it must succeed.
+//
+// This is safe to retry transparently because a WRITE failure means the
+// request was never delivered anywhere: empirically (see the write-to-a
+// peer-closed-AF_UNIX-socket experiment cited in client.go's writeLocked
+// doc comment), a write against a connection whose peer already closed
+// fails immediately (EPIPE) rather than silently buffering, so "the write
+// failed" is a trustworthy "never sent" signal on this transport.
+func TestClientFirstCallAfterRestartLandsWithoutExternalRetry(t *testing.T) {
+	dir := t.TempDir()
+	addr := filepath.Join(dir, "kwi3.rpc.sock")
+
+	ln1, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("listen: %s", err)
+	}
+	serveOnce := func(ln net.Listener) {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var req struct {
+			ID int64 `json:"id"`
+		}
+		json.Unmarshal(line, &req)
+		reply, _ := json.Marshal(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": map[string]interface{}{}})
+		conn.Write(append(reply, '\n'))
+		// conn closes here (defer) - the same as kwi3 exiting right after
+		// answering, which is what leaves the client's cached connection
+		// dead by the time the NEXT chord's Call runs.
+	}
+	go serveOnce(ln1)
+
+	c := New(addr)
+	defer c.Close()
+	if _, err := c.Call("workspace.list", nil); err != nil {
+		t.Fatalf("first call: %s", err)
+	}
+
+	// kwi3 "restarts": old listener gone, a fresh one bound at the same
+	// path and ready to Accept before the next chord fires - the case
+	// where the drop was observed (kwi3 already back, but the client still
+	// held the stale connection from before the restart).
+	ln1.Close()
+	os.Remove(addr)
+	ln2, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("re-listen: %s", err)
+	}
+	defer ln2.Close()
+	go serveOnce(ln2)
+
+	if _, err := c.Call("workspace.list", nil); err != nil {
+		t.Fatalf("the first chord after kwi3 restarts must land, not be dropped: %s", err)
+	}
+}
+
+// TestClientReadFailureIsNotRetried is the negative half of kwi3-5a8: a
+// failure on the READ side (kwi3 accepted the request and may already have
+// run it before dying, e.g. mid-command) must NEVER be retried - retrying
+// would risk sending the same command twice. This asserts the request
+// reaches the server exactly once even though the Call itself reports an
+// error to the caller.
+func TestClientReadFailureIsNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	addr := filepath.Join(dir, "kwi3.rpc.sock")
+	ln, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("listen: %s", err)
+	}
+	defer ln.Close()
+
+	var mu sync.Mutex
+	requestCount := 0
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		if _, err := r.ReadBytes('\n'); err != nil {
+			return
+		}
+		mu.Lock()
+		requestCount++
+		mu.Unlock()
+		// Simulate kwi3 dying after receiving the request (and possibly
+		// having already run it) but before writing any reply: close with
+		// no bytes written back.
+	}()
+
+	c := New(addr)
+	defer c.Close()
+	if _, err := c.Call("window.close", map[string]interface{}{"id": 1}); err == nil {
+		t.Fatalf("expected a read-side error")
+	}
+
+	mu.Lock()
+	n := requestCount
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("a read failure must never be retried (kwi3 may already have run the command) - expected exactly 1 request delivered, got %d", n)
+	}
+}
+
 func TestClientMalformedReplyIsAnError(t *testing.T) {
 	dir := t.TempDir()
 	addr := filepath.Join(dir, "kwi3.rpc.sock")
