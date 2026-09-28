@@ -300,12 +300,17 @@ PanelWindow {
     }
 
     Component.onCompleted: {
-        // Deltas per ft010 (`workspace.focused/created/destroyed`): any of
-        // them re-lists rather than patching in place, same policy the i3-msg
-        // side takes with its own blunter "workspace" event.
+        // Deltas per ft010 (`workspace.focused/created/destroyed/urgent`):
+        // any of them re-lists rather than patching in place, same policy
+        // the i3-msg side takes with its own blunter "workspace" event.
+        // `workspace.urgent` (kwi3-11m) is the fix for a real gap: before
+        // this event existed, a workspace going urgent painted nothing here
+        // until the next focus/create/destroy happened to re-list -
+        // sometimes never, on a session sitting on one workspace.
         Kwi3Client.on("workspace.focused",   function () { root._kwi3Refresh() })
         Kwi3Client.on("workspace.created",   function () { root._kwi3Refresh() })
         Kwi3Client.on("workspace.destroyed", function () { root._kwi3Refresh() })
+        Kwi3Client.on("workspace.urgent",    function () { root._kwi3Refresh() })
         if (Kwi3Client.available) { root._kwi3Refresh() }
     }
 
