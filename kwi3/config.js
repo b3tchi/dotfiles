@@ -61,12 +61,37 @@ kwi3.set({
     // this file - keep the two in step by hand if either changes.
     modifier: 'Alt',
 
-    // kwi3-55l.25: the focus ring turns this colour while hotkeyd's resize
-    // layer is active (hotkeyd sends kwi3 `mode.set {name}` on every layer
-    // change). #DC322F is solarized red - Jan's choice (2026-09-29: "red",
-    // not the orange #CB4B16 his urgent border and the old qs-focus-border
-    // MODE_BC use). Every other layer keeps `frame`'s.
-    modeFrame: { resize: '#DC322F' }
+    // The focus ring per hotkeyd mode (kwi3-55l.25, kwi3-55l.30). hotkeyd
+    // sends kwi3 `mode.set {name}` on every change, and the name is the
+    // EFFECTIVE mode (kwi3-55l.29): the held mod sub-layer's label when one
+    // is held, else the layer name. `default` (no layer) always keeps
+    // `frame`'s colour above and cannot be listed here.
+    //
+    // Jan 2026-09-29: "nav mode including submodes and screenshot mode too
+    // other modes should not have frame" + "nav RESIZE" (red).
+    //
+    // Every name hotkeyd/cmd/hotkeyd/config.go's table can send, so none
+    // falls into '*' by accident:
+    //   nav              layer ($mod+o)                     -> orange
+    //   move             nav sub-layer (held Ctrl)          -> orange
+    //   resize           nav sub-layer (held Alt/Mod1), and
+    //                    the standalone resize layer ($mod+r) -> red
+    //   screenshot       External layer, qs-screenshot aiming -> orange
+    //   screenshot-drag  External layer, region being drawn -> no ring ('*';
+    //                    the old qs-focus-border dropped it here too - a
+    //                    "this is what `w` captures" ring is stale mid-drag)
+    //   system           one-shot session menu ($mod+0)     -> no ring ('*')
+    //   switcher         alt-tab hold layer ($mod+Tab)      -> no ring ('*')
+    // #DC322F is solarized red (Jan's resize choice); #CB4B16 is the orange
+    // of his urgent border and the old overlay's MODE_BC (the colour it
+    // painted for an active layer) - change either here, nowhere else.
+    modeFrame: {
+        nav:        '#CB4B16',
+        move:       '#CB4B16',
+        resize:     '#DC322F',
+        screenshot: '#CB4B16',
+        '*':        'none'
+    }
 
     // focusFrame defaults to true (unset here, matching the old kwi3/config,
     // which never set kwi3_focus_frame either).

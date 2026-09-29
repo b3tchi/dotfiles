@@ -1355,7 +1355,17 @@ PanelWindow {
                 // tab at rest, no visible mode segment while a layer is up) -
                 // "unfocused tabs have none" generalised to "none at all
                 // fires none".
-                visible: Kwi3Grid.frameEnabled && rect !== null && thickness > 0
+                //
+                // kwi3-55l.30: frameEnabled gates the AT-REST (workspace)
+                // ring only. grid.get's frame.enabled is now EFFECTIVE - false
+                // while kwi3's modeFrame hides the window ring for the current
+                // mode (Jan's config.js: '*': 'none' for system/switcher/...)
+                // - and the stripe over the mode pill is the pill's own
+                // accent, independent of the window ring (kwi3-55l.27), so a
+                // mode that hides the window ring must not also take the
+                // pill's highlight away.
+                visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                         && rect !== null && thickness > 0
                 x: rect ? rect.x : 0
                 y: rect ? rect.y - thickness : 0
                 width: rect ? Math.max(1, rect.w) : 1
