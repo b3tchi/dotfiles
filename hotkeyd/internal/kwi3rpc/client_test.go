@@ -592,3 +592,33 @@ func TestDispatchWorkspaceNeighbourResolvesLocally(t *testing.T) {
 		t.Fatalf("the pseudo-method leaked onto the wire: %q", lastMethod)
 	}
 }
+
+// kwi3-55l.25: WithCallTimeout bounds one Call against a kwi3 that reads the
+// request and never answers - the mode reporter's guarantee that a wedged
+// kwi3 costs it one timeout, never a goroutine stuck forever holding the
+// Client's lock. The connection is dropped (the reply may still arrive
+// later and must never pair with a later request), so the next Call redials.
+func TestClientCallTimeout(t *testing.T) {
+	s := newFakeServer(t)
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	s.setHandler(func(method string, params interface{}) (interface{}, int, string) {
+		if method == "hang" {
+			<-block
+		}
+		return map[string]interface{}{}, 0, ""
+	})
+	c := New(s.addr, WithCallTimeout(100*time.Millisecond))
+	t.Cleanup(func() { c.Close() })
+	start := time.Now()
+	_, err := c.Call("hang", nil)
+	if err == nil {
+		t.Fatal("a Call kwi3 never answered returned no error")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("WithCallTimeout(100ms) Call took %s", d)
+	}
+	if _, err := c.Call("workspace.list", nil); err != nil {
+		t.Fatalf("the next Call after a timeout should redial and succeed: %s", err)
+	}
+}

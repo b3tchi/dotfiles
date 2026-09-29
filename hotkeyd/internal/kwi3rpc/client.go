@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // RPCError is a JSON-RPC 2.0 error object kwi3 sent back for one Call -
@@ -59,6 +60,17 @@ func WithLog(fn func(string)) Option {
 	return func(c *Client) { c.log = fn }
 }
 
+// WithCallTimeout bounds each Call (write and reply together) to d; zero,
+// the default, waits as long as kwi3 takes, which is what chord dispatch
+// has always done. A Call that times out drops the connection like any
+// other read failure - the late reply must never pair with a later request
+// - and is not retried. kwi3-55l.25: the mode reporter uses it so a kwi3
+// that has stopped answering costs one timeout per mode change, never a
+// goroutine parked for ever holding the Client's lock.
+func WithCallTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = d }
+}
+
 // Client is a client for kwi3's rpc socket ($KWI3SOCK, ft010): one
 // long-lived NDJSON connection, dialed lazily on the first Call and
 // re-dialed on demand after any transport failure - never eagerly, and
@@ -76,6 +88,8 @@ type Client struct {
 	addr string
 	dial func(network, address string) (net.Conn, error)
 	log  func(string)
+	// timeout bounds one Call; 0 means none (WithCallTimeout).
+	timeout time.Duration
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -169,6 +183,9 @@ func (c *Client) writeLocked(line []byte) error {
 		if dialErr := c.ensureConnectedLocked(); dialErr != nil {
 			return dialErr
 		}
+		if c.timeout > 0 {
+			c.conn.SetDeadline(time.Now().Add(c.timeout))
+		}
 		if _, err2 := c.conn.Write(line); err2 != nil {
 			c.closeLocked()
 			return fmt.Errorf("kwi3rpc: write to %s: %w (retry on a fresh connection also failed: %s)", c.addr, err, err2)
@@ -208,6 +225,11 @@ func (c *Client) Call(method string, params interface{}) (json.RawMessage, error
 	}
 	line = append(line, '\n')
 
+	if c.timeout > 0 {
+		// Set on whichever connection is current; writeLocked's one redial
+		// sets its own below, so a retried write is bounded too.
+		c.conn.SetDeadline(time.Now().Add(c.timeout))
+	}
 	if err := c.writeLocked(line); err != nil {
 		return nil, err
 	}
@@ -216,6 +238,10 @@ func (c *Client) Call(method string, params interface{}) (json.RawMessage, error
 	if err != nil {
 		c.closeLocked()
 		return nil, fmt.Errorf("kwi3rpc: read from %s: %w", c.addr, err)
+	}
+
+	if c.timeout > 0 {
+		c.conn.SetDeadline(time.Time{})
 	}
 
 	var resp response

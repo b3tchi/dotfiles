@@ -140,7 +140,15 @@ func run(argv []string) int {
 	})
 
 	pub, pubCloser := buildPublisher(display, daemonLog)
-	engine := layer.NewEngine(activeBinds, Layers, layer.Config{Publisher: pub, Mod: mod})
+	// kwi3-55l.25: on a kwi3 session the engine's state feed is teed into a
+	// mode reporter that sends kwi3 `mode.set {name}` on every layer change
+	// (kwi3mode.go) - kwi3 paints its focus ring in that mode's colour. No
+	// $KWI3SOCK: pub is passed through untouched and nothing is sent.
+	enginePub, modeCloser := enginePublisher(pub, kwi3Sock, daemonLog)
+	if modeCloser != nil {
+		defer modeCloser.Close()
+	}
+	engine := layer.NewEngine(activeBinds, Layers, layer.Config{Publisher: enginePub, Mod: mod})
 
 	// Control socket: bound AFTER the lock (its stale-socket unlink is only
 	// safe under that guarantee — see NewControlListener) and best-effort
