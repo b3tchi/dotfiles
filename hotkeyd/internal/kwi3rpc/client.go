@@ -71,6 +71,17 @@ func WithCallTimeout(d time.Duration) Option {
 	return func(c *Client) { c.timeout = d }
 }
 
+// WithOnConnect runs fn after every SUCCESSFUL dial - the first one and
+// each reconnect (a failed dial never runs it, a Call on a live connection
+// never runs it). kwi3-55l.28: a kwi3 that restarted comes back in its
+// "default" mode, and the chord client's reconnect is the first sign of
+// it, so the daemon hooks the mode reporter's Resync here. fn runs with the
+// Client's lock held: it must not call back into this Client, and it must
+// not block.
+func WithOnConnect(fn func()) Option {
+	return func(c *Client) { c.onConnect = fn }
+}
+
 // Client is a client for kwi3's rpc socket ($KWI3SOCK, ft010): one
 // long-lived NDJSON connection, dialed lazily on the first Call and
 // re-dialed on demand after any transport failure - never eagerly, and
@@ -90,6 +101,8 @@ type Client struct {
 	log  func(string)
 	// timeout bounds one Call; 0 means none (WithCallTimeout).
 	timeout time.Duration
+	// onConnect runs after each successful dial (WithOnConnect); nil = none.
+	onConnect func()
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -148,6 +161,9 @@ func (c *Client) ensureConnectedLocked() error {
 	if c.down {
 		c.down = false
 		c.log(fmt.Sprintf("kwi3rpc: reconnected to %s", c.addr))
+	}
+	if c.onConnect != nil {
+		c.onConnect()
 	}
 	return nil
 }

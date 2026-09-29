@@ -144,9 +144,9 @@ func run(argv []string) int {
 	// mode reporter that sends kwi3 `mode.set {name}` on every layer change
 	// (kwi3mode.go) - kwi3 paints its focus ring in that mode's colour. No
 	// $KWI3SOCK: pub is passed through untouched and nothing is sent.
-	enginePub, modeCloser := enginePublisher(pub, kwi3Sock, daemonLog)
-	if modeCloser != nil {
-		defer modeCloser.Close()
+	enginePub, modeRep := enginePublisher(pub, kwi3Sock, daemonLog)
+	if modeRep != nil {
+		defer modeRep.Close()
 	}
 	engine := layer.NewEngine(activeBinds, Layers, layer.Config{Publisher: enginePub, Mod: mod})
 
@@ -194,7 +194,13 @@ func run(argv []string) int {
 	// dispatch() falls through to it as it always did. kwi3rpc.New does not
 	// dial here; the first chord does.
 	if kwi3Sock != "" {
-		daeCfg.Kwi3 = kwi3rpc.New(kwi3Sock, kwi3rpc.WithLog(daemonLog))
+		// kwi3-55l.28: every (re)connect of the chord client - the first
+		// sign that a restarted kwi3 is back, in its "default" mode -
+		// makes the mode reporter resend hotkeyd's current mode.
+		// modeRep is non-nil here: enginePublisher builds one whenever
+		// kwi3Sock is set.
+		daeCfg.Kwi3 = kwi3rpc.New(kwi3Sock, kwi3rpc.WithLog(daemonLog),
+			kwi3rpc.WithOnConnect(modeRep.Resync))
 	} else {
 		daeCfg.I3 = i3.NewClient(i3SocketResolver(display), func(kind uint32, data map[string]any) {
 			dae.onI3Event(kind, data)

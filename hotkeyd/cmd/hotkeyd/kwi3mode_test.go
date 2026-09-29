@@ -20,12 +20,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"hotkeyd/internal/kwi3rpc"
 	"hotkeyd/internal/layer"
 )
 
@@ -37,12 +39,18 @@ type modeServer struct {
 	mu    sync.Mutex
 	reqs  []string // "method name"
 	hang  bool
+	drop  int // kwi3-55l.28: the next `drop` requests are read, recorded and answered by closing the connection
 	conns int
+	live  []net.Conn
 }
 
 func newModeServer(t *testing.T, hang bool) *modeServer {
 	t.Helper()
-	addr := filepath.Join(t.TempDir(), "kwi3.rpc.sock")
+	return newModeServerAt(t, filepath.Join(t.TempDir(), "kwi3.rpc.sock"), hang)
+}
+
+func newModeServerAt(t *testing.T, addr string, hang bool) *modeServer {
+	t.Helper()
 	ln, err := net.Listen("unix", addr)
 	if err != nil {
 		t.Fatalf("listen: %s", err)
@@ -56,12 +64,32 @@ func newModeServer(t *testing.T, hang bool) *modeServer {
 			}
 			s.mu.Lock()
 			s.conns++
+			s.live = append(s.live, c)
 			s.mu.Unlock()
 			go s.serve(c)
 		}
 	}()
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(s.stop)
 	return s
+}
+
+// stop is kwi3 exiting: the listener and every open connection close, and
+// the socket path is removed so a fresh server can bind it.
+func (s *modeServer) stop() {
+	s.ln.Close()
+	s.mu.Lock()
+	for _, c := range s.live {
+		c.Close()
+	}
+	s.live = nil
+	s.mu.Unlock()
+	os.Remove(s.addr)
+}
+
+func (s *modeServer) setDrop(n int) {
+	s.mu.Lock()
+	s.drop = n
+	s.mu.Unlock()
 }
 
 func (s *modeServer) serve(c net.Conn) {
@@ -85,7 +113,14 @@ func (s *modeServer) serve(c net.Conn) {
 		s.mu.Lock()
 		s.reqs = append(s.reqs, req.Method+" "+req.Params.Name)
 		hang := s.hang
+		drop := s.drop > 0
+		if drop {
+			s.drop--
+		}
 		s.mu.Unlock()
+		if drop {
+			return // deferred Close: the caller's read fails, nothing was acknowledged
+		}
 		if hang {
 			continue
 		}
@@ -281,5 +316,116 @@ func TestI3SessionHasNoModeReporter(t *testing.T) {
 	// A nil state publisher on an i3 session stays nil (engine: "no feed").
 	if p, c := enginePublisher(nil, "", func(string) {}); p != nil || c != nil {
 		t.Fatalf("i3 session with no state feed: want (nil, nil), got (%v, %v)", p, c)
+	}
+}
+
+// fastModeRetry shrinks the reporter's retry backoff for one test.
+func fastModeRetry(t *testing.T, min, max time.Duration) {
+	t.Helper()
+	oldMin, oldMax := modeRetryMin, modeRetryMax
+	modeRetryMin, modeRetryMax = min, max
+	t.Cleanup(func() { modeRetryMin, modeRetryMax = oldMin, oldMax })
+}
+
+func joined(g []string) string { return strings.Join(g, "|") }
+
+// TestKwi3ModeRetriesAFailedCallUntilAcked is kwi3-55l.28 case (b): a
+// mode.set that failed (here: kwi3 read it and hung up without answering,
+// as a timeout would) used to be dropped for good - the ring stayed red
+// after leaving resize until the next mode change. The CURRENT mode is
+// retried with backoff until kwi3 acknowledges it.
+func TestKwi3ModeRetriesAFailedCallUntilAcked(t *testing.T) {
+	fastModeRetry(t, 10*time.Millisecond, 40*time.Millisecond)
+	srv := newModeServer(t, false)
+	pub, rep := enginePublisher(nil, srv.addr, func(string) {})
+	defer rep.Close()
+	srv.waitFor(t, 1) // startup default, acked
+
+	pub.Publish(layer.State{Layer: "nav", Mod: "resize"})
+	srv.waitFor(t, 2) // resize, acked
+
+	srv.setDrop(2) // the next two mode.set calls fail
+	pub.Publish(layer.State{Layer: layer.DefaultLayer})
+	g := srv.waitFor(t, 5)
+	time.Sleep(100 * time.Millisecond) // nothing more once acked
+	g = srv.got()
+	want := []string{"mode.set default", "mode.set resize",
+		"mode.set default", "mode.set default", "mode.set default"}
+	if joined(g) != joined(want) {
+		t.Fatalf("failed call must be retried until acked, then stop:\nwant %v\ngot  %v", want, g)
+	}
+}
+
+// TestKwi3ModeDedupComparesAgainstAcked is kwi3-55l.28: duplicate
+// suppression keys on the last mode kwi3 ACKNOWLEDGED, not the last one
+// queued. A repeat of an acked mode sends nothing; a repeat of a mode whose
+// call failed is sent again at once (the backoff here is long enough that
+// only the Publish itself can explain the resend).
+func TestKwi3ModeDedupComparesAgainstAcked(t *testing.T) {
+	fastModeRetry(t, time.Hour, time.Hour)
+	srv := newModeServer(t, false)
+	pub, rep := enginePublisher(nil, srv.addr, func(string) {})
+	defer rep.Close()
+	srv.waitFor(t, 1)
+
+	pub.Publish(layer.State{Layer: "resize"})
+	srv.waitFor(t, 2)
+	pub.Publish(layer.State{Layer: "resize"}) // acked: suppressed
+	time.Sleep(50 * time.Millisecond)
+	if g := srv.got(); len(g) != 2 {
+		t.Fatalf("repeat of an acked mode must not be resent: %v", g)
+	}
+
+	srv.setDrop(1)
+	pub.Publish(layer.State{Layer: layer.DefaultLayer}) // fails
+	srv.waitFor(t, 3)
+	time.Sleep(50 * time.Millisecond)
+	pub.Publish(layer.State{Layer: layer.DefaultLayer}) // not acked: sent again
+	g := srv.waitFor(t, 4)
+	time.Sleep(50 * time.Millisecond)
+	g = srv.got()
+	want := []string{"mode.set default", "mode.set resize", "mode.set default", "mode.set default"}
+	if joined(g) != joined(want) {
+		t.Fatalf("dedup against acked:\nwant %v\ngot  %v", want, g)
+	}
+}
+
+// TestKwi3ModeResentAfterKwi3Restart is kwi3-55l.28 case (a): kwi3
+// restarts while hotkeyd sits in resize; the new kwi3 starts in "default".
+// When the chord client's connection is re-established (its OnConnect hook,
+// wired to the reporter's Resync in main.go) the reporter resends its
+// CURRENT mode to the new kwi3, even though the old kwi3 had acked it.
+func TestKwi3ModeResentAfterKwi3Restart(t *testing.T) {
+	fastModeRetry(t, 10*time.Millisecond, 40*time.Millisecond)
+	srv := newModeServer(t, false)
+	pub, rep := enginePublisher(nil, srv.addr, func(string) {})
+	defer rep.Close()
+	chords := kwi3rpc.New(srv.addr, kwi3rpc.WithOnConnect(rep.Resync))
+	defer chords.Close()
+
+	srv.waitFor(t, 1)
+	pub.Publish(layer.State{Layer: "nav", Mod: "resize"})
+	srv.waitFor(t, 2)
+
+	srv.stop() // kwi3 exits
+	srv2 := newModeServerAt(t, srv.addr, false)
+
+	// The first chord after the restart dials the new kwi3.
+	if _, err := chords.Call("workspace.list", nil); err != nil {
+		t.Fatalf("chord after restart: %s", err)
+	}
+	g := srv2.waitFor(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	g = srv2.got()
+	sawResize := false
+	for _, r := range g {
+		if r == "mode.set resize" {
+			sawResize = true
+		} else if r != "workspace.list " {
+			t.Fatalf("new kwi3 got an unexpected request %q (all: %v)", r, g)
+		}
+	}
+	if !sawResize {
+		t.Fatalf("the restarted kwi3 must be told the current mode: got %v", g)
 	}
 }

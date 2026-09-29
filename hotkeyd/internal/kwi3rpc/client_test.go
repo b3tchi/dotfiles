@@ -622,3 +622,60 @@ func TestClientCallTimeout(t *testing.T) {
 		t.Fatalf("the next Call after a timeout should redial and succeed: %s", err)
 	}
 }
+
+// TestClientOnConnectFiresPerSuccessfulDial is kwi3-55l.28: the mode
+// reporter resends hotkeyd's current mode whenever the chord client's
+// connection to kwi3 is (re)established - a kwi3 that restarted came back
+// in "default" and nothing else would tell it otherwise. The hook must run
+// once per SUCCESSFUL dial (the first one and each reconnect), never on a
+// failed dial and never per Call on a live connection.
+func TestClientOnConnectFiresPerSuccessfulDial(t *testing.T) {
+	dir := t.TempDir()
+	addr := filepath.Join(dir, "kwi3.rpc.sock")
+	var mu sync.Mutex
+	fired := 0
+	c := New(addr, WithOnConnect(func() { mu.Lock(); fired++; mu.Unlock() }))
+	defer c.Close()
+	count := func() int { mu.Lock(); defer mu.Unlock(); return fired }
+
+	if _, err := c.Call("workspace.list", nil); err == nil {
+		t.Fatal("no listener: expected the call to fail")
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("a failed dial must not fire OnConnect, fired %d", n)
+	}
+
+	ln1, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("listen: %s", err)
+	}
+	s1 := &fakeServer{t: t, addr: addr, ln: ln1,
+		handler: func(string, interface{}) (interface{}, int, string) { return map[string]interface{}{}, 0, "" }}
+	go s1.acceptLoop()
+	for i := 0; i < 3; i++ {
+		if _, err := c.Call("workspace.list", nil); err != nil {
+			t.Fatalf("call %d: %s", i, err)
+		}
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("one dial, three calls: want OnConnect once, got %d", n)
+	}
+
+	// kwi3 restarts: drop the client's connection server-side too.
+	ln1.Close()
+	c.Close()
+	os.Remove(addr)
+	ln2, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("re-listen: %s", err)
+	}
+	defer ln2.Close()
+	s2 := &fakeServer{t: t, addr: addr, ln: ln2, handler: s1.handler}
+	go s2.acceptLoop()
+	if _, err := c.Call("workspace.list", nil); err != nil {
+		t.Fatalf("after restart: %s", err)
+	}
+	if n := count(); n != 2 {
+		t.Fatalf("reconnect: want OnConnect twice in total, got %d", n)
+	}
+}
