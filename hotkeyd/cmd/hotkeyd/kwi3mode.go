@@ -3,7 +3,7 @@ package main
 // kwi3-55l.25: on a kwi3 session, tell kwi3 which layer is active.
 //
 // kwi3 paints its window focus ring in a per-mode colour (config.js
-// `kwi3.set({modeFrame: {resize: "#CB4B16"}})`) and learns the mode from
+// `kwi3.set({modeFrame: {resize: "#DC322F"}})`) and learns the mode from
 // ft010's `mode.set {name}`. The layer engine already reports every state
 // CHANGE to a layer.Publisher (the bars' state socket); this file tees that
 // feed into a reporter that sends the layer's name to kwi3.

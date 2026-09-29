@@ -63,10 +63,10 @@ kwi3.set({
 
     // kwi3-55l.25: the focus ring turns this colour while hotkeyd's resize
     // layer is active (hotkeyd sends kwi3 `mode.set {name}` on every layer
-    // change). #CB4B16 is the palette's own urgent border above and
-    // qs-focus-border.py's MODE_BC - the colour Jan's old ring overlay
-    // already used for an active layer. Every other layer keeps `frame`'s.
-    modeFrame: { resize: '#CB4B16' }
+    // change). #DC322F is solarized red - Jan's choice (2026-09-29: "red",
+    // not the orange #CB4B16 his urgent border and the old qs-focus-border
+    // MODE_BC use). Every other layer keeps `frame`'s.
+    modeFrame: { resize: '#DC322F' }
 
     // focusFrame defaults to true (unset here, matching the old kwi3/config,
     // which never set kwi3_focus_frame either).
