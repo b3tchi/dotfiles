@@ -488,19 +488,24 @@ PanelWindow {
         }
     }
 
-    // kwi3-55l.24: the mode segment's own screen rect, same band, spanning
-    // ModeBar's rendered width. Unlike the tab case above, ModeBar (`mb`
-    // below) is a single real Item rather than a Repeater of cells with a
-    // hand-tracked plan, so its own `x` (anchored, kept in sync by the
-    // engine) and `implicitWidth` (ModeBar's own api_surface-adjacent
-    // geometry, `strip.implicitWidth`) are read directly rather than
-    // re-derived — there is no separate "plan" to duplicate here the way
-    // tabCellPlan exists for the workspace tabs.
+    // kwi3-55l.24: the mode segment's own screen rect, same band. Unlike the
+    // tab case above, ModeBar (`mb` below) is a single real Item rather than
+    // a Repeater of cells with a hand-tracked plan, so its own `x` (anchored,
+    // kept in sync by the engine) is read directly rather than re-derived —
+    // there is no separate "plan" to duplicate here the way tabCellPlan
+    // exists for the workspace tabs.
+    //
+    // kwi3-55l.27 (Jan, 3392, verbatim): "green line above should have mode
+    // to turn orange and display only above first label" — narrowed from
+    // ModeBar's WHOLE rendered width (`mb.implicitWidth`, pill + gap + hints,
+    // kwi3-55l.24's own span) to just the mode PILL — "the first label" —
+    // `mb.pillWidth`, the pill Rectangle's own width exposed by ModeBar
+    // itself (never re-measured here, for the same reason `mb.x` isn't).
     readonly property var modeSegmentScreenRect: {
         if (!Kwi3Grid.active) { return null }
         if (root.currentMode === "default" || !mb.visible) { return null }
         var origin = root._ringOrigin()
-        return { x: origin.x + mb.x, y: origin.y, w: mb.implicitWidth }
+        return { x: origin.x + mb.x, y: origin.y, w: mb.pillWidth }
     }
 
     // Whichever of the two is the thing actually rendered where `leftSide`
@@ -509,6 +514,21 @@ PanelWindow {
     // already mutually exclusive on `currentMode`, and this just follows.
     readonly property var ringScreenRect: root.currentMode === "default"
         ? root.focusedTabScreenRect : root.modeSegmentScreenRect
+
+    // kwi3-55l.27 (Jan, 3392, verbatim): "in mode green should be hidden and
+    // orange line should be at same height as is the green line" — same
+    // single companion window (wsFocusHighlight below), same rows, but its
+    // FILL now follows which of the two rects above is showing: the
+    // workspace ring's own frame colour at rest, the mode pill's own accent
+    // (ModeBarTheme.highlight, "the pill's own colour... exactly the colour
+    // ModeBar uses for that stripe today" per this task) while a mode/layer
+    // is up — never both, and never kwi3's window-focus-ring colour
+    // (Kwi3Grid.frameColor / kwi3-55l.25's per-mode frame, a DIFFERENT ring
+    // this task must stay independent of, per that task's own note). Read
+    // directly off ModeBarTheme rather than duplicated as a literal here —
+    // if ModeBar ever varies the accent per mode, this follows it for free.
+    readonly property color ringColor: root.currentMode === "default"
+        ? Kwi3Grid.frameColor : ModeBarTheme.highlight
 
     // ------------------------------------------------------- agent census ---
     // Per-project claude-agent counts (ft012 / `agent-census`), rendered as a
@@ -1351,9 +1371,15 @@ PanelWindow {
                 // strip showing through to whatever the compositor-less
                 // "transparent" actually renders as. Square ends (no
                 // radius): a single top line has no corners to round.
+                //
+                // kwi3-55l.27: root.ringColor, not Kwi3Grid.frameColor
+                // directly - the workspace ring's own green at rest, the
+                // mode pill's own accent while a mode is up (see
+                // ringColor's own comment above for why it is not
+                // Kwi3Grid.frameColor unconditionally).
                 Rectangle {
                     anchors.fill: parent
-                    color: Kwi3Grid.frameColor
+                    color: root.ringColor
                 }
             }
         }

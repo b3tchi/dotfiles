@@ -36,8 +36,9 @@
 # geometry-deltas grouped over the resize dump. Colours are asserted by
 # comparing the rendered value against ModeBarTheme.* — a hardcoded literal in
 # ModeBar that drifts from the theme FAILS the colour assertions. The pill
-# width delta (14), underline height (2) and pill/hints gap (4) are pinned so a
-# padding/geometry-retune mutant fails.
+# width delta (14) and pill/hints gap (4) are pinned so a padding/geometry-
+# retune mutant fails (kwi3-55l.27 retired the in-bar underline pin — that
+# Rectangle is gone; its ABSENCE is pinned instead, see underlineH below).
 #
 # usage: quickshell/test-mode-bar.sh
 # env:   XVFB= QUICKSHELL=   (default: from PATH)
@@ -312,7 +313,8 @@ assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,
-#           parity geometry (pill width delta 14, underline 2, gap 4), colours
+#           parity geometry (pill width delta 14, gap 4; the in-bar underline
+#           pin retired by kwi3-55l.27 — its absence is pinned instead), colours
 #           bound to ModeBarTheme, NativeRendering, and mode-flip freshness.
 #           Precedent: test-combo.sh PHASE 1 (persistent Window + IpcHandler).
 # ============================================================================
@@ -372,6 +374,14 @@ ShellRoot {
   function dump(name) {
     var pill = findChild(mb, "pill")
     var pl   = findChild(mb, "pillLabel")
+    // kwi3-55l.27: the in-bar "underline" Rectangle is gone (Jan: "in mode
+    // green should be hidden and orange line should be at same height as is
+    // the green line" - the highlight moved OUTSIDE the bar, to the
+    // companion ring window in Bar.qml, driven by ModeBar's own pillWidth
+    // rather than restated here). findChild now always returns null for it;
+    // kept as a lookup (not deleted outright) so a regression that brings
+    // the Rectangle back is visible in underlineH going non-(-1) rather than
+    // silently passing.
     var ul   = findChild(mb, "underline")
     var gap  = findChild(mb, "gap")
     var rows = hintRows(mb)
@@ -409,9 +419,10 @@ ShellRoot {
     var hl    = rows.length ? findChild(rows[0], "hl")    : null
     // pre/post carry fg (like the tail label); key carries highlight. A
     // hardcoded literal drifting from the theme flips one of these to false.
+    // No "underline" entry any more (kwi3-55l.27: the Rectangle is gone) -
+    // `ul` staying null is asserted directly via underlineH above instead.
     emit(name + ".colors", j({
       pillBg:    sameColour(pill.color, ModeBarTheme.pillBg),
-      underline: sameColour(ul.color,   ModeBarTheme.highlight),
       pillLabel: sameColour(pl.color,   ModeBarTheme.fg),
       pre:       hpre  ? sameColour(hpre.color,  ModeBarTheme.fg)        : true,
       key:       hk    ? sameColour(hk.color,    ModeBarTheme.highlight) : true,
@@ -586,18 +597,22 @@ assert_case "unknown-fallback.pill"    "somefuture"
 # tail (space+tail layout, key span empty).
 assert_case "unknown-fallback.hints"   '[{"pre":"","key":"","post":"","space":" ","tail":"somefuture"}]'
 
-scenario "geometry-deltas: pill width = label + 14, underline 2px, gap 4px (AC1)"
+scenario "geometry-deltas: pill width = label + 14, gap 4px (AC1)"
 EXP_DELTA=14
 [ "$SELFTEST" = "1" ] && EXP_DELTA=99   # self-test: a padding-retune mutant fails
 assert_case "resize.delta"      "$EXP_DELTA"
-assert_case "resize.underlineH" "2"
+# kwi3-55l.27: the in-bar underline is gone - findChild(mb, "underline") is
+# always null now, so this pins ABSENCE rather than a retired geometry pin. A
+# regression that re-adds the Rectangle flips this off -1 and fails here.
+assert_case "resize.underlineH" "-1"
 assert_case "resize.gapW"       "4"
 assert_case "screenshot.delta"  "14"
 
 scenario "colours bound to ModeBarTheme + Text.NativeRendering + bold (AC1)"
 # A hardcoded literal in ModeBar that drifts from the theme flips one of these
-# to false and fails.
-assert_case "resize.colors" '{"pillBg":true,"underline":true,"pillLabel":true,"pre":true,"key":true,"post":true,"label":true}'
+# to false and fails. No "underline" key (kwi3-55l.27: removed with the
+# in-bar stripe) - its absence is pinned by resize.underlineH above instead.
+assert_case "resize.colors" '{"pillBg":true,"pillLabel":true,"pre":true,"key":true,"post":true,"label":true}'
 assert_case "resize.native" '{"pill":true,"pre":true,"key":true,"post":true,"label":true}'
 assert_case "resize.bold"   '{"pill":true,"key":true}'
 assert_case "resize.font"   "Iosevka Nerd Font"

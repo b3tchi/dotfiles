@@ -34,15 +34,38 @@ Item {
     implicitWidth: strip.implicitWidth
     implicitHeight: strip.implicitHeight
 
+    // kwi3-55l.27 (Jan, 3392, verbatim): "green line above should have mode
+    // to turn orange and display only above first label" - the bar's own
+    // ring-highlight companion window (kwi3-55l.20, retargeted to the mode
+    // segment by kwi3-55l.24) now follows only the PILL - the mode's own
+    // name label, "the first label" - not the whole strip (pill + gap +
+    // hints). Exposed here, not re-derived in Bar.qml, for the same reason
+    // implicitWidth/height already are: the pill Rectangle is this
+    // component's own geometry, and a second computation of it in the host
+    // would drift the moment padding here changes.
+    readonly property alias pillWidth: pill.width
+
     Row {
         id: strip
         objectName: "strip"
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
         spacing: 0
 
-        // name-pill: pillBg background, 2px highlight underline, bold fg label
-        // bottom-anchored 1px; pill width = label implicitWidth + 14.
+        // name-pill: pillBg background, bold fg label bottom-anchored 1px;
+        // pill width = label implicitWidth + 14.
+        //
+        // kwi3-55l.27 (Jan, 3392): "in mode green should be hidden and orange
+        // line should be at same height as is the green line" / "green line
+        // above should have mode to turn orange and display only above first
+        // label" - the 2px highlight underline that used to be drawn HERE,
+        // inside the bar, at the pill's own top edge, is gone (like
+        // kwi3-55l.20 removed the workspace tab's equivalent in-bar stripe).
+        // The bar's companion ring window now draws that highlight OUTSIDE
+        // the bar, in the half-gap band above it, at the SAME rows the
+        // workspace ring uses at rest (Bar.qml modeSegmentScreenRect /
+        // ringColor) - one line, not two, per pill and per tab.
         Rectangle {
+            id: pill
             objectName: "pill"
             width: pillLabel.implicitWidth + 14
             height: parent.height
@@ -60,13 +83,6 @@ Item {
                 font.pixelSize: root.fontSize
                 font.bold: true
                 renderType: Text.NativeRendering
-            }
-
-            Rectangle {
-                objectName: "underline"
-                anchors { top: parent.top; left: parent.left; right: parent.right }
-                height: 2
-                color: ModeBarTheme.highlight
             }
         }
 
