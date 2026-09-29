@@ -22,10 +22,18 @@ package main
 //     socket by kwi3rpc.Client itself (its own down/up lines), any other
 //     error (a kwi3 too old to know mode.set answers -32601) here.
 //
-// Only the Layer is reported. A held-modifier sublayer (State.Mod) inside
-// the same layer is not a mode change, so it is not re-sent. A plain i3 or
-// sway session ($KWI3SOCK unset) gets no reporter at all - i3 modes are
-// i3's own business there.
+// What is reported is the EFFECTIVE mode (kwi3-55l.29), not the bare Layer:
+// on Jan's table `resize` is a held-modifier SUB-LAYER inside `nav`
+// (layer.State{Layer: "nav", Mod: "resize"}), not a layer of its own, and
+// reporting only State.Layer never told kwi3 "resize" at all - the ring
+// stayed whatever colour `nav` painted it (none; `nav` has no modeFrame
+// entry). effectiveMode returns the active mod sub-layer's label when one
+// is held (State.Mod - already the bare label a Mods table declares, e.g.
+// "move"/"resize": internal/bind/bind.go's Layer.Mods, keyed by that same
+// label, and config.js's `modeFrame` keys on it directly), else the layer
+// name - so a plain layer change (no Mods declared, or none held) still
+// reports the layer as before. A plain i3 or sway session ($KWI3SOCK
+// unset) gets no reporter at all - i3 modes are i3's own business there.
 
 import (
 	"errors"
@@ -47,7 +55,7 @@ type kwi3ModeReporter struct {
 	log    func(string)
 
 	mu      sync.Mutex
-	last    string        // last layer queued, to drop Mod-only changes
+	last    string        // last effective mode queued, to drop unchanged repeats
 	mailbox chan string   // one slot, latest wins
 	done    chan struct{} // closed by Close
 	closed  bool
@@ -69,7 +77,18 @@ func newKwi3ModeReporter(caller *kwi3rpc.Client, logf func(string), initial stri
 
 // Publish implements layer.Publisher.
 func (r *kwi3ModeReporter) Publish(st layer.State) {
-	r.report(st.Layer)
+	r.report(effectiveMode(st))
+}
+
+// effectiveMode is the name kwi3 is told: the active mod sub-layer's label
+// when one is held, else the layer name. See the file doc for why - this
+// is the one place layer.State collapses to the single name ft010's
+// `mode.set` and config.js's `modeFrame` both key on.
+func effectiveMode(st layer.State) string {
+	if st.Mod != "" {
+		return st.Mod
+	}
+	return st.Layer
 }
 
 func (r *kwi3ModeReporter) report(name string) {

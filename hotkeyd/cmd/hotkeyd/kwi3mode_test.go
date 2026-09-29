@@ -5,6 +5,16 @@ package main
 // mode's modeFrame colour. What is measured is what reached a real unix
 // socket speaking kwi3's wire shape (NDJSON JSON-RPC 2.0) - not the
 // reporter's internals - and that an i3 session gets nothing at all.
+//
+// kwi3-55l.29: on Jan's table `resize` is a held-modifier SUB-LAYER inside
+// the `nav` layer (layer=nav mod=resize), not a layer of its own, so
+// reporting only State.Layer never sends kwi3 "resize" at all and the ring
+// stays whatever colour `nav` painted it (none - `nav` has no modeFrame
+// entry). The reported name is now the EFFECTIVE mode: the active mod
+// sub-layer's label when one is held (State.Mod, e.g. "resize" - the exact
+// key config.js's `modeFrame` uses), else the layer name - matching
+// bind.Layer.Mods' label convention (internal/bind/bind.go) and the state
+// feed's own wire shape (layer + mod, publisher.go's wireState).
 
 import (
 	"bufio"
@@ -134,30 +144,92 @@ func TestKwi3ModeReportsLayerChanges(t *testing.T) {
 		t.Fatalf("startup: want [mode.set default], got %v", g)
 	}
 
-	pub.Publish(layer.State{Layer: "resize"})
+	// Plain layer change, no mod involved.
+	pub.Publish(layer.State{Layer: "screenshot"})
 	srv.waitFor(t, 2)
-	// A held-modifier sublayer change inside the same layer is not a mode change.
-	pub.Publish(layer.State{Layer: "resize", Mod: "Mod1"})
 	pub.Publish(layer.State{Layer: layer.DefaultLayer})
 	g := srv.waitFor(t, 3)
 	time.Sleep(50 * time.Millisecond)
 	g = srv.got()
-	want := []string{"mode.set default", "mode.set resize", "mode.set default"}
+	want := []string{"mode.set default", "mode.set screenshot", "mode.set default"}
 	if strings.Join(g, "|") != strings.Join(want, "|") {
-		t.Fatalf("mode.set sequence: want %v, got %v", want, g)
+		t.Fatalf("plain layer change: want %v, got %v", want, g)
 	}
 
-	// The state feed (bars) still gets EVERY state, Mod changes included.
+	// The state feed (bars) still gets EVERY state.
 	rec.mu.Lock()
 	n := len(rec.got)
 	rec.mu.Unlock()
-	if n != 3 {
-		t.Fatalf("tee: the wrapped publisher should see all 3 states, saw %d", n)
+	if n != 2 {
+		t.Fatalf("tee: the wrapped publisher should see both states, saw %d", n)
 	}
 	logMu.Lock()
 	defer logMu.Unlock()
 	if len(logs) != 0 {
 		t.Fatalf("a healthy kwi3 should log nothing, got %v", logs)
+	}
+}
+
+// TestKwi3ModeReportsEffectiveModSubLayer is kwi3-55l.29: on Jan's table
+// `resize` is a held-modifier sub-layer INSIDE `nav` (layer=nav mod=resize),
+// not its own layer, so kwi3 must be told the EFFECTIVE mode - the mod
+// label when one is held, else the layer name - not the bare layer name.
+func TestKwi3ModeReportsEffectiveModSubLayer(t *testing.T) {
+	srv := newModeServer(t, false)
+	rec := &recPublisher{}
+	logf := func(s string) { t.Fatalf("unexpected log: %s", s) }
+	pub, closer := enginePublisher(rec, srv.addr, logf)
+	defer closer.Close()
+
+	srv.waitFor(t, 1) // startup: mode.set default
+
+	// Plain layer change into nav, no mod held yet: effective mode is the
+	// layer name itself.
+	pub.Publish(layer.State{Layer: "nav"})
+	srv.waitFor(t, 2)
+
+	// Alt held: layer=nav mod=resize (the live log line this task is named
+	// after: "transition layer=nav->nav mod=none->resize"). The EFFECTIVE
+	// mode is the mod's label, "resize" - config.js's modeFrame key.
+	pub.Publish(layer.State{Layer: "nav", Mod: "resize"})
+	srv.waitFor(t, 3)
+
+	// Duplicate: same effective mode (layer AND mod both unchanged) must
+	// not be re-sent - the .25 dedup rule survives, now keyed on the
+	// effective name rather than the bare layer.
+	pub.Publish(layer.State{Layer: "nav", Mod: "resize"})
+	time.Sleep(50 * time.Millisecond)
+	if g := srv.got(); len(g) != 3 {
+		t.Fatalf("duplicate effective mode must not be resent: got %v", g)
+	}
+
+	// Alt released, still in nav: effective mode reverts to the layer name.
+	pub.Publish(layer.State{Layer: "nav"})
+	srv.waitFor(t, 4)
+
+	// Escape back to the default layer.
+	pub.Publish(layer.State{Layer: layer.DefaultLayer})
+	g := srv.waitFor(t, 5)
+	time.Sleep(50 * time.Millisecond)
+	g = srv.got()
+	want := []string{
+		"mode.set default", // startup
+		"mode.set nav",     // plain layer change
+		"mode.set resize",  // mod sub-layer engaged
+		"mode.set nav",     // mod released
+		"mode.set default", // Escape to default
+	}
+	if strings.Join(g, "|") != strings.Join(want, "|") {
+		t.Fatalf("effective-mode sequence: want %v, got %v", want, g)
+	}
+
+	// The state feed (bars) still gets every Publish call, duplicate
+	// included - only the kwi3 report is deduplicated.
+	rec.mu.Lock()
+	n := len(rec.got)
+	rec.mu.Unlock()
+	if n != 5 {
+		t.Fatalf("tee: the wrapped publisher should see all 5 Publish calls, saw %d", n)
 	}
 }
 
