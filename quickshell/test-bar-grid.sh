@@ -461,16 +461,22 @@ for arm in "g8:8:21" "g10:10:20"; do
   done
 done
 
-# dotfiles-52vu (Jan): the ticker's gap is exactly ONE cell at each edge on the
-# grid. In this harness Kwi3Grid is never active, so the tabs (and leftSide's
-# right edge) sit at pixel positions off the cell grid; what is asserted is the
-# RELATION each edge must have, and that the right edge lands on whole cells.
+# dotfiles-52vu (Jan): on the grid exactly ONE cell between the ticker and each
+# neighbour: it starts right at leftSide's end (the last tab's trailing gap cell
+# IS the gap, leftMargin 0) and ends one cell before rightSide. This harness sets
+# cellW (so onGrid is true) but never activates Kwi3Grid, so the TABS here are
+# the off-grid shape (tabGap is a space, tab x/width in pixels) - a combination
+# production never produces. So only the ticker's own anchor margins are
+# asserted here, against whatever leftSide/rightSide happen to be; the label ->
+# ticker distance and the trimmed last-tab highlight on a REAL Kwi3Grid (last
+# tab focused and unfocused, plus the painted pixels) are test-kwi3-backend.sh
+# PHASE 6.
 for arm in "g8:8:21" "g10:10:20"; do
   IFS=: read -r n W H <<<"$arm"
-  scenario "ticker gap over ${W}x${H} (dotfiles-52vu): one cell each side"
+  scenario "ticker margins over ${W}x${H} (dotfiles-52vu): 0 after leftSide, one cell before rightSide"
   chk "${n}T: ticker shown" "${n}T" ".ticker != null"
-  chk "${n}T: ticker starts exactly at leftSide's end (its trailing tab cell IS the gap; last label + one space to the ticker)" "${n}T" \
-      ".ticker.x == .ticker.lsR and (.spaceW as \$s | .tabs[-1] as \$t | ((.ticker.x - (\$t.rx + \$t.rw)) - \$s) | fabs < 0.5)"
+  a2 "${n}T: ticker starts exactly at leftSide's end (margin 0)" "0" \
+      "$(case_of "${n}T" | jq -r '.ticker.x - .ticker.lsR')"
   a2 "${n}T: ticker right edge is exactly one cell before rightSide" "$W" \
       "$(case_of "${n}T" | jq -r '.ticker.rsX - (.ticker.x + .ticker.w)')"
   chk "${n}T: ticker right edge and rightSide start are whole cells" "${n}T" \
