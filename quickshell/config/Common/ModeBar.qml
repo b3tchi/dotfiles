@@ -26,6 +26,17 @@ Item {
     property string mode: "default"
     property int fontSize: 0
 
+    // dotfiles-puoh: kwi3's character-cell width (Kwi3Grid.moduleW; 0 on i3 /
+    // Wayland where Kwi3Grid never activates). >0 => the strip is sized in
+    // whole cells like the workspace tabs (adr0007 / ft008): pill = label
+    // rounded UP to cells + one cell of pad each side, gap = one cell, each
+    // hint row rounded UP to cells with cell-wide separators. 0 => today's
+    // pixel-identical look. Overridable so the headless suite can exercise a
+    // grid (Kwi3Grid itself is a real singleton fed by Kwi3Client). Not part
+    // of ft009's two-prop api_surface for hosts: they leave it at the default.
+    property int cellW: Kwi3Grid.moduleW
+    readonly property bool onGrid: cellW > 0
+
     // "default" => nothing to announce. A mode on ModeBarTheme.silentModes =>
     // deliberately not announced (dotfiles-hwds.44): the switcher's own overlay
     // already says what it is. Invisible AND zero-width — an empty strip would
@@ -67,7 +78,9 @@ Item {
         Rectangle {
             id: pill
             objectName: "pill"
-            width: pillLabel.implicitWidth + 14
+            width: root.onGrid
+                   ? Math.ceil(pillLabel.implicitWidth / root.cellW) * root.cellW + 2 * root.cellW
+                   : pillLabel.implicitWidth + 14
             height: parent.height
             color: ModeBarTheme.pillBg
 
@@ -87,7 +100,9 @@ Item {
         }
 
         // 4px gap between the pill and the hint strip.
-        Item { objectName: "gap"; width: 4; height: parent.height }
+        // One cell on kwi3 (dotfiles-puoh) - a cell keeps every hint row
+        // starting on the grid; 0 would butt the pill against the first hint.
+        Item { objectName: "gap"; width: root.onGrid ? root.cellW : 4; height: parent.height }
 
         // hint rows: two-space separator before every entry after the first,
         // then the hint itself. ft009 extension (sp018 follow-up) — the key is
@@ -109,6 +124,12 @@ Item {
                 required property int index
                 anchors.bottom: parent ? parent.bottom : undefined
                 anchors.bottomMargin: 1
+                // kwi3 (dotfiles-puoh): the row's width is its content rounded
+                // UP to whole cells (never Kwi3Grid.cells(), which rounds and
+                // can clip the last glyph). Not on kwi3: implicitWidth, i.e.
+                // exactly what a bare Row does.
+                width: root.onGrid ? Math.ceil(implicitWidth / root.cellW) * root.cellW
+                                   : implicitWidth
 
                 readonly property string kkey: modelData.key
                 readonly property string ktext: modelData.text
@@ -124,6 +145,8 @@ Item {
                 Text {
                     objectName: "hsep"
                     text: index > 0 ? "  " : ""
+                    // kwi3: two whole cells regardless of the font's space.
+                    width: root.onGrid ? (index > 0 ? 2 * root.cellW : 0) : implicitWidth
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
@@ -160,6 +183,8 @@ Item {
                 Text {
                     objectName: "hspace"
                     text: inl ? "" : " "
+                    // kwi3: one whole cell between key and label.
+                    width: root.onGrid ? (inl ? 0 : root.cellW) : implicitWidth
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
