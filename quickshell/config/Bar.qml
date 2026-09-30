@@ -467,6 +467,16 @@ PanelWindow {
     readonly property real tabGap: Kwi3Grid.active ? Kwi3Grid.moduleW
                                                    : tabSpaceProbe.implicitWidth
 
+    // dotfiles-52vu (Jan): exactly ONE cell between neighbouring items, and
+    // the ticker is just another item. On the grid the ticker starts right
+    // after the last tab's trailing gap cell (tickerArea leftMargin 0), so
+    // that cell IS the one-cell gap - and it must read as a gap: while the
+    // ticker is up the LAST tab's highlight (and its ring) stops at its
+    // label instead of covering that cell, since the ticker background is
+    // the same #152024. Mirrors tickerArea.visible exactly.
+    readonly property bool _trimLastTabHl: onGrid && currentMode === "default" && tickerActive
+    function _hlTrimmed(i) { return _trimLastTabHl && i === sortedWorkspaces.length - 1 }
+
     // The plan every tab Rectangle below reads its width from: `cells[i]` is
     // one entry per row of root.sortedWorkspaces, in the SAME order —
     // index-aligned (the Repeater's own `index`), not name-keyed.
@@ -569,7 +579,7 @@ PanelWindow {
         return {
             x: origin.x + Kwi3Grid.contentLeft + xOff,
             y: origin.y,
-            w: (plan.cells[idx] + 1) * Kwi3Grid.moduleW
+            w: (plan.cells[idx] + (root._hlTrimmed(idx) ? 0 : 1)) * Kwi3Grid.moduleW
         }
     }
 
@@ -1032,6 +1042,7 @@ PanelWindow {
         // Left: workspaces + mode
         Row {
             id: leftSide
+            objectName: "leftSide"
             visible: root.currentMode === "default"
             // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
             // starts where the tiles' own titlebars do.
@@ -1078,7 +1089,11 @@ PanelWindow {
                     Rectangle {
                         objectName: "wsTabHighlight"
                         x: -root.tabGap
+                        // dotfiles-52vu: not over the trailing gap cell of
+                        // the last tab while the ticker is up (root.
+                        // _trimLastTabHl).
                         width: wsTab.width + root.tabGap
+                               - (root._hlTrimmed(wsTab.index) ? root.tabGap : 0)
                         height: parent.height
                         color: modelData.urgent  ? "#cb4b16"
                              : modelData.focused ? "#152024"
@@ -1209,10 +1224,18 @@ PanelWindow {
         }
 
         // Notification ticker — between workspaces and bell/date
+        // dotfiles-52vu (Jan): on the grid exactly ONE cell each side. Left:
+        // leftSide ends in the last tab's trailing gap cell (dotfiles-8luk),
+        // which IS the gap, so leftMargin 0 - and the last tab's highlight
+        // keeps off that cell while the ticker is up (root._trimLastTabHl),
+        // so it is bar background whether or not that tab is focused. Right:
+        // one cell before rightSide (the bell). Off the grid the old 8/4 px
+        // margins stay.
         Rectangle {
             id: tickerArea
+            objectName: "tickerArea"
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 4 }
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? 0 : 8; rightMargin: root.onGrid ? root.cellW : 4 }
             clip: true
             height: parent.height
             z: -1

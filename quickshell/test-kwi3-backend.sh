@@ -1097,6 +1097,40 @@ ShellRoot {
             host.emit("plan", tag + " " + JSON.stringify(bar.tabCellPlan))
         }
 
+        // dotfiles-52vu: show/hide the notification ticker. Sets the SAME
+        // root.tickerActive the notif-history feed sets, but never starts
+        // tickerAnim, so the ticker stays up (and its text, empty here, never
+        // scrolls over a sampled pixel) until this turns it off again.
+        function ticker(tag: string, on: bool): void {
+            bar.notifText = ""
+            bar.tickerActive = on
+            host.emit("ticker", tag + " " + (bar.tickerActive ? "1" : "0"))
+        }
+
+        // dotfiles-52vu: the ticker background and its neighbours in bar
+        // coordinates, plus the ticker's screen position for the pixel reads.
+        function tickerGeom(tag: string): void {
+            var r = host.rootOf(bar)
+            var tk = [], ls = [], rs = []
+            host.findAllByName(r, "tickerArea", tk)
+            host.findAllByName(r, "leftSide", ls)
+            host.findAllByName(r, "rightSide", rs)
+            var t = tk.length ? tk[0] : null
+            var tp = t ? t.mapToItem(r, 0, 0) : null
+            var lp = ls.length ? ls[0].mapToItem(r, 0, 0) : null
+            var rp = rs.length ? rs[0].mapToItem(r, 0, 0) : null
+            // Where it really is on the X screen: the bar window is not at
+            // the screen origin (the grid's top block puts it below y 0).
+            var tg = t ? t.mapToGlobal(0, 0) : null
+            host.emit("tgeom", tag + " " + JSON.stringify({
+                visible: t ? t.visible : null, x: tp ? tp.x : null, w: t ? t.width : null,
+                y: tp ? tp.y : null, h: t ? t.height : null,
+                gx: tg ? tg.x : null, gy: tg ? tg.y : null,
+                color: t ? String(t.color) : null,
+                lsR: lp ? lp.x + ls[0].width : null, rsX: rp ? rp.x : null,
+                barColor: String(bar.color), cellW: bar.cellW }))
+        }
+
         // Invokes the REAL MouseArea.clicked handler on the Nth tab — the
         // same code path a real pointer click reaches.
         function clickTab(tag: string, index: int): void {
@@ -1675,6 +1709,151 @@ ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
                     esac
                 done < "$TMP/realistic-check.out"
             fi
+
+            # ------------------------------------------------------------------
+            # dotfiles-52vu (Jan) - the notification ticker on a REAL Kwi3Grid.
+            # The rule is exactly ONE cell between neighbouring items, and the
+            # ticker is just another item: the last tab's label box -> ticker
+            # background is exactly one cell whether or not that tab is
+            # focused, and ticker -> rightSide is one cell. The one cell is the
+            # last tab's own trailing gap cell (tickerArea leftMargin 0); its
+            # FOCUSED highlight - the same #152024 as the ticker - stops at the
+            # label while the ticker is up, so that cell is bar background in
+            # both states. With the ticker hidden the highlight is 8luk's
+            # label + one cell each side again. Checked as geometry AND as the
+            # pixels actually on the X screen (ImageMagick `import` of the root).
+            # ------------------------------------------------------------------
+            scenario "dotfiles-52vu: ticker on a real Kwi3Grid - exactly one cell of bar background after the last tab's label (focused or not), one cell before rightSide"
+            IM6="$(command -v magick || true)"
+            IMPORT6="$(command -v import || true)"
+            # shot6 <file>: the real X root of the bar's display.
+            shot6() { DISPLAY="$BAR_DPY" "$IMPORT6" -window root "$1" 2>/dev/null; }
+            # strip6 <file> <x> <y> <w> <h>: "<unique colours> <rrggbb of the
+            # first>" for the [x, x+w) x [y, y+h) strip of the shot.
+            strip6() {
+                "$IM6" "$1" -crop "${4}x${5}+${2}+${3}" +repage \
+                    -format '%k %[hex:p{0,0}]' info: 2>/dev/null \
+                    | awk '{ print $1, tolower(substr($2, 1, 6)) }'
+            }
+            # tickerset6 <on|off>: set the ticker and wait until tickerArea says so.
+            tickerset6() {
+                local want tg i
+                [ "$1" = on ] && want=true || want=false
+                ipc6 call bar6 ticker "tk_$1$RANDOM" "$want"
+                for i in $(seq 1 30); do
+                    ipc6 call bar6 tickerGeom "tgw$1$i"
+                    sleep 0.15
+                    tg="$(last6 tgeom "tgw$1$i")"
+                    case "$tg" in *"\"visible\":$want"*) return 0 ;; esac
+                done
+                return 1
+            }
+            if tickerset6 on; then pass "the ticker is up (tickerArea visible)"
+            else fail "the ticker is up (tickerArea visible)" '"visible":true' "$(last6 tgeom tgwon30)"; fi
+            if [ -z "$IM6" ] || [ -z "$IMPORT6" ]; then
+                fail "ImageMagick (magick + import) is present for the ticker pixel checks" "both" "magick='$IM6' import='$IMPORT6'"
+            else
+                # tickcheck <label> <focused|unfocused|hidden>: geometry + ring + pixels.
+                tickcheck() {
+                    local g t rg s strips name sx sy sw sh v
+                    sleep 0.4
+                    ipc6 call bar6 geometry "tkg_$2"
+                    ipc6 call bar6 tickerGeom "tkt_$2"
+                    ipc6 call bar6 ring "tkr_$2"
+                    sleep 0.3
+                    g="$(last6 geom "tkg_$2")"; t="$(last6 tgeom "tkt_$2")"; rg="$(last6 ring "tkr_$2")"
+                    s="$TMP/ticker-$2.png"
+                    rm -f "$s"; shot6 "$s"
+                    # The strips to sample come from the geometry (screen
+                    # position = the ticker's mapToGlobal: the bar window is
+                    # not at the screen origin), then are sampled, then judged.
+                    node -e '
+const g = JSON.parse(process.argv[1]), t = JSON.parse(process.argv[2]);
+const mw = g.grid.moduleW, last = g.tabs[g.tabs.length - 1];
+const H = Math.round(t.h || g.height);
+const dx = Math.round(t.gx - t.x), Y = Math.round(t.gy);
+const labelEnd = last.x + last.width - mw;   // the last tab less its trailing gap cell
+const at = (n, x, w) => console.log(n + " " + (Math.round(x) + dx) + " " + Y + " " + w + " " + H);
+at("hlLead", last.x - mw, mw);      // the highlight leading cell (never has label glyphs)
+at("gap", labelEnd, mw);            // the one cell between the label box and the ticker
+at("tk", labelEnd + mw, mw);        // the ticker first cell
+at("tkr", t.x + t.w, mw);           // after the ticker, before rightSide
+' "$g" "$t" > "$TMP/ticker-strips-$2.txt" 2>&1
+                    strips="{"
+                    while read -r name sx sy sw sh; do
+                        [ -f "$s" ] && v="$(strip6 "$s" "$sx" "$sy" "$sw" "$sh")" || v="noshot"
+                        strips="$strips\"$name\":\"$v\","
+                    done < "$TMP/ticker-strips-$2.txt"
+                    strips="${strips%,}}"
+                    node -e '
+const g = JSON.parse(process.argv[1]), t = JSON.parse(process.argv[2]);
+const px = JSON.parse(process.argv[3]), state = process.argv[4];
+const ring = process.argv[5] ? JSON.parse(process.argv[5]) : null;
+function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
+const mw = g.grid.moduleW, left = g.grid.contentLeft;
+const last = g.tabs[g.tabs.length - 1];
+const labelEnd = last.x + last.width - mw;
+const bg = t.barColor.replace("#", "").slice(-6).toLowerCase();
+const hlc = "152024";
+const isF = last.hlColor === "#152024";
+ok(state === "unfocused" ? (!isF && last.hlColor === "#00000000") : isF,
+   "precondition: the LAST tab (" + JSON.stringify(last.text) + ") is " + (state === "unfocused" ? "unfocused" : "focused") + " (hlColor " + last.hlColor + ")");
+ok(t.cellW === mw && mw > 0, "Bar.cellW is the real Kwi3Grid module (" + t.cellW + " vs " + mw + ")");
+ok(t.lsR === last.x + last.width, "leftSide ends where the last tab (its trailing gap cell) ends (" + t.lsR + ")");
+if (state === "hidden") {
+    ok(t.visible === false, "the ticker is hidden");
+    ok(last.hlX === last.x - mw && last.hlX + last.hlW === labelEnd + mw,
+       "ticker hidden: the last tab highlight is back to label + one cell EACH side, right edge " + (last.hlX + last.hlW) + " == label end " + labelEnd + " + " + mw + " (dotfiles-8luk)");
+    ok(ring && ring.x === last.hlX && ring.w === last.hlW, "ticker hidden: the ring matches the highlight (ring " + JSON.stringify(ring) + ")");
+    ok(px.hlLead === "1 " + hlc, "pixels: the highlight leading cell is painted #" + hlc + " (" + px.hlLead + ")");
+    ok(px.gap === "1 " + hlc, "pixels: ticker hidden, the trailing cell is covered by the highlight again (" + px.gap + ")");
+} else {
+    ok(t.visible === true, "the ticker is visible");
+    ok((t.x - left) % mw === 0, "tickerArea.x is a whole cell from contentLeft (x " + t.x + ", left " + left + ", cell " + mw + ")");
+    ok(t.x - labelEnd === mw, "last tab label box end -> ticker is exactly ONE cell (" + (t.x - labelEnd) + "px, want " + mw + ")");
+    ok(last.rowX + last.rowW <= labelEnd + 0.5, "the painted label row ends inside its label box (" + (last.rowX + last.rowW) + " <= " + labelEnd + ")");
+    ok(t.x + t.w === t.rsX - mw, "ticker right edge == rightSide.x - one cell (" + (t.x + t.w) + " vs " + t.rsX + " - " + mw + ")");
+    ok(t.w > 0 && (t.x + t.w - left) % mw === 0, "the ticker right edge is a whole cell too, and the ticker has width (w " + t.w + ")");
+    ok(t.color === "#152024", "the ticker background is #152024 (" + t.color + ")");
+    ok(px.gap === "1 " + bg, "pixels: the one cell between the last label box and the ticker is bar background #" + bg + ", not the highlight (" + px.gap + ")");
+    ok(px.tk === "1 " + hlc, "pixels: the ticker first cell is its #" + hlc + " background (" + px.tk + ")");
+    ok(px.tkr === "1 " + bg, "pixels: the cell after the ticker (before rightSide) is bar background #" + bg + " (" + px.tkr + ")");
+    if (state === "focused") {
+        ok(last.hlX === last.x - mw && last.hlX + last.hlW === labelEnd,
+           "ticker up: the focused last tab highlight is one cell on the left + its label only, right edge " + (last.hlX + last.hlW) + " == label end " + labelEnd);
+        ok(ring && ring.x === last.hlX && ring.w === last.hlW, "ticker up: the ring matches the trimmed highlight (ring " + JSON.stringify(ring) + ")");
+        ok(px.hlLead === "1 " + hlc, "pixels: the highlight leading cell is painted #" + hlc + " (" + px.hlLead + ")");
+    }
+}
+' "$g" "$t" "$strips" "$2" "$rg" > "$TMP/ticker-check-$2.out" 2>&1
+                    while IFS= read -r line; do
+                        case "$line" in
+                            "PASS "*) pass "$1: ${line#PASS }" ;;
+                            "FAIL "*) fail "$1: ${line#FAIL }" "true" "false" ;;
+                            *) fail "$1: checker output" "PASS/FAIL lines" "$line" ;;
+                        esac
+                    done < "$TMP/ticker-check-$2.out"
+                }
+                tickcheck "ticker, last tab focused" focused
+
+                if tickerset6 off; then tickcheck "ticker hidden, last tab focused" hidden
+                else fail "the ticker hides again" '"visible":false' "$(last6 tgeom tgwoff30)"; fi
+
+                # The rig focuses bb (not the last tab) through Logic; the
+                # last tab keeps its keeper window so it survives.
+                kill -USR2 "$BAR_RIG_PID"
+                bbF=""
+                for i in $(seq 1 20); do
+                    ipc6 call bar6 rows "tkbb$i"
+                    sleep 0.15
+                    last6 rows "tkbb$i" | grep -q '"name":"bb","number":[0-9]*,"focused":true' && { bbF=1; break; }
+                done
+                [ -n "$bbF" ] && pass "bb focused, so the last tab is unfocused" \
+                    || fail "bb focused, so the last tab is unfocused" "bb focused:true" "$(last6 rows tkbb20)"
+                if tickerset6 on; then tickcheck "ticker, last tab unfocused" unfocused
+                else fail "the ticker comes up again" '"visible":true' "$(last6 tgeom tgwon30)"; fi
+            fi
+            tickerset6 off || true
 
             scenario "kwi3 restarts under a live bar: last rows kept while down, then refreshed (edge case)"
             ipc6 call bar6 rows "prekill"

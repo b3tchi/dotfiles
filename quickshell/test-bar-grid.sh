@@ -163,12 +163,17 @@ ShellRoot {
     var tb = findByName(r, "trayBlock"), trow = findByName(r, "trayRow")
     var bell = findByName(r, "bellSlot"), bi = findByName(r, "bellIcon"), bc = findByName(r, "bellCount")
     var sep = findByName(r, "traySep")
+    var tk = findByName(r, "tickerArea"), ls = findByName(r, "leftSide")
+    var tkp = tk ? tk.mapToItem(r, 0, 0) : null, lsp = ls ? ls.mapToItem(r, 0, 0) : null
     var o = {
       real: host.real, modelHasLength: bar.trayModel.length !== undefined,
       trayCount: bar.trayCount, trayRowXFinite: isFinite(trow.x),
       traySepVisible: sep ? sep.visible : null, traySepW: sep ? sep.width : null,
       traySepText: sep ? sep.text : null,
       cell: host.cw, H: host.ch,
+      // dotfiles-52vu: the ticker and its neighbours in bar coordinates
+      ticker: (tk && tk.visible) ? { x: tkp.x, w: tk.width, lsR: lsp.x + ls.width,
+                                     rsX: rs.mapToItem(r, 0, 0).x } : null,
       rs: g(rs), cd: g(cd), parentW: cd.parent.width,
       rsKids: kids(rs), cdKids: kids(cd),
       vol: { g: g(vol), l: g(findByName(vol, "volLabel")), v: g(findByName(vol, "volValue")) },
@@ -455,6 +460,30 @@ for arm in "g8:8:21" "g10:10:20"; do
         "$(case_of "${n}n$k" | jq -r '"\(.trayRowX) \(if (.tray|length) > 1 then .tray[1].x - .tray[0].x else '"$H"' end)"')"
   done
 done
+
+# dotfiles-52vu (Jan): on the grid exactly ONE cell between the ticker and each
+# neighbour: it starts right at leftSide's end (the last tab's trailing gap cell
+# IS the gap, leftMargin 0) and ends one cell before rightSide. This harness sets
+# cellW (so onGrid is true) but never activates Kwi3Grid, so the TABS here are
+# the off-grid shape (tabGap is a space, tab x/width in pixels) - a combination
+# production never produces. So only the ticker's own anchor margins are
+# asserted here, against whatever leftSide/rightSide happen to be; the label ->
+# ticker distance and the trimmed last-tab highlight on a REAL Kwi3Grid (last
+# tab focused and unfocused, plus the painted pixels) are test-kwi3-backend.sh
+# PHASE 6.
+for arm in "g8:8:21" "g10:10:20"; do
+  IFS=: read -r n W H <<<"$arm"
+  scenario "ticker margins over ${W}x${H} (dotfiles-52vu): 0 after leftSide, one cell before rightSide"
+  chk "${n}T: ticker shown" "${n}T" ".ticker != null"
+  a2 "${n}T: ticker starts exactly at leftSide's end (margin 0)" "0" \
+      "$(case_of "${n}T" | jq -r '.ticker.x - .ticker.lsR')"
+  a2 "${n}T: ticker right edge is exactly one cell before rightSide" "$W" \
+      "$(case_of "${n}T" | jq -r '.ticker.rsX - (.ticker.x + .ticker.w)')"
+  chk "${n}T: ticker right edge and rightSide start are whole cells" "${n}T" \
+      ".cell as \$c | ((.ticker.x + .ticker.w)|m(\$c)) and (.ticker.rsX|m(\$c))"
+done
+a2 "nogrid: ticker margins unchanged (left 8 px from leftSide, right 4 px before rightSide)" "8 4" \
+    "$(case_of nogridT | jq -r '"\(.ticker.x - .ticker.lsR) \(.ticker.rsX - (.ticker.x + .ticker.w))"')"
 
 scenario "the tray fake is production-shaped (dotfiles-rlnv rejection #1)"
 a2 "the fake tray model has NO .length (like SystemTray.items' ObjectModel)" "false" \
