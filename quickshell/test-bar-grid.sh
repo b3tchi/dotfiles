@@ -48,6 +48,7 @@ scenario() { printf '\n[%s]\n' "$1"; }
 case_of() { sed -n "s/^CASE $1 //p" "$CASES" | head -1; }
 
 cleanup() {
+  [ -n "${KEEP_CASES:-}" ] && cp "$CASES" "$KEEP_CASES"
   [ -n "${BAR_PID:-}" ]  && kill -- -"$BAR_PID" 2>/dev/null
   [ -n "${BAR_PID:-}" ]  && kill "$BAR_PID" 2>/dev/null
   sleep 0.3
@@ -83,7 +84,7 @@ for t in sh cat sleep tr awk df grep sed cut head; do
 done
 cat > "$TMP/pbin/i3-msg" <<STUB
 #!/bin/sh
-case "\$1" in -t) case "\$2" in get_workspaces) printf '[]'; exit 0 ;; subscribe) exec "$SLEEP_BIN" 300 ;; esac ;; esac
+case "\$1" in -t) case "\$2" in get_workspaces) printf '[{"num":1,"name":"aa","focused":false,"visible":false,"urgent":false,"id":1},{"num":2,"name":"bbbb","focused":true,"visible":true,"urgent":false,"id":2},{"num":3,"name":"c","focused":false,"visible":false,"urgent":false,"id":3}]'; exit 0 ;; subscribe) exec "$SLEEP_BIN" 300 ;; esac ;; esac
 exit 0
 STUB
 chmod +x "$TMP/pbin/i3-msg"; ln -sf "$TMP/pbin/i3-msg" "$TMP/pbin/swaymsg"
@@ -156,7 +157,8 @@ ShellRoot {
     var r = rootOf(bar)
     var rs = findByName(r, "rightSide"), cd = findByName(r, "clockDate")
     var vol = findByName(r, "volSeg"), kbd = findByName(r, "kbdSeg")
-    var slots = [], icons = []
+    var slots = [], icons = [], wtabs = []
+    findAll(r, "wsTab", wtabs)
     findAll(r, "traySlot", slots); findAll(r, "trayIcon", icons)
     var tb = findByName(r, "trayBlock"), trow = findByName(r, "trayRow")
     var bell = findByName(r, "bellSlot"), bi = findByName(r, "bellIcon"), bc = findByName(r, "bellCount")
@@ -172,6 +174,17 @@ ShellRoot {
       vol: { g: g(vol), l: g(findByName(vol, "volLabel")), v: g(findByName(vol, "volValue")) },
       kbd: kbd.visible ? { g: g(kbd), l: g(findByName(kbd, "kbdLabel")), v: g(findByName(kbd, "kbdValue")) } : null,
       trayBlock: g(tb), trayRowX: trow.x, trayN: host.tn,
+      // dotfiles-8luk: the workspace tabs (off the grid here: Kwi3Grid is
+      // never active in this harness), the label row and the highlight of
+      // each, in bar coordinates, plus one space's width measured on a Text
+      // of the bar's own font (the unit the gap must be).
+      spaceW: spaceProbe.implicitWidth,
+      tabs: wtabs.map(function (t) {
+        var rows = [], hls = []
+        findAll(t, "wsLabelRow", rows); findAll(t, "wsTabHighlight", hls)
+        var tp = t.mapToItem(r, 0, 0), rp = rows[0].mapToItem(r, 0, 0), hp = hls[0].mapToItem(r, 0, 0)
+        return { x: tp.x, w: t.width, rx: rp.x, rw: rows[0].width, hx: hp.x, hw: hls[0].width,
+                 hc: String(hls[0].color) } }),
       tray: slots.map(function (s, i) {
         return { x: s.x, w: s.width, ix: icons[i].x, iw: icons[i].width, ih: icons[i].height,
                  sw: icons[i].sourceSize.width, sh: icons[i].sourceSize.height } }),
@@ -193,6 +206,7 @@ ShellRoot {
     function dumpc(name: string): void { host.dump(name) }
     function bye(): void { Quickshell.exit(0) }
   }
+  Text { id: spaceProbe; visible: false; text: " "; font.family: bar.fontFamily; font.pixelSize: bar.fontSize }
   Bar {
     id: bar
     screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
@@ -488,6 +502,20 @@ a2 "nogrid: every separator is exactly ONE space character (dotfiles-hr1g), >= 6
     "$(case_of nogrid | jq -r '[(.rsKids + .cdKids)[] | select(.n | test("^ +$")) | .n] as $s | ($s|length) >= 6 and ($s | all(. == " ")) and .traySepText == " "')"
 a2 "nogrid: VOL/KBL pair widths are label+value implicit sums" "true" \
     "$(case_of nogrid | jq -r '.vol.g.w == (.vol.l.w + .vol.v.w) and .kbd.g.w == (.kbd.l.w + .kbd.v.w)')"
+# dotfiles-8luk: workspace tabs off the grid - exactly ONE space between
+# neighbouring labels, one space of outer padding before the first and after
+# the last, the focused highlight = label + one space each side, unfocused
+# tabs paint nothing.
+a2 "nogrid: three workspace tabs rendered" "3" "$(case_of nogrid | jq -r '.tabs | length')"
+a2 "nogrid: one space is a positive width" "true" "$(case_of nogrid | jq -r '.spaceW > 0')"
+a2 "nogrid: labels are exactly ONE space apart" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | .tabs as $t | [range(0; ($t|length)-1) | ($t[.+1].rx - ($t[.].rx + $t[.].rw)) - $s | fabs < 0.5] | all')"
+a2 "nogrid: one space of outer padding before the first label" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | (.tabs[0].rx - .tabs[0].x) as $l | (.tabs[0].x >= $s - 0.5) and ($l >= 0)')"
+a2 "nogrid: a tab is its label plus one trailing space (so the last one leaves one space of outer padding)" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | [.tabs[] | (.w - .rw - $s) | fabs < 0.5] | all')"
+a2 "nogrid: the focused tab (bbbb) highlight is label + one space each side; unfocused paint nothing" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | .tabs as $t | ($t[1].hc == "#152024") and (($t[1].hx - ($t[1].rx - $s)) | fabs < 0.5) and (($t[1].hw - ($t[1].rw + 2*$s)) | fabs < 0.5) and ($t[0].hc == "#00000000") and ($t[2].hc == "#00000000")')"
 [ -n "${GEOM_OUT:-}" ] && case_of nogrid | jq -cS 'del(.cdKids[].n)' > "$GEOM_OUT"
 
 scenario "separators never double (dotfiles-hr1g rejection #1): each segment owns one LEADING separator"

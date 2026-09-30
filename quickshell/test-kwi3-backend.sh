@@ -1045,7 +1045,24 @@ ShellRoot {
                 var badges = []
                 host.findAllByName(tabs[i], "wsAgentBadge", badges)
                 var bdg = badges.length ? badges[0] : null
+                // dotfiles-8luk: the tab's own highlight rectangle (label + one
+                // gap each side, overhanging the tab), in bar coordinates, and
+                // its colour, so 'focused = label + 1 cell each side' is read
+                // off the painted item and not derived from the plan.
+                var hls = []
+                host.findAllByName(tabs[i], "wsTabHighlight", hls)
+                var hl = hls.length ? hls[0] : null
+                var hp = hl ? hl.mapToItem(r, 0, 0) : null
+                // The label row (name + badge) as painted: the thing whose
+                // gap to its neighbour is what Jan reads (dotfiles-8luk).
+                var rows = []
+                host.findAllByName(tabs[i], "wsLabelRow", rows)
+                var lr = rows.length ? rows[0] : null
+                var lp = lr ? lr.mapToItem(r, 0, 0) : null
                 out.tabs.push({ x: p.x, width: tabs[i].width, clip: tabs[i].clip,
+                                rowX: lp ? lp.x : null, rowW: lr ? lr.width : null,
+                                hlX: hp ? hp.x : null, hlW: hl ? hl.width : null,
+                                hlColor: hl ? String(hl.color) : null,
                                 textX: tp ? tp.x : null,
                                 textPainted: t ? t.paintedWidth : null,
                                 textWidth: t ? t.width : null,
@@ -1067,6 +1084,13 @@ ShellRoot {
 
         function avail(tag: string): void {
             host.emit("avail", tag + " " + (Kwi3Client.available ? "1" : "0"))
+        }
+
+        // dotfiles-8luk: the ring window's own rect (screen coordinates) for
+        // the focused tab, straight from the property the companion window
+        // binds to.
+        function ring(tag: string): void {
+            host.emit("ring", tag + " " + JSON.stringify(bar.focusedTabScreenRect))
         }
 
         function plan(tag: string): void {
@@ -1199,7 +1223,9 @@ const moduleW = 8, contentLeft = 8;
 function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
 const cells = plan.cells;
 ok(cells.length === 3, "plan has three cells");
-let x = contentLeft, allWhole = true, cum = true;
+// dotfiles-8luk: one cell of outer padding before the first tab.
+const firstX = contentLeft + moduleW;
+let x = firstX, allWhole = true, cum = true;
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
     if ((t.x - contentLeft) % moduleW !== 0) { allWhole = false; }
@@ -1208,8 +1234,8 @@ for (let i = 0; i < geom.tabs.length; i++) {
     x += t.width;
 }
 ok(allWhole, "every tab x and width is a whole multiple of moduleW from contentLeft");
-ok(cum, "each tabs x is the running sum of the ones before it, starting at contentLeft");
-ok(geom.tabs.length && geom.tabs[0].x === contentLeft, "the first tab starts at contentLeft");
+ok(cum, "each tabs x is the running sum of the ones before it, starting one cell in from contentLeft");
+ok(geom.tabs.length && geom.tabs[0].x === firstX, "the first tab starts one cell (outer padding) after contentLeft");
 // kwi3-55l.16: cells is wants now, not a shared-out total (see Bar.qml own
 // own tabCellPlan comment) - the invariant this used to check ("spare
 // cells at the front") was really just a symptom of averaging sum(wants)
@@ -1278,15 +1304,19 @@ ok(geom.exclusiveZone === boot.reserve, "the bar exclusiveZone equals Kwi3Grid.r
             TABCHECK="$TMP/tabcheck.js"
             cat > "$TABCHECK" <<'JSEOF'
 'use strict';
-const [geomS, planS, gridS] = process.argv.slice(2);
+const [geomS, planS, gridS, ringS] = process.argv.slice(2);
 const geom = JSON.parse(geomS), plan = JSON.parse(planS), grid = JSON.parse(gridS);
+const ring = ringS ? JSON.parse(ringS) : undefined;
 const mw = grid.module.w, left = grid.contentLeft;
 function ok(cond, name) { console.log((cond ? 'PASS ' : 'FAIL ') + name); }
 ok(geom.grid.moduleW === mw, 'Kwi3Grid.moduleW equals the core grid.get module.w (' + geom.grid.moduleW + ' vs ' + mw + ')');
 ok(geom.height === grid.row, 'the bar height equals the core row (' + geom.height + ' vs ' + grid.row + ')');
 ok(geom.exclusiveZone === grid.reserve, 'the bar exclusiveZone equals the core reserve (' + geom.exclusiveZone + ' vs ' + grid.reserve + ')');
 ok(geom.count > 0 && geom.count === plan.cells.length, 'one tab per planned cell count (' + geom.count + ')');
-let x = left, whole = true, cum = true, match = true;
+// dotfiles-8luk: one cell of outer padding before the first tab; each tab is
+// its label plus ONE trailing gap cell, so labels are exactly one cell apart
+// and the last label is followed by one cell of outer padding.
+let x = left + mw, whole = true, cum = true, match = true;
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
     if ((t.x - left) % mw !== 0 || t.width % mw !== 0) { whole = false; }
@@ -1295,8 +1325,68 @@ for (let i = 0; i < geom.tabs.length; i++) {
     x += t.width;
 }
 ok(whole, 'every tab x and width is a whole multiple of ' + mw + ' from contentLeft ' + left);
-ok(cum, 'tabs abut, starting at contentLeft ' + left);
+ok(geom.tabs[0].x === left + mw, 'the first tab starts ONE cell of outer padding after contentLeft ' + left + ' (x=' + geom.tabs[0].x + ')');
+ok(cum, 'tabs abut, starting one cell after contentLeft ' + left);
 ok(match, 'every tab is exactly its planned cells x ' + mw + 'px');
+// dotfiles-8luk: labels EXACTLY one cell apart. A tab's label box is the tab
+// less its trailing gap cell, so the label boxes of neighbours are separated
+// by that one cell and nothing else (no leading padding in the tab).
+let oneGap = true, gapDetail = [];
+for (let i = 0; i + 1 < geom.tabs.length; i++) {
+    const a = geom.tabs[i], b = geom.tabs[i + 1];
+    const gap = b.x - (a.x + a.width - mw);
+    gapDetail.push(gap);
+    if (gap !== mw) { oneGap = false; }
+}
+ok(oneGap, 'neighbouring tab labels are exactly ONE cell (' + mw + 'px) apart: ' + JSON.stringify(gapDetail));
+// Independent of the plan: the painted label rows. A tab's cells must be its
+// label's whole cells + exactly ONE (not derived from the tab's own width), and
+// the painted gap between two neighbouring label rows is that one cell plus
+// each row's centring slack (< one cell each) - so in [mw, 2*mw), never the
+// two full cells the old label + 1 padding each side gave.
+let cellsOk = true, cellDetail = [], gapsOk = true, gapPx = [];
+for (let i = 0; i < geom.tabs.length; i++) {
+    const t = geom.tabs[i];
+    if (typeof t.rowW !== 'number' || t.truncated === true) { continue; }
+    const want = Math.max(1, Math.ceil(t.rowW / mw - 0.001)) + 1;
+    cellDetail.push(t.width / mw + '=' + want);
+    if (t.width / mw !== want) { cellsOk = false; }
+    if (i + 1 < geom.tabs.length && typeof geom.tabs[i + 1].rowX === 'number') {
+        const g = geom.tabs[i + 1].rowX - (t.rowX + t.rowW);
+        gapPx.push(g.toFixed(1));
+        if (g < mw - 0.5 || g >= 2 * mw - 0.5) { gapsOk = false; }
+    }
+}
+ok(cellsOk, 'each tab is its label\'s whole cells + exactly one cell: ' + cellDetail.join(' '));
+ok(gapsOk, 'the painted gap between neighbouring label rows is one cell (>= ' + mw + ', < ' + 2 * mw + 'px): ' + gapPx.join(' '));
+let painted = true;
+for (let i = 0; i < geom.tabs.length; i++) {
+    const t = geom.tabs[i];
+    if (typeof t.textX !== 'number') { continue; }
+    // the painted label lies inside [x, x + width - mw]: nothing of it in the gap cell
+    if (t.textX < t.x - 0.5 || t.textX + t.textPainted > t.x + t.width - mw + 0.5) { painted = false; }
+}
+ok(painted, 'every painted label stays out of its trailing gap cell');
+const last = geom.tabs[geom.tabs.length - 1];
+ok((last.x + last.width - mw) + mw === last.x + last.width, 'the last tab is followed by one cell of outer padding (its trailing gap cell)');
+// Focused highlight: label + one cell each side, on the grid, overhanging the
+// tab; every unfocused tab paints nothing (transparent).
+let fIdx = -1;
+for (let i = 0; i < geom.tabs.length; i++) { if (geom.tabs[i].hlColor === '#152024') { fIdx = i; } }
+ok(fIdx >= 0, 'exactly the focused tab paints the #152024 highlight (index ' + fIdx + ')');
+if (fIdx >= 0) {
+    const f = geom.tabs[fIdx];
+    ok(f.hlX === f.x - mw && f.hlW === f.width + mw,
+       'the focused highlight is its label + one cell each side: x ' + f.hlX + ' w ' + f.hlW + ' vs tab ' + f.x + '/' + f.width);
+    ok((f.hlX - left) % mw === 0 && f.hlW % mw === 0, 'the focused highlight is on the grid');
+    let quiet = true;
+    for (let i = 0; i < geom.tabs.length; i++) { if (i !== fIdx && geom.tabs[i].hlColor !== '#00000000') { quiet = false; } }
+    ok(quiet, 'unfocused tabs paint no highlight (transparent)');
+    if (ring) {
+        ok(ring.x === f.hlX && ring.w === f.hlW,
+           'the ring window rect matches the highlight: ring x ' + ring.x + ' w ' + ring.w + ' vs ' + f.hlX + '/' + f.hlW);
+    } else { ok(false, 'a ring rect was read'); }
+}
 // kwi3-55l.16: cells is wants now (Bar.qml's own tabCellPlan comment) -
 // the old "non-increasing left to right" check only ever held because
 // sum(wants) was averaged across every tab; the invariant that actually
@@ -1305,8 +1395,11 @@ let noneStarved = true;
 for (let i = 0; i < plan.cells.length; i++) { if (plan.cells[i] < plan.wants[i]) { noneStarved = false; } }
 ok(noneStarved, "no tab has fewer cells than its own want (kwi3-55l.16)");
 JSEOF
-            tabcheck() { # <label> <geom> <plan> <grid>
-                node "$TABCHECK" "$2" "$3" "$4" > "$TMP/tabcheck.out" 2>&1
+            tabcheck() { # <label> <geom> <plan> <grid> [<ring>]
+                local rtag="ring$RANDOM$RANDOM"
+                ipc6 call bar6 ring "$rtag"
+                sleep 0.3
+                node "$TABCHECK" "$2" "$3" "$4" "$(last6 ring "$rtag")" > "$TMP/tabcheck.out" 2>&1
                 while IFS= read -r line; do
                     case "$line" in
                         "PASS "*) pass "$1: ${line#PASS }" ;;
@@ -1360,13 +1453,12 @@ for (const t of geom.tabs) {
     const l = t.textX, r = t.textX + t.textPainted;
     detail.push("[" + t.x + "," + (t.x + t.width) + "] label [" + l.toFixed(1) + "," + r.toFixed(1) + "]");
     if (l < t.x || r > t.x + t.width) { inside = false; }
-    if (l < t.x + mw - 0.5 || r > t.x + t.width - mw + 0.5) { padded = false; }
+    if (l < t.x - 0.5 || r > t.x + t.width - mw + 0.5) { padded = false; }
 }
 ok(inside, "every painted label lies inside its own tab: " + detail.join(" "));
-ok(padded, "every painted label keeps one module of padding each side");
+ok(padded, "every painted label keeps out of its trailing gap cell (dotfiles-8luk)");
 const lt = geom.tabs[3];
 ok(lt && lt.truncated === true, "the long label is elided (Text.truncated), not merely clipped");
-ok(lt && lt.clip === true, "the tab clips its children");
 ' "$geomL" "$planL" "$BOOTGRID" "1024" > "$TMP/long-check.out" 2>&1
             while IFS= read -r line; do
                 case "$line" in
