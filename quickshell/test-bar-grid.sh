@@ -163,12 +163,17 @@ ShellRoot {
     var tb = findByName(r, "trayBlock"), trow = findByName(r, "trayRow")
     var bell = findByName(r, "bellSlot"), bi = findByName(r, "bellIcon"), bc = findByName(r, "bellCount")
     var sep = findByName(r, "traySep")
+    var tk = findByName(r, "tickerArea"), ls = findByName(r, "leftSide")
+    var tkp = tk ? tk.mapToItem(r, 0, 0) : null, lsp = ls ? ls.mapToItem(r, 0, 0) : null
     var o = {
       real: host.real, modelHasLength: bar.trayModel.length !== undefined,
       trayCount: bar.trayCount, trayRowXFinite: isFinite(trow.x),
       traySepVisible: sep ? sep.visible : null, traySepW: sep ? sep.width : null,
       traySepText: sep ? sep.text : null,
       cell: host.cw, H: host.ch,
+      // dotfiles-52vu: the ticker and its neighbours in bar coordinates
+      ticker: (tk && tk.visible) ? { x: tkp.x, w: tk.width, lsR: lsp.x + ls.width,
+                                     rsX: rs.mapToItem(r, 0, 0).x } : null,
       rs: g(rs), cd: g(cd), parentW: cd.parent.width,
       rsKids: kids(rs), cdKids: kids(cd),
       vol: { g: g(vol), l: g(findByName(vol, "volLabel")), v: g(findByName(vol, "volValue")) },
@@ -455,6 +460,24 @@ for arm in "g8:8:21" "g10:10:20"; do
         "$(case_of "${n}n$k" | jq -r '"\(.trayRowX) \(if (.tray|length) > 1 then .tray[1].x - .tray[0].x else '"$H"' end)"')"
   done
 done
+
+# dotfiles-52vu (Jan): the ticker's gap is exactly ONE cell at each edge on the
+# grid. In this harness Kwi3Grid is never active, so the tabs (and leftSide's
+# right edge) sit at pixel positions off the cell grid; what is asserted is the
+# RELATION each edge must have, and that the right edge lands on whole cells.
+for arm in "g8:8:21" "g10:10:20"; do
+  IFS=: read -r n W H <<<"$arm"
+  scenario "ticker gap over ${W}x${H} (dotfiles-52vu): one cell each side"
+  chk "${n}T: ticker shown" "${n}T" ".ticker != null"
+  chk "${n}T: ticker starts exactly at leftSide's end (its trailing tab cell IS the gap; last label + one space to the ticker)" "${n}T" \
+      ".ticker.x == .ticker.lsR and (.spaceW as \$s | .tabs[-1] as \$t | ((.ticker.x - (\$t.rx + \$t.rw)) - \$s) | fabs < 0.5)"
+  a2 "${n}T: ticker right edge is exactly one cell before rightSide" "$W" \
+      "$(case_of "${n}T" | jq -r '.ticker.rsX - (.ticker.x + .ticker.w)')"
+  chk "${n}T: ticker right edge and rightSide start are whole cells" "${n}T" \
+      ".cell as \$c | ((.ticker.x + .ticker.w)|m(\$c)) and (.ticker.rsX|m(\$c))"
+done
+a2 "nogrid: ticker margins unchanged (left 8 px from leftSide, right 4 px before rightSide)" "8 4" \
+    "$(case_of nogridT | jq -r '"\(.ticker.x - .ticker.lsR) \(.ticker.rsX - (.ticker.x + .ticker.w))"')"
 
 scenario "the tray fake is production-shaped (dotfiles-rlnv rejection #1)"
 a2 "the fake tray model has NO .length (like SystemTray.items' ObjectModel)" "false" \

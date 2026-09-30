@@ -1032,6 +1032,7 @@ PanelWindow {
         // Left: workspaces + mode
         Row {
             id: leftSide
+            objectName: "leftSide"
             visible: root.currentMode === "default"
             // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
             // starts where the tiles' own titlebars do.
@@ -1209,10 +1210,17 @@ PanelWindow {
         }
 
         // Notification ticker — between workspaces and bell/date
+        // dotfiles-52vu (Jan): on the grid the gap is exactly ONE cell at each
+        // edge. Left: leftSide already ends in the last tab's trailing gap
+        // cell (dotfiles-8luk), so that cell IS the gap between the last tab
+        // label and the ticker background - leftMargin 0, not one more cell.
+        // Right: one cell between the ticker background and rightSide (the
+        // bell). Off the grid the old 8/4 px margins stay.
         Rectangle {
             id: tickerArea
+            objectName: "tickerArea"
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 4 }
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? 0 : 8; rightMargin: root.onGrid ? root.cellW : 4 }
             clip: true
             height: parent.height
             z: -1
