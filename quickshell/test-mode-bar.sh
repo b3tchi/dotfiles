@@ -69,6 +69,7 @@ FAIL=0
 pass() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n         expected: %s\n         actual:   %s\n' "$1" "$2" "$3"; }
 
+a2() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi; }
 scenario() { printf '\n[%s]\n' "$1"; }
 
 # payload for a CASE name — everything after "CASE <name> " on its line.
@@ -340,6 +341,10 @@ ShellRoot {
   id: host
   property string mode: "default"
   property int fontSize: 16
+  // dotfiles-puoh: the kwi3 module cell width fed to ModeBar.cellW. 0 = not on
+  // kwi3 (today's look). Kwi3Grid cannot be faked from here (a real singleton
+  // fed by Kwi3Client), so ModeBar exposes cellW and the host sets it.
+  property int cell: 0
 
   function emit(n, p) { console.log("CASE " + n + " " + p) }
   function j(v) { return JSON.stringify(v) }
@@ -413,6 +418,25 @@ ShellRoot {
     emit(name + ".gapW",    gap ? gap.width : -1)
     emit(name + ".hints",   j(data))
 
+    // dotfiles-puoh: geometry in the strip's own coordinates. `onGrid` is true
+    // iff cell>0 and pill x/width, gap x/width and every hint row x/width are
+    // whole multiples of the cell (a mod check, not a re-derivation of the
+    // sizing rule under test). Raw numbers are emitted too.
+    var rowG = []
+    var okAll = host.cell > 0
+    var c = host.cell
+    function m(v) { return c > 0 && (Math.round(v * 1000) % (c * 1000)) === 0 }
+    if (pill && gap) {
+      okAll = okAll && m(pill.x) && m(pill.width) && m(gap.x) && m(gap.width)
+      for (var r = 0; r < rows.length; r++) {
+        okAll = okAll && m(rows[r].x) && m(rows[r].width)
+        rowG.push([rows[r].x, rows[r].width])
+      }
+      emit(name + ".geom", j({ pillX: pill.x, pillW: pill.width, labelW: pl.implicitWidth,
+                               gapX: gap.x, gapW: gap.width, rows: rowG }))
+    }
+    emit(name + ".onGrid", okAll ? "1" : "0")
+
     var hpre  = rows.length ? findChild(rows[0], "hpre")  : null
     var hk    = rows.length ? findChild(rows[0], "hk")    : null
     var hpost = rows.length ? findChild(rows[0], "hpost") : null
@@ -465,6 +489,7 @@ ShellRoot {
     target: "modebar"
     function setmode(m: string): void { host.mode = m }
     function setfont(n: int): void    { host.fontSize = n }
+    function setcell(n: int): void    { host.cell = n }
     function dumpc(name: string): void { host.dump(name) }
     function bye(): void { Quickshell.exit(0) }
   }
@@ -485,6 +510,7 @@ ShellRoot {
       anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
       mode: host.mode
       fontSize: host.fontSize
+      cellW: host.cell
     }
   }
 }
@@ -510,6 +536,7 @@ done
 
 setmodei() { ipc call modebar setmode "$1" >/dev/null 2>&1; }
 setfont()  { ipc call modebar setfont "$1" >/dev/null 2>&1; }
+setcell()  { ipc call modebar setcell "$1" >/dev/null 2>&1; }
 dumpc()    { ipc call modebar dumpc "$1"   >/dev/null 2>&1; }
 # set a mode, let the scene lay out + compute Text metrics, then dump.
 flip1()    { setmodei "$1"; sleep 0.5; dumpc "$2"; sleep 0.2; }
@@ -533,6 +560,16 @@ setmodei "resize";     sleep 0.2
 setmodei "default";    sleep 0.2
 setmodei "screenshot"; sleep 0.5
 dumpc "mode-flip-no-stale"; sleep 0.3
+
+# dotfiles-puoh: kwi3 grid runs. cellW 8 (Jan's live module) and 10 (another),
+# each over every mode that has a strip; then back to 0 for the non-grid arm.
+for cw in 8 10; do
+  setcell "$cw"; sleep 0.3
+  for md in resize nav screenshot system; do flip1 "$md" "g${cw}-${md}"; done
+done
+setcell 0; sleep 0.3
+flip1 "resize" "nogrid-resize"
+flip1 "system" "nogrid-system"
 
 # collect PHASE 1 CASE lines (append; PHASE 0 names never collide with these).
 grep -a 'CASE ' "$TMP/qs1.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
@@ -608,6 +645,30 @@ assert_case "resize.underlineH" "-1"
 assert_case "resize.gapW"       "4"
 assert_case "screenshot.delta"  "14"
 
+scenario "kwi3 grid (dotfiles-puoh): pill, gap and every hint row are whole cells"
+for cw in 8 10; do
+  for md in resize nav screenshot system; do
+    assert_case "g${cw}-${md}.onGrid" "1"
+    # gap is exactly one cell; pill is label rounded up to cells plus one
+    # cell of padding each side (label centred by the existing anchor).
+    got="$(case_of "g${cw}-${md}.geom")"
+    gw="$(printf '%s' "$got" | sed -n 's/.*"gapW":\([0-9.]*\).*/\1/p')"
+    pw="$(printf '%s' "$got" | sed -n 's/.*"pillW":\([0-9.]*\).*/\1/p')"
+    lw="$(printf '%s' "$got" | sed -n 's/.*"labelW":\([0-9.]*\).*/\1/p')"
+    a2 "g${cw}-${md} gap is one cell" "$cw" "$gw"
+    exp_pw="$(awk -v l="$lw" -v w="$cw" 'BEGIN{c=int(l/w); if (c*w<l) c++; print c*w+2*w}')"
+    a2 "g${cw}-${md} pill = ceil(label/cell)*cell + 2 cells" "$exp_pw" "$pw"
+  done
+done
+
+scenario "no grid (dotfiles-puoh): today's look - pill label+14, gap 4, font-space separators"
+assert_case "nogrid-resize.delta" "14"
+assert_case "nogrid-resize.gapW"  "4"
+assert_case "nogrid-system.delta" "14"
+assert_case "nogrid-system.gapW"  "4"
+assert_case "nogrid-resize.onGrid" "0"
+assert_case "nogrid-resize.fonts" '{"pill":true,"pre":true,"key":true,"post":true,"label":true,"sep":true,"space":true}'
+
 scenario "colours bound to ModeBarTheme + Text.NativeRendering + bold (AC1)"
 # A hardcoded literal in ModeBar that drifts from the theme flips one of these
 # to false and fails. No "underline" key (kwi3-55l.27: removed with the
@@ -653,7 +714,6 @@ BAR_QML="$SCRIPT_DIR/config/Bar.qml"
 [ -r "$BAR_QML" ] || { echo "FATAL: Bar.qml missing" >&2; exit 1; }
 
 # direct (non-CASE) shell assert for the grep contract + a few booleans.
-a2() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi; }
 
 # ---- AC3 grep contract (negative control, asserted in-suite) ----------------
 scenario "grep-contract: Bar.qml drops modeHints/(l)ock, the modeText/modeNameText ids, keeps exactly one ModeBar (AC3)"

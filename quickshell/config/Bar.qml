@@ -1095,7 +1095,8 @@ PanelWindow {
             // to know exactly where this renders, the same way the tab
             // Repeater's own geometry feeds focusedTabScreenRect.
             id: mb
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom
+                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
             mode: root.inNavMode ? root.navLayerSticky : root.currentMode
             fontSize: root.fontSize
         }
