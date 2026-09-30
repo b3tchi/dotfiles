@@ -239,7 +239,10 @@ PanelWindow {
     // spare split to its two ends. Off kwi3: 18 px slots, 14 px icons.
     readonly property int iconSlot: onGrid ? cellH : 18
     readonly property int iconSide: onGrid ? cellH - 2 : 14
-    readonly property int trayCount: root.tickerActive ? 0 : root.trayModel.length
+    // Counted by the tray Repeater, never trayModel.length: SystemTray.items is
+    // an ObjectModel (QAbstractListModel) with no `.length` (dotfiles-rlnv
+    // rejection #1), and Repeater.count reads both a model and a JS array.
+    readonly property int trayCount: root.tickerActive ? 0 : trayRep.count
     readonly property int trayBlockW: onGrid ? (trayCount > 0 ? Math.ceil(trayCount * iconSlot / cellW) * cellW : 0)
                                              : trayRow.width
     // A content width rounded UP to whole cells (never Kwi3Grid.cells(), which
@@ -1262,6 +1265,7 @@ PanelWindow {
                 // spare cells split to the two ends: floor to the left
                 x: root.onGrid ? Math.floor((root.trayBlockW - root.trayCount * root.iconSlot) / 2) : 0
                 Repeater {
+                id: trayRep
                 model: root.trayModel
                 delegate: Item {
                     objectName: "traySlot"
@@ -1291,7 +1295,8 @@ PanelWindow {
             }
 
             Text {
-                visible: !root.tickerActive && root.trayModel.length > 0
+                objectName: "traySep"
+                visible: root.trayCount > 0
                 text: "  "
                 width: root.gsep(2, implicitWidth)
                 font.pixelSize: root.fontSize
