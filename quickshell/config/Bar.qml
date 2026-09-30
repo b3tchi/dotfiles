@@ -251,6 +251,31 @@ PanelWindow {
     // A separator (always one " " / one cell now): n whole cells on kwi3, the font's own space off it.
     function gsep(n, w) { return onGrid ? n * cellW : w }
 
+    // rightSide's segments, in Row order, and whether each is on screen
+    // (dotfiles-hr1g). Separators are owned BY CONSTRUCTION: each segment has
+    // only a LEADING separator, shown iff the segment is shown AND some
+    // earlier segment is - never a trailing one. A hidden segment (a Text with
+    // visible:false takes no Row space) therefore takes its one separator with
+    // it, so two can never sit side by side ("RAM:47  VOL:" at density compact,
+    // where HDD is hidden - Jan), and none ever sits at the Row's left edge.
+    // The bell is always shown and closes the Row, so nothing trails it.
+    readonly property var segShown: [
+        showNet && !tickerActive && netVal !== "",      // 0 NET
+        showCpu && !tickerActive && cpuVal !== "?",     // 1 CPU
+        showRam && !tickerActive && ramVal !== "?",     // 2 RAM
+        showDisk && !tickerActive && diskVal !== "?",   // 3 HDD
+        !tickerActive && volVal !== "",                 // 4 VOL
+        !tickerActive && batVal !== "",                 // 5 BAT / CHR / CHARGED
+        isSway && !tickerActive,                        // 6 KBL
+        trayCount > 0,                                  // 7 tray (0 while ticker)
+        true                                            // 8 bell
+    ]
+    function leadSep(i) {
+        if (!segShown[i]) return false
+        for (var j = 0; j < i; j++) if (segShown[j]) return true
+        return false
+    }
+
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
     // I3.workspaces ObjectModel was previously used as the data source, but it
     // does not always track `rename`/`empty`/`init` events fired by wm-state
@@ -1191,22 +1216,22 @@ PanelWindow {
             // Stats (hidden during ticker)
             Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(1, implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(1); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(1, implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(2); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(1, implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(3); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { width: root.gsep(1, implicitWidth); visible: !root.tickerActive && root.volVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(4); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
                 objectName: "volSeg"
                 visible: !root.tickerActive && root.volVal !== ""
@@ -1222,13 +1247,13 @@ PanelWindow {
                 }
             }
 
-            Text { width: root.gsep(1, implicitWidth); visible: !root.tickerActive && root.batVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(5); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Keyboard layout indicator (sway only). Click cycles us↔dvorak.
-            Text { width: root.gsep(1, implicitWidth); visible: root.isSway && !root.tickerActive; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(6); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
                 objectName: "kbdSeg"
                 visible: root.isSway && !root.tickerActive
@@ -1247,7 +1272,15 @@ PanelWindow {
                 }
             }
 
-            Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            // The tray's leading separator (objectName kept: tests read it).
+            Text {
+                objectName: "traySep"
+                visible: root.leadSep(7)
+                text: " "
+                width: root.gsep(1, implicitWidth)
+                font.pixelSize: root.fontSize
+                renderType: root.nativeRender
+            }
 
             // System tray (StatusNotifierItem / SNI). Legacy XEmbed apps
             // (nm-applet, pamac-tray) will not appear without an XEmbed→SNI
@@ -1294,14 +1327,8 @@ PanelWindow {
               }
             }
 
-            Text {
-                objectName: "traySep"
-                visible: root.trayCount > 0
-                text: " "
-                width: root.gsep(1, implicitWidth)
-                font.pixelSize: root.fontSize
-                renderType: root.nativeRender
-            }
+            // The bell's leading separator.
+            Text { width: root.gsep(1, implicitWidth); visible: root.leadSep(8); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Bell — always visible, click to replay ticker
             Item {

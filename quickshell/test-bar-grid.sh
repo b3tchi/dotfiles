@@ -102,6 +102,12 @@ ShellRoot {
   property int ch: 0
   property int tn: 3
   property bool real: false
+  // dotfiles-hr1g: the values that hide a segment (HDD '?', VOL/BAT '') and
+  // the ticker, settable per case so separator adjacency is exercised.
+  property string disk: "63"
+  property string vol: "50"
+  property string bat: "83"
+  property bool ticker: false
   // production-shaped fake: a QAbstractListModel with `values` and no `.length`
   ScriptModel { id: fakeTray; values: host.allTray.slice(0, host.tn) }
   readonly property var allTray: [
@@ -139,7 +145,9 @@ ShellRoot {
     for (var i = 0; i < row.children.length; i++) {
       var c = row.children[i]
       if (!c.visible || c.width <= 0) continue   // Repeater itself has no width
+      // sep: a whitespace-only Text (every separator, traySep included)
       out.push({ n: c.objectName || c.text || "", x: c.x, w: c.width,
+                 sep: (typeof c.text === "string" && /^\s+$/.test(c.text)),
                  iw: (c.text !== undefined ? c.implicitWidth : null) })
     }
     return out
@@ -176,6 +184,9 @@ ShellRoot {
     target: "bargrid"
     function setgrid(w: int, h: int, n: int): void { host.cw = w; host.ch = h; host.tn = n }
     function setreal(on: bool): void { host.real = on }
+    function setvals(disk: string, vol: string, bat: string, ticker: bool): void {
+      host.disk = disk; host.vol = vol; host.bat = bat; host.ticker = ticker
+    }
     function trayslots(): string {   // live slot count, for polling SNI arrivals
       var s = []; host.findAll(host.rootOf(bar), "traySlot", s); return String(s.length)
     }
@@ -192,9 +203,10 @@ ShellRoot {
     netVal: "1.5M"
     cpuVal: "12"
     ramVal: "47"
-    diskVal: "63"
-    volVal: "50"
-    batVal: "83"
+    diskVal: host.disk
+    volVal: host.vol
+    batVal: host.bat
+    tickerActive: host.ticker
     batStatus: "Discharging"
   }
 }
@@ -269,27 +281,40 @@ for i in $(seq 1 50); do dpy_up "$DPY" && break; sleep 0.1; done
 dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
 # SWAYSOCK set (bogus) so isSway is true and the KBL: pair renders; the stub
-# swaymsg keeps every wm probe inert.
-setsid env DISPLAY="$DPY" PATH="$TMP/pbin" SWAYSOCK="$TMP/none.sock" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-    XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
-    QS_LAYER_FEED="$TMP/feed.sh" QS_BAR_DENSITY=full \
-    "$QS_BIN" -p "$CFG" >"$TMP/qs.out" 2>&1 &
-BAR_PID=$!
+# swaymsg keeps every wm probe inert. QS_BAR_DENSITY is read once at startup
+# (Session.densityOverride), so each density is its own quickshell process.
+start_bar() { # <density>
+  UP=""
+  setsid env DISPLAY="$DPY" PATH="$TMP/pbin" SWAYSOCK="$TMP/none.sock" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
+      XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
+      QS_LAYER_FEED="$TMP/feed.sh" QS_BAR_DENSITY="$1" \
+      "$QS_BIN" -p "$CFG" >"$TMP/qs-$1.out" 2>&1 &
+  BAR_PID=$!
+  for i in $(seq 1 60); do
+    [ "$(ipc show | grep -c bargrid)" -gt 0 ] && { UP=1; break; }; sleep 0.5
+  done
+  if [ -z "${UP:-}" ]; then
+    fail "bar host ($1) exposed the 'bargrid' IPC target" "a target" "none"; tail -30 "$TMP/qs-$1.out" >&2
+    printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; exit 1
+  fi
+  sleep 1
+}
+stop_bar() { # <density>: collect its CASE lines, exit it, reap exactly its pid
+  grep -a 'CASE ' "$TMP/qs-$1.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
+  ipc call bargrid bye >/dev/null 2>&1
+  for i in $(seq 1 30); do kill -0 "$BAR_PID" 2>/dev/null || break; sleep 0.2; done
+  kill -- -"$BAR_PID" 2>/dev/null; kill "$BAR_PID" 2>/dev/null; wait "$BAR_PID" 2>/dev/null
+  BAR_PID=""
+}
 ipc() { env XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
           "$QUICKSHELL" ipc --pid "$BAR_PID" "$@" 2>/dev/null; }
-for i in $(seq 1 60); do
-  [ "$(ipc show | grep -c bargrid)" -gt 0 ] && { UP=1; break; }; sleep 0.5
-done
-if [ -z "${UP:-}" ]; then
-  fail "bar host exposed the 'bargrid' IPC target" "a target" "none"; tail -30 "$TMP/qs.out" >&2
-  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; exit 1
-fi
-sleep 1
 : > "$CASES"
 run() { # <name> <cellW> <cellH> <trayN>
   ipc call bargrid setgrid "$2" "$3" "$4" >/dev/null; sleep 0.6
   ipc call bargrid dumpc "$1" >/dev/null; sleep 0.3
 }
+vals() { ipc call bargrid setvals "$1" "$2" "$3" "$4" >/dev/null; } # <disk> <vol> <bat> <ticker>
+start_bar full
 run g8   8 21 3
 run g10  10 20 3
 for n in 0 1 2 3 4; do run "g8n$n" 8 21 "$n"; run "g10n$n" 10 20 "$n"; done
@@ -321,8 +346,31 @@ if [ "$REAL_OK" = 1 ]; then
   sni_wait 2 || fail "real: an SNI item that exits leaves the bar within 10s" "2" "$(ipc call bargrid trayslots)"
   run r8n2b 8 21 0
 fi
-grep -a 'CASE ' "$TMP/qs.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
-ipc call bargrid bye >/dev/null 2>&1
+ipc call bargrid setreal false >/dev/null
+# dotfiles-hr1g: segments HIDDEN by their values, at full density. A hidden
+# Text takes no Row space, so a separator owned by a hidden neighbour must go
+# with it or two separators sit side by side ("RAM:47  VOL:" - Jan).
+for gc in g8:8:21 g10:10:20 nogrid:0:0; do
+  IFS=: read -r n W H <<<"$gc"
+  vals "?" 50 83 false;  run "${n}D"   "$W" "$H" 3   # HDD '?' (daemon can't read)
+  vals 63 "" "" false;   run "${n}VB"  "$W" "$H" 3   # no VOL, no BAT
+  vals 63 "" "" false;   run "${n}VB0" "$W" "$H" 0   # ... and an empty tray
+  vals 63 50 83 true;    run "${n}T"   "$W" "$H" 3   # ticker: stats + tray gone
+  vals 63 50 83 false
+done
+stop_bar full
+
+# dotfiles-hr1g: density compact (screens 1000..1399 px, Session.qml) drops
+# NET and HDD - Jan's own case: RAM: then VOL: with HDD hidden between them.
+start_bar compact
+for gc in g8:8:21 g10:10:20 nogrid:0:0; do
+  IFS=: read -r n W H <<<"$gc"
+  vals 63 50 83 false;   run "c${n}"    "$W" "$H" 3
+  vals 63 "" "" false;   run "c${n}VB"  "$W" "$H" 3
+  vals 63 "" "" false;   run "c${n}VB0" "$W" "$H" 0
+  vals 63 50 83 false
+done
+stop_bar compact
 
 # ---------------------------------------------------------------- asserts ---
 # jq helpers: m($c) = value is a whole multiple of the cell (1/1000 px slack).
@@ -343,7 +391,7 @@ for arm in "g8:8:21" "g10:10:20" ; do
   chk "$n: every visible clockDate child x and width is a whole cell" "$n" \
       ".cell as \$c | [.cdKids[] | (.x|m(\$c)) and (.w|m(\$c))] | all"
   # dotfiles-hr1g: EVERY separator (whitespace-only Text: stats, VOL/KBL, bat,
-  # the pre-tray one, clock/date) is exactly ONE cell, as is the tray separator.
+  # the tray and bell leading ones, clock/date) is exactly ONE cell.
   chk "$n: every whitespace separator (rightSide+clockDate) is exactly one cell, and there are >= 6" "$n" \
       ".cell as \$c | [(.rsKids + .cdKids)[] | select(.n | test(\"^ +\$\")) | .w] as \$s | (\$s|length) >= 6 and (\$s | all(. == \$c))"
   chk "$n: tray separator is exactly one cell" "$n" ".cell as \$c | .traySepW == \$c"
@@ -441,6 +489,51 @@ a2 "nogrid: every separator is exactly ONE space character (dotfiles-hr1g), >= 6
 a2 "nogrid: VOL/KBL pair widths are label+value implicit sums" "true" \
     "$(case_of nogrid | jq -r '.vol.g.w == (.vol.l.w + .vol.v.w) and .kbd.g.w == (.kbd.l.w + .kbd.v.w)')"
 [ -n "${GEOM_OUT:-}" ] && case_of nogrid | jq -cS 'del(.cdKids[].n)' > "$GEOM_OUT"
+
+scenario "separators never double (dotfiles-hr1g rejection #1): each segment owns one LEADING separator"
+# The visible rightSide sequence, separators as "_", written out BY HAND per
+# case - not derived from the Bar. D = HDD '?', VB = no VOL/BAT, VB0 = that
+# plus an empty tray, T = ticker running, c* = density compact (no NET/HDD).
+FULL_ALL='NET:,1.5M,_,CPU:,12,_,RAM:,47,_,HDD:,63,_,volSeg,_,BAT:,83%,_,kbdSeg,_,trayBlock,_,bellSlot'
+SEQ_TABLE="
+g8|$FULL_ALL
+g10|$FULL_ALL
+nogrid|$FULL_ALL
+D|NET:,1.5M,_,CPU:,12,_,RAM:,47,_,volSeg,_,BAT:,83%,_,kbdSeg,_,trayBlock,_,bellSlot
+VB|NET:,1.5M,_,CPU:,12,_,RAM:,47,_,HDD:,63,_,kbdSeg,_,trayBlock,_,bellSlot
+VB0|NET:,1.5M,_,CPU:,12,_,RAM:,47,_,HDD:,63,_,kbdSeg,_,bellSlot
+T|bellSlot
+c|CPU:,12,_,RAM:,47,_,volSeg,_,BAT:,83%,_,kbdSeg,_,trayBlock,_,bellSlot
+cVB|CPU:,12,_,RAM:,47,_,kbdSeg,_,trayBlock,_,bellSlot
+cVB0|CPU:,12,_,RAM:,47,_,kbdSeg,_,bellSlot"
+SEQ='[.rsKids[] | if .sep then "_" else .n end] | join(",")'
+for gc in g8:8 g10:10 nogrid:0; do
+  IFS=: read -r g W <<<"$gc"
+  while IFS='|' read -r suf want; do
+    [ -n "$suf" ] || continue
+    case "$suf" in g8|g10|nogrid) [ "$suf" = "$g" ] || continue; c="$g" ;;
+                   c*) c="c${g}${suf#c}" ;; *) c="${g}${suf}" ;; esac
+    [ -n "$(case_of "$c")" ] || { fail "$c dump present" "a dump" "none"; continue; }
+    a2 "$c: rightSide sequence (separators '_')" "$want" "$(case_of "$c" | jq -r "$SEQ")"
+    a2 "$c: no two consecutive visible separators across rightSide+clockDate" "true" \
+        "$(case_of "$c" | jq -r '[(.rsKids + .cdKids)[] | .sep] as $s | [range(1; $s|length) | ($s[.] and $s[.-1]) | not] | all')"
+    a2 "$c: no separator at rightSide's edges, none at clockDate's right edge" "false false false" \
+        "$(case_of "$c" | jq -r '"\(.rsKids[0].sep) \(.rsKids[-1].sep) \(.cdKids[-1].sep)"')"
+    if [ "$W" -gt 0 ]; then
+      a2 "$c: every visible separator is exactly one cell ($W px)" "true" \
+          "$(case_of "$c" | jq -r "[(.rsKids + .cdKids)[] | select(.sep) | .w == $W] | all")"
+    else
+      a2 "$c: every visible separator is one ' ' at its implicit width" "true" \
+          "$(case_of "$c" | jq -r '([(.rsKids + .cdKids)[] | select(.sep) | .n == " " or .n == "traySep"] | all) and ([(.rsKids + .cdKids)[] | select(.sep) | .w == .iw] | all)')"
+    fi
+    if [ "$suf" != T ]; then
+      # RAM:47 -> the next visible segment: exactly one separator's width.
+      if [ "$W" -gt 0 ]; then GAP="$W"; else GAP="$(case_of "$c" | jq -r '[.rsKids[] | select(.sep)][0].iw')"; fi
+      a2 "$c: RAM:47 to the next visible segment is exactly one separator ($GAP px)" "$GAP" \
+          "$(case_of "$c" | jq -r '.rsKids as $k | ([range(0; $k|length) | select($k[.].n == "47")][0]) as $i | ([range($i+1; $k|length) | select($k[.].sep | not)][0]) as $j | $k[$j].x - ($k[$i].x + $k[$i].w)')"
+    fi
+  done <<<"$SEQ_TABLE"
+done
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ -n "$SKIPS" ] && printf 'SKIP: (UNVERIFIED, not counted as passes)%s\n' "$SKIPS"
