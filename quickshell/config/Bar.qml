@@ -221,6 +221,33 @@ PanelWindow {
     // here is what makes the two agree.
     readonly property int nativeRender: Text.QtRendering
 
+    // dotfiles-rlnv: kwi3's character cell (Kwi3Grid.moduleW x moduleH; 0 off
+    // kwi3 where Kwi3Grid never activates). cellW > 0 => the right side (stats,
+    // VOL/KBL, tray, bell, clock/date) is laid out in whole cells, like the
+    // workspace tabs and the mode strip (dotfiles-puoh). 0 => today's pixel
+    // sizes. Overridable so test-bar-grid.sh can exercise a grid: Kwi3Grid
+    // itself is a real singleton fed by Kwi3Client. trayModel likewise: a
+    // headless test has no StatusNotifierWatcher to populate SystemTray.items.
+    property int cellW: Kwi3Grid.active ? Kwi3Grid.moduleW : 0
+    property int cellH: Kwi3Grid.active ? Kwi3Grid.moduleH : 0
+    readonly property bool onGrid: cellW > 0 && cellH > 0
+    property var trayModel: SystemTray.items
+    // Icons are the titlebar icon's size, moduleH - 2 (1 px margin each side,
+    // as the titlebar has vertically), packed at pitch moduleH. Whole-cell
+    // rounding is over the WHOLE tray block, not per icon (Jan, 2026-09-30),
+    // so neighbours stay close: block = ceil(n * pitch / cellW) * cellW, the
+    // spare split to its two ends. Off kwi3: 18 px slots, 14 px icons.
+    readonly property int iconSlot: onGrid ? cellH : 18
+    readonly property int iconSide: onGrid ? cellH - 2 : 14
+    readonly property int trayCount: root.tickerActive ? 0 : root.trayModel.length
+    readonly property int trayBlockW: onGrid ? (trayCount > 0 ? Math.ceil(trayCount * iconSlot / cellW) * cellW : 0)
+                                             : trayRow.width
+    // A content width rounded UP to whole cells (never Kwi3Grid.cells(), which
+    // rounds and can clip the last glyph); the content's own width off kwi3.
+    function gw(w) { return onGrid ? Math.ceil(w / cellW - 0.001) * cellW : w }
+    // A "  " / " " separator: n whole cells on kwi3, the font's own space off it.
+    function gsep(n, w) { return onGrid ? n * cellW : w }
+
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
     // I3.workspaces ObjectModel was previously used as the data source, but it
     // does not always track `rename`/`empty`/`init` events fired by wm-state
@@ -1149,6 +1176,7 @@ PanelWindow {
         // Right side: stats + bell + date
         Row {
             id: rightSide
+            objectName: "rightSide"
             // Stats/tray/bell hide in a mode; the clock+date (clockDate Row
             // below) stay pinned right, so the mode strip only replaces the
             // left/workspace side. Anchored to clockDate.left so the two
@@ -1158,30 +1186,31 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
-            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
+                objectName: "volSeg"
                 visible: !root.tickerActive && root.volVal !== ""
-                width: volLabel.implicitWidth + volValue.implicitWidth
+                width: volLabel.width + volValue.width
                 height: parent.height
-                Text { id: volLabel; text: (root.volMuted || root.volVal === "0") ? "" : "VOL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
-                Text { id: volValue; anchors.left: volLabel.right; text: (root.volMuted || root.volVal === "0") ? "MUTED" : root.volVal + "%"; color: (root.volMuted || root.volVal === "0") ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: volLabel; objectName: "volLabel"; width: root.gw(implicitWidth); text: (root.volMuted || root.volVal === "0") ? "" : "VOL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: volValue; objectName: "volValue"; width: root.gw(implicitWidth); anchors.left: volLabel.right; text: (root.volMuted || root.volVal === "0") ? "MUTED" : root.volVal + "%"; color: (root.volMuted || root.volVal === "0") ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
@@ -1190,19 +1219,20 @@ PanelWindow {
                 }
             }
 
-            Text { visible: !root.tickerActive && root.batVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: !root.tickerActive && root.batVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Keyboard layout indicator (sway only). Click cycles us↔dvorak.
-            Text { visible: root.isSway && !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); visible: root.isSway && !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
+                objectName: "kbdSeg"
                 visible: root.isSway && !root.tickerActive
-                width: visible ? kbdLabel.implicitWidth + kbdValue.implicitWidth : 0
+                width: visible ? kbdLabel.width + kbdValue.width : 0
                 height: parent.height
-                Text { id: kbdLabel; text: "KBL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
-                Text { id: kbdValue; anchors.left: kbdLabel.right; text: root.kbdLayout === "dvorak" ? "DVK" : "QWT"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: kbdLabel; objectName: "kbdLabel"; width: root.gw(implicitWidth); text: "KBL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: kbdValue; objectName: "kbdValue"; width: root.gw(implicitWidth); anchors.left: kbdLabel.right; text: root.kbdLayout === "dvorak" ? "DVK" : "QWT"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton
@@ -1214,23 +1244,36 @@ PanelWindow {
                 }
             }
 
-            Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // System tray (StatusNotifierItem / SNI). Legacy XEmbed apps
             // (nm-applet, pamac-tray) will not appear without an XEmbed→SNI
             // bridge like xembedsniproxy. Modern apps (Firefox, Telegram,
             // Element, Steam, KeePassXC, …) show up automatically.
-            Repeater {
-                model: SystemTray.items
+            Item {
+              id: trayBlock
+              objectName: "trayBlock"
+              width: root.trayBlockW
+              height: parent.height
+              Row {
+                id: trayRow
+                objectName: "trayRow"
+                height: parent.height
+                // spare cells split to the two ends: floor to the left
+                x: root.onGrid ? Math.floor((root.trayBlockW - root.trayCount * root.iconSlot) / 2) : 0
+                Repeater {
+                model: root.trayModel
                 delegate: Item {
+                    objectName: "traySlot"
                     required property var modelData
                     visible: !root.tickerActive
-                    width: visible ? 18 : 0
-                    height: parent.height
+                    width: visible ? root.iconSlot : 0
+                    height: trayRow.height
                     Image {
+                        objectName: "trayIcon"
                         anchors.centerIn: parent
-                        width: 14; height: 14
-                        sourceSize: Qt.size(14, 14)
+                        width: root.iconSide; height: root.iconSide
+                        sourceSize: Qt.size(root.iconSide, root.iconSide)
                         source: modelData.icon
                         smooth: false
                     }
@@ -1244,29 +1287,39 @@ PanelWindow {
                     }
                 }
             }
+              }
+            }
 
             Text {
-                visible: !root.tickerActive && SystemTray.items.length > 0
+                visible: !root.tickerActive && root.trayModel.length > 0
                 text: "  "
+                width: root.gsep(2, implicitWidth)
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
             }
 
             // Bell — always visible, click to replay ticker
             Item {
-                width: bellIcon.width + (root.notifCount > 0 ? bellCount.implicitWidth + 4 : 0)
+                objectName: "bellSlot"
+                // kwi3: its own segment - the icon (moduleH - 2, at pitch
+                // moduleH) plus the count, the whole segment rounded UP to
+                // cells; no "+ 4" (the icon's own 1 px margin is the gap).
+                width: root.onGrid ? Math.ceil((root.iconSlot + (root.notifCount > 0 ? bellCount.implicitWidth : 0)) / root.cellW) * root.cellW
+                                   : bellIcon.width + (root.notifCount > 0 ? bellCount.implicitWidth + 4 : 0)
                 height: parent.height
                 Image {
                     id: bellIcon
-                    width: 14; height: 14
+                    objectName: "bellIcon"
+                    width: root.iconSide; height: root.iconSide
+                    x: root.onGrid ? (root.iconSlot - root.iconSide) / 2 : 0
                     anchors.verticalCenter: parent.verticalCenter
-                    sourceSize: Qt.size(14, 14)
+                    sourceSize: Qt.size(root.iconSide, root.iconSide)
                     source: "data:image/svg+xml," + encodeURIComponent(
                         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (root.hasCritical ? '#cb4b16' : root.notifCount > 0 ? '#fdf6e3' : '#707880') + '">' +
                         '<path d="M12 2C10.9 2 10 2.9 10 4V4.3C7.7 5.1 6 7.3 6 10V16L4 18V19H20V18L18 16V10C18 7.3 16.3 5.1 14 4.3V4C14 2.9 13.1 2 12 2ZM10 20C10 21.1 10.9 22 12 22S14 21.1 14 20H10Z"/>' +
                         '</svg>')
                 }
-                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; anchors.verticalCenter: parent.verticalCenter; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender }
+                Text { id: bellCount; objectName: "bellCount"; visible: root.notifCount > 0; x: root.onGrid ? root.iconSlot : bellIcon.width; anchors.verticalCenter: parent.verticalCenter; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
@@ -1287,14 +1340,17 @@ PanelWindow {
         // the stats/tray/bell, never the time.
         Row {
             id: clockDate
-            anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1; rightMargin: 8 }
+            objectName: "clockDate"
+            anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1
+                      rightMargin: root.onGrid ? root.cellW : 8 }
             spacing: 0
 
-            Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(2, implicitWidth); text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Time — sync to second/minute boundary so updates aren't delayed
             Text {
                 id: clockText
+                width: root.gw(implicitWidth)
                 property bool showSeconds: false
                 text: Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm")
                 color: "#707880"
@@ -1316,8 +1372,9 @@ PanelWindow {
                 }
                 MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.refresh(); clockTimer.interval = 1000; clockTimer.restart() } }
             }
-            Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text {
+                width: root.gw(implicitWidth)
                 text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
                 color: "#fdf6e3"
                 font.family: root.fontFamily

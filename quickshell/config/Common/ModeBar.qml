@@ -34,7 +34,7 @@ Item {
     // pixel-identical look. Overridable so the headless suite can exercise a
     // grid (Kwi3Grid itself is a real singleton fed by Kwi3Client). Not part
     // of ft009's two-prop api_surface for hosts: they leave it at the default.
-    property int cellW: Kwi3Grid.moduleW
+    property int cellW: Kwi3Grid.active ? Kwi3Grid.moduleW : 0
     readonly property bool onGrid: cellW > 0
 
     // "default" => nothing to announce. A mode on ModeBarTheme.silentModes =>
