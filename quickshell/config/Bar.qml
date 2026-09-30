@@ -248,7 +248,7 @@ PanelWindow {
     // A content width rounded UP to whole cells (never Kwi3Grid.cells(), which
     // rounds and can clip the last glyph); the content's own width off kwi3.
     function gw(w) { return onGrid ? Math.ceil(w / cellW - 0.001) * cellW : w }
-    // A "  " / " " separator: n whole cells on kwi3, the font's own space off it.
+    // A separator (always one " " / one cell now): n whole cells on kwi3, the font's own space off it.
     function gsep(n, w) { return onGrid ? n * cellW : w }
 
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
@@ -1191,22 +1191,22 @@ PanelWindow {
             // Stats (hidden during ticker)
             Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(2, implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
             Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(2, implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gsep(2, implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { width: root.gsep(2, implicitWidth); visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: !root.tickerActive && root.volVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
                 objectName: "volSeg"
                 visible: !root.tickerActive && root.volVal !== ""
@@ -1222,13 +1222,13 @@ PanelWindow {
                 }
             }
 
-            Text { width: root.gsep(2, implicitWidth); visible: !root.tickerActive && root.batVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: !root.tickerActive && root.batVal !== ""; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { width: root.gw(implicitWidth); visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Keyboard layout indicator (sway only). Click cycles us↔dvorak.
-            Text { width: root.gsep(2, implicitWidth); visible: root.isSway && !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); visible: root.isSway && !root.tickerActive; text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {
                 objectName: "kbdSeg"
                 visible: root.isSway && !root.tickerActive
@@ -1247,7 +1247,7 @@ PanelWindow {
                 }
             }
 
-            Text { width: root.gsep(2, implicitWidth); text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // System tray (StatusNotifierItem / SNI). Legacy XEmbed apps
             // (nm-applet, pamac-tray) will not appear without an XEmbed→SNI
@@ -1297,8 +1297,8 @@ PanelWindow {
             Text {
                 objectName: "traySep"
                 visible: root.trayCount > 0
-                text: "  "
-                width: root.gsep(2, implicitWidth)
+                text: " "
+                width: root.gsep(1, implicitWidth)
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
             }
@@ -1350,7 +1350,7 @@ PanelWindow {
                       rightMargin: root.onGrid ? root.cellW : 8 }
             spacing: 0
 
-            Text { width: root.gsep(2, implicitWidth); text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Time — sync to second/minute boundary so updates aren't delayed
             Text {

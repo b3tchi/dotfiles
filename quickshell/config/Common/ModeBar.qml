@@ -104,7 +104,7 @@ Item {
         // starting on the grid; 0 would butt the pill against the first hint.
         Item { objectName: "gap"; width: root.onGrid ? root.cellW : 4; height: parent.height }
 
-        // hint rows: two-space separator before every entry after the first,
+        // hint rows: one-space separator before every entry after the first,
         // then the hint itself. ft009 extension (sp018 follow-up) — the key is
         // the HIGHLIGHTED part of the word: when `key` occurs inside `text`,
         // render pre(fg) + key(highlight bold) + post(fg) so e.g. "Escape"
@@ -144,9 +144,9 @@ Item {
                 // the strip. Only pixelSize + NativeRendering, like the source.
                 Text {
                     objectName: "hsep"
-                    text: index > 0 ? "  " : ""
-                    // kwi3: two whole cells regardless of the font's space.
-                    width: root.onGrid ? (index > 0 ? 2 * root.cellW : 0) : implicitWidth
+                    text: index > 0 ? " " : ""
+                    // kwi3: one whole cell regardless of the font's space.
+                    width: root.onGrid ? (index > 0 ? root.cellW : 0) : implicitWidth
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }

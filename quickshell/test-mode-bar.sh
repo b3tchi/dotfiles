@@ -436,6 +436,14 @@ ShellRoot {
                                gapX: gap.x, gapW: gap.width, rows: rowG }))
     }
     emit(name + ".onGrid", okAll ? "1" : "0")
+    // dotfiles-hr1g: every hint separator (hsep of rows 1..n-1; row 0's is
+    // empty and zero wide) as [text, width]; must be one space / one cell.
+    var hs = []
+    for (var q = 1; q < rows.length; q++) {
+      var hq = findChild(rows[q], "hsep")
+      hs.push(hq ? [hq.text, hq.width, hq.implicitWidth] : null)
+    }
+    emit(name + ".seps", j(hs))
 
     var hpre  = rows.length ? findChild(rows[0], "hpre")  : null
     var hk    = rows.length ? findChild(rows[0], "hk")    : null
@@ -660,6 +668,22 @@ for cw in 8 10; do
     a2 "g${cw}-${md} pill = ceil(label/cell)*cell + 2 cells" "$exp_pw" "$pw"
   done
 done
+
+scenario "every hint separator is exactly ONE cell on the grid (dotfiles-hr1g)"
+for cw in 8 10; do
+  for md in resize nav system; do
+    got="$(case_of "g${cw}-${md}.seps")"
+    n_sep="$(printf '%s' "$got" | jq -r 'length')"
+    a2 "g${cw}-${md} has >= 2 hint separators" "true" "$([ "${n_sep:-0}" -ge 2 ] && echo true || echo false)"
+    a2 "g${cw}-${md} every hint separator is one space, ${cw}px wide" "true" \
+        "$(printf '%s' "$got" | jq -r --argjson c "$cw" 'all(.[]; .[0] == " " and .[1] == $c)')"
+  done
+done
+
+scenario "no grid (dotfiles-hr1g): every hint separator is ONE space char at its implicit width"
+got="$(case_of "nogrid-resize.seps")"
+a2 "nogrid-resize hint separators are exactly one space, width == implicitWidth" "true" \
+    "$(printf '%s' "$got" | jq -r 'length >= 2 and all(.[]; .[0] == " " and .[1] == .[2])')"
 
 scenario "no grid (dotfiles-puoh): today's look - pill label+14, gap 4, font-space separators"
 assert_case "nogrid-resize.delta" "14"

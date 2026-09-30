@@ -157,6 +157,7 @@ ShellRoot {
       real: host.real, modelHasLength: bar.trayModel.length !== undefined,
       trayCount: bar.trayCount, trayRowXFinite: isFinite(trow.x),
       traySepVisible: sep ? sep.visible : null, traySepW: sep ? sep.width : null,
+      traySepText: sep ? sep.text : null,
       cell: host.cw, H: host.ch,
       rs: g(rs), cd: g(cd), parentW: cd.parent.width,
       rsKids: kids(rs), cdKids: kids(cd),
@@ -341,6 +342,11 @@ for arm in "g8:8:21" "g10:10:20" ; do
       ".cell as \$c | [.rsKids[] | (.x|m(\$c)) and (.w|m(\$c))] | all"
   chk "$n: every visible clockDate child x and width is a whole cell" "$n" \
       ".cell as \$c | [.cdKids[] | (.x|m(\$c)) and (.w|m(\$c))] | all"
+  # dotfiles-hr1g: EVERY separator (whitespace-only Text: stats, VOL/KBL, bat,
+  # the pre-tray one, clock/date) is exactly ONE cell, as is the tray separator.
+  chk "$n: every whitespace separator (rightSide+clockDate) is exactly one cell, and there are >= 6" "$n" \
+      ".cell as \$c | [(.rsKids + .cdKids)[] | select(.n | test(\"^ +\$\")) | .w] as \$s | (\$s|length) >= 6 and (\$s | all(. == \$c))"
+  chk "$n: tray separator is exactly one cell" "$n" ".cell as \$c | .traySepW == \$c"
   chk "$n: rightSide x/width whole cells" "$n" ".cell as \$c | (.rs.x|m(\$c)) and (.rs.w|m(\$c))"
   chk "$n: clockDate x/width whole cells" "$n" ".cell as \$c | (.cd.x|m(\$c)) and (.cd.w|m(\$c))"
   chk "$n: rightSide is flush against clockDate (no drift between blocks)" "$n" \
@@ -397,7 +403,7 @@ for c in g8 g10 g8n0 g8n1 g8n2 g8n3 g8n4 g10n0 g10n4 nogrid; do
 done
 a2 "tray separator: shown iff the tray has icons (n = 0..4)" "false true true true true" \
     "$(for k in 0 1 2 3 4; do case_of "g8n$k" | jq -r '.traySepVisible'; done | tr '\n' ' ' | sed 's/ $//')"
-a2 "tray separator on the 8x21 grid is 2 whole cells" "16" "$(case_of g8n2 | jq -r '.traySepW')"
+a2 "tray separator on the 8x21 grid is ONE cell (dotfiles-hr1g)" "8" "$(case_of g8n2 | jq -r '.traySepW')"
 
 scenario "the REAL SystemTray.items on a private bus (StatusNotifierItems over D-Bus)"
 if [ "$REAL_OK" = 1 ]; then
@@ -430,6 +436,8 @@ a2 "nogrid: bell slot = 14 + count + 4, icon 14x14" "18 14 14 14" \
 a2 "nogrid: clockDate margin 8" "8" "$(case_of nogrid | jq -r '.parentW - (.cd.x + .cd.w)')"
 a2 "nogrid: every Text child is exactly its implicitWidth" "true" \
     "$(case_of nogrid | jq -r '[(.rsKids + .cdKids)[] | select(.iw != null) | .w == .iw] | all')"
+a2 "nogrid: every separator is exactly ONE space character (dotfiles-hr1g), >= 6 of them" "true" \
+    "$(case_of nogrid | jq -r '[(.rsKids + .cdKids)[] | select(.n | test("^ +$")) | .n] as $s | ($s|length) >= 6 and ($s | all(. == " ")) and .traySepText == " "')"
 a2 "nogrid: VOL/KBL pair widths are label+value implicit sums" "true" \
     "$(case_of nogrid | jq -r '.vol.g.w == (.vol.l.w + .vol.v.w) and .kbd.g.w == (.kbd.l.w + .kbd.v.w)')"
 [ -n "${GEOM_OUT:-}" ] && case_of nogrid | jq -cS 'del(.cdKids[].n)' > "$GEOM_OUT"
