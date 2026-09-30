@@ -429,7 +429,9 @@ PanelWindow {
             var badgeText = count > 1 ? ("●" + count) : "●"
             raw += kwi3TabMetrics.advanceWidth(badgeText) + 4 // wsLabel.spacing
         }
-        var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 2
+        // dotfiles-8luk: label cells + ONE (the gap to the next tab; the
+        // last tab's is the outer padding). See tabGap.
+        var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 1
         var cap = Math.max(1, Math.floor((root.width * 0.4) / Kwi3Grid.moduleW))
         return Math.min(want, cap)
     }
@@ -439,6 +441,31 @@ PanelWindow {
         font.family: root.fontFamily
         font.pixelSize: root.fontSize
     }
+
+    // dotfiles-8luk (Jan, 2026-09-30): exactly ONE cell (one space off the
+    // grid) between neighbouring tab labels, and one cell of outer padding
+    // before the first / after the last. Layout: leftSide has leftPadding =
+    // tabGap; each tab is its label plus ONE trailing gap cell (so the last
+    // tab's trailing cell is the outer padding after it). The FOCUSED tab's
+    // highlight (background + ring window) still covers its label plus one
+    // gap each side, i.e. it reaches back over the previous tab's trailing
+    // cell and forward over its own: tabGap left of the tab, tab.width +
+    // tabGap wide. Unfocused tabs paint nothing there. Click rule: a gap
+    // cell belongs to the tab on its LEFT (its trailing cell); the leading
+    // outer cell belongs to no tab.
+    //
+    // Off the grid a "space" is measured with a Text of the tab labels' own
+    // font (never FontMetrics.advanceWidth(" "), which read half of it here).
+    Text {
+        id: tabSpaceProbe
+        visible: false
+        text: " "
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize
+        renderType: root.nativeRender
+    }
+    readonly property real tabGap: Kwi3Grid.active ? Kwi3Grid.moduleW
+                                                   : tabSpaceProbe.implicitWidth
 
     // The plan every tab Rectangle below reads its width from: `cells[i]` is
     // one entry per row of root.sortedWorkspaces, in the SAME order —
@@ -530,6 +557,9 @@ PanelWindow {
         if (idx < 0 || idx >= plan.cells.length) { return null }
         var xOff = 0
         for (var j = 0; j < idx; j++) { xOff += plan.cells[j] * Kwi3Grid.moduleW }
+        // The tab starts one gap (leftSide.leftPadding) in from contentLeft
+        // and its highlight reaches one gap back, so the highlight's left
+        // edge is contentLeft + xOff exactly; it is the tab's cells + 1 wide.
         // Same offsets leftSide/the content Item itself use to place the
         // first tab (root.inset's pill margin, root.insetTop) — worked out
         // here rather than read back off the Item, so this stays a plain
@@ -539,7 +569,7 @@ PanelWindow {
         return {
             x: origin.x + Kwi3Grid.contentLeft + xOff,
             y: origin.y,
-            w: plan.cells[idx] * Kwi3Grid.moduleW
+            w: (plan.cells[idx] + 1) * Kwi3Grid.moduleW
         }
     }
 
@@ -1008,6 +1038,7 @@ PanelWindow {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                       leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
             spacing: 0
+            leftPadding: root.tabGap
 
             Repeater {
                 model: root.sortedWorkspaces
@@ -1027,23 +1058,44 @@ PanelWindow {
                     // nothing - the badge included - ever paints onto the
                     // next tab. Off under i3/sway, where the tab is sized
                     // from its label and nothing can overflow (AC3).
-                    clip: root.tabCellPlan !== null
+                    // (dotfiles-8luk: no clip here any more - the highlight
+                    // below overhangs the tab by one gap each side. Nothing
+                    // else can overflow: wsText elides to the tab less the
+                    // gap and the badge.)
+                    // Label + ONE trailing gap; see root.tabGap.
                     width: (root.tabCellPlan && root.tabCellPlan.cells
                             && index < root.tabCellPlan.cells.length)
                          ? root.tabCellPlan.cells[index] * Kwi3Grid.moduleW
-                         : (wsLabel.implicitWidth + 14)
+                         : (wsLabel.implicitWidth + root.tabGap)
                     height: leftSide.height
+                    color: "transparent"
+
                     // Focused tab uses the same highlight as the mod+d launcher
-                    // input/selection (#152024, Overlay.qml).
-                    color: modelData.urgent  ? "#cb4b16"
-                         : modelData.focused ? "#152024"
-                         : "transparent"
+                    // input/selection (#152024, Overlay.qml). Label + one gap
+                    // each side: overhangs the tab into the neighbours' gap
+                    // cells (dotfiles-8luk). Painted first, so the label is
+                    // over it.
+                    Rectangle {
+                        objectName: "wsTabHighlight"
+                        x: -root.tabGap
+                        width: wsTab.width + root.tabGap
+                        height: parent.height
+                        color: modelData.urgent  ? "#cb4b16"
+                             : modelData.focused ? "#152024"
+                             : "transparent"
+                    }
 
                     // Name + agent badge share one baseline-aligned Row, so the
                     // tab widens by exactly the badge and the name stays put.
                     Row {
                         id: wsLabel
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        objectName: "wsLabelRow"
+                        // Centred in the tab less its trailing gap cell (an
+                        // explicit x, not anchors.horizontalCenter, which
+                        // snapped to whole pixels and put the off-grid gap
+                        // half a pixel off). Off the grid that box is exactly
+                        // the label, so x is 0.
+                        x: Math.max(0, (wsTab.width - root.tabGap - width) / 2)
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 1
                         spacing: 4
@@ -1053,14 +1105,14 @@ PanelWindow {
                             objectName: "wsTabText"
                             text: modelData.name
                             // kwi3 only: at most the tab's whole-module width
-                            // less one module of padding each side (the same
-                            // +2 cells _tabWantCells adds) and less the agent
+                            // less its trailing gap cell (the same +1 cell
+                            // _tabWantCells adds) and less the agent
                             // badge if it shows, elided at the right. Under
                             // i3/sway this is exactly implicitWidth, i.e. the
                             // Text's own default, so nothing changes there.
                             width: root.tabCellPlan
                                  ? Math.min(implicitWidth, Math.max(0,
-                                       wsTab.width - 2 * Kwi3Grid.moduleW
+                                       wsTab.width - Kwi3Grid.moduleW
                                        - (wsBadge.visible ? wsBadge.implicitWidth + wsLabel.spacing : 0)))
                                  : implicitWidth
                             elide: root.tabCellPlan ? Text.ElideRight : Text.ElideNone
