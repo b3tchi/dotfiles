@@ -422,20 +422,33 @@ PanelWindow {
     // cap shell.qml uses, converted to whole cells — so one long workspace
     // name cannot take over the bar (edge case: "a workspace name wider
     // than the bar").
-    // The agent badge's text (dotfiles-1ewf, Jan's `=name ● 2=`): the dot
-    // alone for one agent, "● N" - the count after ONE space - for N > 1,
-    // nothing at all for none (the badge is hidden then). One function for
-    // the delegate's wsBadge and _tabWantCells, so the tab is always sized
-    // for exactly what is painted.
+    // The agent badge's text (dotfiles-pokv, Jan: "this ● needs width of 2
+    // cells then 1 cell number if needed"): the dot alone for one agent,
+    // "●N" - NO space character; the dot's own blank second cell is the gap -
+    // for N > 1, nothing at all for none (the badge is hidden then). One
+    // function for the delegate's wsBadge and _tabWantCells, so the tab is
+    // always sized for exactly what is painted.
     function _badgeText(name) {
         var n = Census.totalFor(name)
-        return n > 1 ? ("● " + n) : "●"
+        return n > 1 ? ("●" + n) : "●"
+    }
+
+    // Width the badge is DRAWN at. On the kwi3 grid: whole cells - the dot is
+    // two cells whatever its font's exact advance, then one cell per digit of
+    // the count. Off the grid: the natural text.
+    function _badgeWidth(name) {
+        var n = Census.totalFor(name)
+        if (n <= 0) { return 0 }
+        if (Kwi3Grid.active) {
+            return (2 + (n > 1 ? String(n).length : 0)) * Kwi3Grid.moduleW
+        }
+        return kwi3TabMetrics.advanceWidth(root._badgeText(name))
     }
 
     function _tabWantCells(text) {
         var raw = kwi3TabMetrics.advanceWidth(text)
         if (Census.totalFor(text) > 0) {
-            raw += kwi3TabMetrics.advanceWidth(root._badgeText(text)) + 4 // wsLabel.spacing
+            raw += root._badgeWidth(text) + 4 // wsLabel.spacing
         }
         // dotfiles-1ewf: label cells + TWO - the tab's own padding cell on
         // each side of its label. See tabGap.
@@ -1145,19 +1158,49 @@ PanelWindow {
                         // Hidden at zero rather than rendered as "0": a
                         // permanent 0 on every tab trains the eye to skip the
                         // column the badge exists to draw it to.
-                        Text {
+                        Item {
                             id: wsBadge
                             objectName: "wsAgentBadge"
                             visible: Census.totalFor(modelData.name) > 0
-                            text: root._badgeText(modelData.name)
+                            // dotfiles-pokv: drawn width is whole cells on
+                            // the kwi3 grid (dot = 2 cells, digits one cell
+                            // each), the natural text off it.
+                            property string text: root._badgeText(modelData.name)
+                            // Where the count's own text starts, in cells
+                            // after the dot's two (painted separately so the
+                            // digit sits in ITS cell whatever the dot's
+                            // advance is).
+                            readonly property string countText: text.length > 1 ? text.substring(1) : ""
+                            implicitWidth: root._badgeWidth(modelData.name)
+                            width: implicitWidth
+                            implicitHeight: wsBadgeDot.implicitHeight
+                            height: implicitHeight
                             // Colour is the census's own priority (blocked >
                             // working > idle) and ignores focus/urgency, so the
                             // badge means the same thing on every tab.
-                            color: Census.colorFor(modelData.name)
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
-                            font.bold: true
-                            renderType: root.nativeRender
+                            Text {
+                                id: wsBadgeDot
+                                objectName: "wsAgentBadgeDot"
+                                x: 0
+                                text: "\u25CF"
+                                color: Census.colorFor(modelData.name)
+                                font.family: root.fontFamily
+                                font.pixelSize: root.fontSize
+                                font.bold: true
+                                renderType: root.nativeRender
+                            }
+                            Text {
+                                id: wsBadgeCount
+                                objectName: "wsAgentBadgeCount"
+                                x: Kwi3Grid.active ? 2 * Kwi3Grid.moduleW : wsBadgeDot.implicitWidth
+                                visible: wsBadge.countText !== ""
+                                text: wsBadge.countText
+                                color: Census.colorFor(modelData.name)
+                                font.family: root.fontFamily
+                                font.pixelSize: root.fontSize
+                                font.bold: true
+                                renderType: root.nativeRender
+                            }
                         }
                     }
 

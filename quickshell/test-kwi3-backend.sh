@@ -1090,7 +1090,11 @@ ShellRoot {
                                 text: t ? t.text : null,
                                 badgeVisible: bdg ? bdg.visible : false,
                                 badgeX: bdp ? bdp.x : null, badgeW: bdg ? bdg.width : null,
-                                badgeText: bdg ? bdg.text : null })
+                                badgeText: bdg ? bdg.text : null,
+                                // dotfiles-pokv: the dot's own advance and the
+                                // count's x inside the badge item.
+                                badgeDotW: bdg ? bdg.children[0].implicitWidth : null,
+                                badgeCountX: (bdg && bdg.children.length > 1 && bdg.children[1].visible) ? bdg.children[1].x : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
         }
@@ -1536,11 +1540,21 @@ for (const t of g.tabs) {
         ok(has(f.textX, f.textX + gw), name + ': the first glyph (' + JSON.stringify(f.text[0]) + ') is painted inside the highlight at x ' + f.textX.toFixed(1));
         ok(has(f.textX + f.textPainted - gw, f.textX + f.textPainted), name + ': the last glyph (' + JSON.stringify(f.text.slice(-1)) + ') is painted inside the highlight');
         if (f.badgeVisible) {
-            ok(has(f.badgeX, f.badgeX + gw) && f.badgeX + f.badgeW <= x1 - mw + 0.5,
-               name + ': the census dot of ' + JSON.stringify(f.badgeText) + ' is painted inside the highlight, a full padding cell before its right edge (x ' + f.badgeX.toFixed(1) + '+' + f.badgeW + ' <= ' + (x1 - mw) + ')');
-            if (f.badgeText.length > 1) {
-                ok(has(f.badgeX + f.badgeW - gw, f.badgeX + f.badgeW),
-                   name + ': the agent count ' + JSON.stringify(f.badgeText.slice(-1)) + ' is painted inside the highlight too');
+            const ninkc = f.badgeText.length > 1;
+            const bcells = ninkc ? 2 + (f.badgeText.length - 1) : 2;
+            ok(Math.abs(f.badgeW - bcells * mw) < 0.01,
+               name + ': the badge ' + JSON.stringify(f.badgeText) + ' is drawn exactly ' + bcells + ' cells wide (' + f.badgeW + 'px = ' + bcells + ' x ' + mw + ') - the dot advance is ' + f.badgeDotW + 'px');
+            const bx0 = Math.round(f.badgeX), bx = f.badgeX;
+            const inkIn = (a, b) => { const r = []; for (const x of inkCols) { if (x >= Math.floor(a) && x < Math.ceil(b)) { r.push(x); } } return r; };
+            const dotInk = inkIn(bx, bx + 2 * mw);
+            ok(dotInk.length > 0 && dotInk[dotInk.length - 1] < Math.ceil(bx + 2 * mw) && f.badgeX + f.badgeW <= x1 - mw + 0.5,
+               name + ': the dot ink (x ' + dotInk[0] + '..' + dotInk[dotInk.length - 1] + ') is inside the badge\'s first two cells [' + bx.toFixed(1) + ',' + (bx + 2 * mw).toFixed(1) + '), the badge a full padding cell before the highlight edge ' + (x1 - mw));
+            if (ninkc) {
+                const dg = inkIn(bx + 2 * mw, bx + f.badgeW);
+                ok(dg.length > 0 && dg[0] >= Math.floor(bx + 2 * mw) && dg[dg.length - 1] < Math.ceil(bx + f.badgeW),
+                   name + ': the count digit ink (x ' + dg[0] + '..' + dg[dg.length - 1] + ') lies inside the badge\'s 3rd cell [' + (bx + 2 * mw).toFixed(1) + ',' + (bx + f.badgeW).toFixed(1) + ')');
+                ok(dotInk.length > 0 && dg.length > 0 && dg[0] - dotInk[dotInk.length - 1] - 1 < mw,
+                   name + ': no blank whole cell between the dot ink and the digit (gap ' + (dg.length ? dg[0] - dotInk[dotInk.length - 1] - 1 : '?') + 'px < ' + mw + ')');
             }
         }
     } else if (t.badgeVisible) {
@@ -1856,19 +1870,18 @@ for (const name of ["9", "asahi", "kwi3", "dotfiles"]) {
 // badge must be visible together, neither one crowding the other out.
 const asahi = geom.tabs.find((x) => x.text === "asahi");
 ok(asahi && asahi.badgeVisible === true, "asahi'"'"'s census badge is visible (" + (asahi ? asahi.badgeVisible : "tab not found") + ")");
-ok(asahi && asahi.badgeText === "● 2", "asahi'"'"'s badge reads \"● 2\" - the dot, ONE space, the count (two working agents; dotfiles-1ewf), got " + JSON.stringify(asahi ? asahi.badgeText : null));
+ok(asahi && asahi.badgeText === "●2", "asahi'"'"'s badge reads \"●2\" - the dot, NO space, the count (two working agents; dotfiles-pokv), got " + JSON.stringify(asahi ? asahi.badgeText : null));
 // dotfiles-1ewf (Jan): N == 1 shows the dot alone, no number.
 const kw = geom.tabs.find((x) => x.text === "dotfiles");
 ok(kw && kw.badgeVisible === true && kw.badgeText === "●", "dotfiles (ONE agent) shows the bare dot, no count: " + JSON.stringify(kw ? kw.badgeText : null));
-// The label (and so the tab) is sized for the " N": the asahi badge is wider
-// than the bare dot by at least the space + digit (two glyph advances, less
-// half a pixel of rounding).
-const cw = kw ? kw.textPainted / kw.text.length : 0;
-ok(asahi && kw && asahi.badgeW >= kw.badgeW + 2 * cw - 0.5,
-   "asahi'"'"'s badge \"● 2\" is the dot + two more glyph advances wide (" + (asahi ? asahi.badgeW : "?") + " >= " + (kw ? kw.badgeW : "?") + " + 2 x " + cw.toFixed(2) + ")");
+// dotfiles-pokv: the dot is exactly TWO cells and the one-digit count exactly
+// ONE more, whatever the font own advance for U+25CF.
+const mwR = JSON.parse(process.argv[2]).module.w;
+ok(kw && kw.badgeW === 2 * mwR, "dotfiles'"'"'s badge \"●\" is exactly 2 cells (" + (kw ? kw.badgeW : "?") + "px = 2 x " + mwR + "; the font'"'"'s own dot advance " + (kw ? kw.badgeDotW : "?") + "px)");
+ok(asahi && asahi.badgeW === 3 * mwR, "asahi'"'"'s badge \"●2\" is exactly 3 cells (" + (asahi ? asahi.badgeW : "?") + "px = 3 x " + mwR + ")");
 const nW = (t) => Math.max(1, Math.ceil((t.textPainted + 4 + t.badgeW) / JSON.parse(process.argv[2]).module.w - 0.001)) + 2;
 ok(asahi && asahi.width / JSON.parse(process.argv[2]).module.w === nW(asahi),
-   "asahi'"'"'s tab is cells(name + space + \"● 2\") + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
+   "asahi'"'"'s tab is cells(name + 4px + \"●2\" badge) + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
 ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
    "asahi'"'"'s NAME is still fully visible beside its badge, not swallowed by it (text=" + JSON.stringify(asahi ? asahi.text : null) + " truncated=" + (asahi ? asahi.truncated : "?") + ")");
 ' "$realgeom" "$REALGRID" > "$TMP/realistic-check.out" 2>&1
