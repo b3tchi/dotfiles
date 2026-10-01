@@ -24,11 +24,15 @@
 #     -Protocol TCP -LocalPort 3392 -Action Allow -Profile Private `
 #     -RemoteAddress LocalSubnet
 #
-# ${KWI3_REPO:-https://github.com/b3tchi/kwi3} at ${KWI3_REF:-main} is the
-# real default. A local path clone (KWI3_REPO=/path/to/kwi3) is supported
-# for the same reason KWI3_CONFIG overrides the config lookup on the kwi3
-# side: developing kwi3 and this dot together without a round trip through
-# GitHub.
+# RELEASES ONLY (kwi3 AGENTS.md "Releases"): this dot builds the highest
+# vMAJOR.MINOR.PATCH tag of ${KWI3_REPO:-https://github.com/b3tchi/kwi3},
+# checked out detached - never a branch, and deliberately no ref override
+# (KWI3_REF is gone). Prerelease tags (v0.2.0-rc1) are ignored. A commit on
+# kwi3's main reaches this box only once it is tagged AND the tag is pushed;
+# for an untagged build, `make -C i3kwin/adapters/x11` in a dev clone.
+# Remote unreachable: build the newest tag already fetched, with a warning.
+# No release tag at all: refuse, named. KWI3_REPO=/path/to/kwi3 (a local
+# clone) still works - its tags are what is fetched.
 #
 # BUILD-TO-TEMP-THEN-MV (hotkeyd/akm-graph/preview precedent, dotfiles-8kro):
 # i3kwin/adapters/x11/Makefile's BUILD variable is overridable from the
@@ -89,13 +93,12 @@ linux:
   installs:
     cmd: |
       REPO="${KWI3_REPO:-https://github.com/b3tchi/kwi3}"
-      REF="${KWI3_REF:-main}"
       SRC="$HOME/.local/src/kwi3"
 
       # ---------------------------------------------------------------
-      # 1. Clone, or fast-forward an existing clone. Never resets one -
-      #    a dirty or diverged ~/.local/src/kwi3 is refused BY NAME, not
-      #    silently discarded (kwi3-7m8.6 edge case).
+      # 1. Clone (no checkout) or reuse the clone, fetch the release tags
+      #    and check out the highest vX.Y.Z, detached. A dirty clone is
+      #    refused BY NAME, never reset (kwi3-7m8.6 edge case).
       # ---------------------------------------------------------------
       if [ -d "$SRC/.git" ]; then
         if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
@@ -104,33 +107,35 @@ linux:
           echo "kwi3: and re-run 'rotz install kwi3'." >&2
           exit 1
         fi
-        PULL_LOG=$(mktemp)
-        if ! git -C "$SRC" pull --quiet --ff-only origin "$REF" >"$PULL_LOG" 2>&1; then
-          # A clean tree that would not fast-forward is EITHER a diverged
-          # history (refuse, name it) OR the remote being unreachable
-          # (warn, build what is already checked out) - distinguished by
-          # asking the remote directly rather than guessing from git's
-          # error text.
-          if git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
-            echo "kwi3: $SRC did not fast-forward to $REPO#$REF -- refusing to reset it." >&2
-            echo "kwi3: resolve by hand and re-run 'rotz install kwi3'. ($(tail -n1 "$PULL_LOG"))" >&2
-            rm -f "$PULL_LOG"
-            exit 1
-          fi
-          echo "kwi3: WARNING -- could not reach $REPO to update $SRC (network down?); building the checkout already there." >&2
-        fi
-        rm -f "$PULL_LOG"
       else
         mkdir -p "$(dirname "$SRC")"
         CLONE_LOG=$(mktemp)
-        if ! git clone --quiet --branch "$REF" "$REPO" "$SRC" >"$CLONE_LOG" 2>&1; then
-          echo "kwi3: git clone of $REPO (ref $REF) failed and $SRC does not exist -- nothing to build." >&2
+        if ! git clone --quiet --no-checkout "$REPO" "$SRC" >"$CLONE_LOG" 2>&1; then
+          echo "kwi3: git clone of $REPO failed and $SRC does not exist -- nothing to build." >&2
           echo "kwi3: $(tail -n1 "$CLONE_LOG")" >&2
           rm -f "$CLONE_LOG"
           exit 1
         fi
         rm -f "$CLONE_LOG"
       fi
+
+      # Fetched from $REPO itself, not `origin`, so a changed KWI3_REPO is
+      # honoured by an existing clone too.
+      if ! git -C "$SRC" fetch --quiet --force "$REPO" '+refs/tags/*:refs/tags/*' 2>/dev/null; then
+        echo "kwi3: WARNING -- could not reach $REPO to fetch release tags (network down?); using the newest tag already in $SRC." >&2
+      fi
+
+      TAG=$(git -C "$SRC" tag -l 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+      if [ -z "$TAG" ]; then
+        echo "kwi3: no release tag (vX.Y.Z) in $REPO -- refusing to build an unreleased commit." >&2
+        echo "kwi3: cut one in the kwi3 repo (AGENTS.md \"Releases\") and re-run 'rotz install kwi3'." >&2
+        exit 1
+      fi
+      if ! git -C "$SRC" -c advice.detachedHead=false checkout --quiet --detach "$TAG" 2>/dev/null; then
+        echo "kwi3: could not check out $TAG in $SRC -- resolve by hand and re-run 'rotz install kwi3'." >&2
+        exit 1
+      fi
+      echo "kwi3: release $TAG"
 
       # ---------------------------------------------------------------
       # 2. Build. Guarded on the build deps and on the make result, both
