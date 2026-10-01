@@ -422,16 +422,24 @@ PanelWindow {
     // cap shell.qml uses, converted to whole cells — so one long workspace
     // name cannot take over the bar (edge case: "a workspace name wider
     // than the bar").
+    // The agent badge's text (dotfiles-1ewf, Jan's `=name ● 2=`): the dot
+    // alone for one agent, "● N" - the count after ONE space - for N > 1,
+    // nothing at all for none (the badge is hidden then). One function for
+    // the delegate's wsBadge and _tabWantCells, so the tab is always sized
+    // for exactly what is painted.
+    function _badgeText(name) {
+        var n = Census.totalFor(name)
+        return n > 1 ? ("● " + n) : "●"
+    }
+
     function _tabWantCells(text) {
         var raw = kwi3TabMetrics.advanceWidth(text)
-        var count = Census.totalFor(text)
-        if (count > 0) {
-            var badgeText = count > 1 ? ("●" + count) : "●"
-            raw += kwi3TabMetrics.advanceWidth(badgeText) + 4 // wsLabel.spacing
+        if (Census.totalFor(text) > 0) {
+            raw += kwi3TabMetrics.advanceWidth(root._badgeText(text)) + 4 // wsLabel.spacing
         }
-        // dotfiles-8luk: label cells + ONE (the gap to the next tab; the
-        // last tab's is the outer padding). See tabGap.
-        var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 1
+        // dotfiles-1ewf: label cells + TWO - the tab's own padding cell on
+        // each side of its label. See tabGap.
+        var want = Math.max(1, Math.ceil(raw / Kwi3Grid.moduleW)) + 2
         var cap = Math.max(1, Math.floor((root.width * 0.4) / Kwi3Grid.moduleW))
         return Math.min(want, cap)
     }
@@ -442,17 +450,17 @@ PanelWindow {
         font.pixelSize: root.fontSize
     }
 
-    // dotfiles-8luk (Jan, 2026-09-30): exactly ONE cell (one space off the
-    // grid) between neighbouring tab labels, and one cell of outer padding
-    // before the first / after the last. Layout: leftSide has leftPadding =
-    // tabGap; each tab is its label plus ONE trailing gap cell (so the last
-    // tab's trailing cell is the outer padding after it). The FOCUSED tab's
-    // highlight (background + ring window) still covers its label plus one
-    // gap each side, i.e. it reaches back over the previous tab's trailing
-    // cell and forward over its own: tabGap left of the tab, tab.width +
-    // tabGap wide. Unfocused tabs paint nothing there. Click rule: a gap
-    // cell belongs to the tab on its LEFT (its trailing cell); the leading
-    // outer cell belongs to no tab.
+    // dotfiles-1ewf (Jan, 2026-10-01; supersedes dotfiles-8luk's one-cell
+    // spacing): `_name1_=selected2=_name3_` (_ a plain cell, = a highlighted
+    // one). Each tab OWNS one padding cell (one space off the grid) on each
+    // side of its label: tab = cell + label + cell, tabs abut (leftSide has
+    // no padding of its own), so neighbouring labels are always TWO cells
+    // apart and the first/last tab's own outer cell is the outer padding.
+    // The focused tab's highlight (background + ring window) is EXACTLY its
+    // own tab box - no overhang into a neighbour - so both of its padding
+    // cells are highlighted and an unfocused tab's are plain. The label row
+    // (name + badge) sits between the two padding cells, inside the box.
+    // Clicks: a padding cell belongs to its own tab.
     //
     // Off the grid a "space" is measured with a Text of the tab labels' own
     // font (never FontMetrics.advanceWidth(" "), which read half of it here).
@@ -466,16 +474,6 @@ PanelWindow {
     }
     readonly property real tabGap: Kwi3Grid.active ? Kwi3Grid.moduleW
                                                    : tabSpaceProbe.implicitWidth
-
-    // dotfiles-52vu (Jan): exactly ONE cell between neighbouring items, and
-    // the ticker is just another item. On the grid the ticker starts right
-    // after the last tab's trailing gap cell (tickerArea leftMargin 0), so
-    // that cell IS the one-cell gap - and it must read as a gap: while the
-    // ticker is up the LAST tab's highlight (and its ring) stops at its
-    // label instead of covering that cell, since the ticker background is
-    // the same #152024. Mirrors tickerArea.visible exactly.
-    readonly property bool _trimLastTabHl: onGrid && currentMode === "default" && tickerActive
-    function _hlTrimmed(i) { return _trimLastTabHl && i === sortedWorkspaces.length - 1 }
 
     // The plan every tab Rectangle below reads its width from: `cells[i]` is
     // one entry per row of root.sortedWorkspaces, in the SAME order —
@@ -567,9 +565,9 @@ PanelWindow {
         if (idx < 0 || idx >= plan.cells.length) { return null }
         var xOff = 0
         for (var j = 0; j < idx; j++) { xOff += plan.cells[j] * Kwi3Grid.moduleW }
-        // The tab starts one gap (leftSide.leftPadding) in from contentLeft
-        // and its highlight reaches one gap back, so the highlight's left
-        // edge is contentLeft + xOff exactly; it is the tab's cells + 1 wide.
+        // dotfiles-1ewf: the ring is exactly the tab box (its own padding
+        // cells included): tabs abut from contentLeft, so it starts at
+        // contentLeft + xOff and is the tab's cells wide.
         // Same offsets leftSide/the content Item itself use to place the
         // first tab (root.inset's pill margin, root.insetTop) — worked out
         // here rather than read back off the Item, so this stays a plain
@@ -579,7 +577,7 @@ PanelWindow {
         return {
             x: origin.x + Kwi3Grid.contentLeft + xOff,
             y: origin.y,
-            w: (plan.cells[idx] + (root._hlTrimmed(idx) ? 0 : 1)) * Kwi3Grid.moduleW
+            w: plan.cells[idx] * Kwi3Grid.moduleW
         }
     }
 
@@ -1049,7 +1047,6 @@ PanelWindow {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                       leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
             spacing: 0
-            leftPadding: root.tabGap
 
             Repeater {
                 model: root.sortedWorkspaces
@@ -1069,31 +1066,25 @@ PanelWindow {
                     // nothing - the badge included - ever paints onto the
                     // next tab. Off under i3/sway, where the tab is sized
                     // from its label and nothing can overflow (AC3).
-                    // (dotfiles-8luk: no clip here any more - the highlight
-                    // below overhangs the tab by one gap each side. Nothing
-                    // else can overflow: wsText elides to the tab less the
-                    // gap and the badge.)
-                    // Label + ONE trailing gap; see root.tabGap.
+                    // (dotfiles-1ewf: the clip is back - the highlight is
+                    // exactly this box again, nothing overhangs it.)
+                    clip: root.tabCellPlan !== null
+                    // Padding cell + label + padding cell; see root.tabGap.
                     width: (root.tabCellPlan && root.tabCellPlan.cells
                             && index < root.tabCellPlan.cells.length)
                          ? root.tabCellPlan.cells[index] * Kwi3Grid.moduleW
-                         : (wsLabel.implicitWidth + root.tabGap)
+                         : (wsLabel.implicitWidth + 2 * root.tabGap)
                     height: leftSide.height
                     color: "transparent"
 
                     // Focused tab uses the same highlight as the mod+d launcher
-                    // input/selection (#152024, Overlay.qml). Label + one gap
-                    // each side: overhangs the tab into the neighbours' gap
-                    // cells (dotfiles-8luk). Painted first, so the label is
-                    // over it.
+                    // input/selection (#152024, Overlay.qml). Exactly the tab
+                    // box, both padding cells included (dotfiles-1ewf). Painted
+                    // first, so the label is over it.
                     Rectangle {
                         objectName: "wsTabHighlight"
-                        x: -root.tabGap
-                        // dotfiles-52vu: not over the trailing gap cell of
-                        // the last tab while the ticker is up (root.
-                        // _trimLastTabHl).
-                        width: wsTab.width + root.tabGap
-                               - (root._hlTrimmed(wsTab.index) ? root.tabGap : 0)
+                        x: 0
+                        width: wsTab.width
                         height: parent.height
                         color: modelData.urgent  ? "#cb4b16"
                              : modelData.focused ? "#152024"
@@ -1105,12 +1096,16 @@ PanelWindow {
                     Row {
                         id: wsLabel
                         objectName: "wsLabelRow"
-                        // Centred in the tab less its trailing gap cell (an
-                        // explicit x, not anchors.horizontalCenter, which
-                        // snapped to whole pixels and put the off-grid gap
-                        // half a pixel off). Off the grid that box is exactly
-                        // the label, so x is 0.
-                        x: Math.max(0, (wsTab.width - root.tabGap - width) / 2)
+                        // dotfiles-1ewf: one padding cell in, then centred
+                        // (whole pixels, rounded DOWN so it never reaches the
+                        // trailing padding cell) in the label cells between
+                        // the two padding cells. An explicit x, not
+                        // anchors.horizontalCenter, so the off-grid padding is
+                        // exactly one space (dotfiles-8luk's finding). Off the
+                        // grid the label cells are exactly the label: x is
+                        // tabGap.
+                        x: root.tabGap + Math.max(0, Math.floor(
+                               (wsTab.width - 2 * root.tabGap - width) / 2))
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 1
                         spacing: 4
@@ -1120,14 +1115,14 @@ PanelWindow {
                             objectName: "wsTabText"
                             text: modelData.name
                             // kwi3 only: at most the tab's whole-module width
-                            // less its trailing gap cell (the same +1 cell
+                            // less its two padding cells (the same +2 cells
                             // _tabWantCells adds) and less the agent
                             // badge if it shows, elided at the right. Under
                             // i3/sway this is exactly implicitWidth, i.e. the
                             // Text's own default, so nothing changes there.
                             width: root.tabCellPlan
                                  ? Math.min(implicitWidth, Math.max(0,
-                                       wsTab.width - Kwi3Grid.moduleW
+                                       wsTab.width - 2 * Kwi3Grid.moduleW
                                        - (wsBadge.visible ? wsBadge.implicitWidth + wsLabel.spacing : 0)))
                                  : implicitWidth
                             elide: root.tabCellPlan ? Text.ElideRight : Text.ElideNone
@@ -1154,9 +1149,7 @@ PanelWindow {
                             id: wsBadge
                             objectName: "wsAgentBadge"
                             visible: Census.totalFor(modelData.name) > 0
-                            text: Census.totalFor(modelData.name) > 1
-                                ? "●" + Census.totalFor(modelData.name)
-                                : "●"
+                            text: root._badgeText(modelData.name)
                             // Colour is the census's own priority (blocked >
                             // working > idle) and ignores focus/urgency, so the
                             // badge means the same thing on every tab.
@@ -1224,18 +1217,17 @@ PanelWindow {
         }
 
         // Notification ticker — between workspaces and bell/date
-        // dotfiles-52vu (Jan): on the grid exactly ONE cell each side. Left:
-        // leftSide ends in the last tab's trailing gap cell (dotfiles-8luk),
-        // which IS the gap, so leftMargin 0 - and the last tab's highlight
-        // keeps off that cell while the ticker is up (root._trimLastTabHl),
-        // so it is bar background whether or not that tab is focused. Right:
-        // one cell before rightSide (the bell). Off the grid the old 8/4 px
-        // margins stay.
+        // dotfiles-1ewf (supersedes dotfiles-52vu's left edge): the ticker is
+        // just another item. On the grid it starts ONE plain cell after the
+        // last tab's own trailing padding cell (leftMargin = one cell), so
+        // last label -> ticker is two cells, focused or not, exactly like
+        // label -> label. Right: one cell before rightSide (the bell),
+        // unchanged. Off the grid the old 8/4 px margins stay.
         Rectangle {
             id: tickerArea
             objectName: "tickerArea"
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? 0 : 8; rightMargin: root.onGrid ? root.cellW : 4 }
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? root.cellW : 8; rightMargin: root.onGrid ? root.cellW : 4 }
             clip: true
             height: parent.height
             z: -1

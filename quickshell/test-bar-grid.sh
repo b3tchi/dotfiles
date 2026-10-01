@@ -461,21 +461,22 @@ for arm in "g8:8:21" "g10:10:20"; do
   done
 done
 
-# dotfiles-52vu (Jan): on the grid exactly ONE cell between the ticker and each
-# neighbour: it starts right at leftSide's end (the last tab's trailing gap cell
-# IS the gap, leftMargin 0) and ends one cell before rightSide. This harness sets
+# dotfiles-1ewf (Jan; rewrites dotfiles-52vu's "leftMargin 0"): on the grid the
+# ticker starts ONE plain cell after leftSide's end (the last tab's own trailing
+# padding cell + this one = two cells from the last label, like label -> label)
+# and ends one cell before rightSide (52vu, unchanged). This harness sets
 # cellW (so onGrid is true) but never activates Kwi3Grid, so the TABS here are
 # the off-grid shape (tabGap is a space, tab x/width in pixels) - a combination
 # production never produces. So only the ticker's own anchor margins are
 # asserted here, against whatever leftSide/rightSide happen to be; the label ->
-# ticker distance and the trimmed last-tab highlight on a REAL Kwi3Grid (last
+# ticker distance and the last-tab highlight (== its tab box) on a REAL Kwi3Grid (last
 # tab focused and unfocused, plus the painted pixels) are test-kwi3-backend.sh
 # PHASE 6.
 for arm in "g8:8:21" "g10:10:20"; do
   IFS=: read -r n W H <<<"$arm"
-  scenario "ticker margins over ${W}x${H} (dotfiles-52vu): 0 after leftSide, one cell before rightSide"
+  scenario "ticker margins over ${W}x${H} (dotfiles-1ewf/52vu): one cell after leftSide, one cell before rightSide"
   chk "${n}T: ticker shown" "${n}T" ".ticker != null"
-  a2 "${n}T: ticker starts exactly at leftSide's end (margin 0)" "0" \
+  a2 "${n}T: ticker starts exactly ONE cell after leftSide's end (dotfiles-1ewf)" "$W" \
       "$(case_of "${n}T" | jq -r '.ticker.x - .ticker.lsR')"
   a2 "${n}T: ticker right edge is exactly one cell before rightSide" "$W" \
       "$(case_of "${n}T" | jq -r '.ticker.rsX - (.ticker.x + .ticker.w)')"
@@ -531,20 +532,23 @@ a2 "nogrid: every separator is exactly ONE space character (dotfiles-hr1g), >= 6
     "$(case_of nogrid | jq -r '[(.rsKids + .cdKids)[] | select(.n | test("^ +$")) | .n] as $s | ($s|length) >= 6 and ($s | all(. == " ")) and .traySepText == " "')"
 a2 "nogrid: VOL/KBL pair widths are label+value implicit sums" "true" \
     "$(case_of nogrid | jq -r '.vol.g.w == (.vol.l.w + .vol.v.w) and .kbd.g.w == (.kbd.l.w + .kbd.v.w)')"
-# dotfiles-8luk: workspace tabs off the grid - exactly ONE space between
-# neighbouring labels, one space of outer padding before the first and after
-# the last, the focused highlight = label + one space each side, unfocused
-# tabs paint nothing.
+# dotfiles-1ewf (Jan; rewrites dotfiles-8luk's one-space rule): workspace tabs
+# off the grid - every tab is ONE space + its label + ONE space (its own
+# padding), tabs abut, so neighbouring labels are exactly TWO spaces apart and
+# the first/last tab's own outer space is the outer padding; the focused
+# highlight is exactly its tab box; unfocused tabs paint nothing.
 a2 "nogrid: three workspace tabs rendered" "3" "$(case_of nogrid | jq -r '.tabs | length')"
 a2 "nogrid: one space is a positive width" "true" "$(case_of nogrid | jq -r '.spaceW > 0')"
-a2 "nogrid: labels are exactly ONE space apart" "true" \
-    "$(case_of nogrid | jq -r '.spaceW as $s | .tabs as $t | [range(0; ($t|length)-1) | ($t[.+1].rx - ($t[.].rx + $t[.].rw)) - $s | fabs < 0.5] | all')"
-a2 "nogrid: one space of outer padding before the first label" "true" \
-    "$(case_of nogrid | jq -r '.spaceW as $s | (.tabs[0].rx - .tabs[0].x) as $l | (.tabs[0].x >= $s - 0.5) and ($l >= 0)')"
-a2 "nogrid: a tab is its label plus one trailing space (so the last one leaves one space of outer padding)" "true" \
-    "$(case_of nogrid | jq -r '.spaceW as $s | [.tabs[] | (.w - .rw - $s) | fabs < 0.5] | all')"
-a2 "nogrid: the focused tab (bbbb) highlight is label + one space each side; unfocused paint nothing" "true" \
-    "$(case_of nogrid | jq -r '.spaceW as $s | .tabs as $t | ($t[1].hc == "#152024") and (($t[1].hx - ($t[1].rx - $s)) | fabs < 0.5) and (($t[1].hw - ($t[1].rw + 2*$s)) | fabs < 0.5) and ($t[0].hc == "#00000000") and ($t[2].hc == "#00000000")')"
+a2 "nogrid: labels are exactly TWO spaces apart (dotfiles-1ewf)" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | .tabs as $t | [range(0; ($t|length)-1) | ($t[.+1].rx - ($t[.].rx + $t[.].rw)) - 2*$s | fabs < 0.5] | all')"
+a2 "nogrid: tabs abut, the first starting at leftSide's own left (no padding outside a tab)" "true" \
+    "$(case_of nogrid | jq -r '.tabs as $t | [range(0; ($t|length)-1) | ($t[.+1].x - ($t[.].x + $t[.].w)) | fabs < 0.5] | all')"
+a2 "nogrid: every label starts exactly one space into its own tab" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | [.tabs[] | (.rx - .x - $s) | fabs < 0.5] | all')"
+a2 "nogrid: a tab is one space + its label + one space" "true" \
+    "$(case_of nogrid | jq -r '.spaceW as $s | [.tabs[] | (.w - .rw - 2*$s) | fabs < 0.5] | all')"
+a2 "nogrid: the focused tab (bbbb) highlight is exactly its tab box; unfocused paint nothing" "true" \
+    "$(case_of nogrid | jq -r '.tabs as $t | ($t[1].hc == "#152024") and (($t[1].hx - $t[1].x) | fabs < 0.01) and (($t[1].hw - $t[1].w) | fabs < 0.01) and ($t[0].hc == "#00000000") and ($t[2].hc == "#00000000")')"
 [ -n "${GEOM_OUT:-}" ] && case_of nogrid | jq -cS 'del(.cdKids[].n)' > "$GEOM_OUT"
 
 scenario "separators never double (dotfiles-hr1g rejection #1): each segment owns one LEADING separator"
