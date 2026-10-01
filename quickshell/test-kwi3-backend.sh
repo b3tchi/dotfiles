@@ -1179,16 +1179,17 @@ QMLEOF
 
         # kwi3-55l.16: a fixed census fixture (QS_CENSUS_CMD, the same
         # override Census.qml's own header describes) - "asahi" always
-        # shows 2 working agents, so the badge (wsBadge, "● 2" since
-        # dotfiles-1ewf; "dotfiles" has ONE agent, so its badge is the bare
-        # dot) is ALWAYS
+        # shows 2 working agents, so the badge (wsBadge, "●2" since
+        # dotfiles-pokv - the dot, no space, the count; "dotfiles" has ONE
+        # agent, so its badge is the bare dot; "kwi3" has TWELVE, the
+        # two-digit "●12") is ALWAYS
         # visible for that one tab, reproducing exactly the live shape that
         # made the name collapse to invisible (a badge Bar.qml's tab-width
         # calc never reserved room for).
         CENSUS_STUB="$TMP/census-stub.sh"
         cat > "$CENSUS_STUB" <<'CENSUSEOF'
 #!/bin/sh
-printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0},{"project":"dotfiles","total":1,"blocked":0,"working":1,"idle":0,"other":0}]\n'
+printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0},{"project":"dotfiles","total":1,"blocked":0,"working":1,"idle":0,"other":0},{"project":"kwi3","total":12,"blocked":0,"working":12,"idle":0,"other":0}]\n'
 CENSUSEOF
         chmod +x "$CENSUS_STUB"
 
@@ -1552,9 +1553,17 @@ for (const t of g.tabs) {
             if (ninkc) {
                 const dg = inkIn(bx + 2 * mw, bx + f.badgeW);
                 ok(dg.length > 0 && dg[0] >= Math.floor(bx + 2 * mw) && dg[dg.length - 1] < Math.ceil(bx + f.badgeW),
-                   name + ': the count digit ink (x ' + dg[0] + '..' + dg[dg.length - 1] + ') lies inside the badge\'s 3rd cell [' + (bx + 2 * mw).toFixed(1) + ',' + (bx + f.badgeW).toFixed(1) + ')');
+                   name + ': the count digit ink (x ' + dg[0] + '..' + dg[dg.length - 1] + ') lies inside the badge\'s count cells (3..' + (2 + f.badgeText.length - 1) + ') [' + (bx + 2 * mw).toFixed(1) + ',' + (bx + f.badgeW).toFixed(1) + ')');
                 ok(dotInk.length > 0 && dg.length > 0 && dg[0] - dotInk[dotInk.length - 1] - 1 < mw,
                    name + ': no blank whole cell between the dot ink and the digit (gap ' + (dg.length ? dg[0] - dotInk[dotInk.length - 1] - 1 : '?') + 'px < ' + mw + ')');
+                // One digit per cell: EVERY count cell carries ink of its own
+                // (cells 3 and 4 for "●12"), so a badge sized for fewer
+                // digits than it paints, or a digit pushed a cell over, shows.
+                for (let c = 2; c < bcells; c++) {
+                    const ci = inkIn(bx + c * mw, bx + (c + 1) * mw);
+                    ok(ci.length > 0,
+                       name + ': badge cell ' + (c + 1) + ' of ' + bcells + ' [' + (bx + c * mw).toFixed(1) + ',' + (bx + (c + 1) * mw).toFixed(1) + ') carries the ink of digit ' + JSON.stringify(f.badgeText[c - 1]) + (ci.length ? ' (x ' + ci[0] + '..' + ci[ci.length - 1] + ')' : ' - none'));
+                }
             }
         }
     } else if (t.badgeVisible) {
@@ -1884,6 +1893,16 @@ ok(asahi && asahi.width / JSON.parse(process.argv[2]).module.w === nW(asahi),
    "asahi'"'"'s tab is cells(name + 4px + \"●2\" badge) + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
 ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
    "asahi'"'"'s NAME is still fully visible beside its badge, not swallowed by it (text=" + JSON.stringify(asahi ? asahi.text : null) + " truncated=" + (asahi ? asahi.truncated : "?") + ")");
+// dotfiles-pokv rejection #1: a TWO-digit count. "kwi3" has 12 agents, so its
+// badge is "●12" - the dot (2 cells) and one cell PER DIGIT, 4 cells - and
+// its tab still reserves all of it (name untruncated, width = nW).
+const k12 = geom.tabs.find((x) => x.text === "kwi3");
+ok(k12 && k12.badgeVisible === true && k12.badgeText === "●12", "kwi3'"'"'s badge reads \"●12\" - the dot, NO space, the two-digit count (twelve agents), got " + JSON.stringify(k12 ? k12.badgeText : null));
+ok(k12 && k12.badgeW === 4 * mwR, "kwi3'"'"'s badge \"●12\" is exactly 4 cells - 2 for the dot + 1 per digit (" + (k12 ? k12.badgeW : "?") + "px = 4 x " + mwR + ")");
+ok(k12 && k12.text === "kwi3" && k12.truncated === false,
+   "kwi3'"'"'s NAME is still fully visible beside its two-digit badge (text=" + JSON.stringify(k12 ? k12.text : null) + " truncated=" + (k12 ? k12.truncated : "?") + ")");
+ok(k12 && k12.width / mwR === nW(k12),
+   "kwi3'"'"'s tab is cells(name + 4px + \"●12\" badge) + 2 padding cells (" + (k12 ? k12.width : "?") + "px = " + (k12 ? k12.width / mwR : "?") + " cells, want " + (k12 ? nW(k12) : "?") + ")");
 ' "$realgeom" "$REALGRID" > "$TMP/realistic-check.out" 2>&1
                 while IFS= read -r line; do
                     case "$line" in
@@ -1893,11 +1912,14 @@ ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
                     esac
                 done < "$TMP/realistic-check.out"
                 # dotfiles-1ewf: "9" is the bare-number tab (Jan's "1"),
-                # asahi carries "● 2", dotfiles "●" (one agent); dotfiles (the
-                # LAST tab) is focused last, which the ticker scenario below
-                # starts from. (kwi3's tab, position 9 beside a workspace
-                # named "9", is dotfiles-4wkc's own scenario below.)
-                pixcheck6 "realistic font, 8x21 pixels" "9,asahi,dotfiles"
+                # asahi carries "●2", kwi3 the two-digit "●12", dotfiles "●"
+                # (one agent); dotfiles (the LAST tab) is focused last, which
+                # the ticker scenario below starts from. (kwi3's tab, position
+                # 9 beside a workspace named "9", is clicked here too - by its
+                # index, as clickTab has done since dotfiles-4wkc - and that
+                # click's server-side effect is dotfiles-4wkc's own scenario
+                # below.)
+                pixcheck6 "realistic font, 8x21 pixels" "9,asahi,kwi3,dotfiles"
             fi
 
             # ------------------------------------------------------------------
