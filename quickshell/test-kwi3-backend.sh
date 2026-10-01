@@ -1090,7 +1090,11 @@ ShellRoot {
                                 text: t ? t.text : null,
                                 badgeVisible: bdg ? bdg.visible : false,
                                 badgeX: bdp ? bdp.x : null, badgeW: bdg ? bdg.width : null,
-                                badgeText: bdg ? bdg.text : null })
+                                badgeText: bdg ? bdg.text : null,
+                                // dotfiles-pokv: the dot's own advance and the
+                                // count's x inside the badge item.
+                                badgeDotW: bdg ? bdg.children[0].implicitWidth : null,
+                                badgeCountX: (bdg && bdg.children.length > 1 && bdg.children[1].visible) ? bdg.children[1].x : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
         }
@@ -1175,16 +1179,17 @@ QMLEOF
 
         # kwi3-55l.16: a fixed census fixture (QS_CENSUS_CMD, the same
         # override Census.qml's own header describes) - "asahi" always
-        # shows 2 working agents, so the badge (wsBadge, "● 2" since
-        # dotfiles-1ewf; "dotfiles" has ONE agent, so its badge is the bare
-        # dot) is ALWAYS
+        # shows 2 working agents, so the badge (wsBadge, "●2" since
+        # dotfiles-pokv - the dot, no space, the count; "dotfiles" has ONE
+        # agent, so its badge is the bare dot; "kwi3" has TWELVE, the
+        # two-digit "●12") is ALWAYS
         # visible for that one tab, reproducing exactly the live shape that
         # made the name collapse to invisible (a badge Bar.qml's tab-width
         # calc never reserved room for).
         CENSUS_STUB="$TMP/census-stub.sh"
         cat > "$CENSUS_STUB" <<'CENSUSEOF'
 #!/bin/sh
-printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0},{"project":"dotfiles","total":1,"blocked":0,"working":1,"idle":0,"other":0}]\n'
+printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0},{"project":"dotfiles","total":1,"blocked":0,"working":1,"idle":0,"other":0},{"project":"kwi3","total":12,"blocked":0,"working":12,"idle":0,"other":0}]\n'
 CENSUSEOF
         chmod +x "$CENSUS_STUB"
 
@@ -1536,11 +1541,29 @@ for (const t of g.tabs) {
         ok(has(f.textX, f.textX + gw), name + ': the first glyph (' + JSON.stringify(f.text[0]) + ') is painted inside the highlight at x ' + f.textX.toFixed(1));
         ok(has(f.textX + f.textPainted - gw, f.textX + f.textPainted), name + ': the last glyph (' + JSON.stringify(f.text.slice(-1)) + ') is painted inside the highlight');
         if (f.badgeVisible) {
-            ok(has(f.badgeX, f.badgeX + gw) && f.badgeX + f.badgeW <= x1 - mw + 0.5,
-               name + ': the census dot of ' + JSON.stringify(f.badgeText) + ' is painted inside the highlight, a full padding cell before its right edge (x ' + f.badgeX.toFixed(1) + '+' + f.badgeW + ' <= ' + (x1 - mw) + ')');
-            if (f.badgeText.length > 1) {
-                ok(has(f.badgeX + f.badgeW - gw, f.badgeX + f.badgeW),
-                   name + ': the agent count ' + JSON.stringify(f.badgeText.slice(-1)) + ' is painted inside the highlight too');
+            const ninkc = f.badgeText.length > 1;
+            const bcells = ninkc ? 2 + (f.badgeText.length - 1) : 2;
+            ok(Math.abs(f.badgeW - bcells * mw) < 0.01,
+               name + ': the badge ' + JSON.stringify(f.badgeText) + ' is drawn exactly ' + bcells + ' cells wide (' + f.badgeW + 'px = ' + bcells + ' x ' + mw + ') - the dot advance is ' + f.badgeDotW + 'px');
+            const bx0 = Math.round(f.badgeX), bx = f.badgeX;
+            const inkIn = (a, b) => { const r = []; for (const x of inkCols) { if (x >= Math.floor(a) && x < Math.ceil(b)) { r.push(x); } } return r; };
+            const dotInk = inkIn(bx, bx + 2 * mw);
+            ok(dotInk.length > 0 && dotInk[dotInk.length - 1] < Math.ceil(bx + 2 * mw) && f.badgeX + f.badgeW <= x1 - mw + 0.5,
+               name + ': the dot ink (x ' + dotInk[0] + '..' + dotInk[dotInk.length - 1] + ') is inside the badge\'s first two cells [' + bx.toFixed(1) + ',' + (bx + 2 * mw).toFixed(1) + '), the badge a full padding cell before the highlight edge ' + (x1 - mw));
+            if (ninkc) {
+                const dg = inkIn(bx + 2 * mw, bx + f.badgeW);
+                ok(dg.length > 0 && dg[0] >= Math.floor(bx + 2 * mw) && dg[dg.length - 1] < Math.ceil(bx + f.badgeW),
+                   name + ': the count digit ink (x ' + dg[0] + '..' + dg[dg.length - 1] + ') lies inside the badge\'s count cells (3..' + (2 + f.badgeText.length - 1) + ') [' + (bx + 2 * mw).toFixed(1) + ',' + (bx + f.badgeW).toFixed(1) + ')');
+                ok(dotInk.length > 0 && dg.length > 0 && dg[0] - dotInk[dotInk.length - 1] - 1 < mw,
+                   name + ': no blank whole cell between the dot ink and the digit (gap ' + (dg.length ? dg[0] - dotInk[dotInk.length - 1] - 1 : '?') + 'px < ' + mw + ')');
+                // One digit per cell: EVERY count cell carries ink of its own
+                // (cells 3 and 4 for "●12"), so a badge sized for fewer
+                // digits than it paints, or a digit pushed a cell over, shows.
+                for (let c = 2; c < bcells; c++) {
+                    const ci = inkIn(bx + c * mw, bx + (c + 1) * mw);
+                    ok(ci.length > 0,
+                       name + ': badge cell ' + (c + 1) + ' of ' + bcells + ' [' + (bx + c * mw).toFixed(1) + ',' + (bx + (c + 1) * mw).toFixed(1) + ') carries the ink of digit ' + JSON.stringify(f.badgeText[c - 1]) + (ci.length ? ' (x ' + ci[0] + '..' + ci[ci.length - 1] + ')' : ' - none'));
+                }
             }
         }
     } else if (t.badgeVisible) {
@@ -1856,21 +1879,30 @@ for (const name of ["9", "asahi", "kwi3", "dotfiles"]) {
 // badge must be visible together, neither one crowding the other out.
 const asahi = geom.tabs.find((x) => x.text === "asahi");
 ok(asahi && asahi.badgeVisible === true, "asahi'"'"'s census badge is visible (" + (asahi ? asahi.badgeVisible : "tab not found") + ")");
-ok(asahi && asahi.badgeText === "● 2", "asahi'"'"'s badge reads \"● 2\" - the dot, ONE space, the count (two working agents; dotfiles-1ewf), got " + JSON.stringify(asahi ? asahi.badgeText : null));
+ok(asahi && asahi.badgeText === "●2", "asahi'"'"'s badge reads \"●2\" - the dot, NO space, the count (two working agents; dotfiles-pokv), got " + JSON.stringify(asahi ? asahi.badgeText : null));
 // dotfiles-1ewf (Jan): N == 1 shows the dot alone, no number.
 const kw = geom.tabs.find((x) => x.text === "dotfiles");
 ok(kw && kw.badgeVisible === true && kw.badgeText === "●", "dotfiles (ONE agent) shows the bare dot, no count: " + JSON.stringify(kw ? kw.badgeText : null));
-// The label (and so the tab) is sized for the " N": the asahi badge is wider
-// than the bare dot by at least the space + digit (two glyph advances, less
-// half a pixel of rounding).
-const cw = kw ? kw.textPainted / kw.text.length : 0;
-ok(asahi && kw && asahi.badgeW >= kw.badgeW + 2 * cw - 0.5,
-   "asahi'"'"'s badge \"● 2\" is the dot + two more glyph advances wide (" + (asahi ? asahi.badgeW : "?") + " >= " + (kw ? kw.badgeW : "?") + " + 2 x " + cw.toFixed(2) + ")");
+// dotfiles-pokv: the dot is exactly TWO cells and the one-digit count exactly
+// ONE more, whatever the font own advance for U+25CF.
+const mwR = JSON.parse(process.argv[2]).module.w;
+ok(kw && kw.badgeW === 2 * mwR, "dotfiles'"'"'s badge \"●\" is exactly 2 cells (" + (kw ? kw.badgeW : "?") + "px = 2 x " + mwR + "; the font'"'"'s own dot advance " + (kw ? kw.badgeDotW : "?") + "px)");
+ok(asahi && asahi.badgeW === 3 * mwR, "asahi'"'"'s badge \"●2\" is exactly 3 cells (" + (asahi ? asahi.badgeW : "?") + "px = 3 x " + mwR + ")");
 const nW = (t) => Math.max(1, Math.ceil((t.textPainted + 4 + t.badgeW) / JSON.parse(process.argv[2]).module.w - 0.001)) + 2;
 ok(asahi && asahi.width / JSON.parse(process.argv[2]).module.w === nW(asahi),
-   "asahi'"'"'s tab is cells(name + space + \"● 2\") + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
+   "asahi'"'"'s tab is cells(name + 4px + \"●2\" badge) + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
 ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
    "asahi'"'"'s NAME is still fully visible beside its badge, not swallowed by it (text=" + JSON.stringify(asahi ? asahi.text : null) + " truncated=" + (asahi ? asahi.truncated : "?") + ")");
+// dotfiles-pokv rejection #1: a TWO-digit count. "kwi3" has 12 agents, so its
+// badge is "●12" - the dot (2 cells) and one cell PER DIGIT, 4 cells - and
+// its tab still reserves all of it (name untruncated, width = nW).
+const k12 = geom.tabs.find((x) => x.text === "kwi3");
+ok(k12 && k12.badgeVisible === true && k12.badgeText === "●12", "kwi3'"'"'s badge reads \"●12\" - the dot, NO space, the two-digit count (twelve agents), got " + JSON.stringify(k12 ? k12.badgeText : null));
+ok(k12 && k12.badgeW === 4 * mwR, "kwi3'"'"'s badge \"●12\" is exactly 4 cells - 2 for the dot + 1 per digit (" + (k12 ? k12.badgeW : "?") + "px = 4 x " + mwR + ")");
+ok(k12 && k12.text === "kwi3" && k12.truncated === false,
+   "kwi3'"'"'s NAME is still fully visible beside its two-digit badge (text=" + JSON.stringify(k12 ? k12.text : null) + " truncated=" + (k12 ? k12.truncated : "?") + ")");
+ok(k12 && k12.width / mwR === nW(k12),
+   "kwi3'"'"'s tab is cells(name + 4px + \"●12\" badge) + 2 padding cells (" + (k12 ? k12.width : "?") + "px = " + (k12 ? k12.width / mwR : "?") + " cells, want " + (k12 ? nW(k12) : "?") + ")");
 ' "$realgeom" "$REALGRID" > "$TMP/realistic-check.out" 2>&1
                 while IFS= read -r line; do
                     case "$line" in
@@ -1880,11 +1912,14 @@ ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
                     esac
                 done < "$TMP/realistic-check.out"
                 # dotfiles-1ewf: "9" is the bare-number tab (Jan's "1"),
-                # asahi carries "● 2", dotfiles "●" (one agent); dotfiles (the
-                # LAST tab) is focused last, which the ticker scenario below
-                # starts from. (kwi3's tab, position 9 beside a workspace
-                # named "9", is dotfiles-4wkc's own scenario below.)
-                pixcheck6 "realistic font, 8x21 pixels" "9,asahi,dotfiles"
+                # asahi carries "●2", kwi3 the two-digit "●12", dotfiles "●"
+                # (one agent); dotfiles (the LAST tab) is focused last, which
+                # the ticker scenario below starts from. (kwi3's tab, position
+                # 9 beside a workspace named "9", is clicked here too - by its
+                # index, as clickTab has done since dotfiles-4wkc - and that
+                # click's server-side effect is dotfiles-4wkc's own scenario
+                # below.)
+                pixcheck6 "realistic font, 8x21 pixels" "9,asahi,kwi3,dotfiles"
             fi
 
             # ------------------------------------------------------------------
