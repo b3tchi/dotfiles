@@ -824,7 +824,12 @@ kill "$GRID_PID" 2>/dev/null
 
 scenario "PHASE 6 setup: rpc-server.js rig + a real Bar under Xvfb"
 
-"$XVFB" "$BAR_DPY" -screen 0 1024x300x24 >"$TMP/xvfb.log" 2>&1 &
+# 1600 wide (1024 until dotfiles-1ewf): with two padding cells per tab, the
+# realistic scenario's eleven tabs (the 200-char one capped at 40%) plus
+# rightSide no longer fit 1024 px, and the ticker scenario needs room
+# between them.
+BAR_SW=1600
+"$XVFB" "$BAR_DPY" -screen 0 ${BAR_SW}x300x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
 PIDS+=("$XVFB_PID")
 for i in $(seq 1 50); do dpy_up "$BAR_DPY" && break; sleep 0.1; done
@@ -1045,8 +1050,9 @@ ShellRoot {
                 var badges = []
                 host.findAllByName(tabs[i], "wsAgentBadge", badges)
                 var bdg = badges.length ? badges[0] : null
-                // dotfiles-8luk: the tab's own highlight rectangle (label + one
-                // gap each side, overhanging the tab), in bar coordinates, and
+                var bdp = bdg ? bdg.mapToItem(r, 0, 0) : null
+                // dotfiles-1ewf: the tab's own highlight rectangle (exactly the
+                // tab box since dotfiles-1ewf), in bar coordinates, and
                 // its colour, so 'focused = label + 1 cell each side' is read
                 // off the painted item and not derived from the plan.
                 var hls = []
@@ -1059,7 +1065,12 @@ ShellRoot {
                 host.findAllByName(tabs[i], "wsLabelRow", rows)
                 var lr = rows.length ? rows[0] : null
                 var lp = lr ? lr.mapToItem(r, 0, 0) : null
+                // dotfiles-1ewf: where the tab really is on the X screen
+                // (the bar window is not at the origin), for the ring and
+                // the pixel reads.
+                var gp = tabs[i].mapToGlobal(0, 0)
                 out.tabs.push({ x: p.x, width: tabs[i].width, clip: tabs[i].clip,
+                                gx: gp.x, gy: gp.y, height: tabs[i].height,
                                 rowX: lp ? lp.x : null, rowW: lr ? lr.width : null,
                                 hlX: hp ? hp.x : null, hlW: hl ? hl.width : null,
                                 hlColor: hl ? String(hl.color) : null,
@@ -1073,6 +1084,7 @@ ShellRoot {
                                 // carries it.
                                 text: t ? t.text : null,
                                 badgeVisible: bdg ? bdg.visible : false,
+                                badgeX: bdp ? bdp.x : null, badgeW: bdg ? bdg.width : null,
                                 badgeText: bdg ? bdg.text : null })
             }
             host.emit("geom", tag + " " + JSON.stringify(out))
@@ -1158,14 +1170,16 @@ QMLEOF
 
         # kwi3-55l.16: a fixed census fixture (QS_CENSUS_CMD, the same
         # override Census.qml's own header describes) - "asahi" always
-        # shows 2 working agents, so the badge (wsBadge, "●2") is ALWAYS
+        # shows 2 working agents, so the badge (wsBadge, "● 2" since
+        # dotfiles-1ewf; "dotfiles" has ONE agent, so its badge is the bare
+        # dot) is ALWAYS
         # visible for that one tab, reproducing exactly the live shape that
         # made the name collapse to invisible (a badge Bar.qml's tab-width
         # calc never reserved room for).
         CENSUS_STUB="$TMP/census-stub.sh"
         cat > "$CENSUS_STUB" <<'CENSUSEOF'
 #!/bin/sh
-printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0}]\n'
+printf '[{"project":"asahi","total":2,"blocked":0,"working":2,"idle":0,"other":0},{"project":"dotfiles","total":1,"blocked":0,"working":1,"idle":0,"other":0}]\n'
 CENSUSEOF
         chmod +x "$CENSUS_STUB"
 
@@ -1257,8 +1271,10 @@ const moduleW = 8, contentLeft = 8;
 function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
 const cells = plan.cells;
 ok(cells.length === 3, "plan has three cells");
-// dotfiles-8luk: one cell of outer padding before the first tab.
-const firstX = contentLeft + moduleW;
+// dotfiles-1ewf (rewrites dotfiles-8luk: "one cell of outer padding
+// before the first tab"): the first tab starts AT contentLeft - its own
+// leading padding cell is the outer padding.
+const firstX = contentLeft;
 let x = firstX, allWhole = true, cum = true;
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
@@ -1268,8 +1284,8 @@ for (let i = 0; i < geom.tabs.length; i++) {
     x += t.width;
 }
 ok(allWhole, "every tab x and width is a whole multiple of moduleW from contentLeft");
-ok(cum, "each tabs x is the running sum of the ones before it, starting one cell in from contentLeft");
-ok(geom.tabs.length && geom.tabs[0].x === firstX, "the first tab starts one cell (outer padding) after contentLeft");
+ok(cum, "each tabs x is the running sum of the ones before it, starting at contentLeft");
+ok(geom.tabs.length && geom.tabs[0].x === firstX, "the first tab starts at contentLeft (its own padding cell is the outer padding)");
 // kwi3-55l.16: cells is wants now, not a shared-out total (see Bar.qml own
 // own tabCellPlan comment) - the invariant this used to check ("spare
 // cells at the front") was really just a symptom of averaging sum(wants)
@@ -1347,10 +1363,13 @@ ok(geom.grid.moduleW === mw, 'Kwi3Grid.moduleW equals the core grid.get module.w
 ok(geom.height === grid.row, 'the bar height equals the core row (' + geom.height + ' vs ' + grid.row + ')');
 ok(geom.exclusiveZone === grid.reserve, 'the bar exclusiveZone equals the core reserve (' + geom.exclusiveZone + ' vs ' + grid.reserve + ')');
 ok(geom.count > 0 && geom.count === plan.cells.length, 'one tab per planned cell count (' + geom.count + ')');
-// dotfiles-8luk: one cell of outer padding before the first tab; each tab is
-// its label plus ONE trailing gap cell, so labels are exactly one cell apart
-// and the last label is followed by one cell of outer padding.
-let x = left + mw, whole = true, cum = true, match = true;
+// dotfiles-1ewf (Jan, `_name1_=selected2=_name3_`; REWRITES dotfiles-8luk's
+// checks - one cell of outer padding before the first tab, label + ONE
+// trailing gap cell, labels one cell apart, highlight = label + one cell each
+// side overhanging the tab): every tab is ITS OWN padding cell + label cells +
+// its own padding cell, tabs abut from contentLeft, so neighbouring labels are
+// TWO cells apart; the focused highlight and the ring are exactly the tab box.
+let x = left, whole = true, cum = true, match = true;
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
     if ((t.x - left) % mw !== 0 || t.width % mw !== 0) { whole = false; }
@@ -1359,66 +1378,67 @@ for (let i = 0; i < geom.tabs.length; i++) {
     x += t.width;
 }
 ok(whole, 'every tab x and width is a whole multiple of ' + mw + ' from contentLeft ' + left);
-ok(geom.tabs[0].x === left + mw, 'the first tab starts ONE cell of outer padding after contentLeft ' + left + ' (x=' + geom.tabs[0].x + ')');
-ok(cum, 'tabs abut, starting one cell after contentLeft ' + left);
+ok(geom.tabs[0].x === left, 'the first tab starts AT contentLeft ' + left + ', its own leading cell being the outer padding (x=' + geom.tabs[0].x + ')');
+ok(cum, 'tabs abut, starting at contentLeft ' + left);
 ok(match, 'every tab is exactly its planned cells x ' + mw + 'px');
-// dotfiles-8luk: labels EXACTLY one cell apart. A tab's label box is the tab
-// less its trailing gap cell, so the label boxes of neighbours are separated
-// by that one cell and nothing else (no leading padding in the tab).
-let oneGap = true, gapDetail = [];
+// A tab's label box is the tab less its two padding cells.
+let twoGap = true, gapDetail = [];
 for (let i = 0; i + 1 < geom.tabs.length; i++) {
     const a = geom.tabs[i], b = geom.tabs[i + 1];
-    const gap = b.x - (a.x + a.width - mw);
+    const gap = (b.x + mw) - (a.x + a.width - mw);
     gapDetail.push(gap);
-    if (gap !== mw) { oneGap = false; }
+    if (gap !== 2 * mw) { twoGap = false; }
 }
-ok(oneGap, 'neighbouring tab labels are exactly ONE cell (' + mw + 'px) apart: ' + JSON.stringify(gapDetail));
+ok(twoGap, 'neighbouring tab label boxes are exactly TWO cells (' + 2 * mw + 'px) apart: ' + JSON.stringify(gapDetail));
 // Independent of the plan: the painted label rows. A tab's cells must be its
-// label's whole cells + exactly ONE (not derived from the tab's own width), and
-// the painted gap between two neighbouring label rows is that one cell plus
-// each row's centring slack (< one cell each) - so in [mw, 2*mw), never the
-// two full cells the old label + 1 padding each side gave.
-let cellsOk = true, cellDetail = [], gapsOk = true, gapPx = [];
+// label's whole cells + exactly TWO (not derived from the tab's own width),
+// every label row lies between its tab's two padding cells, and the painted
+// gap between two neighbouring label rows is the two cells plus each row's
+// centring slack (< one cell each) - so in [2*mw, 3*mw).
+let cellsOk = true, cellDetail = [], gapsOk = true, gapPx = [], rowIn = true, rowDetail = [];
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
+    if (typeof t.rowX === 'number') {
+        rowDetail.push('[' + t.x + ',' + (t.x + t.width) + ') row [' + t.rowX.toFixed(1) + ',' + (t.rowX + t.rowW).toFixed(1) + ')');
+        if (t.truncated !== true && (t.rowX < t.x + mw - 0.01 || t.rowX + t.rowW > t.x + t.width - mw + 0.01)) { rowIn = false; }
+    } else { rowIn = false; }
     if (typeof t.rowW !== 'number' || t.truncated === true) { continue; }
-    const want = Math.max(1, Math.ceil(t.rowW / mw - 0.001)) + 1;
+    const want = Math.max(1, Math.ceil(t.rowW / mw - 0.001)) + 2;
     cellDetail.push(t.width / mw + '=' + want);
     if (t.width / mw !== want) { cellsOk = false; }
     if (i + 1 < geom.tabs.length && typeof geom.tabs[i + 1].rowX === 'number') {
         const g = geom.tabs[i + 1].rowX - (t.rowX + t.rowW);
         gapPx.push(g.toFixed(1));
-        if (g < mw - 0.5 || g >= 2 * mw - 0.5) { gapsOk = false; }
+        if (g < 2 * mw - 0.5 || g >= 3 * mw - 0.5) { gapsOk = false; }
     }
 }
-ok(cellsOk, 'each tab is its label\'s whole cells + exactly one cell: ' + cellDetail.join(' '));
-ok(gapsOk, 'the painted gap between neighbouring label rows is one cell (>= ' + mw + ', < ' + 2 * mw + 'px): ' + gapPx.join(' '));
+ok(cellsOk, 'each tab is its label\'s whole cells + exactly two cells: ' + cellDetail.join(' '));
+ok(rowIn, 'every label row (name + badge) lies between its tab\'s two padding cells: ' + rowDetail.join(' '));
+ok(gapsOk, 'the painted gap between neighbouring label rows is two cells (>= ' + 2 * mw + ', < ' + 3 * mw + 'px): ' + gapPx.join(' '));
 let painted = true;
 for (let i = 0; i < geom.tabs.length; i++) {
     const t = geom.tabs[i];
     if (typeof t.textX !== 'number') { continue; }
-    // the painted label lies inside [x, x + width - mw]: nothing of it in the gap cell
-    if (t.textX < t.x - 0.5 || t.textX + t.textPainted > t.x + t.width - mw + 0.5) { painted = false; }
+    // the painted name lies inside [x + mw, x + width - mw]: nothing of it in a padding cell
+    if (t.textX < t.x + mw - 0.5 || t.textX + t.textPainted > t.x + t.width - mw + 0.5) { painted = false; }
 }
-ok(painted, 'every painted label stays out of its trailing gap cell');
-const last = geom.tabs[geom.tabs.length - 1];
-ok((last.x + last.width - mw) + mw === last.x + last.width, 'the last tab is followed by one cell of outer padding (its trailing gap cell)');
-// Focused highlight: label + one cell each side, on the grid, overhanging the
-// tab; every unfocused tab paints nothing (transparent).
+ok(painted, 'every painted label stays out of both of its padding cells');
+// Focused highlight: exactly the tab box (no overhang), on the grid; every
+// unfocused tab paints nothing (transparent).
 let fIdx = -1;
 for (let i = 0; i < geom.tabs.length; i++) { if (geom.tabs[i].hlColor === '#152024') { fIdx = i; } }
 ok(fIdx >= 0, 'exactly the focused tab paints the #152024 highlight (index ' + fIdx + ')');
 if (fIdx >= 0) {
     const f = geom.tabs[fIdx];
-    ok(f.hlX === f.x - mw && f.hlW === f.width + mw,
-       'the focused highlight is its label + one cell each side: x ' + f.hlX + ' w ' + f.hlW + ' vs tab ' + f.x + '/' + f.width);
+    ok(f.hlX === f.x && f.hlW === f.width,
+       'the focused highlight is exactly its own tab box (both padding cells, no overhang): x ' + f.hlX + ' w ' + f.hlW + ' vs tab ' + f.x + '/' + f.width);
     ok((f.hlX - left) % mw === 0 && f.hlW % mw === 0, 'the focused highlight is on the grid');
     let quiet = true;
     for (let i = 0; i < geom.tabs.length; i++) { if (i !== fIdx && geom.tabs[i].hlColor !== '#00000000') { quiet = false; } }
     ok(quiet, 'unfocused tabs paint no highlight (transparent)');
     if (ring) {
-        ok(ring.x === f.hlX && ring.w === f.hlW,
-           'the ring window rect matches the highlight: ring x ' + ring.x + ' w ' + ring.w + ' vs ' + f.hlX + '/' + f.hlW);
+        ok(ring.x === f.gx && ring.w === f.width,
+           'the ring window rect is the tab box on screen: ring x ' + ring.x + ' w ' + ring.w + ' vs tab screen x ' + f.gx + ' w ' + f.width);
     } else { ok(false, 'a ring rect was read'); }
 }
 // kwi3-55l.16: cells is wants now (Bar.qml's own tabCellPlan comment) -
@@ -1441,6 +1461,139 @@ JSEOF
                         *) fail "$1: checker output" "PASS/FAIL lines" "$line" ;;
                     esac
                 done < "$TMP/tabcheck.out"
+            }
+
+            IM6="$(command -v magick || true)"
+            IMPORT6="$(command -v import || true)"
+            # shot6 <file>: the real X root of the bar's display.
+            shot6() { DISPLAY="$BAR_DPY" "$IMPORT6" -window root "$1" 2>/dev/null; }
+            # strip6 <file> <x> <y> <w> <h>: "<unique colours> <rrggbb of the
+            # first>" for the [x, x+w) x [y, y+h) strip of the shot.
+            strip6() {
+                "$IM6" "$1" -crop "${4}x${5}+${2}+${3}" +repage \
+                    -format '%k %[hex:p{0,0}]' info: 2>/dev/null \
+                    | awk '{ print $1, tolower(substr($2, 1, 6)) }'
+            }
+
+            # ---- dotfiles-1ewf: the PAINTED tabs, read off the X screen. Jan
+            # saw (live :40, 8x21) a bare-number workspace's "1" one cell
+            # left of the focused highlight; the rule is that every tab's
+            # whole label (number, name, badge) is painted between ITS OWN two
+            # padding cells, and the highlight is exactly the focused tab's
+            # box. pixcheck6 <label> <comma-separated names to focus in turn>:
+            # for each name, click its tab (the real MouseArea handler), wait
+            # until it is focused, grab the root and judge EVERY tab: both
+            # padding cells one flat colour (#152024 on the focused tab, the
+            # bar background on the others - no overhang either way), all ink
+            # strictly inside the label cells, and on the focused tab ink in
+            # the name's first and last glyph columns (the number) and in the
+            # badge if it shows.
+            PIXJS="$TMP/pixcheck.js"
+            cat > "$PIXJS" <<'JSEOF'
+'use strict';
+const fs = require('fs');
+const [geomS, tgS, txtFile, name] = process.argv.slice(2);
+const g = JSON.parse(geomS), tg = JSON.parse(tgS);
+function ok(c, n) { console.log((c ? 'PASS ' : 'FAIL ') + n); }
+const mw = g.grid.moduleW;
+const bg = tg.barColor.replace('#', '').slice(-6).toLowerCase(), hl = '152024';
+// "x,y: (...)  #RRGGBB..." per pixel, crop origin = the first tab's screen x/y.
+const t0 = g.tabs[0], ox = Math.round(t0.gx - t0.x), oy = Math.round(t0.gy);
+const px = {};
+for (const line of fs.readFileSync(txtFile, 'utf8').split('\n')) {
+    const m = /^(\d+),(\d+):.*#([0-9A-Fa-f]{6})/.exec(line);
+    if (m) { px[m[1] + ',' + m[2]] = m[3].toLowerCase(); }
+}
+const H = Math.round(t0.height);
+const at = (x, y) => px[(x + ox) + ',' + y];
+const f = g.tabs.find((t) => t.text === name);
+ok(!!f && f.hlColor === '#' + hl, name + ': the clicked tab is the focused one (' + (f ? f.hlColor : 'not found') + ')');
+for (const t of g.tabs) {
+    const x0 = Math.round(t.x), x1 = Math.round(t.x + t.width), want = t === f ? hl : bg;
+    if (x1 + ox > Number(process.argv[6]) - 1) { continue; }   // off the screen
+    let padFlat = true, inkOut = [], inkCols = [];
+    for (let x = x0; x < x1; x++) {
+        let ink = false;
+        for (let y = 0; y < H; y++) {
+            const c = at(x, y);
+            if (c !== want) { ink = true; }
+        }
+        const pad = x < x0 + mw || x >= x1 - mw;
+        if (pad && ink) { padFlat = false; inkOut.push(x); }
+        if (!pad && ink) { inkCols.push(x); }
+    }
+    ok(padFlat, name + ': tab ' + JSON.stringify(t.text) + ' [' + x0 + ',' + x1 + '): both padding cells are flat #' + want + (inkOut.length ? ' (ink/other colour at x ' + inkOut.join(',') + ')' : ''));
+    if (t === f) {
+        const has = (a, b) => inkCols.some((x) => x >= Math.floor(a) && x < Math.ceil(b));
+        const gw = f.textPainted / Math.max(1, f.text.length);
+        ok(inkCols.length > 0 && inkCols[0] >= x0 + mw && inkCols[inkCols.length - 1] < x1 - mw,
+           name + ': all label ink lies inside the focused highlight, between its padding cells: ink x ' + (inkCols[0]) + '..' + inkCols[inkCols.length - 1] + ' within [' + (x0 + mw) + ',' + (x1 - mw) + ')');
+        ok(has(f.textX, f.textX + gw), name + ': the first glyph (' + JSON.stringify(f.text[0]) + ') is painted inside the highlight at x ' + f.textX.toFixed(1));
+        ok(has(f.textX + f.textPainted - gw, f.textX + f.textPainted), name + ': the last glyph (' + JSON.stringify(f.text.slice(-1)) + ') is painted inside the highlight');
+        if (f.badgeVisible) {
+            ok(has(f.badgeX, f.badgeX + gw) && f.badgeX + f.badgeW <= x1 - mw + 0.5,
+               name + ': the census dot of ' + JSON.stringify(f.badgeText) + ' is painted inside the highlight, a full padding cell before its right edge (x ' + f.badgeX.toFixed(1) + '+' + f.badgeW + ' <= ' + (x1 - mw) + ')');
+            if (f.badgeText.length > 1) {
+                ok(has(f.badgeX + f.badgeW - gw, f.badgeX + f.badgeW),
+                   name + ': the agent count ' + JSON.stringify(f.badgeText.slice(-1)) + ' is painted inside the highlight too');
+            }
+        }
+    } else if (t.badgeVisible) {
+        // dotfiles-1ewf: a badge on an UNFOCUSED tab is part of ITS label too:
+        // inside its own tab box, a full padding cell before the box end, and
+        // two cells (plus the next row's centring slack) from the next label.
+        const i = g.tabs.indexOf(t), nx = g.tabs[i + 1];
+        const be = t.badgeX + t.badgeW;
+        ok(inkCols.length > 0 && inkCols[inkCols.length - 1] < x1 - mw && be <= x1 - mw + 0.5,
+           name + ': unfocused ' + JSON.stringify(t.text) + ' badge ' + JSON.stringify(t.badgeText) + ' lies inside its own tab, before its trailing padding cell (badge end ' + be.toFixed(1) + ', last ink ' + inkCols[inkCols.length - 1] + ', cell starts ' + (x1 - mw) + ')');
+        if (nx && typeof nx.rowX === 'number') {
+            const gap = nx.rowX - be;
+            ok(gap >= 2 * mw - 0.5 && gap < 3 * mw - 0.5,
+               name + ': unfocused ' + JSON.stringify(t.text) + ' badge -> next label ' + JSON.stringify(nx.text) + ' is two cells (+ slack): ' + gap.toFixed(1) + 'px');
+        }
+    }
+}
+JSEOF
+            pixcheck6() { # <label> <name,name,...>
+                local nm idx k got s gtag ttag
+                if [ -z "$IM6" ] || [ -z "$IMPORT6" ]; then
+                    fail "$1: ImageMagick (magick + import) is present for the pixel checks" "both" "magick='$IM6' import='$IMPORT6'"
+                    return
+                fi
+                for nm in ${2//,/ }; do
+                    gtag="pxr$RANDOM"; ipc6 call bar6 rows "$gtag"; sleep 0.3
+                    idx="$(last6 rows "$gtag" \
+                        | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{console.log(JSON.parse(d).findIndex(r=>r.name===process.argv[1]))})' "$nm" 2>/dev/null)"
+                    if [ -z "$idx" ] || [ "$idx" -lt 0 ]; then
+                        fail "$1: a tab named $nm exists to click" "an index" "${idx:-none}"; continue
+                    fi
+                    ipc6 call bar6 clickTab "pxc$RANDOM" "$idx"
+                    got=""
+                    for k in $(seq 1 30); do
+                        gtag="pxg$RANDOM$k"; ipc6 call bar6 geometry "$gtag"; sleep 0.15
+                        if last6 geom "$gtag" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const g=JSON.parse(d);const t=g.tabs.find(t=>t.text===process.argv[1]);process.exit(t&&t.hlColor==="#152024"?0:1)})' "$nm" 2>/dev/null
+                        then got=1; break; fi
+                    done
+                    [ -n "$got" ] || { fail "$1: clicking $nm focuses it" "#152024 on $nm" "$(last6 geom "$gtag")"; continue; }
+                    sleep 0.5
+                    gtag="pxg2$RANDOM"; ttag="pxt$RANDOM"
+                    ipc6 call bar6 geometry "$gtag"; ipc6 call bar6 tickerGeom "$ttag"; sleep 0.3
+                    s="$TMP/pix-$nm.png"; rm -f "$s"; shot6 "$s"
+                    node -e '
+const g = JSON.parse(process.argv[1]);
+const t0 = g.tabs[0];
+console.log(process.argv[2] + "x" + Math.round(t0.height) + "+0+" + Math.round(t0.gy));
+' "$(last6 geom "$gtag")" "$BAR_SW" > "$TMP/pix-crop.txt" 2>/dev/null
+                    "$IM6" "$s" -crop "$(cat "$TMP/pix-crop.txt")" +repage txt:- > "$TMP/pix-$nm.txt" 2>/dev/null
+                    node "$PIXJS" "$(last6 geom "$gtag")" "$(last6 tgeom "$ttag")" "$TMP/pix-$nm.txt" "$nm" "$BAR_SW" > "$TMP/pix-$nm.out" 2>&1
+                    while IFS= read -r line; do
+                        case "$line" in
+                            "PASS "*) pass "$1: ${line#PASS }" ;;
+                            "FAIL "*) fail "$1: ${line#FAIL }" "true" "false" ;;
+                            *) fail "$1: pixel checker output" "PASS/FAIL lines" "$line" ;;
+                        esac
+                    done < "$TMP/pix-$nm.out"
+                done
             }
 
             scenario "a workspace name wider than the bar: capped to whole modules, label stays inside its tab (edge case)"
@@ -1487,13 +1640,13 @@ for (const t of geom.tabs) {
     const l = t.textX, r = t.textX + t.textPainted;
     detail.push("[" + t.x + "," + (t.x + t.width) + "] label [" + l.toFixed(1) + "," + r.toFixed(1) + "]");
     if (l < t.x || r > t.x + t.width) { inside = false; }
-    if (l < t.x - 0.5 || r > t.x + t.width - mw + 0.5) { padded = false; }
+    if (l < t.x + mw - 0.5 || r > t.x + t.width - mw + 0.5) { padded = false; }
 }
 ok(inside, "every painted label lies inside its own tab: " + detail.join(" "));
-ok(padded, "every painted label keeps out of its trailing gap cell (dotfiles-8luk)");
+ok(padded, "every painted label keeps out of both of its padding cells (dotfiles-1ewf)");
 const lt = geom.tabs[3];
 ok(lt && lt.truncated === true, "the long label is elided (Text.truncated), not merely clipped");
-' "$geomL" "$planL" "$BOOTGRID" "1024" > "$TMP/long-check.out" 2>&1
+' "$geomL" "$planL" "$BOOTGRID" "$BAR_SW" > "$TMP/long-check.out" 2>&1
             while IFS= read -r line; do
                 case "$line" in
                     "PASS "*) pass "long name: ${line#PASS }" ;;
@@ -1613,6 +1766,7 @@ for (const name of ["alpha_1", "alpha_2", "gamma"]) {
                     *) fail "project names: checker output" "PASS/FAIL lines" "$line" ;;
                 esac
             done < "$TMP/project-label-check.out"
+            pixcheck6 "project names, 10x24 pixels" "gamma,alpha_1"
 
             # ------------------------------------------------------------------
             # kwi3-55l.16 (Jan's own report, precise this time): the tab did not
@@ -1697,10 +1851,22 @@ for (const name of ["9", "asahi", "kwi3", "dotfiles"]) {
 // badge must be visible together, neither one crowding the other out.
 const asahi = geom.tabs.find((x) => x.text === "asahi");
 ok(asahi && asahi.badgeVisible === true, "asahi'"'"'s census badge is visible (" + (asahi ? asahi.badgeVisible : "tab not found") + ")");
-ok(asahi && asahi.badgeText === "●2", "asahi'"'"'s badge reads ●2 (two working agents), got " + JSON.stringify(asahi ? asahi.badgeText : null));
+ok(asahi && asahi.badgeText === "● 2", "asahi'"'"'s badge reads \"● 2\" - the dot, ONE space, the count (two working agents; dotfiles-1ewf), got " + JSON.stringify(asahi ? asahi.badgeText : null));
+// dotfiles-1ewf (Jan): N == 1 shows the dot alone, no number.
+const kw = geom.tabs.find((x) => x.text === "dotfiles");
+ok(kw && kw.badgeVisible === true && kw.badgeText === "●", "dotfiles (ONE agent) shows the bare dot, no count: " + JSON.stringify(kw ? kw.badgeText : null));
+// The label (and so the tab) is sized for the " N": the asahi badge is wider
+// than the bare dot by at least the space + digit (two glyph advances, less
+// half a pixel of rounding).
+const cw = kw ? kw.textPainted / kw.text.length : 0;
+ok(asahi && kw && asahi.badgeW >= kw.badgeW + 2 * cw - 0.5,
+   "asahi'"'"'s badge \"● 2\" is the dot + two more glyph advances wide (" + (asahi ? asahi.badgeW : "?") + " >= " + (kw ? kw.badgeW : "?") + " + 2 x " + cw.toFixed(2) + ")");
+const nW = (t) => Math.max(1, Math.ceil((t.textPainted + 4 + t.badgeW) / JSON.parse(process.argv[2]).module.w - 0.001)) + 2;
+ok(asahi && asahi.width / JSON.parse(process.argv[2]).module.w === nW(asahi),
+   "asahi'"'"'s tab is cells(name + space + \"● 2\") + 2 padding cells (" + (asahi ? asahi.width : "?") + "px)");
 ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
    "asahi'"'"'s NAME is still fully visible beside its badge, not swallowed by it (text=" + JSON.stringify(asahi ? asahi.text : null) + " truncated=" + (asahi ? asahi.truncated : "?") + ")");
-' "$realgeom" > "$TMP/realistic-check.out" 2>&1
+' "$realgeom" "$REALGRID" > "$TMP/realistic-check.out" 2>&1
                 while IFS= read -r line; do
                     case "$line" in
                         "PASS "*) pass "realistic font: ${line#PASS }" ;;
@@ -1708,33 +1874,29 @@ ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
                         *) fail "realistic font: checker output" "PASS/FAIL lines" "$line" ;;
                     esac
                 done < "$TMP/realistic-check.out"
+                # dotfiles-1ewf: "9" is the bare-number tab (Jan's "1"),
+                # asahi carries "● 2", dotfiles "●" (one agent); dotfiles (the
+                # LAST tab) is focused last, which the ticker scenario below
+                # starts from. NOT kwi3: its tab's num is 9, and the tab
+                # click's workspace.focus {num: 9} focuses the workspace
+                # NAMED "9" (dotfiles-4wkc, pre-existing).
+                pixcheck6 "realistic font, 8x21 pixels" "9,asahi,dotfiles"
             fi
 
             # ------------------------------------------------------------------
-            # dotfiles-52vu (Jan) - the notification ticker on a REAL Kwi3Grid.
-            # The rule is exactly ONE cell between neighbouring items, and the
-            # ticker is just another item: the last tab's label box -> ticker
-            # background is exactly one cell whether or not that tab is
-            # focused, and ticker -> rightSide is one cell. The one cell is the
-            # last tab's own trailing gap cell (tickerArea leftMargin 0); its
-            # FOCUSED highlight - the same #152024 as the ticker - stops at the
-            # label while the ticker is up, so that cell is bar background in
-            # both states. With the ticker hidden the highlight is 8luk's
-            # label + one cell each side again. Checked as geometry AND as the
-            # pixels actually on the X screen (ImageMagick `import` of the root).
+            # dotfiles-1ewf (Jan; REWRITES dotfiles-52vu's one-cell rule and its
+            # trimmed last-tab highlight) - the notification ticker on a REAL
+            # Kwi3Grid. The ticker is just another item: it starts ONE plain
+            # cell after the last tab's own trailing padding cell (tickerArea
+            # leftMargin = one cell), so last label -> ticker is two cells,
+            # focused or not, and that cell is bar background in every state;
+            # the last tab's highlight and ring stay exactly its tab box (no
+            # trim). ticker -> rightSide is one cell (52vu, unchanged). Checked
+            # as geometry AND as the pixels actually on the X screen
+            # (ImageMagick `import` of the root).
             # ------------------------------------------------------------------
-            scenario "dotfiles-52vu: ticker on a real Kwi3Grid - exactly one cell of bar background after the last tab's label (focused or not), one cell before rightSide"
-            IM6="$(command -v magick || true)"
-            IMPORT6="$(command -v import || true)"
-            # shot6 <file>: the real X root of the bar's display.
-            shot6() { DISPLAY="$BAR_DPY" "$IMPORT6" -window root "$1" 2>/dev/null; }
-            # strip6 <file> <x> <y> <w> <h>: "<unique colours> <rrggbb of the
-            # first>" for the [x, x+w) x [y, y+h) strip of the shot.
-            strip6() {
-                "$IM6" "$1" -crop "${4}x${5}+${2}+${3}" +repage \
-                    -format '%k %[hex:p{0,0}]' info: 2>/dev/null \
-                    | awk '{ print $1, tolower(substr($2, 1, 6)) }'
-            }
+            scenario "dotfiles-1ewf: ticker on a real Kwi3Grid - one plain cell after the last tab's own padding cell (focused or not), one cell before rightSide"
+            # (IM6/IMPORT6/shot6/strip6: defined with pixcheck6 above.)
             # tickerset6 <on|off>: set the ticker and wait until tickerArea says so.
             tickerset6() {
                 local want tg i
@@ -1772,11 +1934,12 @@ const g = JSON.parse(process.argv[1]), t = JSON.parse(process.argv[2]);
 const mw = g.grid.moduleW, last = g.tabs[g.tabs.length - 1];
 const H = Math.round(t.h || g.height);
 const dx = Math.round(t.gx - t.x), Y = Math.round(t.gy);
-const labelEnd = last.x + last.width - mw;   // the last tab less its trailing gap cell
+const end = last.x + last.width;               // the last tab box end (after its trailing padding cell)
 const at = (n, x, w) => console.log(n + " " + (Math.round(x) + dx) + " " + Y + " " + w + " " + H);
-at("hlLead", last.x - mw, mw);      // the highlight leading cell (never has label glyphs)
-at("gap", labelEnd, mw);            // the one cell between the label box and the ticker
-at("tk", labelEnd + mw, mw);        // the ticker first cell
+at("hlLead", last.x, mw);           // the last tab leading padding cell
+at("trail", end - mw, mw);          // the last tab trailing padding cell
+at("gap", end, mw);                 // the one plain cell between the tab box and the ticker
+at("tk", end + mw, mw);             // the ticker first cell
 at("tkr", t.x + t.w, mw);           // after the ticker, before rightSide
 ' "$g" "$t" > "$TMP/ticker-strips-$2.txt" 2>&1
                     strips="{"
@@ -1792,38 +1955,39 @@ const ring = process.argv[5] ? JSON.parse(process.argv[5]) : null;
 function ok(cond, name) { console.log((cond ? "PASS " : "FAIL ") + name); }
 const mw = g.grid.moduleW, left = g.grid.contentLeft;
 const last = g.tabs[g.tabs.length - 1];
-const labelEnd = last.x + last.width - mw;
+const end = last.x + last.width;
 const bg = t.barColor.replace("#", "").slice(-6).toLowerCase();
 const hlc = "152024";
 const isF = last.hlColor === "#152024";
 ok(state === "unfocused" ? (!isF && last.hlColor === "#00000000") : isF,
    "precondition: the LAST tab (" + JSON.stringify(last.text) + ") is " + (state === "unfocused" ? "unfocused" : "focused") + " (hlColor " + last.hlColor + ")");
 ok(t.cellW === mw && mw > 0, "Bar.cellW is the real Kwi3Grid module (" + t.cellW + " vs " + mw + ")");
-ok(t.lsR === last.x + last.width, "leftSide ends where the last tab (its trailing gap cell) ends (" + t.lsR + ")");
+ok(t.lsR === end, "leftSide ends where the last tab (its own trailing padding cell) ends (" + t.lsR + ")");
+ok(last.rowX >= last.x + mw - 0.01 && last.rowX + last.rowW <= end - mw + 0.01,
+   "the last label row lies between its tab two padding cells (" + last.rowX + ".." + (last.rowX + last.rowW) + " in [" + (last.x + mw) + "," + (end - mw) + "])");
+ok(px.gap === "1 " + bg, "pixels: the cell after the last tab box is bar background #" + bg + " (" + px.gap + ")");
+if (state === "unfocused") {
+    ok(px.trail === "1 " + bg, "pixels: the unfocused last tab trailing padding cell is plain bar background (" + px.trail + ")");
+} else {
+    ok(last.hlX === last.x && last.hlW === last.width,
+       "ticker " + (state === "hidden" ? "hidden" : "up") + ": the focused last tab highlight is exactly its tab box, no trim (" + last.hlX + "/" + last.hlW + " vs " + last.x + "/" + last.width + ")");
+    ok(ring && ring.x === last.gx && ring.w === last.width,
+       "ticker " + (state === "hidden" ? "hidden" : "up") + ": the ring is the tab box on screen (ring " + JSON.stringify(ring) + ", tab screen x " + last.gx + " w " + last.width + ")");
+    ok(px.hlLead === "1 " + hlc, "pixels: the leading padding cell is painted #" + hlc + " (" + px.hlLead + ")");
+    ok(px.trail === "1 " + hlc, "pixels: the trailing padding cell is painted #" + hlc + " too - the highlight is the whole tab box (" + px.trail + ")");
+}
 if (state === "hidden") {
     ok(t.visible === false, "the ticker is hidden");
-    ok(last.hlX === last.x - mw && last.hlX + last.hlW === labelEnd + mw,
-       "ticker hidden: the last tab highlight is back to label + one cell EACH side, right edge " + (last.hlX + last.hlW) + " == label end " + labelEnd + " + " + mw + " (dotfiles-8luk)");
-    ok(ring && ring.x === last.hlX && ring.w === last.hlW, "ticker hidden: the ring matches the highlight (ring " + JSON.stringify(ring) + ")");
-    ok(px.hlLead === "1 " + hlc, "pixels: the highlight leading cell is painted #" + hlc + " (" + px.hlLead + ")");
-    ok(px.gap === "1 " + hlc, "pixels: ticker hidden, the trailing cell is covered by the highlight again (" + px.gap + ")");
 } else {
     ok(t.visible === true, "the ticker is visible");
     ok((t.x - left) % mw === 0, "tickerArea.x is a whole cell from contentLeft (x " + t.x + ", left " + left + ", cell " + mw + ")");
-    ok(t.x - labelEnd === mw, "last tab label box end -> ticker is exactly ONE cell (" + (t.x - labelEnd) + "px, want " + mw + ")");
-    ok(last.rowX + last.rowW <= labelEnd + 0.5, "the painted label row ends inside its label box (" + (last.rowX + last.rowW) + " <= " + labelEnd + ")");
+    ok(t.x === end + mw, "ticker.x == last tab end + one cell (" + t.x + " vs " + end + " + " + mw + ")");
+    ok(t.x - (end - mw) === 2 * mw, "last label box end -> ticker is exactly TWO cells, like label -> label (" + (t.x - (end - mw)) + "px)");
     ok(t.x + t.w === t.rsX - mw, "ticker right edge == rightSide.x - one cell (" + (t.x + t.w) + " vs " + t.rsX + " - " + mw + ")");
     ok(t.w > 0 && (t.x + t.w - left) % mw === 0, "the ticker right edge is a whole cell too, and the ticker has width (w " + t.w + ")");
     ok(t.color === "#152024", "the ticker background is #152024 (" + t.color + ")");
-    ok(px.gap === "1 " + bg, "pixels: the one cell between the last label box and the ticker is bar background #" + bg + ", not the highlight (" + px.gap + ")");
     ok(px.tk === "1 " + hlc, "pixels: the ticker first cell is its #" + hlc + " background (" + px.tk + ")");
     ok(px.tkr === "1 " + bg, "pixels: the cell after the ticker (before rightSide) is bar background #" + bg + " (" + px.tkr + ")");
-    if (state === "focused") {
-        ok(last.hlX === last.x - mw && last.hlX + last.hlW === labelEnd,
-           "ticker up: the focused last tab highlight is one cell on the left + its label only, right edge " + (last.hlX + last.hlW) + " == label end " + labelEnd);
-        ok(ring && ring.x === last.hlX && ring.w === last.hlW, "ticker up: the ring matches the trimmed highlight (ring " + JSON.stringify(ring) + ")");
-        ok(px.hlLead === "1 " + hlc, "pixels: the highlight leading cell is painted #" + hlc + " (" + px.hlLead + ")");
-    }
 }
 ' "$g" "$t" "$strips" "$2" "$rg" > "$TMP/ticker-check-$2.out" 2>&1
                     while IFS= read -r line; do
