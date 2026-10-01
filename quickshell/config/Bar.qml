@@ -1185,7 +1185,7 @@ PanelWindow {
                         anchors.fill: parent
                         onClicked: {
                             if (Kwi3Client.available) {
-                                Kwi3Client.call("workspace.focus", { num: modelData.number })
+                                Kwi3Client.call("workspace.focus", { id: modelData.wsId })
                             } else {
                                 I3.dispatch("workspace " + modelData.name)
                             }

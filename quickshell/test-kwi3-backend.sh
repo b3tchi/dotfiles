@@ -904,6 +904,11 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
                 rig.openWindow('alpha2-keeper'); // keeper: switching away must not reap it
                 rig.ctx.RPC_METHODS['workspace.focus'].run(null, { name: 'gamma' });
                 console.log('PROJECT ' + JSON.stringify(rig.ctx.workspacesJson()));
+            } else if (name === 'wslist') {
+                // dotfiles-4wkc: the SERVER's own workspace.list (not the
+                // bar's rows) - what a click really focused, and how many
+                // workspaces exist (a click that CREATED one grows it).
+                console.log('WSLIST ' + JSON.stringify(rig.ctx.rpcWorkspaceList()));
             } else if (name === 'realistic') {
                 // Jan's OWN production settings (~/.dotfiles/kwi3/config.js:
                 // font 'Iosevka 16', module [8, 21]) - not the neutral
@@ -1326,9 +1331,9 @@ ok(geom.exclusiveZone === boot.reserve, "the bar exclusiveZone equals Kwi3Grid.r
             [ -n "$followed" ] && pass "the bar re-focused bb after a workspace.focus it did not send" \
                 || fail "the bar followed the other client's workspace.focus" "bb focused:true" "$r"
 
-            scenario "a click sends exactly one workspace.focus {num} (AC1)"
+            scenario "a click sends exactly one workspace.focus {id} (AC1, dotfiles-4wkc)"
             : > "$BAR_RIG_LOG.clickmark"
-            CCC_NUM="$(printf '%s' "$got_rows" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const rows=JSON.parse(d);console.log(String(rows.find(r=>r.name==="ccc").number))})' 2>/dev/null)"
+            CCC_ID="$(printf '%s' "$got_rows" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const rows=JSON.parse(d);console.log(String(rows.find(r=>r.name==="ccc").wsId))})' 2>/dev/null)"
             ipc6 call bar6 clickTab "click1" "2"
             sleep 0.2
             clicked="$(last6 clicked click1)"
@@ -1344,8 +1349,8 @@ ok(geom.exclusiveZone === boot.reserve, "the bar exclusiveZone equals Kwi3Grid.r
             [ "$n_calls" = "1" ] && pass "exactly one workspace.focus call reached the socket" \
                 || fail "exactly one workspace.focus call reached the socket" "1" "$n_calls"
             case "$calls" in
-                *"\"num\":$CCC_NUM"*) pass "the call's num matches the clicked tab (ccc)" ;;
-                *) fail "the call's num matches the clicked tab (ccc)" "num:$CCC_NUM" "$calls" ;;
+                *"\"id\":$CCC_ID"*) pass "the call's id matches the clicked tab (ccc)" ;;
+                *) fail "the call's id matches the clicked tab (ccc)" "id:$CCC_ID" "$calls" ;;
             esac
 
             # ---- shared checker for the scenarios below: every tab on the
@@ -1877,11 +1882,67 @@ ok(asahi && asahi.text === "asahi" && asahi.truncated === false,
                 # dotfiles-1ewf: "9" is the bare-number tab (Jan's "1"),
                 # asahi carries "● 2", dotfiles "●" (one agent); dotfiles (the
                 # LAST tab) is focused last, which the ticker scenario below
-                # starts from. NOT kwi3: its tab's num is 9, and the tab
-                # click's workspace.focus {num: 9} focuses the workspace
-                # NAMED "9" (dotfiles-4wkc, pre-existing).
+                # starts from. (kwi3's tab, position 9 beside a workspace
+                # named "9", is dotfiles-4wkc's own scenario below.)
                 pixcheck6 "realistic font, 8x21 pixels" "9,asahi,dotfiles"
             fi
+
+            # ------------------------------------------------------------------
+            # dotfiles-4wkc - a tab click must focus ITS OWN workspace. The bar
+            # used to send workspace.focus {num: <position>}, which kwi3 reads
+            # as the $mod+<n> action, i.e. a workspace NAMED "<n>". The realistic
+            # fixture has a workspace named "9" and "kwi3" at position 9, so
+            # clicking the kwi3 tab focused "9" (or created a workspace named
+            # by a position nobody has). Asserted on the SERVER's workspace.list.
+            # ------------------------------------------------------------------
+            scenario "dotfiles-4wkc: a tab click focuses its own workspace, not the one NAMED after its position"
+            wslist6() { # prints "<focused name>|<count>|<position of focused>"
+                local n0 n i out
+                n0="$(grep -ac '^WSLIST ' "$BAR_RIG_LOG")"
+                bar_cmd wslist
+                for i in $(seq 1 40); do
+                    n="$(grep -ac '^WSLIST ' "$BAR_RIG_LOG")"
+                    [ "$n" -gt "$n0" ] && break
+                    sleep 0.1
+                done
+                out="$(grep -a '^WSLIST ' "$BAR_RIG_LOG" | tail -1 | sed 's/^WSLIST //')"
+                printf '%s' "$out" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const l=JSON.parse(d);const f=l.find(w=>w.focused);console.log((f?f.name:"-")+"|"+l.length+"|"+(f?f.num:0))})' 2>/dev/null
+            }
+            clickname6() { # <name>: click that tab on the real bar
+                local g="cn$RANDOM" idx
+                ipc6 call bar6 rows "$g"; sleep 0.3
+                idx="$(last6 rows "$g" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{console.log(JSON.parse(d).findIndex(r=>r.name===process.argv[1]))})' "$1" 2>/dev/null)"
+                [ -n "$idx" ] && [ "$idx" -ge 0 ] || return 1
+                ipc6 call bar6 clickTab "cn$RANDOM" "$idx"
+                sleep 0.5
+            }
+            before6="$(wslist6)"
+            count_before6="${before6#*|}"; count_before6="${count_before6%%|*}"
+            if clickname6 kwi3; then
+                after6="$(wslist6)"
+                case "$after6" in
+                    kwi3\|*) pass "clicking the kwi3 tab (position 9, a workspace named 9 also exists) focuses kwi3" ;;
+                    *) fail "clicking the kwi3 tab (position 9, a workspace named 9 also exists) focuses kwi3" "kwi3|..." "$after6 (before: $before6)" ;;
+                esac
+                case "$after6" in
+                    *\|"$count_before6"\|*) pass "the click created no workspace (count stays $count_before6)" ;;
+                    *) fail "the click created no workspace (count stays $count_before6)" "count $count_before6" "$after6" ;;
+                esac
+            else
+                fail "a tab named kwi3 exists to click" "an index" "none"
+            fi
+            if clickname6 9; then
+                after6="$(wslist6)"
+                case "$after6" in
+                    9\|*) pass "clicking the numerically-named tab (9) focuses workspace 9" ;;
+                    *) fail "clicking the numerically-named tab (9) focuses workspace 9" "9|..." "$after6" ;;
+                esac
+            else
+                fail "a tab named 9 exists to click" "an index" "none"
+            fi
+            # Leave the fixture as the next scenario expects: dotfiles focused.
+            clickname6 dotfiles || fail "a tab named dotfiles exists to click" "an index" "none"
+            sleep 0.3
 
             # ------------------------------------------------------------------
             # dotfiles-1ewf (Jan; REWRITES dotfiles-52vu's one-cell rule and its
