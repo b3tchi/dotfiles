@@ -1,0 +1,26 @@
+# Fonts installed per user, no root needed (~/.local/share/fonts).
+#
+# Architects Daughter is the hand-drawn font draw.io's sketch style uses
+# (kwi3 docs/diagrams/*.drawio). With it installed locally a diagram needs
+# no per-cell `fontSource=` Google Fonts URL; draw.io's style compression
+# (`def()`) does not cover fonts, so this is how that repetition goes away.
+linux:
+  installs:
+    cmd: |
+      FONT_DIR="$HOME/.local/share/fonts"
+      mkdir -p "$FONT_DIR"
+      AD="$FONT_DIR/ArchitectsDaughter-Regular.ttf"
+      if [ ! -s "$AD" ]; then
+        TMP=$(mktemp)
+        if curl -fsSL "https://github.com/google/fonts/raw/main/ofl/architectsdaughter/ArchitectsDaughter-Regular.ttf" -o "$TMP"; then
+          mv "$TMP" "$AD"
+          echo "fonts: installed $AD"
+        else
+          rm -f "$TMP"
+          echo "fonts: download of Architects Daughter FAILED" >&2
+          exit 1
+        fi
+      fi
+      if command -v fc-cache >/dev/null 2>&1; then
+        fc-cache -f "$FONT_DIR"
+      fi

@@ -8,6 +8,7 @@ depends:
   - nvim
   - lazygit
   - d2
+  - fonts
   - ssh
   - glab
   - azcli
