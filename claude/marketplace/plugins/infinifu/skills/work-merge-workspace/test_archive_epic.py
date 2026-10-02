@@ -316,6 +316,131 @@ class ArchiveEpicTests(unittest.TestCase):
         self.assertEqual(status(self.root / "docs/notes/im001.md"), "accepted")
         self.assertEqual(status(self.root / "docs/notes/ft002.md"), "accepted")
 
+    # ---- story-refresh shape ---------------------------------------------
+    # A spec that delivers one or more stories by refreshing implementations
+    # that were ALREADY accepted under earlier specs. The stories flip
+    # ready → done; the refreshed im### stay accepted (spec-retro rewrites
+    # their bodies). Recognised ONLY from an explicit `## refreshes` section.
+
+    def seed_refresh_lineage(self) -> None:
+        write(self.root / "docs/notes/us003.md", frontmatter("second story", "ready", "Story"))
+        write(self.root / "docs/notes/im004.md", frontmatter("other shipped impl", "accepted", "Implementation"))
+        write(self.root / "docs/notes/im005.md", frontmatter("stable impl", "stable", "Implementation"))
+        subprocess.run(["git", "add", "docs/notes"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "seed refresh lineage"], cwd=self.root, check=True)
+
+    def test_story_refresh_flips_every_solved_story_and_no_implementation(self) -> None:
+        self.seed_refresh_lineage()
+        self.write_spec(
+            "refresh impls",
+            "## solves\n[[us001|first]] [[us003|second]]\n\n"
+            "## refreshes\n[[im002]] [[im004]] [[im005]]\n\n"
+            "## problem\nWiden shipped behaviour; [[im001]] is a surveyed non-dependency.",
+        )
+        self.commit_spec("story-refresh spec")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/us003.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/im002.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/im004.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/im005.md"), "stable")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "proposed")
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
+        self.assertNotIn("sp001", (self.root / "docs/board.md").read_text())
+        self.assertIn("close epic-1", (self.root / "bd.log").read_text())
+        self.assertIn("us001 → done", result.stdout)
+        self.assertIn("us003 → done", result.stdout)
+        self.assertIn("refreshed", result.stdout)
+        # Story flips land in the archive commit, not left dirty.
+        dirty = subprocess.run(["git", "status", "--porcelain", "docs"], cwd=self.root,
+                               text=True, stdout=subprocess.PIPE, check=True).stdout
+        self.assertEqual(dirty, "")
+
+    def test_story_refresh_rejects_a_proposed_implementation(self) -> None:
+        # A proposed im### is the owned shape and belongs under ## implements.
+        self.write_spec("refresh proposed", "## solves\n[[us001]]\n\n## refreshes\n[[im001]]")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("im001", result.stderr)
+        self.assertEqual(self.docs_snapshot(), before)
+        self.assertFalse((self.root / "bd.log").exists())
+
+    def test_story_refresh_rejects_a_story_that_is_not_ready(self) -> None:
+        self.write_spec("refresh done story", "## solves\n[[us001]] [[us002]]\n\n## refreshes\n[[im002]]")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("us002", result.stderr)
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_story_refresh_rejects_a_missing_implementation(self) -> None:
+        self.write_spec("refresh ghost", "## solves\n[[us001]]\n\n## refreshes\n[[im099]]")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("im099", result.stderr)
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_refreshes_together_with_implements_is_ambiguous(self) -> None:
+        self.write_spec(
+            "both",
+            "## solves\n[[us001]]\n\n## implements\n[[im001]]\n\n## refreshes\n[[im002]]",
+        )
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ambiguous", result.stderr.lower())
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_refreshes_without_a_solved_story_is_ambiguous(self) -> None:
+        self.write_spec("no story", "## refreshes\n[[im002]]\n\n## problem\nNo story.")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ambiguous", result.stderr.lower())
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_story_refresh_rolls_back_every_story_flip_on_failure(self) -> None:
+        self.seed_refresh_lineage()
+        self.write_spec("refresh impls", "## solves\n[[us001]] [[us003]]\n\n## refreshes\n[[im002]]")
+        self.commit_spec("story-refresh spec")
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1", fail_close=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rolled back", (result.stderr + result.stdout).lower())
+        self.assertEqual(self.docs_snapshot(), before)
+
+    def test_solves_two_stories_without_refreshes_still_fails_closed(self) -> None:
+        # The sp011 shape before the fix: multi-story ## solves, accepted ims
+        # only cited in prose. Without the declaration it must stay loud.
+        self.write_spec(
+            "undeclared refresh",
+            "## solves\n[[us001]] [[us003]]\n\n## problem\nRefreshes [[im002]] in prose only.",
+        )
+        before = self.docs_snapshot()
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refreshes", result.stderr)
+        self.assertEqual(self.docs_snapshot(), before)
+
     # ---- pre-existing shapes, unchanged ----------------------------------
 
     def test_story_backed_consumed_mode_flips_nothing_upstream(self) -> None:

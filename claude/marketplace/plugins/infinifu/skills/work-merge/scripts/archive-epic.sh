@@ -71,21 +71,58 @@ require_status () {
   }
 }
 
-# Allow callers to pass story lineage explicitly, but infer it from the spec's
-# declared lineage sections when the slots are blank.
-SPEC_US="$(extract_section_link solves us "$SP_FILE")"
-SPEC_IM="$(extract_section_link implements im "$SP_FILE")"
-US="${US:-$SPEC_US}"
-IM="${IM:-$SPEC_IM}"
+# Every link of one prefix in a declared section, in order, deduped. The link
+# may sit in the heading itself (`## refreshes [[im002]]`) or in the body.
+extract_declared_links () {
+  local section="$1" prefix="$2" file="$3"
+  awk -v section="$section" '
+    $0 ~ "^## " section "([ \t]|$)" { in_section = 1; print; next }
+    /^## / { in_section = 0 }
+    in_section { print }
+  ' "$file" | grep -oE "\[\[$prefix[0-9]+" | sed 's/^\[\[//' | awk '!seen[$0]++' || true
+}
 
-LINEAGE_MODE=""
-HAS_STORY=0
-if [ -n "$US" ] || [ -n "$IM" ]; then
-  if [ -z "$US" ] || [ -z "$IM" ]; then
-    echo "ERROR: ambiguous lifecycle shape for $SP: story-backed finale needs both us### and im###" >&2
+# A story-refresh spec delivers its ## solves stories by refreshing im### that
+# earlier specs already accepted. It is DECLARED by a `## refreshes` section,
+# never inferred from prose citations of accepted im### — the same fail-closed
+# rule [[adr0026]] sets for `## extends` below. Every solved story flips
+# ready → done; the refreshed im### are asserted, never written (spec-retro
+# rewrites their bodies).
+mapfile -t REFRESH_IMS < <(extract_declared_links refreshes im "$SP_FILE")
+mapfile -t SOLVED_USS < <(extract_declared_links solves us "$SP_FILE")
+HAS_STORY_REFRESH=0
+if [ "${#REFRESH_IMS[@]}" -gt 0 ]; then
+  if [ -n "$(extract_section_link implements im "$SP_FILE")" ]; then
+    echo "ERROR: ambiguous lifecycle shape for $SP: declares both '## implements' (deliver a proposed im###) and '## refreshes' (refresh accepted im###)" >&2
     exit 1
   fi
-  HAS_STORY=1
+  if [ -n "$US" ] || [ -n "$IM" ]; then
+    echo "ERROR: $SP declares '## refreshes'; pass blank us/im args — story lineage comes from '## solves'" >&2
+    exit 1
+  fi
+  if [ "${#SOLVED_USS[@]}" -eq 0 ]; then
+    echo "ERROR: ambiguous lifecycle shape for $SP: '## refreshes' declared but '## solves' names no us###" >&2
+    exit 1
+  fi
+  HAS_STORY_REFRESH=1
+fi
+
+# Allow callers to pass story lineage explicitly, but infer it from the spec's
+# declared lineage sections when the slots are blank.
+LINEAGE_MODE=""
+HAS_STORY=0
+if [ "$HAS_STORY_REFRESH" -eq 0 ]; then
+  SPEC_US="$(extract_section_link solves us "$SP_FILE")"
+  SPEC_IM="$(extract_section_link implements im "$SP_FILE")"
+  US="${US:-$SPEC_US}"
+  IM="${IM:-$SPEC_IM}"
+  if [ -n "$US" ] || [ -n "$IM" ]; then
+    if [ -z "$US" ] || [ -z "$IM" ]; then
+      echo "ERROR: ambiguous lifecycle shape for $SP: story-backed finale needs both us### and im### (or a '## refreshes [[im###]]' declaration when the implementations were already accepted)" >&2
+      exit 1
+    fi
+    HAS_STORY=1
+  fi
 fi
 
 # A feature-add deliverable is the unique proposed ft### referenced by the spec
@@ -170,7 +207,7 @@ elif [ "${#EXTENDS_FTS[@]}" -eq 1 ]; then
   esac
 fi
 
-if [ "$HAS_STORY" -eq 0 ] && [ "$HAS_FEATURE" -eq 0 ] && [ "$HAS_REFRESH" -eq 0 ]; then
+if [ "$HAS_STORY" -eq 0 ] && [ "$HAS_STORY_REFRESH" -eq 0 ] && [ "$HAS_FEATURE" -eq 0 ] && [ "$HAS_REFRESH" -eq 0 ]; then
   echo "ERROR: ambiguous lifecycle shape for $SP: no complete story-backed lineage, no unique proposed ft### deliverable, and no '## extends [[ft###]]' declaration for a feature-refresh" >&2
   exit 1
 fi
@@ -204,6 +241,27 @@ if [ "$HAS_STORY" -eq 1 ]; then
     echo "ERROR: ambiguous story-backed lineage for $SP: expected ($US=ready, $IM=proposed) to deliver the story, or ($US=done, $IM=accepted) to consume it; got ($US=${US_STATUS:-missing}, $IM=${IM_STATUS:-missing})" >&2
     exit 1
   fi
+fi
+REFRESH_US_FILES=()
+if [ "$HAS_STORY_REFRESH" -eq 1 ]; then
+  for im in "${REFRESH_IMS[@]}"; do
+    im_file="$AKM_ROOT/docs/notes/$im.md"
+    [ -f "$im_file" ] || { echo "ERROR: $SP declares '## refreshes [[$im]]' but $im_file is missing" >&2; exit 1; }
+    case "$(status_of "$im_file")" in
+      accepted|stable) : ;;
+      *)
+        echo "ERROR: ambiguous lifecycle shape for $SP: '## refreshes [[$im]]' has status $(status_of "$im_file"); expected accepted/stable (a proposed im### belongs under '## implements')" >&2
+        exit 1
+        ;;
+    esac
+  done
+  for us in "${SOLVED_USS[@]}"; do
+    us_file="$AKM_ROOT/docs/notes/$us.md"
+    [ -f "$us_file" ] || { echo "ERROR: missing $us_file" >&2; exit 1; }
+    require_status "$us_file" "ready"
+    REFRESH_US_FILES+=("$us_file")
+  done
+  TOUCH_PATHS+=("${REFRESH_US_FILES[@]}")
 fi
 if [ "$HAS_FEATURE" -eq 1 ]; then
   FT_FILE="$AKM_ROOT/docs/notes/$FT.md"
@@ -295,6 +353,9 @@ if [ "$HAS_STORY" -eq 1 ] && [ "$LINEAGE_MODE" = "owned" ]; then
   flip_status "$US_FILE" "ready" "done"
   flip_status "$IM_FILE" "proposed" "accepted"
 fi
+for us_file in "${REFRESH_US_FILES[@]}"; do
+  flip_status "$us_file" "ready" "done"
+done
 [ "$HAS_FEATURE" -eq 0 ] || flip_status "$FT_FILE" "proposed" "accepted"
 flip_status "$SP_FILE" "ready" "done"
 
@@ -327,6 +388,7 @@ fi
 # the ERR trap resets this local commit and restores the file snapshot.
 git -C "$AKM_ROOT" add "$SP_ARCHIVE" "$BOARD" "$ARCHIVE"
 [ "$HAS_STORY" -eq 0 ] || git -C "$AKM_ROOT" add "$US_FILE" "$IM_FILE"
+[ "${#REFRESH_US_FILES[@]}" -eq 0 ] || git -C "$AKM_ROOT" add "${REFRESH_US_FILES[@]}"
 [ "$HAS_FEATURE" -eq 0 ] || git -C "$AKM_ROOT" add "$FT_FILE"
 git -C "$AKM_ROOT" commit -m "feat(akm): archive $SP"
 COMMIT_SHA="$(git -C "$AKM_ROOT" rev-parse HEAD)"
@@ -349,6 +411,10 @@ story_summary () {
 
 SUMMARY="Archived: $SP → done ($SP_ARCHIVE)"
 [ "$HAS_STORY" -eq 0 ] || SUMMARY="$SUMMARY, $(story_summary)"
+if [ "$HAS_STORY_REFRESH" -eq 1 ]; then
+  for us in "${SOLVED_USS[@]}"; do SUMMARY="$SUMMARY, $us → done"; done
+  SUMMARY="$SUMMARY, ${REFRESH_IMS[*]} refreshed (already accepted, not flipped)"
+fi
 [ "$HAS_FEATURE" -eq 0 ] || SUMMARY="$SUMMARY, $FT → accepted"
 # Report the refresh truthfully: the finale did NOT touch this feature.
 [ "$HAS_REFRESH" -eq 0 ] || SUMMARY="$SUMMARY, $REFRESH_FT refreshed (already $REFRESH_FT_STATUS, not flipped)"
