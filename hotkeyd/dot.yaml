@@ -49,6 +49,15 @@
 # does not need this binary at all — hotkeyd-panic.sh hands the keyboard back
 # to i3's own bind table — so a host in this state is degraded, not locked out.
 linux:
+  # $mod+Return runs ~/.local/bin/wm-launch-terminal, which needs nushell's
+  # actions (wm-launch-terminal, wm-current-workspace, wm-ipc.nu, tmux-start)
+  # and the tmux binary + config - without them a bare `rotz install
+  # hotkeyd` (or `rotz install kwi3`, which depends on it) binds a chord
+  # that opens nothing, or a terminal outside tmux.
+  depends:
+    - nushell
+    - tmux
+
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
