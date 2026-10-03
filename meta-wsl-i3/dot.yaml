@@ -2,9 +2,7 @@
 # Usage: rotz install meta-wsl-i3
 # Sets i3-over-xrdp as the active WSL session via wsl-wm-switch.
 depends:
-  - distro
-  - nushell
-  - tmux
+  - meta-xrdp   # xrdp, distro, nushell, tmux, st, hotkeyd, quickshell
   - nvim
   - lazygit
   - d2
@@ -15,9 +13,6 @@ depends:
   - claude
   - opencode
   - pi
-  - st
-  - hotkeyd
-  - quickshell
   - docker
 
 installs:

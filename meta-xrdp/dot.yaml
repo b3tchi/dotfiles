@@ -1,0 +1,26 @@
+# Meta-package: the shared xrdp desktop session, independent of the WM.
+# Usage: not normally run directly - meta-wsl-i3, meta-wsl-kwi3 and
+# meta-proot depend on it and add their own window manager on top.
+#
+# Everything a session served over xrdp needs to be usable, whichever WM
+# runs in it:
+#   xrdp       the listener + xinitrc the session starts from
+#   distro     ~/.bashrc, which attaches a new terminal to its TMUX_TARGET
+#   nushell    wm-launch-terminal / wm-current-workspace / wm-ipc.nu /
+#              tmux-start - what $mod+Return runs
+#   tmux       the tmux binary and config those attach to
+#   st         the terminal $mod+Return launches
+#   hotkeyd    the keybinding daemon (owns $mod+Return, $mod+p, ...)
+#   quickshell the bar and the overlay ($mod+d, $mod+p pickers)
+#
+# Lives here rather than as dot-level depends between those dots
+# (hotkeyd -> nushell, kwi3 -> hotkeyd, ...) so the individual dots stay
+# independent and the session composition is stated in one place.
+depends:
+  - xrdp
+  - distro
+  - nushell
+  - tmux
+  - st
+  - hotkeyd
+  - quickshell

@@ -87,14 +87,6 @@
 # the moment a top-level shell.qml exists in a search path, so `qs -c kwi3`
 # still failed. See kwi3/test-bar-symlink-safe.sh.
 linux:
-  # hotkeyd is kwi3's keyboard (kwi3-x11-session starts it; kwi3 itself
-  # holds only the panic chord), and its kwi3-session fixes only land on a
-  # rebuild - so `rotz install kwi3` alone must rebuild it too, not just
-  # the meta-wsl-kwi3 path (dotfiles-r0lz follow-up: a stale Aug binary
-  # left $mod+Shift+q dead on kwi3 after kwi3-55l.1 had fixed it).
-  depends:
-    - hotkeyd
-
   links:
     config.js: ~/.config/kwi3/config.js
 
