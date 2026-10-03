@@ -20,7 +20,9 @@
 # same reasons. `st` is the terminal kwi3-x11-session's fallback path
 # reaches for if nothing else is on screen.
 depends:
-  - meta-xrdp   # xrdp, distro, nushell, tmux, st, hotkeyd, quickshell
+  - distro
+  - nushell
+  - tmux
   - nvim
   - lazygit
   - d2
@@ -31,6 +33,9 @@ depends:
   - claude
   - opencode
   - pi
+  - st
+  - hotkeyd
+  - quickshell
   - docker
   - kwi3
 

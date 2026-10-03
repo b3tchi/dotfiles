@@ -2,7 +2,9 @@
 # Arch Linux ARM with i3 (Termux:X11 or xrdp native-Xorg RDP)
 # Usage: rotz install meta-proot
 depends:
-  - meta-xrdp   # xrdp, distro, nushell, tmux, st, hotkeyd, quickshell
+  - distro
+  - nushell
+  - tmux
   - nvim
   - lazygit
   - d2
@@ -10,3 +12,7 @@ depends:
   - opencode
   - pi
   - i3
+  - hotkeyd
+  - quickshell
+  - st
+  - xrdp

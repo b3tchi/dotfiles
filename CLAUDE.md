@@ -152,13 +152,14 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 |---|---|---|
 | `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
 | `meta-wsl-sway` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, quickshell, docker + installs.depends: wsl, sway |
-| `meta-xrdp` | Shared xrdp desktop session (WM-agnostic; used by the WM metas below, not run directly) | xrdp, distro, nushell, tmux, st, hotkeyd, quickshell |
-| `meta-wsl-i3` | WSL (nested in Windows, i3 over xrdp — adr0004) | meta-xrdp + core + installs.depends: wsl, i3, xrdp |
-| `meta-wsl-kwi3` | WSL (nested in Windows, kwi3 over xrdp port 3392) | meta-xrdp + core + kwi3 + installs.depends: wsl, xrdp, kwi3 |
+| `meta-wsl-i3` | WSL (nested in Windows, i3 over xrdp — adr0004) | core + st, hotkeyd, quickshell + installs.depends: wsl, i3, xrdp |
+| `meta-wsl-kwi3` | WSL (nested in Windows, kwi3 over xrdp port 3392) | core + st, hotkeyd, quickshell, kwi3 + installs.depends: wsl, xrdp, kwi3 |
 | `meta-wsl-gnome` | WSL (nested in Windows, full GNOME over RDP — im005) | core (no quickshell) + installs.depends: wsl, gnome-rdp; installs the full `gnome` group + `gnome-shell-extension-forge` (i3-like tiling) |
-| `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | meta-xrdp + nvim, lazygit, d2, ssh, opencode, pi, i3 |
+| `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, d2, ssh, opencode, pi, i3, hotkeyd, quickshell, st, xrdp |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
+
+Metas are FLAT: a meta lists dots only, never another meta.
 
 Usage: `rotz install meta-linux`, `rotz install meta-wsl-i3`, etc.
 
