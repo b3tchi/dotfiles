@@ -1,0 +1,11 @@
+# ~/.xprofile - sourced by /etc/lightdm/Xsession for EVERY lightdm session
+# (i3, xfce, kwi3), so each block below gates on $DESKTOP_SESSION.
+#
+# kwi3: lightdm-gtk-greeter paints its background image onto the X root
+# window and leaves it there after login (_XROOTPMAP_ID). i3 covers it with
+# nitrogen and xfce with xfdesktop; kwi3 never touches the root window, so
+# without this the greeter's wallpaper shows behind every kwi3 window. Paint
+# it solid black - the same colour as kwi3's bar (kwi3/config.js).
+if [ "$DESKTOP_SESSION" = kwi3 ] && command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -solid '#000000'
+fi

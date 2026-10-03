@@ -32,11 +32,21 @@
 # Based on kwi3's reference dot (i3kwin/examples/kwi3-lightdm/dot.yaml).
 # Overrides: KWI3_SRC (the kwi3 checkout), KWI3_XSESSION_ROOT (prefix for
 # /usr, default none).
+#
+# WALLPAPER: xprofile -> ~/.xprofile paints the root window black in the kwi3
+# session only, hiding the greeter background lightdm-gtk-greeter leaves
+# behind. Needs xsetroot (xorg-xsetroot), installed below.
 linux:
+  links:
+    xprofile: ~/.xprofile
   installs:
     depends:
       - kwi3
     cmd: |
+      if ! command -v xsetroot >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm xorg-xsetroot ||
+          echo "kwi3-lightdm: WARNING -- xorg-xsetroot not installed; kwi3 keeps the greeter wallpaper" >&2
+      fi
       SRC="${KWI3_SRC:-$HOME/.local/src/kwi3}"
       if [ ! -d "$SRC/i3kwin" ]; then
         echo "kwi3-lightdm: no kwi3 checkout at $SRC - run 'rotz install kwi3' first" >&2
