@@ -1,9 +1,11 @@
-# Meta-package: native Linux (Arch / Manjaro) with kwi3 over xrdp.
+# Meta-package: native Linux (Arch / Manjaro) with kwi3 over xrdp AND on
+# the box's own display (kwi3-lightdm: a lightdm session, default once).
 # Usage: rotz install meta-native-kwi3
 #
 # The native counterpart of meta-wsl-kwi3: same session (kwi3 on its own
 # xrdp listener, port 3392 - kwi3/xrdp/xrdp-kwi3.service), minus the WSL
-# bits (the `wsl` prerequisite and docker). xrdp/dot.yaml picks its native
+# bits (the `wsl` prerequisite and docker), plus `kwi3-lightdm` - the local
+# display is the one thing a WSL box does not have. xrdp/dot.yaml picks its native
 # vs WSL config at runtime ([ -d /mnt/c ]), so the same dot serves both.
 #
 # FLAT, like every meta: lists dots only, never another meta.
@@ -30,6 +32,7 @@ depends:
   - hotkeyd
   - quickshell
   - kwi3
+  - kwi3-lightdm
 
 installs:
   # prerequisites: xrdp (the 3392 listener's binaries and TLS defaults)
@@ -39,5 +42,7 @@ installs:
   depends:
     - xrdp
     - kwi3
+    - kwi3-lightdm
   cmd: |
-    echo "meta-native-kwi3: kwi3 is on its own xrdp listener, port 3392."
+    echo "meta-native-kwi3: kwi3 is on its own xrdp listener, port 3392,"
+    echo "meta-native-kwi3: and a lightdm session on the local display."

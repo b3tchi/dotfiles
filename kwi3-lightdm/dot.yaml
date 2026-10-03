@@ -1,0 +1,93 @@
+# kwi3-lightdm - kwi3 as a session on this box's OWN display (lightdm), not
+# only over xrdp. Native boxes only: listed by meta-native-kwi3, never by
+# meta-wsl-kwi3 - a WSL distro has no local display, and installing this
+# there would still flip AccountsService's default session for nothing.
+#
+# kwi3 ships the session itself, user-agnostic (kwi3 repo kwi3-30f:
+# i3kwin/session/kwi3.desktop + kwi3-xsession, tested there). This dot is
+# only THIS box's wiring: copy both out of the release checkout the kwi3 dot
+# made (~/.local/src/kwi3, the same tree it links kwi3-x11-session from),
+# with sudo, and pick the default session:
+#   kwi3.desktop  -> /usr/share/xsessions/kwi3.desktop
+#   kwi3-xsession -> /usr/local/bin/kwi3-xsession
+# Copied because the greeter reads them as user `lightdm` before anyone has
+# logged in, and $HOME is mode 700 - a symlink into ~/.local/src would be
+# unreadable and kwi3 would silently vanish from the session list.
+# The wrapper exists because lightdm's /etc/lightdm/Xsession ends in an
+# unquoted `exec $@` and the greeter checks TryExec= on the system PATH, so
+# Exec= cannot name ~/.local/bin/kwi3-x11-session (linked by the kwi3 dot,
+# hence `depends: kwi3`) itself.
+#
+# DEFAULT SESSION: set ONCE, on the run that first installs kwi3.desktop -
+# AccountsService's per-user XSession (what lightdm preselects) plus
+# ~/.dmrc's Session= (its fallback). Never again after that, so a later pick
+# of i3/xfce in the greeter sticks across re-runs. i3 and xfce stay listed
+# in the greeter either way; a broken kwi3 exits back to it.
+#
+# A kwi3 release that predates kwi3-30f (no kwi3.desktop), or no
+# /usr/share/xsessions (no display manager): skipped, named, exit 0.
+# No kwi3 checkout at all: exit 1, named.
+# A refused sudo: exit 1, named, nothing listed in the greeter.
+#
+# KWI3_SRC and KWI3_XSESSION_ROOT (default "", i.e. /) let
+# kwi3/test-xsession-install.sh run this exact text with no root.
+linux:
+  installs:
+    depends:
+      - kwi3
+    cmd: |
+      SRC="${KWI3_SRC:-$HOME/.local/src/kwi3}"
+      if [ ! -d "$SRC/i3kwin" ]; then
+        echo "kwi3-lightdm: no kwi3 checkout at $SRC - run 'rotz install kwi3' first" >&2
+        exit 1
+      fi
+      XS_SRC="$SRC/i3kwin/session"
+      XS_ROOT="${KWI3_XSESSION_ROOT:-}"
+      XS_DIR="$XS_ROOT/usr/share/xsessions"
+      XS_DESKTOP_SRC="$XS_SRC/kwi3.desktop"
+      XS_WRAP_SRC="$XS_SRC/kwi3-xsession"
+      if [ ! -f "$XS_DESKTOP_SRC" ] || [ ! -f "$XS_WRAP_SRC" ]; then
+        echo "kwi3-lightdm: the kwi3 release in $SRC has no i3kwin/session/kwi3.desktop (needs one with kwi3-30f) - local session not installed" >&2
+      elif [ ! -d "$XS_DIR" ]; then
+        echo "kwi3-lightdm: no $XS_DIR (no display manager?) - local session not installed" >&2
+      else
+        XS_FIRST=0
+        [ -f "$XS_DIR/kwi3.desktop" ] || XS_FIRST=1
+        XS_FAILED=0
+        xs_install() {   # xs_install SRC DST MODE
+          if [ -f "$2" ] && cmp -s "$1" "$2"; then
+            echo "kwi3-lightdm: $2 unchanged"
+          elif sudo mkdir -p "$(dirname "$2")" && sudo install -m "$3" "$1" "$2"; then
+            echo "kwi3-lightdm: wrote $2"
+          else
+            echo "kwi3-lightdm: FAILED to install $1 -> $2 (sudo mkdir/install failed)" >&2
+            XS_FAILED=1
+          fi
+        }
+        # Wrapper first: a .desktop whose TryExec is missing is hidden by
+        # the greeter anyway, but never list a session that cannot start.
+        xs_install "$XS_WRAP_SRC" "$XS_ROOT/usr/local/bin/kwi3-xsession" 755
+        [ "$XS_FAILED" = 1 ] || xs_install "$XS_DESKTOP_SRC" "$XS_DIR/kwi3.desktop" 644
+
+        if [ "$XS_FAILED" = 1 ]; then
+          echo "kwi3-lightdm: local session NOT installed - re-run 'rotz install kwi3-lightdm' once sudo works" >&2
+          exit 1
+        elif [ "$XS_FIRST" = 1 ]; then
+          if sudo busctl call org.freedesktop.Accounts "/org/freedesktop/Accounts/User$(id -u)" \
+               org.freedesktop.Accounts.User SetXSession s kwi3; then
+            echo "kwi3-lightdm: kwi3 is now $(id -un)'s default lightdm session (AccountsService)"
+          else
+            echo "kwi3-lightdm: WARNING -- could not set the default session via AccountsService; pick kwi3 once in the greeter" >&2
+          fi
+          if [ -f "$HOME/.dmrc" ] && grep -q '^Session=' "$HOME/.dmrc"; then
+            sed -i 's/^Session=.*/Session=kwi3/' "$HOME/.dmrc"
+          elif [ -f "$HOME/.dmrc" ] && grep -q '^\[Desktop\]' "$HOME/.dmrc"; then
+            sed -i '/^\[Desktop\]/a Session=kwi3' "$HOME/.dmrc"
+          else
+            printf '[Desktop]\nSession=kwi3\n' >> "$HOME/.dmrc"
+          fi
+        else
+          echo "kwi3-lightdm: already installed - default session left as chosen in the greeter"
+        fi
+      fi
+
