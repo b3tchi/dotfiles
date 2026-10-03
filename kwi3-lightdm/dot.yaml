@@ -3,8 +3,8 @@
 # meta-wsl-kwi3 - a WSL distro has no local display, and installing this
 # there would still flip AccountsService's default session for nothing.
 #
-# kwi3 ships the session itself, user-agnostic (kwi3 repo kwi3-30f:
-# i3kwin/session/kwi3.desktop + kwi3-xsession, tested there). This dot is
+# kwi3 ships the session itself, user-agnostic (kwi3 repo
+# i3kwin/session/kwi3.desktop + kwi3-xsession). This dot is
 # only THIS box's wiring: copy both out of the release checkout the kwi3 dot
 # made (~/.local/src/kwi3, the same tree it links kwi3-x11-session from),
 # with sudo, and pick the default session:
@@ -30,9 +30,8 @@
 # A refused sudo: exit 1, named, nothing listed in the greeter.
 #
 # Based on kwi3's reference dot (i3kwin/examples/kwi3-lightdm/dot.yaml).
-# Tested from the kwi3 repo, which runs this exact text with no root
-# (KWI3_SRC, KWI3_XSESSION_ROOT):
-#   KWI3_DOTFILES=~/.dotfiles i3kwin/test/xsession-install-test.sh
+# Overrides: KWI3_SRC (the kwi3 checkout), KWI3_XSESSION_ROOT (prefix for
+# /usr, default none).
 linux:
   installs:
     depends:
