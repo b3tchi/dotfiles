@@ -29,8 +29,10 @@
 # No kwi3 checkout at all: exit 1, named.
 # A refused sudo: exit 1, named, nothing listed in the greeter.
 #
-# KWI3_SRC and KWI3_XSESSION_ROOT (default "", i.e. /) let
-# kwi3/test-xsession-install.sh run this exact text with no root.
+# Based on kwi3's reference dot (i3kwin/examples/kwi3-lightdm/dot.yaml).
+# Tested from the kwi3 repo, which runs this exact text with no root
+# (KWI3_SRC, KWI3_XSESSION_ROOT):
+#   KWI3_DOTFILES=~/.dotfiles i3kwin/test/xsession-install-test.sh
 linux:
   installs:
     depends:
