@@ -1,0 +1,43 @@
+# Meta-package: native Linux (Arch / Manjaro) with kwi3 over xrdp.
+# Usage: rotz install meta-native-kwi3
+#
+# The native counterpart of meta-wsl-kwi3: same session (kwi3 on its own
+# xrdp listener, port 3392 - kwi3/xrdp/xrdp-kwi3.service), minus the WSL
+# bits (the `wsl` prerequisite and docker). xrdp/dot.yaml picks its native
+# vs WSL config at runtime ([ -d /mnt/c ]), so the same dot serves both.
+#
+# FLAT, like every meta: lists dots only, never another meta.
+#
+# `hotkeyd` and `quickshell` are the keyboard daemon and the bar
+# kwi3-x11-session starts; `distro` (~/.bashrc), `nushell`
+# (wm-launch-terminal, tmux-start) and `tmux` are what $mod+Return needs to
+# land a terminal in the project's tmux session; `st` is that terminal.
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - d2
+  - fonts
+  - ssh
+  - glab
+  - azcli
+  - claude
+  - opencode
+  - pi
+  - st
+  - hotkeyd
+  - quickshell
+  - kwi3
+
+installs:
+  # prerequisites: xrdp (the 3392 listener's binaries and TLS defaults)
+  # before kwi3, whose own install cmd writes and starts the kwi3 xrdp
+  # units. rotz needs a non-empty `cmd` beside `installs.depends`, hence
+  # the informational echo (same as meta-wsl-kwi3).
+  depends:
+    - xrdp
+    - kwi3
+  cmd: |
+    echo "meta-native-kwi3: kwi3 is on its own xrdp listener, port 3392."
