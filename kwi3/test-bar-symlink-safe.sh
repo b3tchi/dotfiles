@@ -135,6 +135,8 @@ echo '#!/bin/sh' > "$SRC/i3kwin/adapters/x11/build/i3kwin-x11"
 chmod +x "$SRC/i3kwin/adapters/x11/build/i3kwin-x11"
 : > "$SRC/i3kwin/session/kwi3-x11-session"
 : > "$SRC/i3kwin/session/kwi3-session-env.sh"
+mkdir -p "$SRC/i3kwin/bin"
+: > "$SRC/i3kwin/bin/kwi3-msg"
 FINAL_BIN="$SRC/i3kwin/adapters/x11/build/i3kwin-x11"
 
 env -i \
@@ -168,6 +170,15 @@ if [ -L "$FAKE_HOME/.local/bin/kwi3-x11-session" ]; then
   ok "kwi3-x11-session is still linked from the clone"
 else
   bad "kwi3-x11-session link is missing"
+fi
+# kwi3-msg must be on PATH: nushell/actions/wm-ipc.nu does nothing without
+# it, so wm-current-workspace answered "local" and every terminal launched on
+# a project workspace joined tmux session @local instead of the project's.
+if [ -L "$FAKE_HOME/.local/bin/kwi3-msg" ] \
+   && [ "$(readlink "$FAKE_HOME/.local/bin/kwi3-msg")" = "$SRC/i3kwin/bin/kwi3-msg" ]; then
+  ok "kwi3-msg is linked from the clone (wm-ipc.nu needs it on PATH)"
+else
+  bad "kwi3-msg link is missing or wrong"
 fi
 has "$TRACE" "rotz link kwi3 --force" "and rotz link kwi3 --force still ran"
 

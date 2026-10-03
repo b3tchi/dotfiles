@@ -224,6 +224,10 @@ linux:
       ln -sf "$FINAL_BIN" "$HOME/.local/bin/i3kwin-x11"
       ln -sf "$SRC/i3kwin/session/kwi3-x11-session" "$HOME/.local/bin/kwi3-x11-session"
       ln -sf "$SRC/i3kwin/session/kwi3-session-env.sh" "$HOME/.local/bin/kwi3-session-env.sh"
+      # kwi3-msg on PATH: nushell/actions/wm-ipc.nu (and through it
+      # wm-current-workspace -> wm-launch-terminal's tmux session pick) does
+      # nothing without it, so every terminal joined tmux session "local".
+      ln -sf "$SRC/i3kwin/bin/kwi3-msg" "$HOME/.local/bin/kwi3-msg"
 
       rotz link kwi3 --force
 
