@@ -791,15 +791,23 @@ PanelWindow {
     property string batVal:  ""
     property string batStatus: ""
 
+    // The state file outlives the daemon (a dead daemon leaves it non-empty),
+    // so the probe also asks whether the process is alive. The file's mtime is
+    // no liveness signal: the daemon skips rewrites while values are unchanged.
+    // No pgrep -> liveness unknown, trust the file as before.
     Process {
         id: daemonProbe
         running: true
-        command: ["sh", "-c", "[ -s " + root.daemonFile + " ] && echo yes || echo no"]
+        command: ["sh", "-c", "[ -s " + root.daemonFile + " ] && " +
+            "{ ! command -v pgrep >/dev/null 2>&1 || pgrep -x qs-stats-daemon >/dev/null 2>&1; } " +
+            "&& echo yes || echo no"]
         stdout: SplitParser {
             onRead: data => {
                 if (data.trim() === "yes") {
                     root.daemonMode = true
                     root.daemonProbed = true
+                } else if (root.daemonProbed) {
+                    root.daemonMode = false    // daemon died — polling until it is back
                 } else if (root.daemonProbeTries < 5) {
                     root.daemonProbeTries++
                     daemonProbeRetry.restart()
@@ -810,6 +818,21 @@ PanelWindow {
         }
     }
     Timer { id: daemonProbeRetry; interval: 2000; onTriggered: daemonProbe.running = true }
+    // Keep probing once decided: a daemon that dies mid-session would else
+    // freeze the bar on its last state (clicks act, the widgets never move);
+    // one that starts later is picked up again.
+    Timer { id: daemonWatch; interval: 30000; repeat: true; running: root.daemonProbed; onTriggered: daemonProbe.running = true }
+    // The timers below assign `running`, which breaks the `!daemonMode`
+    // bindings — so a mode flip restarts each side explicitly.
+    onDaemonModeChanged: {
+        feedProc.running = daemonMode
+        if (!daemonMode) {
+            statsProc.running = true
+            netProc.running = true
+            volProc.running = true
+            batProc.running = true
+        }
+    }
 
     Process {
         id: feedProc
