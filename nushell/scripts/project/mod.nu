@@ -10,8 +10,17 @@ export-env {
 	# Auto-cd to project directory by detecting WM workspace name
 	# Uses wm-ipc.nu to query i3/sway for the focused workspace,
 	# then looks up the project path in projects.yaml
+	# Inside tmux the session group IS the project (tmux-start names groups
+	# after projects) — trust it over the focused workspace, which can belong
+	# to another project when the pane is spawned via project go/tmux-project.
 	let wm_ipc_path = ('~/.local/bin/wm-ipc.nu' | path expand)
-	let project_name = if ($wm_ipc_path | path exists) {
+	let tmux_group = if ($env | get -o TMUX | is-not-empty) {
+		do { ^tmux display-message -p '#{session_group}' } | complete
+			| if $in.exit_code == 0 { $in.stdout | str trim } else { '' }
+	} else { '' }
+	let project_name = if ($tmux_group | is-not-empty) {
+		$tmux_group
+	} else if ($wm_ipc_path | path exists) {
 		try {
 			const wm_ipc = '~/.local/bin/wm-ipc.nu'
 			use $wm_ipc *
