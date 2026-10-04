@@ -1,0 +1,33 @@
+#!/bin/sh
+# i3exit - session-aware front for Manjaro's /usr/bin/i3exit (dotfiles-hw9t).
+#
+# Linked to ~/.local/bin/i3exit, which is first on PATH, so the hotkeyd system
+# layer ($mod+0, cmd/hotkeyd/config.go) and i3's zz-fallback-binds.conf mode
+# both land here. Only `logout` differs: the stock script does `i3-msg exit`,
+# a no-op in a kwi3 session (no i3 there). On kwi3 ($KWI3SOCK set) the
+# i3kwin-x11 that owns that socket gets SIGTERM instead - it quits cleanly with
+# status 0, kwi3-x11-session returns, and the display manager takes over.
+# Never falls back to i3-msg when $KWI3SOCK is set (same rule as wm-ipc.nu):
+# an i3 answering beside kwi3 is the wrong window manager to end.
+#
+# Every other verb (lock, suspend, reboot, ...) is WM-neutral and goes to the
+# system script unchanged.
+
+SYS=/usr/bin/i3exit
+
+if [ "$1" = logout ] && [ -n "$KWI3SOCK" ]; then
+    for pid in $(pgrep -u "$(id -u)" -x i3kwin-x11); do
+        if tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
+            | grep -qxF "KWI3SOCK=$KWI3SOCK"; then
+            exec kill -TERM "$pid"
+        fi
+    done
+    echo "i3exit: no i3kwin-x11 owns KWI3SOCK=$KWI3SOCK - not logging out" >&2
+    exit 1
+fi
+
+if [ ! -x "$SYS" ]; then
+    echo "i3exit: $SYS missing (Manjaro's i3exit package) - cannot '$*'" >&2
+    exit 1
+fi
+exec "$SYS" "$@"

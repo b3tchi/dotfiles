@@ -49,6 +49,9 @@
 # does not need this binary at all — hotkeyd-panic.sh hands the keyboard back
 # to i3's own bind table — so a host in this state is degraded, not locked out.
 linux:
+  links:
+    # session-aware i3exit (kwi3 logout) - shadows /usr/bin/i3exit via PATH
+    i3exit: ~/.local/bin/i3exit
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
