@@ -21,6 +21,7 @@ linux:
     config: ~/.config/quickshell
     overlay: ~/.config/quickshell-overlay
     notif: ~/.config/quickshell-notif
+    qs-stats-daemon.service: ~/.config/systemd/user/qs-stats-daemon.service
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -42,3 +43,9 @@ linux:
         scrot imagemagick xclip libnotify
       {{/if}}
       rotz link quickshell --force
+      # stats daemon: one per machine as a user unit (binary built by
+      # qs-start.sh, which starts the unit; enable = up from login on)
+      if [ -d /run/systemd/system ]; then
+        systemctl --user daemon-reload
+        systemctl --user enable qs-stats-daemon.service
+      fi

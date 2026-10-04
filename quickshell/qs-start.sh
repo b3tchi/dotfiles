@@ -70,10 +70,22 @@ if [ -f "$QS_SRC" ] && [ -n "$QS_CC" ]; then
         fi
     fi
 fi
-# flock so two sessions starting at once don't race the singleton check.
-# Restart only after a rebuild (stale binary); otherwise leave the running
-# daemon alone — another session's bar may be reading it right now.
-if [ -x "$QS_DAEMON" ]; then
+# With systemd the user unit owns it — one per machine, Restart=always, up
+# from login on regardless of which session starts first (or goes down).
+# `start` is a no-op while it runs; restart only after a rebuild.
+if [ -x "$QS_DAEMON" ] && [ -d /run/systemd/system ] &&
+   systemctl --user cat qs-stats-daemon.service >/dev/null 2>&1; then
+    QS_STATS_FILE=/tmp/qs-stats.state   # the unit's path, not $TMPDIR's
+    if [ -n "$QS_REBUILT" ]; then
+        systemctl --user restart qs-stats-daemon.service
+    else
+        systemctl --user start qs-stats-daemon.service
+    fi
+# No systemd (Termux, proot): first session up starts it. flock so two
+# sessions starting at once don't race the singleton check. Restart only
+# after a rebuild (stale binary); otherwise leave the running daemon alone —
+# another session's bar may be reading it right now.
+elif [ -x "$QS_DAEMON" ]; then
     (
         flock -w 5 9 || exit 0
         if [ -n "$QS_REBUILT" ]; then

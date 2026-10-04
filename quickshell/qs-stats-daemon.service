@@ -1,0 +1,21 @@
+[Unit]
+Description=qs-stats-daemon: machine-wide stats feed for the quickshell bar
+Documentation=file:%h/.dotfiles/quickshell/qs-stats-daemon.c
+
+# One daemon per machine, shared by every session's bar (local, xrdp, kwi3).
+# Before this unit it was started by whichever session's qs-start.sh ran
+# first; when that session went down (kwi3 :0 restart, 2026-10-03) nothing
+# started it again and the bars froze on the stale state file.
+# Hosts without systemd (Termux, proot) keep qs-start.sh's setsid path.
+
+[Service]
+# Binary is built (hash-checked) by qs-start.sh. A daemon that same script
+# started with setsid before this unit existed would write the same file;
+# reap it so the unit's is the only one. `-` = no stray is fine.
+ExecStartPre=-/usr/bin/pkill -x qs-stats-daemon
+ExecStart=%h/.local/bin/qs-stats-daemon /tmp/qs-stats.state
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
