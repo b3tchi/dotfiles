@@ -228,6 +228,18 @@ linux:
       # wm-current-workspace -> wm-launch-terminal's tmux session pick) does
       # nothing without it, so every terminal joined tmux session "local".
       ln -sf "$SRC/i3kwin/bin/kwi3-msg" "$HOME/.local/bin/kwi3-msg"
+      # kwi3-recover (kwi3 sp006): what kwi3-x11-session points the panic
+      # chord ($mod+Shift+r) at - hotkeyd-panic.sh recover, then this
+      # display's bar restarted, like i3's hammer. Guarded: a tag older than
+      # sp006 has no such file, and a dangling link left from a newer one is
+      # removed, so the launcher falls back to the plain recover (it exports
+      # nothing when the wrapper is not executable). ln -sf replaces a
+      # regular file at that path too.
+      if [ -e "$SRC/i3kwin/session/kwi3-recover" ]; then
+        ln -sf "$SRC/i3kwin/session/kwi3-recover" "$HOME/.local/bin/kwi3-recover"
+      else
+        rm -f "$HOME/.local/bin/kwi3-recover"
+      fi
 
       rotz link kwi3 --force
 
