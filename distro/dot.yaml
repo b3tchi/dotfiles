@@ -41,6 +41,7 @@ linux:
           go-yq \
           chafa \
           xclip \
+          pacman-contrib \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
           xfce-theme-greybird
 
@@ -63,6 +64,7 @@ linux:
           go-yq \
           chafa \
           xclip \
+          pacman-contrib \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
         sudo pacman -S --needed --noconfirm git base-devel
@@ -86,6 +88,7 @@ linux:
           go-yq dasel \
           chafa \
           xclip \
+          pacman-contrib \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
         sudo pacman -S --needed --noconfirm git base-devel
