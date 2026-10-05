@@ -2213,6 +2213,19 @@ def bd_ensure_schema [] {
   $changed
 }
 
+# Point .beads/interactions.jsonl at /dev/null. bd appends every status change
+# there unconditionally (no config key to disable it), but the file is
+# gitignored and never synced — the same changes already live in Dolt commits
+# and issue close_reason, which ride `bd dolt push/pull`. Idempotent.
+def bd_null_interactions [root: string] {
+  let f = $"($root)/.beads/interactions.jsonl"
+  let is_null = (($f | path type) == "symlink") and ((^readlink $f | str trim) == "/dev/null")
+  if $is_null { return }
+  if ($f | path exists) { rm $f }
+  ^ln -s /dev/null $f
+  print -e "Linked .beads/interactions.jsonl -> /dev/null (audit log is local-only noise)"
+}
+
 def bd_preflight [] {
   if (which bd | is-empty) {
     error make { msg: "bd (beads) CLI not found on PATH — run infinifu/install.sh" }
@@ -2223,6 +2236,7 @@ def bd_preflight [] {
   }
   bd_strip_hooks $root
   bd_ensure_config
+  bd_null_interactions $root
 }
 
 def "main bd" [] {

@@ -398,6 +398,8 @@ Workflow:
 - `akm bd import` = recovery only — replays closed history into Dolt. It cannot restore live issues; those sync exclusively via `bd dolt push/pull`.
 - For cross-machine sync: `bd dolt push` / `bd dolt pull` (separate from git). Pull requires a clean Dolt working set; bd's config-table churn can block it — if so, commit + pull in one SQL session against the shared server.
 
+`.beads/interactions.jsonl` (bd's always-on audit log, no config key to disable) is symlinked to `/dev/null` by `akm bd init` — gitignored, never synced, and redundant with Dolt history + issue `close_reason`.
+
 **Run `akm bd init` after `rotz link` on a fresh clone** (or after `bd hooks install` re-installs auto-hooks). Idempotent.
 
 ## Session Completion
