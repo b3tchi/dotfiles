@@ -1905,7 +1905,7 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 		t.Fatalf("starting Xvfb: %v", err)
 	}
 	t.Cleanup(func() { xvfb.Process.Kill(); xvfb.Wait() })
-	if !waitForPathIntegration("/tmp/.X11-unix/X198", 5*time.Second) {
+	if !waitForXAccepting(198, 5*time.Second) {
 		t.Fatal("Xvfb did not create its socket in time")
 	}
 
@@ -2100,14 +2100,26 @@ func xSocketPath(displayNum int) string {
 // xAccepting reports whether something is actually listening on
 // displayNum's socket. os.Stat is NOT enough: a SIGKILLed X server leaves
 // its socket inode behind, and a rig that only stats it happily proceeds
-// against a dead display.
+// against a dead display. The abstract namespace is tried too, as
+// x11.dialUnixWithAbstractFallback does: under WSLg /tmp/.X11-unix is a
+// read-only mount, so Xvfb binds only "@/tmp/.X11-unix/X<n>".
 func xAccepting(displayNum int) bool {
-	c, err := net.DialTimeout("unix", xSocketPath(displayNum), 250*time.Millisecond)
-	if err != nil {
-		return false
+	for _, addr := range []string{xSocketPath(displayNum), "@" + xSocketPath(displayNum)} {
+		if c, err := net.DialTimeout("unix", addr, 250*time.Millisecond); err == nil {
+			c.Close()
+			return true
+		}
 	}
-	c.Close()
-	return true
+	return false
+}
+
+// xTaken reports whether displayNum is unsafe to hand a fresh Xvfb: a
+// socket file (live or stale) or a listener in either namespace.
+func xTaken(displayNum int) bool {
+	if _, err := os.Stat(xSocketPath(displayNum)); err == nil {
+		return true
+	}
+	return xAccepting(displayNum)
 }
 
 func waitForXAccepting(displayNum int, timeout time.Duration) bool {

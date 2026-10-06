@@ -634,7 +634,7 @@ func pickFreeIntegrationDisplay(t *testing.T) int {
 	t.Helper()
 	for attempt := 0; attempt < 50; attempt++ {
 		n := 6000 + rand.IntN(2000)
-		if _, err := os.Stat(fmt.Sprintf("/tmp/.X11-unix/X%d", n)); err != nil {
+		if !xTaken(n) {
 			return n
 		}
 	}
@@ -659,12 +659,8 @@ func startIntegrationXvfb(t *testing.T, dispNum int) {
 		os.Remove(sockPath)
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(sockPath); err == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+	if waitForXAccepting(dispNum, 5*time.Second) {
+		return
 	}
 	t.Fatalf("Xvfb did not create its socket in time: %s", stderr.String())
 }

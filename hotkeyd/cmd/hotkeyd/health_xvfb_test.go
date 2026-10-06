@@ -47,7 +47,7 @@ func pickPrivateXvfbDisplay(t *testing.T) int {
 	t.Helper()
 	for attempt := 0; attempt < 50; attempt++ {
 		n := 6000 + rand.Intn(2000)
-		if _, err := os.Stat(x11.SocketPath(n)); err != nil {
+		if !xTaken(n) {
 			return n
 		}
 	}
@@ -72,16 +72,12 @@ func startPrivateXvfb(t *testing.T, dispNum int) (cleanup func()) {
 		t.Fatalf("starting private Xvfb: %s", err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(sockPath); err == nil {
-			return func() {
-				cmd.Process.Kill()
-				cmd.Wait()
-				os.Remove(sockPath)
-			}
+	if waitForXAccepting(dispNum, 5*time.Second) {
+		return func() {
+			cmd.Process.Kill()
+			cmd.Wait()
+			os.Remove(sockPath)
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 	cmd.Process.Kill()
 	cmd.Wait()

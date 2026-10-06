@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,7 @@ func pickFreeDisplay(t *testing.T) int {
 	t.Helper()
 	for attempt := 0; attempt < 50; attempt++ {
 		n := 200 + rand.IntN(2000)
-		if _, err := os.Stat(SocketPath(n)); err != nil {
+		if !socketUp(SocketPath(n)) {
 			return n
 		}
 	}
@@ -64,10 +65,27 @@ func startXvfb(t *testing.T, dispNum int, extraArgs ...string) (cleanup func()) 
 	}
 }
 
+// socketUp reports whether an X server is reachable at path, either as a
+// file or in Linux's abstract namespace -- the same two places
+// dialUnixWithAbstractFallback tries. Under WSLg /tmp/.X11-unix is a
+// read-only mount, so Xvfb binds only the abstract socket and a file-only
+// check never sees it come up (or sees a taken display as free).
+func socketUp(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	c, err := net.Dial("unix", "@"+path)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
 func waitForSocket(path string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
+		if socketUp(path) {
 			return true
 		}
 		time.Sleep(20 * time.Millisecond)

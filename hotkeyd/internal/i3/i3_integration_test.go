@@ -2,6 +2,7 @@ package i3
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,7 +49,7 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 		t.Fatalf("starting Xvfb: %v", err)
 	}
 	xSockPath := fmt.Sprintf("/tmp/.X11-unix/X%s", strings.TrimPrefix(display, ":"))
-	if !waitForPath(xSockPath, 5*time.Second) {
+	if !waitForX(xSockPath, 5*time.Second) {
 		xvfb.Process.Kill()
 		xvfb.Wait()
 		t.Fatal("Xvfb did not create its socket in time")
@@ -84,6 +85,24 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 		t.Fatal("live i3 did not start")
 	}
 	return sockPath, killI3, cleanup
+}
+
+// waitForX is waitForPath for an X socket, which may exist only in Linux's
+// abstract namespace: under WSLg /tmp/.X11-unix is a read-only mount, so
+// Xvfb cannot create the file and binds "@/tmp/.X11-unix/X<n>" alone.
+func waitForX(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		if c, err := net.Dial("unix", "@"+path); err == nil {
+			c.Close()
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 func waitForPath(path string, timeout time.Duration) bool {
