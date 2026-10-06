@@ -497,6 +497,11 @@ if (check "round-trip: second restore respawns the terminals with fresh slot cla
 let r = (run-ws $tmp $test_path $k ["save" "--workspace" "dev"])
 let sv2 = (open $cache | get workspaces | where name == "dev" | first)
 if (check "round-trip: a second save is stable (same layout, same state)" ($r.exit_code == 0 and $sv2.layout == $sv.layout and ($sv2.state | get "1" | get session) == "a" and ($sv2.state | get "2" | get session) == "b") $"layout1=($sv.layout | to json -r) layout2=($sv2.layout | to json -r)") { $passed += 1 } else { $failed += 1 }
+# A corrupt cache must not abort a FULL save: on main it is simply overwritten.
+"workspaces: [unclosed\n  - : : {" | save -f $cache
+let r = (run-ws $tmp $test_path $k ["save"])
+let healed = (try { open $cache | get workspaces | length } catch { -1 })
+if (check "round-trip: a full save over a corrupt cache succeeds and rewrites it" ($r.exit_code == 0 and $healed > 0) $"healed=($healed) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 ^rm -f $"($tmp)/mapspawn"
 
 # ── 8. tmux down ──────────────────────────────────────────────────────────────

@@ -514,7 +514,10 @@ def "main save" [
 
     let tmux_cache = (build-tmux-window-cache $local_clients $thin_clients)
     let prev_cache_path = ("~/.cache/sway-state.yaml" | path expand)
-    let prev_ws = if ($prev_cache_path | path exists) { open $prev_cache_path | get -o workspaces | default [] } else { [] }
+    # A missing or corrupt cache means "no history" - a full save overwrites it.
+    let prev_ws = if ($prev_cache_path | path exists) {
+        try { open $prev_cache_path | get -o workspaces | default [] } catch { [] }
+    } else { [] }
 
     let fresh = ($workspaces_raw | each { |ws|
         # state is a record keyed by id; enrich each value
