@@ -17,6 +17,8 @@ def is-term-class [cls: string] {
 
 # kwi3's tree.get carries no pid, so a slot terminal cannot be matched to its
 # tmux client; it inherits the session of the same slot in the previous cache.
+# STALENESS: that session is only the last one recorded for the slot; it is
+# wrong if the user switched tmux session inside that terminal after restore.
 def inherit-slot-session [entry: record, ws_name: string, prev: list<record>] {
     let cls = ($entry | get -o class | default "")
     let pre = $"wm-slot-($ws_name)-"
