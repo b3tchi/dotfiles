@@ -1,0 +1,49 @@
+#!/usr/bin/env nu
+# wm-session-env-snapshot - freeze the SESSION's canonical environment so
+# wm-launch-detach (sp038, poc023) can start children from it instead of from
+# whatever env the caller happens to carry (a tmux pane, nushell, ...).
+#
+# Writes $XDG_RUNTIME_DIR/wm-session-env-<display>, <display> being $DISPLAY
+# with ':' and '.' replaced by '_' (:10 -> _10). Format: `env -0` - every
+# NAME=value entry terminated by NUL, so values may hold newlines and '='.
+# Read back with: open --raw <file> | split row (char -i 0)
+# Atomic (tmp + mv), mode 0600.
+#
+# Call it at session start, right before the window manager is exec'd
+# (xrdp/xinitrc, i3 `exec --no-startup-id`). Names dropped here, once, at
+# write time - never at launch time, where a denylist drifts:
+const DROP = [
+    TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK
+    OLDPWD PWD SHLVL _
+    CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS
+]
+
+# Exit 78 (EX_CONFIG) naming the missing variable, writing nothing.
+def refuse [var: string] {
+    print -e $"wm-session-env-snapshot: ($var) is not set - refusing to write a snapshot"
+    exit 78
+}
+
+def main [] {
+    let runtime = ($env | get -o XDG_RUNTIME_DIR | default "")
+    if $runtime == "" { refuse XDG_RUNTIME_DIR }
+    let display = ($env | get -o DISPLAY | default "")
+    if $display == "" { refuse DISPLAY }
+
+    let tag = ($display | str replace --all ":" "_" | str replace --all "." "_")
+    let dest = $"($runtime)/wm-session-env-($tag)"
+    let tmp = $"($dest).tmp.(random uuid)"
+
+    # `env -0` is the environment as a child of this process sees it.
+    let body = (
+        ^env -0 | decode utf-8
+        | split row (char -i 0)
+        | where {|e| $e != "" and (($e | split row "=" | first) not-in $DROP) }
+        | each {|e| $"($e)(char -i 0)" }
+        | str join
+    )
+
+    ^install -m 600 /dev/null $tmp
+    $body | into binary | save --raw --force $tmp
+    ^mv -f $tmp $dest
+}

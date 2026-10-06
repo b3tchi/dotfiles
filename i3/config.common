@@ -52,6 +52,10 @@ tiling_drag modifier titlebar
 #   config (desktop) -> wm-launch-terminal st (tmux/project wrapper)
 #   config-proot-xrdp (RDP) -> plain st
 
+# session env snapshot for wm-launch-detach (sp038): the WM's own environment,
+# frozen once so launched apps never inherit a caller's (tmux pane, nushell).
+exec --no-startup-id ~/.local/bin/wm-session-env-snapshot
+
 # kill focused window
 bindsym $mod+Shift+q kill
 

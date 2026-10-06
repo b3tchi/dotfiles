@@ -58,6 +58,13 @@ mkstub setxkbmap 'if [ "$1" = -query ]; then
 fi
 exit 0'
 mkstub i3        'exit 0'
+# sp038 T1: the snapshot writer is a recorder too; only ORDER is asserted.
+cat > "$FAKE_HOME/.local/bin/wm-session-env-snapshot" <<EOF
+#!/bin/sh
+printf 'wm-session-env-snapshot\n' >> "$TRACE"
+exit 0
+EOF
+chmod +x "$FAKE_HOME/.local/bin/wm-session-env-snapshot"
 
 cat > "$FAKE_HOME/.local/bin/kwi3-x11-session" <<EOF
 #!/bin/sh
@@ -176,6 +183,37 @@ if git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
 else
   echo "  SKIP diff-against-base check ($BASE_REF not found in this clone)"
 fi
+
+# ===========================================================================
+echo "-- 7. sp038 T1: the session env snapshot is taken BEFORE each exec"
+# ===========================================================================
+# line number of the first trace line starting with $1 (empty when absent)
+lineof() { grep -n "^$1" "$TRACE" | head -1 | cut -d: -f1; }
+before() { # before SNAP-LINE EXEC-LINE LABEL
+  if [ -n "$1" ] && [ -n "$2" ] && [ "$1" -lt "$2" ]; then ok "$3"; else bad "$3 (snapshot line '$1', exec line '$2')"; fi
+}
+cat > "$FAKE_HOME/.local/bin/kwi3-x11-session" <<EOF
+#!/bin/sh
+printf 'kwi3-x11-session %s\n' "\$*" >> "$TRACE"
+exit 0
+EOF
+chmod +x "$FAKE_HOME/.local/bin/kwi3-x11-session"
+
+run_xinitrc KWI3_SESSION=1 STUB_ENV_MODE=agree >/dev/null
+before "$(lineof wm-session-env-snapshot)" "$(lineof kwi3-x11-session)" "snapshot-before-exec-kwi3: snapshot recorded before kwi3-x11-session"
+hasnt "$TRACE" "i3 " "snapshot-before-exec-kwi3: no i3 exec"
+
+run_xinitrc >/dev/null
+before "$(lineof wm-session-env-snapshot)" "$(lineof 'i3 ')" "snapshot-before-exec-i3: snapshot recorded before i3"
+
+run_xinitrc KWI3_SESSION=1 STUB_ENV_MODE=noexport >/dev/null 2>&1
+before "$(lineof wm-session-env-snapshot)" "$(lineof 'i3 ')" "snapshot-on-fallthrough: refusal path still snapshots, before i3"
+check "$(grep -c '^wm-session-env-snapshot' "$TRACE")" "1" "snapshot-on-fallthrough: exactly once"
+
+# a missing writer must not stop the session
+rm -f "$FAKE_HOME/.local/bin/wm-session-env-snapshot"
+run_xinitrc >/dev/null 2>&1
+has "$TRACE" "i3 " "snapshot writer missing: i3 still exec'd"
 
 echo
 echo "test-xinitrc: $pass passed, $fail failed"

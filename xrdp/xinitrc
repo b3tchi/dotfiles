@@ -23,6 +23,21 @@ setxkbmap -layout "${xkb_layout:-us}" ${xkb_variant:+-variant "$xkb_variant"} \
     -model pc104 -option ""
 unset xkb_layout xkb_variant
 
+# ------------------------------------------- session env snapshot (sp038 T1)
+# wm-launch-detach starts every launched app from THIS environment, never the
+# caller's. Written right before each exec below (kwi3 and i3), when DISPLAY
+# and everything the session exported are final. A failure is reported, not
+# fatal: the session must still come up (launches then refuse by name).
+wm_session_env_snapshot() {
+    _snap="$HOME/.local/bin/wm-session-env-snapshot"
+    if [ -x "$_snap" ]; then
+        "$_snap" || echo "xinitrc: wm-session-env-snapshot failed" >&2
+    else
+        echo "xinitrc: $_snap missing - launches will refuse" >&2
+    fi
+    unset _snap
+}
+
 # ------------------------------------------------- the kwi3 leg (kwi3-7m8.7)
 # Set only by the kwi3 xrdp listener's own sesman.ini
 # ([SessionVariables] KWI3_SESSION=1 in kwi3/xrdp/sesman.ini) — nothing else
@@ -57,6 +72,7 @@ if [ -n "${KWI3_SESSION:-}" ]; then
     # nothing. (kwi3-x11-session makes the same check again, and also
     # refuses an i3 variable left set.)
     if [ -n "${KWI3SOCK:-}" ] && [ -x "$HOME/.local/bin/kwi3-x11-session" ]; then
+        wm_session_env_snapshot
         exec "$HOME/.local/bin/kwi3-x11-session"
     fi
 
@@ -65,4 +81,5 @@ if [ -n "${KWI3_SESSION:-}" ]; then
 fi
 
 # shared config (ft003): ~/.i3/config + ~/.i3/config.d/wsl.conf via rotz
+wm_session_env_snapshot
 exec i3

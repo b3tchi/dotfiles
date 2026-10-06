@@ -1,0 +1,113 @@
+#!/usr/bin/env nu
+# wm-launch-test - scripted test for the sp038 session launchers, in the
+# wm-ipc-test / d2-router-test pattern. Headless: every case runs the real
+# script under `env -i` with a sandbox HOME and XDG_RUNTIME_DIR in mktemp
+# dirs. Never touches :10, a live i3, Jan's tmux server or his real
+# $XDG_RUNTIME_DIR.
+#
+#   nu nushell/actions/wm-launch-test
+#
+# Task 1 (wm-session-env-snapshot):
+#   1a snapshot-written       1b drop-list-absent (one assertion per name)
+#   1c atomic-replace         1d no-runtime-dir-78     1e no-display-78
+#   1f per-display-files      1g newline-value-roundtrip
+
+const here = (path self | path dirname)
+const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS]
+
+
+def sandbox [] {
+    let d = (^mktemp -d | str trim)
+    ^mkdir -p $"($d)/home" $"($d)/run"
+    $d
+}
+
+# Run a script under env -i. `extra` is a list of "K=V" words.
+def run-under [script: string, extra: list<string>] {
+    ^env -i ...$extra $nu.current-exe $script | complete
+}
+
+def read-snapshot [file: string] {
+    if not ($file | path exists) { return [] }
+    open --raw $file | split row (char -i 0) | where {|e| $e != "" }
+}
+
+def names-of [entries: list<string>] {
+    $entries | each {|e| $e | split row "=" | first }
+}
+
+def check [ok: bool, label: string] {
+    if $ok { print $"  ok   ($label)" } else { print $"  FAIL ($label)" }
+    $ok
+}
+
+def main [] {
+    let snap = $"($here)/wm-session-env-snapshot"
+    mut oks = []
+
+    print "-- 1. wm-session-env-snapshot"
+    let sb = (sandbox)
+    let run = $"($sb)/run"
+    let base = [$"HOME=($sb)/home" $"XDG_RUNTIME_DIR=($run)" "PATH=/usr/bin:/bin" "DISPLAY=:977"]
+    let noise = ["TMUX=/tmp/tmux-1/default,1,0" "TMUX_PANE=%3" "I3SOCK=/x/i3" "HOTKEYD_I3SOCK=/x/i3" "OLDPWD=/elsewhere" "SHLVL=4" "CURRENT_FILE=/f" "FILE_PWD=/p" "LAST_EXIT_CODE=3" "NU_VERSION=0.1" "CMD_DURATION_MS=12" "KEEPME=yes"]
+
+    # 1a
+    let r = (run-under $snap [...$base ...$noise])
+    let f = $"($run)/wm-session-env-_977"
+    let exists = ($f | path exists)
+    $oks = ($oks | append (check ($r.exit_code == 0 and $exists) "1a snapshot-written: exit 0 and $XDG_RUNTIME_DIR/wm-session-env-_977 exists"))
+    let mode = if $exists { ^stat -c %a $f | str trim } else { "" }
+    $oks = ($oks | append (check ($mode == "600") $"1a mode 0600 \(got '($mode)'\)"))
+    let entries = if $exists { read-snapshot $f } else { [] }
+    let have = ($entries | where {|e| $e | str starts-with "KEEPME=yes" } | length)
+    $oks = ($oks | append (check (($entries | any {|e| $e == $"HOME=($sb)/home" }) and ($entries | any {|e| $e == "DISPLAY=:977" }) and ($entries | any {|e| $e | str starts-with "PATH=" }) and $have == 1) "1a NUL-separated, holds HOME/DISPLAY/PATH and an ordinary var"))
+
+    # 1b
+    let names = (names-of $entries)
+    $oks = ($oks | append (check (($names | length) > 3) "1b snapshot is non-empty (so absence below means something)"))
+    for n in $DROPPED {
+        $oks = ($oks | append (check (not ($n in $names)) $"1b drop-list-absent: ($n)"))
+    }
+
+    # 1c
+    let r2 = (run-under $snap [...$base "KEEPME=second" "NEWVAR=1"])
+    let entries2 = (read-snapshot $f)
+    let tmps = (glob $"($run)/*tmp*" | length)
+    $oks = ($oks | append (check ($r2.exit_code == 0 and ($entries2 | any {|e| $e == "KEEPME=second" }) and not ($entries2 | any {|e| $e == "KEEPME=yes" }) and $tmps == 0) "1c atomic-replace: new content, no tmp left behind"))
+
+    # 1d
+    let sb2 = (sandbox)
+    let r = (run-under $snap [$"HOME=($sb2)/home" "PATH=/usr/bin:/bin" "DISPLAY=:977"])
+    let nothing = ((^find $sb2 -type f | lines | length) == 0)
+    $oks = ($oks | append (check ($r.exit_code == 78 and ($r.stderr | str contains "XDG_RUNTIME_DIR") and $nothing) "1d no-runtime-dir-78: names XDG_RUNTIME_DIR, writes nothing"))
+
+    # 1e
+    let sb3 = (sandbox)
+    let r = (run-under $snap [$"HOME=($sb3)/home" $"XDG_RUNTIME_DIR=($sb3)/run" "PATH=/usr/bin:/bin"])
+    let nothing = ((^find $"($sb3)/run" -type f | lines | length) == 0)
+    $oks = ($oks | append (check ($r.exit_code == 78 and ($r.stderr | str contains "DISPLAY") and $nothing) "1e no-display-78: names DISPLAY, writes nothing"))
+
+    # 1f
+    let sb4 = (sandbox)
+    let b4 = [$"HOME=($sb4)/home" $"XDG_RUNTIME_DIR=($sb4)/run" "PATH=/usr/bin:/bin"]
+    run-under $snap [...$b4 "DISPLAY=:10" "WHO=ten"] | ignore
+    run-under $snap [...$b4 "DISPLAY=:40.1" "WHO=forty"] | ignore
+    let f10 = $"($sb4)/run/wm-session-env-_10"
+    let f40 = $"($sb4)/run/wm-session-env-_40_1"
+    $oks = ($oks | append (check (($f10 | path exists) and ($f40 | path exists) and ((read-snapshot $f10) | any {|e| $e == "WHO=ten" }) and ((read-snapshot $f40) | any {|e| $e == "WHO=forty" })) "1f per-display-files: :10 and :40.1 -> two files, neither overwrites"))
+
+    # 1g
+    let sb5 = (sandbox)
+    let b5 = [$"HOME=($sb5)/home" $"XDG_RUNTIME_DIR=($sb5)/run" "PATH=/usr/bin:/bin" "DISPLAY=:977"]
+    let tricky = "line1\nline2=x\n\u{e9}\u{4e2d}"
+    run-under $snap [...$b5 $"MULTI=($tricky)"] | ignore
+    let got = (read-snapshot $"($sb5)/run/wm-session-env-_977" | where {|e| $e | str starts-with "MULTI=" })
+    $oks = ($oks | append (check ($got == [$"MULTI=($tricky)"]) "1g newline-value-roundtrip: newline, = and unicode survive NUL framing"))
+
+    for d in [$sb $sb2 $sb3 $sb4 $sb5] { ^rm -rf $d }
+
+    let failed = ($oks | where {|x| not $x } | length)
+    print ""
+    print $"wm-launch-test: (($oks | length) - $failed) passed, ($failed) failed"
+    if $failed > 0 { exit 1 }
+}
