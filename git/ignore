@@ -1,0 +1,7 @@
+# Global gitignore (core.excludesfile default: ~/.config/git/ignore)
+
+# Claude Code per-machine settings
+**/.claude/settings.local.json
+
+# draw.io editor backups
+*.drawio.bkp

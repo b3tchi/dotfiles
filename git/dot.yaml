@@ -1,0 +1,7 @@
+windows:
+  links:
+    ignore: ~/.config/git/ignore
+
+linux:
+  links:
+    ignore: ~/.config/git/ignore
