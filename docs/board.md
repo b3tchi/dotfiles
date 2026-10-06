@@ -20,10 +20,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp038|session-launcher]]
 
 ## ready
 
+- [[sp038|session-launcher]]
 - [[sp037|infinifu-lifecycle-drives-pi-worker]]
 
 
