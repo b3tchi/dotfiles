@@ -332,15 +332,55 @@ if [ -n "$TEST_CMD" ]; then
 fi
 
 # Approved-iteration cleanup
+#
+# Worktrees are often seeded from the main worktree (a post-checkout hook
+# symlinking node_modules, copying gitignored build outputs). Ignored seeds
+# never block `worktree remove`; seeds the branch does not ignore (e.g. a
+# branch cut before the ignore rule) do. Force only when every leftover is a
+# seed — a symlink into AKM_ROOT or a byte-identical copy of AKM_ROOT's file at
+# the same path. Tracked changes or any other untracked file may be work the
+# implementer forgot to commit: keep the worktree and say so.
+is_seed() { # $1 = path relative to the worktree
+  local p="${1%/}" t
+  if [ -L "$WT/$p" ]; then
+    t="$(readlink -f "$WT/$p")"
+    case "$t" in "$AKM_ROOT"|"$AKM_ROOT"/*) return 0 ;; esac
+    return 1
+  fi
+  if [ -d "$WT/$p" ]; then
+    [ -d "$AKM_ROOT/$p" ] && diff -rq --no-dereference "$WT/$p" "$AKM_ROOT/$p" >/dev/null 2>&1
+    return
+  fi
+  [ -f "$AKM_ROOT/$p" ] && cmp -s "$WT/$p" "$AKM_ROOT/$p"
+}
+
+WT_KEPT=""
 if [ -n "$WT" ] && [ "$WT" != "$AKM_ROOT" ]; then
-  git -C "$AKM_ROOT" worktree remove "$WT"
+  if ! git -C "$AKM_ROOT" worktree remove "$WT" 2>/dev/null; then
+    tracked="$(git -C "$WT" status --porcelain --untracked-files=no)"
+    leftovers=()
+    while IFS= read -r -d '' p; do
+      is_seed "$p" || leftovers+=("$p")
+    done < <(git -C "$WT" ls-files --others --exclude-standard --directory -z)
+    if [ -z "$tracked" ] && [ "${#leftovers[@]}" -eq 0 ]; then
+      echo "Worktree holds only seeded files (symlinks into / copies of $AKM_ROOT) — removing with --force."
+      git -C "$AKM_ROOT" worktree remove --force "$WT"
+    else
+      WT_KEPT="$WT"
+      echo "WARNING: approved worktree $WT kept — it holds changes that are not seeds:" >&2
+      [ -n "$tracked" ] && printf '%s\n' "$tracked" | sed 's/^/  tracked: /' >&2
+      for p in "${leftovers[@]}"; do echo "  untracked: $p" >&2; done
+      echo "The merge landed. Inspect, then: git -C \"$AKM_ROOT\" worktree remove --force \"$WT\" && git -C \"$AKM_ROOT\" branch -d \"$BRANCH\"" >&2
+    fi
+  fi
 fi
-git -C "$AKM_ROOT" branch -d "$BRANCH"
+[ -z "$WT_KEPT" ] && git -C "$AKM_ROOT" branch -d "$BRANCH"
 
 # Sweep sibling iterations (rejected attempts that never got cleaned up)
 SIBLINGS_REMOVED=0
 while IFS= read -r sib; do
   [ -z "$sib" ] && continue
+  [ "$sib" = "$BRANCH" ] && continue   # the approved branch, kept above
   sib_wt="$(git -C "$AKM_ROOT" worktree list --porcelain \
             | awk -v b="refs/heads/$sib" '/^worktree / {w=$2} $1=="branch" && $2==b {print w; exit}')"
   echo "Sweeping rejected sibling: $sib (worktree: ${sib_wt:-none})"
@@ -354,7 +394,11 @@ done < <(git -C "$AKM_ROOT" branch --list "bd-${ID}.*" --format='%(refname:short
 git -C "$AKM_ROOT" worktree prune
 
 echo "---"
-echo "Landed: $BRANCH → $BASE (local). Approved worktree removed. $SIBLINGS_REMOVED sibling iteration(s) swept."
+if [ -n "$WT_KEPT" ]; then
+  echo "Landed: $BRANCH → $BASE (local). Approved worktree KEPT (see WARNING above). $SIBLINGS_REMOVED sibling iteration(s) swept."
+else
+  echo "Landed: $BRANCH → $BASE (local). Approved worktree removed. $SIBLINGS_REMOVED sibling iteration(s) swept."
+fi
 
 # The land succeeded. If the task is not closed, say so HERE rather than
 # leaving the caller to infer it from an exit code that only reports the
