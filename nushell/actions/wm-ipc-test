@@ -28,6 +28,8 @@
 #      answering $I3SOCK beside it.
 #   9. $KWI3SOCK unset: the i3 path is unchanged — the same commands through
 #      main's wm-ipc.nu and this one give the identical stub i3-msg argv log.
+#  10. kwi3-rpc <method> [params]: raw JSON-RPC (sp007 T5) - parsed result,
+#      kwi3's error message in a nu error, no i3 fallback, JSON-safe params.
 #
 # Safety: every nu run is `env -i` (no DISPLAY / WAYLAND_DISPLAY / I3SOCK /
 # SWAYSOCK / HOTKEYD_I3SOCK from the caller), HOME is a sandbox whose
@@ -230,6 +232,32 @@ let new_sway = (open $sway_log)
 if (check "same stdout / exit" ($old.stdout == $new.stdout and $old.exit_code == $new.exit_code and $new.exit_code == 0) $"old=($old | to nuon) new=($new | to nuon)") { $passed += 1 } else { $failed += 1 }
 if (check "same i3-msg argv log" ($old_log == $new_log and ($new_log | str contains $"-s ($i3sock) workspace 2")) $"old:\n($old_log)\nnew:\n($new_log)") { $passed += 1 } else { $failed += 1 }
 if (check "same swaymsg argv log" ($old_sway == $new_sway) $"old:\n($old_sway)\nnew:\n($new_sway)") { $passed += 1 } else { $failed += 1 }
+
+# ── 10. kwi3-rpc: a raw JSON-RPC call, parsed result, loud errors ─────────────
+print "\n[10] kwi3-rpc"
+let build = '{"name":"dev10","tree":{"layout":"splith","nodes":[{"key":"ed","swallows":[{"title":"^tmux:@3$"}]}]}}'
+let r = (run-nu $tmp $test_path $k ["-c" $"($use_ipc) kwi3-rpc workspace.build \(r#'($build)'# | from json\) | to json -r"])
+let got = (try { $r.stdout | str trim | from json } catch { null })
+let names = (rig-list $test_path $sock | get name)
+if (check "10a kwi3-rpc-result: {workspace, cons} record, workspace exists" ($r.exit_code == 0 and $got != null and ($got.workspace | describe) == "int" and ($got.cons | columns) == ["ed"] and "dev10" in $names) $"names=($names | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+let r = (run-nu $tmp $test_path $k ["-c" $"($use_ipc) kwi3-rpc workspace.build \(r#'($build)'# | from json\) | to json -r"])
+if (check "10b kwi3-rpc-error: -32000 message in a nu error, non-zero" ($r.exit_code != 0 and ($r.stderr | str replace -ar "[^a-z0-9]+" "" | str contains "workspacedev10alreadyexists")) $"($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+"" | save -f $i3_log
+let r = (run-nu $tmp $test_path [$"I3SOCK=($i3sock)"] ["-c" $"($use_ipc) kwi3-rpc workspace.list"])
+let i3calls = (open $i3_log | str trim)
+if (check "10c kwi3-rpc-no-sock: errors, no i3 socket touched" ($r.exit_code != 0 and ($r.stderr | str contains "KWI3SOCK") and ($i3calls | is-empty)) $"i3calls=($i3calls) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+let uni = r#'{"name":"d\u00e9v \"q\" \u65e5\u672c 'x' $HOME","tree":{"layout":"splith","nodes":[{"key":"k","swallows":[{"title":"^a \"b\" \u00fc$"}]}]}}'#
+let r = (run-nu $tmp $test_path $k ["-c" $"($use_ipc) kwi3-rpc workspace.build \(r#'($uni)'# | from json\) | to json -r"])
+let names = (rig-list $test_path $sock | get name)
+let want = ($uni | from json | get name)
+if (check "10d kwi3-rpc-unicode: quotes/unicode/$ reach kwi3 verbatim" ($r.exit_code == 0 and $want in $names) $"names=($names | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+"" | save -f $i3_log
+let r = (run-nu $tmp $test_path [$"KWI3SOCK=($tmp)/missing.sock" $"I3SOCK=($i3sock)"] ["-c" $"($use_ipc) kwi3-rpc workspace.list"])
+if (check "10e dead socket: same loud log as kwi3-state, error, no i3" ($r.exit_code != 0 and ($r.stderr | str contains "does not answer") and ((open $i3_log | str trim) | is-empty)) $"($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 
 # ── cleanup ───────────────────────────────────────────────────────────────────
 

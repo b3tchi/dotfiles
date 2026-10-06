@@ -270,6 +270,29 @@ def kwi3-call [sock: string, method: string, params: any] {
 	}
 }
 
+# One raw kwi3 JSON-RPC call (ft010): returns the parsed result. `params` is
+# any nu value, sent as JSON in a single argv word (never shell-joined), or
+# nothing. Loud by design: no $KWI3SOCK, a dead socket (logged by kwi3-state,
+# exactly as for ipc) or a kwi3 error (its message, code included, is the nu
+# error's message) all raise; there is never a fall back to i3 or sway.
+export def kwi3-rpc [method: string, params?: any] {
+	let state = (kwi3-state)
+	if $state == null {
+		error make { msg: "wm-ipc: kwi3-rpc needs a kwi3 session but KWI3SOCK is not set - doing nothing (no fallback to i3)" }
+	}
+	if $state != "live" {
+		error make { msg: "wm-ipc: kwi3-rpc: KWI3SOCK does not answer (see the log line above) - doing nothing (no fallback to i3)" }
+	}
+	let sock = $env.KWI3SOCK
+	let r = (kwi3-call $sock $method $params)
+	if $r.exit_code != 0 {
+		error make { msg: $"wm-ipc: kwi3 ($method) failed: ($r.stderr | str trim)" }
+	}
+	try { $r.stdout | from json } catch {
+		error make { msg: $"wm-ipc: kwi3 ($method) returned non-JSON: ($r.stdout | str trim)" }
+	}
+}
+
 # Run translated operations in order. A query returns kwi3's JSON verbatim
 # (workspace.list carries i3's get_workspaces fields id/num/name/focused/
 # visible/urgent/output; tree.get is i3's get_tree shape). Commands return
