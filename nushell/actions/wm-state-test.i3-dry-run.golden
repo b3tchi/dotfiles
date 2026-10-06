@@ -1,0 +1,12 @@
+  DRY: ipc-raw [con_mark=wm-gui-stale] kill
+Restoring workspace: dev
+  DRY: ipc-raw rename workspace dev to dev-old
+  DRY: ipc-raw workspace --no-auto-back-and-forth dev
+  DRY: write /tmp/wm-restore-dev.json
+  DRY: ipc-raw append_layout /tmp/wm-restore-dev.json
+  DRY: ipc-raw exec kitty -e tmux attach -t a
+  DRY: sleep 600ms (let new terminals attach)
+  DRY: ipc-raw [id=101] floating disable, move container to mark wm-gui-dev-2
+  DRY: ipc-raw [con_mark=wm-gui-dev-2] kill
+  DRY: ipc-raw workspace --no-auto-back-and-forth dev
+Dry run complete
