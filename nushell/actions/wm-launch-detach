@@ -1,0 +1,161 @@
+#!/usr/bin/env nu
+# wm-launch-detach - start <argv> detached from the caller, in the SESSION's
+# canonical environment (sp038, ft017, poc023).
+#
+#   wm-launch-detach [--display D] [--set K=V]... [--dry-run] -- <argv...>
+#
+# The caller's environment is never passed through: the only caller inputs
+# are the display selector (--display, default $DISPLAY; $XDG_RUNTIME_DIR
+# only to LOCATE the snapshot) and explicit --set pairs. cwd = snapshot HOME.
+#
+# Backend probe, first match wins:
+#   1 windows  Start-Process via powershell
+#   2 x11      snapshot for the display exists: env -i <snapshot> setsid -f
+#              /bin/sh -c '<close fds > 2>; exec "$@"' sh <argv>
+#   3 systemd  `systemctl --user show-environment` ok: systemd-run --user
+#              --slice=app.slice --collect --quiet -- <argv>
+#   4 none     exit 78 naming the display and the snapshot path
+# --dry-run prints `<backend> <argv>` on one line and starts nothing.
+# Exit 0 once the child is started; never waits for it.
+#
+# Test-only knobs, honoured only with WM_LAUNCH_TEST=1 (refused otherwise):
+#   WM_LAUNCH_TEST_NO_FDCLOSE=1  drop the fd-closer (proves the test has teeth)
+#   WM_LAUNCH_TEST_OS=windows    pretend to be on Windows
+
+const here = (path self | path dirname)
+
+def die [msg: string, code: int = 1] {
+    print -e $"wm-launch-detach: ($msg)"
+    exit $code
+}
+
+# The snapshot path comes from wm-session-env-snapshot (the single owner of
+# the DISPLAY -> file-name rule): sibling file first, then $PATH.
+def snapshot-path [display: string] {
+    let sibling = $"($here)/wm-session-env-snapshot"
+    let tool = if ($sibling | path exists) { $sibling } else {
+        let w = (which wm-session-env-snapshot)
+        if ($w | is-empty) { die "wm-session-env-snapshot not found" 127 }
+        ($w | first | get path)
+    }
+    let r = (^$nu.current-exe $tool path $display | complete)
+    if $r.exit_code != 0 { die ($r.stderr | str trim) $r.exit_code }
+    $r.stdout | str trim
+}
+
+def test-knob [name: string] {
+    let v = ($env | get -o $name | default "")
+    if $v != "" and ($env | get -o WM_LAUNCH_TEST | default "") != "1" {
+        die $"($name) is a test-only knob and needs WM_LAUNCH_TEST=1" 64
+    }
+    $v
+}
+
+def --wrapped main [...args: string] {
+    mut display = ($env | get -o DISPLAY | default "")
+    mut sets = []
+    mut dry = false
+    mut argv = []
+    mut i = 0
+    while $i < ($args | length) {
+        let a = ($args | get $i)
+        if $a == "--" { $argv = ($args | skip ($i + 1)); break }
+        match $a {
+            "--dry-run" => { $dry = true }
+            "--display" => {
+                $i += 1
+                if $i >= ($args | length) { die "--display needs a value" 64 }
+                $display = ($args | get $i)
+            }
+            "--set" => {
+                $i += 1
+                if $i >= ($args | length) { die "--set needs K=V" 64 }
+                let kv = ($args | get $i)
+                if not ($kv | str contains "=") or ($kv | str starts-with "=") { die $"--set wants K=V, got '($kv)'" 64 }
+                $sets = ($sets | append $kv)
+            }
+            _ => { die $"unknown option '($a)' \(put the command after --\)" 64 }
+        }
+        $i += 1
+    }
+    if ($argv | is-empty) { die "no command given (usage: wm-launch-detach [--display D] [--set K=V]... [--dry-run] -- <argv...>)" 64 }
+
+    let fake_os = (test-knob WM_LAUNCH_TEST_OS)
+    let nofdclose = (test-knob WM_LAUNCH_TEST_NO_FDCLOSE) == "1"
+    let os = if $fake_os != "" { $fake_os } else { $nu.os-info.name }
+    let runtime = ($env | get -o XDG_RUNTIME_DIR | default "")
+
+    # ---- probe ----
+    mut backend = ""
+    mut snap_path = ""
+    if $os == "windows" {
+        $backend = "windows"
+    } else {
+        if $display != "" and $runtime != "" {
+            $snap_path = (snapshot-path $display)
+            if ($snap_path | path exists) { $backend = "x11" }
+        }
+        if $backend == "" {
+            if (which systemctl | is-not-empty) and ((^systemctl --user show-environment | complete).exit_code == 0) {
+                $backend = "systemd"
+            }
+        }
+    }
+    if $backend == "" {
+        let shown = if $snap_path == "" { $"($runtime)/wm-session-env-<display>" } else { $snap_path }
+        die $"no launch backend for display ($display) \(no snapshot at ($shown), no systemd user manager\)" 78
+    }
+
+    # ---- x11: read the snapshot ----
+    mut senv = []
+    mut path_var = ""
+    mut home = ""
+    if $backend == "x11" {
+        let sp = $snap_path
+        let raw = (try { open --raw $sp | decode utf-8 } catch { die $"snapshot ($sp) is unreadable" 78 })
+        $senv = ($raw | split row (char -i 0) | where {|e| $e != "" })
+        let h = ($senv | where {|e| $e | str starts-with "HOME=" })
+        if ($h | is-empty) { die $"snapshot ($sp) is corrupt \(no HOME=\)" 78 }
+        $home = ($h | first | str replace "HOME=" "")
+        let p = ($senv | where {|e| $e | str starts-with "PATH=" })
+        $path_var = (if ($p | is-empty) { "/usr/local/bin:/usr/bin:/bin" } else { $p | first | str replace "PATH=" "" })
+    }
+
+    # ---- command must exist (checked before anything is detached) ----
+    let cmd = ($argv | first)
+    if $backend != "windows" {
+        let search = if $backend == "x11" { $path_var } else { $env | get -o PATH | default "" | default "" }
+        let found = (^env -i $"PATH=($search)" /bin/sh -c 'command -v -- "$1" >/dev/null 2>&1' sh $cmd | complete)
+        if $found.exit_code != 0 { die $"command not found: ($cmd)" 127 }
+    }
+
+    if $dry {
+        print $"($backend) ($argv | str join ' ')"
+        return
+    }
+
+    match $backend {
+        "x11" => {
+            let closer = if $nofdclose { 'exec "$@"' } else {
+                'for f in /proc/self/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] && eval "exec $n>&-"; done 2>/dev/null; exec "$@"'
+            }
+            let setsid = (which setsid | get -o 0.path | default "")
+            if $setsid == "" { die "setsid (util-linux) not found" 127 }
+            cd $home
+            ^env -i ...$senv ...$sets $setsid -f /bin/sh -c $closer sh ...$argv
+        }
+        "systemd" => {
+            let setenvs = ($sets | each {|kv| ["--setenv" $kv] } | flatten)
+            ^systemd-run --user --slice=app.slice --collect --quiet ...$setenvs -- ...$argv
+        }
+        "windows" => {
+            let q = {|s| "'" + ($s | str replace --all "'" "''") + "'" }
+            let rest = ($argv | skip 1)
+            let envs = ($sets | each {|kv|
+                let p = ($kv | split row "=" )
+                $"$env:(($p | first))=(do $q ($p | skip 1 | str join '='));" } | str join " ")
+            let al = if ($rest | is-empty) { "" } else { $" -ArgumentList (($rest | each {|x| do $q $x } | str join ','))" }
+            ^powershell -NoProfile -Command $"($envs) Start-Process -FilePath (do $q $cmd)($al)"
+        }
+    }
+}
