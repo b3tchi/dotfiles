@@ -722,8 +722,18 @@ kwi3_start() {
     DISPLAY="$XD" KWI3SOCK="$KWI3_RPC" "$HERE/hotkeyd.sh" "$@" "$XD" 2>&1
 }
 
-out="$(kwi3_start start)"; rc=$?
+# Started from a shell inside tmux (a recover/restart typed in a terminal):
+# the daemon must not inherit $TMUX, or every $mod+Return it spawns makes
+# wm-current-workspace answer that pane's session group instead of the
+# focused workspace — every terminal lands in one tmux group.
+out="$(TMUX=/tmp/tmux-fake/default,1,0 TMUX_PANE=%99 kwi3_start start)"; rc=$?
 sleep 0.5
+_tpid="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $XD" 2>/dev/null | head -1)"
+if [ -n "$_tpid" ] && ! tr '\0' '\n' <"/proc/$_tpid/environ" | grep -q '^TMUX'; then
+    ok "a daemon started from inside tmux does not inherit TMUX/TMUX_PANE"
+else
+    bad "the daemon on $XD inherited the starting shell's TMUX (pid=${_tpid:-none})"
+fi
 [ "$rc" -eq 0 ] \
     && ok "start on a kwi3 display (KWI3SOCK answers JSON-RPC) succeeds while i3 is panicked (rc=0)" \
     || bad "start on a kwi3 display was latched by i3's fallback (rc=$rc): $out"

@@ -415,6 +415,10 @@ starting" 78
         # the :10 daemon would inherit :0's socket. The daemon resolves the path
         # itself from its own X connection (dotfiles-hwds.6) — this just removes
         # the misleading value from the environment entirely.
+        # `-u TMUX -u TMUX_PANE`: same class of leak when start/recover is
+        # typed in a terminal inside tmux. Every spawn (wm-launch-terminal ->
+        # wm-current-workspace) then sees "inside tmux" and answers that
+        # pane's session group, so $mod+Return on every workspace joined it.
         # HOTKEYD_BINDS named an alternative table file, which only python
         # could take (`--binds <file>`). The Go daemon compiles its table in,
         # dwm-style, so "a daemon carrying a different table" IS a different
@@ -432,7 +436,7 @@ in and has no --binds flag (python was removed at dotfiles-ylmp.16) -- unset \
 HOTKEYD_BINDS, or point HOTKEYD_GO_DAEMON at a binary built with the table \
 you want" 78
         fi
-        env -u I3SOCK DISPLAY="$DPY_BASE" \
+        env -u I3SOCK -u TMUX -u TMUX_PANE DISPLAY="$DPY_BASE" \
             setsid "$DAEMON" --display "$DPY_BASE" >>"$LOG" 2>&1 &
         # Give it long enough to fail loudly (bad table, no X, lock held) rather
         # than reporting success for a process that died on startup.
