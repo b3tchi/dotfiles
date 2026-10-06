@@ -9,7 +9,7 @@ use $wm_ipc *
 const terminal_ids = ["foot", "kitty", "wezterm", "WezTerm", "Alacritty", "alacritty", "xterm", "st", "st-256color"]
 
 # Default terminal to launch per WM on restore.
-const default_term_by_wm = { sway: "foot", i3: "kitty" }
+const default_term_by_wm = { sway: "foot", i3: "kitty", kwi3: "st" }
 
 # Check if candidate_pid is a descendant of ancestor_pid via /proc
 def is-descendant [ancestor_pid: int, candidate_pid: int] {
@@ -277,7 +277,13 @@ def resolve-target-ws [workspace: string, current: bool] {
     }
     if ($workspace | is-not-empty) { return [$workspace] }
     if $current {
-        let r = (do { ipc "-t get_workspaces" } | complete)
+        # kwi3 answers `ipc` with a plain string, which `complete` refuses; the
+        # i3/sway path (an external command's stream) is untouched.
+        let r = if ($env | get -o KWI3SOCK | default "" | is-not-empty) {
+            try { { exit_code: 0, stdout: (ipc "-t get_workspaces" | into string) } } catch { { exit_code: 1, stdout: "" } }
+        } else {
+            (do { ipc "-t get_workspaces" } | complete)
+        }
         if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) {
             error make { msg: "Could not query focused workspace" }
         }
@@ -779,6 +785,13 @@ def "main restore" [
     }
     let term = ($default_term_by_wm | get -o $wm | default "kitty")
 
+    # kwi3 has no append_layout / marks: its restore is one workspace.build
+    # (ft011, sp007 T6). Everything below this point is the i3/sway path.
+    if $wm == "kwi3" {
+        restore-kwi3 $workspaces $term $dry_run
+        return
+    }
+
     # Remember the workspace the user is currently on so we can return at the end.
     let start_ws = (do {
         let r = (do { ipc "-t get_workspaces" } | complete)
@@ -956,6 +969,8 @@ def term-class-flag [term: string, slot_id: string] {
         $"--app-id ($slot_id)"
     } else if $term == "xterm" {
         $"-class ($slot_id)"
+    } else if $term == "st" {
+        $"-c ($slot_id)"
     } else {
         ""
     }
@@ -1156,6 +1171,293 @@ def spawn-for [entry: record, term: string, id: string] {
 
     # Non-terminal: exec by natural class as a best-effort launcher.
     if ($cls | is-not-empty) { $cls } else { "" }
+}
+
+# ── kwi3 restore (sp007 T6) ──────────────────────────────────────────────────
+#
+# kwi3 speaks JSON-RPC only (ft010), so none of the i3 verbs above exist there:
+# no append_layout, no marks, no `[id=..] kill`. The whole workspace is ONE
+# `workspace.build` (ft011): a terminal leaf is a placeholder that swallows by a
+# per-slot CLASS (`^wm-slot-<ws>-<key>$`, poc004: at manage the tmux-id title is
+# not there yet), a GUI leaf is `window: <con id>` when a live window of the
+# saved class exists, else a class placeholder. Everything goes through
+# kwi3-rpc by con id; nothing is addressed by mark.
+
+# Single-quote a word for the shell the exec command runs in, only if needed.
+def shq [s: string] {
+    if ($s =~ '^[A-Za-z0-9_.:@%+=,/-]+$') { $s } else { "'" + ($s | str replace -a "'" "'\\''") + "'" }
+}
+
+# Escape regex metacharacters (kwi3 compiles swallows with a JS RegExp).
+def re-escape [s: string] {
+    $s | str replace -a -r '([\\.^$|?*+()\[\]{}])' '\$1'
+}
+
+def kwi3-layout [l: string] {
+    if $l in ["splith" "splitv" "tabbed" "stacked"] { $l } else { "splith" }
+}
+
+# Every window leaf under a tree.get node, floating included. Unlike
+# collect-ws-windows this never asks X for a pid: on kwi3 `window` is a con id.
+def kwi3-leaves [node: record] {
+    let kids = (($node | get -o nodes | default []) | append ($node | get -o floating_nodes | default []))
+    if ($kids | is-empty) {
+        if ($node | get -o window) != null {
+            [{ id: $node.id, class: ($node | get -o window_properties.class | default "") }]
+        } else { [] }
+    } else {
+        $kids | each {|k| kwi3-leaves $k } | flatten
+    }
+}
+
+# Placeholder cons (window null, swallows filled) under a tree.get node.
+def kwi3-placeholders [node: record] {
+    let kids = (($node | get -o nodes | default []) | append ($node | get -o floating_nodes | default []))
+    if ($kids | is-empty) {
+        if ($node | get -o window) == null and (($node | get -o swallows | default []) | is-not-empty) {
+            [$node.id]
+        } else { [] }
+    } else {
+        $kids | each {|k| kwi3-placeholders $k } | flatten
+    }
+}
+
+# Leaves of a saved layout body that are GUI windows, in tree order.
+def kwi3-gui-keys [body: record, state: record] {
+    mut out = []
+    for key in ($body | columns) {
+        let val = ($body | get $key)
+        if (is-leaf-key $key) {
+            let cls = ($state | get -o $key | default {} | get -o class | default "")
+            let is_term = ($terminal_ids | any {|t| $t == $cls })
+            if (not $is_term) and ($cls | is-not-empty) {
+                $out = ($out | append { key: $key, class: $cls, saved: ($state | get $key | get -o wid | default 0) })
+            }
+        } else {
+            $out = ($out | append (kwi3-gui-keys $val $state))
+        }
+    }
+    $out
+}
+
+# Which live window fills each GUI leaf: the saved con id when it is still alive
+# with the saved class, else the first unclaimed live window of that class.
+# Returns { "<key>": <con id> } for the leaves that found one.
+def kwi3-assign-gui [gui: list<record>, live: list<record>] {
+    mut taken = []
+    mut out = {}
+    for g in $gui {
+        let hit = ($live | where id == $g.saved and class == $g.class)
+        if ($hit | is-not-empty) and not ($g.saved in $taken) {
+            $out = ($out | upsert $g.key $g.saved)
+            $taken = ($taken | append $g.saved)
+        }
+    }
+    for g in $gui {
+        if ($g.key in ($out | columns)) { continue }
+        let hit = ($live | where {|l| $l.class == $g.class and not ($l.id in $taken) })
+        if ($hit | is-not-empty) {
+            let id = ($hit | first | get id)
+            $out = ($out | upsert $g.key $id)
+            $taken = ($taken | append $id)
+        }
+    }
+    $out
+}
+
+# Recursive body -> workspace.build nodes. { nodes, terms } where terms carries
+# one { key, class, exec } per terminal leaf, in tree order.
+def build-kwi3-nodes [body: record, state: record, term: string, ws_name: string, assign: record] {
+    mut nodes = []
+    mut terms = []
+    for key in ($body | columns) {
+        let val = ($body | get $key)
+        if (is-leaf-key $key) {
+            let entry = ($state | get -o $key | default {})
+            let cls = ($entry | get -o class | default "")
+            let session = ($entry | get -o session | default "")
+            if ($terminal_ids | any {|t| $t == $cls }) {
+                let slot = $"wm-slot-($ws_name)-($key)"
+                let flag = (term-class-flag $term (shq $slot))
+                let exec = if ($session | is-not-empty) {
+                    $"($term) ($flag) -e tmux attach -t (shq $session)"
+                } else {
+                    $"($term) ($flag)"
+                }
+                $nodes = ($nodes | append { key: $key, swallows: [{ class: ("^" + (re-escape $slot) + "$") }] })
+                $terms = ($terms | append { key: $key, class: $slot, exec: $exec })
+            } else if ($cls | is-not-empty) {
+                let live = ($assign | get -o $key)
+                if $live != null {
+                    $nodes = ($nodes | append { key: $key, window: $live })
+                } else {
+                    $nodes = ($nodes | append { key: $key, swallows: [{ class: ("^" + (re-escape $cls) + "$") }] })
+                }
+            }
+        } else {
+            let sub = (build-kwi3-nodes $val $state $term $ws_name $assign)
+            $terms = ($terms | append $sub.terms)
+            if ($sub.nodes | is-not-empty) {
+                $nodes = ($nodes | append { layout: (kwi3-layout ($key | split row "-" | first)), nodes: $sub.nodes })
+            }
+        }
+    }
+    { nodes: $nodes, terms: $terms }
+}
+
+# A saved workspace -> { tree, terms } for workspace.build. tree.nodes is empty
+# when no leaf has a class at all (a corrupt save): nothing to build.
+def build-kwi3-tree [layout_tree: record, state: record, term: string, ws_name: string, ws_layout: string, is_legacy: bool, live: list<record>] {
+    let body = if $is_legacy { peel-legacy-wrapper $layout_tree $ws_layout } else { $layout_tree }
+    let assign = (kwi3-assign-gui (kwi3-gui-keys $body $state) $live)
+    let res = (build-kwi3-nodes $body $state $term $ws_name $assign)
+    { tree: { layout: (kwi3-layout $ws_layout), nodes: $res.nodes }, terms: $res.terms }
+}
+
+# One kwi3 call, or its dry-run line. Raises on a kwi3 refusal (kwi3-rpc does).
+def kwi3-do [method: string, params: record, dry_run: bool] {
+    if $dry_run {
+        print $"  DRY: kwi3-rpc ($method) ($params | to json -r)"
+    } else {
+        kwi3-rpc $method $params | ignore
+    }
+}
+
+# Close windows by con id, reporting (never stopping at) a refusal.
+def kwi3-close-all [ids: list<int>, dry_run: bool] {
+    for id in $ids {
+        try { kwi3-do "window.close" { id: $id } $dry_run } catch {|e| print -e $"  warn: window.close ($id): ($e.msg)" }
+    }
+}
+
+# Phase 1 on kwi3: <name> -> <name>-old by workspace id; a leftover <name>-old
+# is stamped <name>-old-<ts> after its terminals are closed. Returns
+# { id: <renamed workspace id or null>, terminals: [con ids], stale: [con ids] }.
+#
+# `stale` are the placeholders the workspace going away still holds. They carry
+# the slot classes this restore is about to reuse, and one earlier in tree order
+# than the new workspace would swallow the new terminal, so the caller closes
+# them AFTER the build (once the windows it pulls in have left the old workspace
+# - closing a placeholder that sits beside a window in a nested container
+# destroys the workspace and re-homes the window under a new con id on kwi3
+# today, see kwi3 bd issue kwi3-a1j.6 notes) and BEFORE the first exec. A
+# placeholder-only workspace has no windows to protect: it is closed here, which
+# removes the workspace itself and frees the name, and nothing is renamed.
+def isolate-kwi3 [tree: record, name: string, dry_run: bool] {
+    let target = (find-workspace-by-name $tree $name)
+    if $target == null { return { id: null, terminals: [], stale: [] } }
+    let old_name = $"($name)-old"
+    let leftover = (find-workspace-by-name $tree $old_name)
+    if $leftover != null {
+        let lterms = (kwi3-leaves $leftover | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id)
+        kwi3-close-all (kwi3-placeholders $leftover | append $lterms) $dry_run
+        let stamped = $"($old_name)-(date now | format date '%s')"
+        kwi3-do "workspace.rename" { id: $leftover.id, name: $stamped } $dry_run
+    }
+    let placeholders = (kwi3-placeholders $target)
+    let windows = (kwi3-leaves $target)
+    if ($windows | is-empty) {
+        kwi3-close-all $placeholders $dry_run
+        return { id: null, terminals: [], stale: [] }
+    }
+    kwi3-do "workspace.rename" { id: $target.id, name: $old_name } $dry_run
+    {
+        id: $target.id,
+        terminals: ($windows | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id),
+        stale: $placeholders,
+    }
+}
+
+def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
+    let start_ws = (try { kwi3-rpc "workspace.list" | where focused == true | get -o 0.name } catch { null })
+
+    # Workspaces whose terminals were all launched: their old terminals are
+    # closed after the attach wait. { name, terminals }
+    mut respawned = []
+
+    for ws in $workspaces {
+        let ws_name = ($ws | get -o name | default "")
+        if ($ws_name | is-empty) { continue }
+        let layout_tree = ($ws | get -o layout | default null)
+        let ws_state = ($ws | get -o state | default {})
+        let ws_layout_raw = ($ws | get -o ws_layout)
+        let is_legacy = ($ws_layout_raw == null)
+        let ws_layout = if $is_legacy { "splith" } else { $ws_layout_raw }
+
+        print $"Restoring workspace: ($ws_name)"
+        if $layout_tree == null or (($ws_state | columns) | is-empty) { continue }
+
+        # Plan from reads alone, so a saved layout that yields nothing leaves
+        # the live workspace exactly as it was.
+        let tree = (try { kwi3-rpc "tree.get" } catch {|e| print -e $"  error: tree.get: ($e.msg)"; null })
+        if $tree == null { continue }
+        # The workspace's own windows come first, so "first by class" prefers
+        # the one that already lives there over a look-alike elsewhere.
+        let live = (find-workspaces $tree | sort-by {|w| if $w.name == $ws_name { 0 } else { 1 } } | each {|w| kwi3-leaves $w } | flatten)
+        let plan = (build-kwi3-tree $layout_tree $ws_state $term $ws_name $ws_layout $is_legacy $live)
+        if ($plan.tree.nodes | is-empty) {
+            print $"  Workspace ($ws_name): skipped - no leaf has a class"
+            continue
+        }
+
+        let iso = (isolate-kwi3 $tree $ws_name $dry_run)
+        let built = (try {
+            kwi3-do "workspace.build" { name: $ws_name, tree: $plan.tree } $dry_run
+            true
+        } catch {|e|
+            print -e $"  error: workspace.build ($ws_name): ($e.msg)"
+            false
+        })
+        if not $built {
+            # Put the old workspace back under its name rather than leave the
+            # user with only <name>-old.
+            if $iso.id != null and not $dry_run {
+                try { kwi3-rpc "workspace.rename" { id: $iso.id, name: $ws_name } | ignore } catch {|e| print -e $"  warn: could not restore the name ($ws_name): ($e.msg)" }
+            }
+            continue
+        }
+
+        # The old workspace's leftover placeholders must be gone before any
+        # terminal maps (see isolate-kwi3).
+        kwi3-close-all $iso.stale $dry_run
+
+        # One exec per terminal; a refusal is reported and the rest still go.
+        let results = ($plan.terms | each {|t|
+            try { kwi3-do "exec" { command: $t.exec } $dry_run; true } catch {|e|
+                print -e $"  error: exec for slot ($t.class): ($e.msg)"
+                false
+            }
+        })
+        if ($results | any {|r| not $r }) {
+            print -e $"  warn: ($ws_name): a terminal could not be launched - keeping the old terminals on ($ws_name)-old"
+        } else if ($plan.terms | is-not-empty) {
+            $respawned = ($respawned | append { name: $ws_name, terminals: $iso.terminals })
+        }
+    }
+
+    # Phase 2: once the new terminals have attached, close the old ones - the
+    # new clients hold the sessions open, so destroy-unattached does not fire.
+    if ($respawned | is-not-empty) {
+        if $dry_run {
+            print "  DRY: sleep 600ms (let new terminals attach)"
+            for r in $respawned { kwi3-close-all $r.terminals true }
+        } else {
+            sleep 600ms
+            let tree = (try { kwi3-rpc "tree.get" } catch { null })
+            for r in $respawned {
+                let old = if $tree == null { null } else { find-workspace-by-name $tree $"($r.name)-old" }
+                if $old != null {
+                    kwi3-close-all (kwi3-leaves $old | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id) false
+                }
+            }
+        }
+    }
+
+    if ($start_ws | is-not-empty) {
+        try { kwi3-do "workspace.focus" { name: $start_ws } $dry_run } catch {|e| print -e $"  warn: workspace.focus ($start_ws): ($e.msg)" }
+    }
+
+    if $dry_run { print "Dry run complete" } else { print "Restore complete" }
 }
 
 def main [] {

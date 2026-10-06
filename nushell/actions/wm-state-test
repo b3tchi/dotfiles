@@ -278,6 +278,7 @@ let seed = {
     ]
 }
 $seed | to json | save -f $"($tmp)/seed.json"
+"" | save -f $"($tmp)/spawn.log"
 let sock = $"($tmp)/k.sock"
 let rig_log = $"($tmp)/rig.log"
 let rig_pid = (^bash -c $"KWI3_REPO='($kwi3_repo)' '($node)' '($driver)' '($sock)' '($tmp)/seed.json' '($tmp)' > '($rig_log)' 2>&1 & echo $!" | str trim | into int)
@@ -380,7 +381,7 @@ let want_dry = ([
 let r = (run-ws $tmp $test_path $k ["restore" "--dry-run" "--workspace" "dev"])
 let tree_after_dry = (rig $test_path $sock "tree.get")
 if (check "dry-run-kwi3: exact build params and exec lines" ($r.exit_code == 0 and $r.stdout == $want_dry) $"exit=($r.exit_code)\n--- got\n($r.stdout)\n--- want\n($want_dry)\nstderr=($r.stderr)") { $passed += 1 } else { $failed += 1 }
-if (check "dry-run-kwi3: rig tree unchanged, no mutating call, nothing spawned" ($tree_before_dry == $tree_after_dry and (mutating $rig_log | length) == $calls_before and not ($"($tmp)/spawn.log" | path exists)) "dry run changed the rig") { $passed += 1 } else { $failed += 1 }
+if (check "dry-run-kwi3: rig tree unchanged, no mutating call, nothing spawned" ($tree_before_dry == $tree_after_dry and (mutating $rig_log | length) == $calls_before and (open $"($tmp)/spawn.log" | lines | is-empty)) "dry run changed the rig") { $passed += 1 } else { $failed += 1 }
 
 # ── 2. restore (first run) ────────────────────────────────────────────────────
 print "\n[2] restore dev"
@@ -424,10 +425,11 @@ let t2 = (rig-json $test_path $sock "tree.get")
 let stamped_ws = if ($stamped | is-empty) { null } else { ws-node $t2 ($stamped | first) }
 let dev2 = (ws-node $t2 "dev")
 let dev2_shape = if $dev2 == null { null } else { { layout: $dev2.layout, kids: ($dev2.nodes | each {|k| shape $k }) } }
-if (check "restore-old-stamped: leftover dev-old renamed dev-old-<ts>, previous dev became dev-old, new dev built" ($r.exit_code == 0 and ($stamped | length) == 1 and "dev-old" in $names and "dev" in $names and $stamped_ws != null and ((leaves $stamped_ws | get window_properties.title) == ["keep-dev"]) and $dev2_shape == $want_shape) $"names=($names | to json -r) shape=($dev2_shape | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
-# The previous dev's placeholders must not outlive it, or `wm-slot-dev-1` would
+if (check "restore-old-stamped: leftover dev-old stamped dev-old-<ts> (keeps its window), new dev built" ($r.exit_code == 0 and ($stamped | length) == 1 and "dev" in $names and not ("dev-old" in $names) and $stamped_ws != null and ((leaves $stamped_ws | get window_properties.title) == ["keep-dev"]) and $dev2_shape == $want_shape) $"names=($names | to json -r) shape=($dev2_shape | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+# (The previous dev held only windows the build pulled out plus placeholders, so
+# it is gone - nothing is left under a plain dev-old.) Its placeholders must not outlive it, or `wm-slot-dev-1` would
 # be swallowed by the OLD one when the new terminal maps.
-let stale_ph = (workspace-nodes $t2 | where name != "dev" | each {|w| shape $w } | to json -r | str contains "ph:")
+let stale_ph = (workspace-nodes $t2 | where name != "dev" | each {|w| $w.nodes | each {|k| shape $k } } | to json -r | str contains "ph:")
 if (check "restore-old-stamped: no placeholder left on a -old workspace" (not $stale_ph) "an old placeholder would steal a new terminal") { $passed += 1 } else { $failed += 1 }
 
 # ── 4. placeholder-only workspace ─────────────────────────────────────────────
