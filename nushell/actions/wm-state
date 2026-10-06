@@ -8,6 +8,31 @@ use $wm_ipc *
 # Terminal identifiers to match (sway app_id or i3 window_properties.class).
 const terminal_ids = ["foot", "kitty", "wezterm", "WezTerm", "Alacritty", "alacritty", "xterm", "st", "st-256color"]
 
+# kwi3 restore (sp007 T6) spawns terminals under the per-slot class
+# `wm-slot-<ws>-<key>`; a later save must still see them as terminals
+# (kwi3-a1j.9). i3/sway never produce that class, so this is a no-op there.
+def is-term-class [cls: string] {
+    ($terminal_ids | any {|t| $t == $cls }) or ($cls | str starts-with "wm-slot-")
+}
+
+# kwi3's tree.get carries no pid, so a slot terminal cannot be matched to its
+# tmux client; it inherits the session of the same slot in the previous cache.
+# STALENESS: that session is only the last one recorded for the slot; it is
+# wrong if the user switched tmux session inside that terminal after restore.
+def inherit-slot-session [entry: record, ws_name: string, prev: list<record>] {
+    let cls = ($entry | get -o class | default "")
+    let pre = $"wm-slot-($ws_name)-"
+    if not ($cls | str starts-with $pre) or (($entry | get -o session | default "") | is-not-empty) { return $entry }
+    let key = ($cls | str substring ($pre | str length)..)
+    let old = ($prev | where name == $ws_name)
+    if ($old | is-empty) { return $entry }
+    let o = ($old | first | get -o state | default {} | get -o $key | default {})
+    let sess = ($o | get -o session | default "")
+    if ($sess | is-empty) { return $entry }
+    $entry | upsert session_type ($o | get -o session_type | default "local") | upsert session $sess
+}
+
+
 # Default terminal to launch per WM on restore.
 const default_term_by_wm = { sway: "foot", i3: "kitty", kwi3: "st" }
 
@@ -43,7 +68,7 @@ def resolve-i3-pid [window_id: int] {
 def node-terminal-pid [node: record] {
     let app_id = ($node | get -o app_id | default "")
     let cls = ($node | get -o window_properties.class | default "")
-    let matches = ($terminal_ids | any {|t| $t == $app_id or $t == $cls })
+    let matches = ((is-term-class $app_id) or (is-term-class $cls))
     if not $matches { return 0 }
     let pid = ($node | get -o pid | default 0)
     if $pid > 0 { return $pid }
@@ -417,7 +442,7 @@ def build-tmux-window-cache [local_clients: list<record>, thin_clients: list<rec
 # Failures to query tmux degrade gracefully: omit tmux_window_id, never abort.
 def enrich-state-entry [entry: record, local_clients: list<record>, thin_clients: list<record>, tmux_cache: record] {
     let cls = ($entry | get -o class | default "")
-    let is_terminal = ($terminal_ids | any {|t| $t == $cls })
+    let is_terminal = (is-term-class $cls)
 
     # Non-terminal entries: tag skip_restore: true and short-circuit before any
     # tmux query work. Preserve all existing fields (wid/pid/class/title).
@@ -490,11 +515,16 @@ def "main save" [
     } else { [] }
 
     let tmux_cache = (build-tmux-window-cache $local_clients $thin_clients)
+    let prev_cache_path = ("~/.cache/sway-state.yaml" | path expand)
+    # A missing or corrupt cache means "no history" - a full save overwrites it.
+    let prev_ws = if ($prev_cache_path | path exists) {
+        try { open $prev_cache_path | get -o workspaces | default [] } catch { [] }
+    } else { [] }
 
     let fresh = ($workspaces_raw | each { |ws|
         # state is a record keyed by id; enrich each value
         let enriched = ($ws.state | transpose k v
-            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) } }
+            | each { |it| { k: $it.k, v: (inherit-slot-session (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) $ws.workspace $prev_ws) } }
             | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
         { name: $ws.workspace, ws_layout: $ws.ws_layout, layout: $ws.layout, state: $enriched }
     })
@@ -596,7 +626,7 @@ def isolate-target [name: string, --dry-run] {
     if $leftover != null {
         let leftover_leaves = (collect-ws-windows $leftover "")
         for leaf in $leftover_leaves {
-            let is_terminal = ($terminal_ids | any {|t| $t == $leaf.class })
+            let is_terminal = (is-term-class $leaf.class)
             if not $is_terminal { continue }
             let cmd = $"[id=($leaf.wid)] kill"
             if $dry_run {
@@ -714,7 +744,7 @@ def kill-old-terminals [old_name: string, --dry-run] {
     if $target == null { return }
     let leaves = (collect-ws-windows $target "")
     for leaf in $leaves {
-        let is_terminal = ($terminal_ids | any {|t| $t == $leaf.class })
+        let is_terminal = (is-term-class $leaf.class)
         if not $is_terminal { continue }
         let cmd = $"[id=($leaf.wid)] kill"
         if $dry_run {
@@ -993,7 +1023,7 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
             let session = ($entry | get -o session | default "")
             let saved_wid = ($entry | get -o wid | default 0)
             let title = ($entry | get -o title | default "")
-            let is_term = ($terminal_ids | any {|t| $t == $cls })
+            let is_term = (is-term-class $cls)
 
             if $is_term and ($wid | is-not-empty) and ($session | is-not-empty) {
                 # Happy path: tmux-attached terminal. Match by title which
@@ -1149,7 +1179,7 @@ def spawn-for [entry: record, term: string, id: string] {
     let cls = ($entry | get -o class | default "")
     let session = ($entry | get -o session | default "")
     let session_type = ($entry | get -o session_type | default "")
-    let is_term = ($terminal_ids | any {|t| $t == $cls })
+    let is_term = (is-term-class $cls)
     let slot = (slot-id-for $id)
 
     if $is_term {
@@ -1229,7 +1259,7 @@ def kwi3-gui-keys [body: record, state: record] {
         let val = ($body | get $key)
         if (is-leaf-key $key) {
             let cls = ($state | get -o $key | default {} | get -o class | default "")
-            let is_term = ($terminal_ids | any {|t| $t == $cls })
+            let is_term = (is-term-class $cls)
             if (not $is_term) and ($cls | is-not-empty) {
                 $out = ($out | append { key: $key, class: $cls, saved: ($state | get $key | get -o wid | default 0) })
             }
@@ -1276,7 +1306,7 @@ def build-kwi3-nodes [body: record, state: record, term: string, ws_name: string
             let entry = ($state | get -o $key | default {})
             let cls = ($entry | get -o class | default "")
             let session = ($entry | get -o session | default "")
-            if ($terminal_ids | any {|t| $t == $cls }) {
+            if (is-term-class $cls) {
                 let slot = $"wm-slot-($ws_name)-($key)"
                 let flag = (term-class-flag $term (shq $slot))
                 let exec = if ($session | is-not-empty) {
@@ -1349,7 +1379,7 @@ def isolate-kwi3 [tree: record, name: string, dry_run: bool] {
     let old_name = $"($name)-old"
     let leftover = (find-workspace-by-name $tree $old_name)
     if $leftover != null {
-        let lterms = (kwi3-leaves $leftover | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id)
+        let lterms = (kwi3-leaves $leftover | where {|l| is-term-class $l.class } | get id)
         kwi3-close-all (kwi3-placeholders $leftover | append $lterms) $dry_run
         let stamped = $"($old_name)-(date now | format date '%s')"
         kwi3-do "workspace.rename" { id: $leftover.id, name: $stamped } $dry_run
@@ -1363,7 +1393,7 @@ def isolate-kwi3 [tree: record, name: string, dry_run: bool] {
     kwi3-do "workspace.rename" { id: $target.id, name: $old_name } $dry_run
     {
         id: $target.id,
-        terminals: ($windows | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id),
+        terminals: ($windows | where {|l| is-term-class $l.class } | get id),
         stale: $placeholders,
     }
 }
@@ -1447,7 +1477,7 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
             for r in $respawned {
                 let old = if $tree == null { null } else { find-workspace-by-name $tree $"($r.name)-old" }
                 if $old != null {
-                    kwi3-close-all (kwi3-leaves $old | where {|l| $terminal_ids | any {|t| $t == $l.class } } | get id) false
+                    kwi3-close-all (kwi3-leaves $old | where {|l| is-term-class $l.class } | get id) false
                 }
             }
         }

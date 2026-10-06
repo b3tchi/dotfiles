@@ -476,6 +476,34 @@ let filled = if $dev3 == null { [] } else { leaves $dev3 | get window_properties
 if (check "restore: terminals mapped by `st -c wm-slot-...` land in dev, GUI leaves stay" ($r.exit_code == 0 and ($filled | where {|c| $c =~ '^wm-slot-dev-' } | length) == 3 and "Zathura" in $filled and "Firefox" in $filled) $"classes=($filled | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 ^rm -f $"($tmp)/mapspawn"
 
+# ── 7b. save -> restore -> save -> restore (kwi3-a1j.9) ────────────────────────
+# After a restore the terminals wear `wm-slot-<ws>-<key>`; a save of that state
+# used to file them as GUI skip_restore, so the NEXT restore never respawned
+# them. Section 7 left dev holding exactly those terminals.
+print "\n[7b] round-trip"
+let cache = $"($home)/.cache/sway-state.yaml"
+let r = (run-ws $tmp $test_path $k ["save" "--workspace" "dev"])
+let sv = (open $cache | get workspaces | where name == "dev" | first)
+let term_entries = ($sv.state | transpose k v | where {|e| ($e.v.class | str starts-with "wm-slot-") })
+if (check "round-trip: save ran clean, the three slot terminals are in the cache" ($r.exit_code == 0 and ($term_entries | length) == 3) $"($r | to nuon) state=($sv.state | to json -r)") { $passed += 1 } else { $failed += 1 }
+if (check "round-trip: slot terminals are NOT skip_restore" ($term_entries | all {|e| ($e.v | get -o skip_restore | default false) == false }) $"state=($sv.state | to json -r)") { $passed += 1 } else { $failed += 1 }
+let sess = ($term_entries | each {|e| { c: $e.v.class, s: ($e.v | get -o session | default "") } } | sort-by c)
+if (check "round-trip: tmux session association survives the save" ($sess == [{c: "wm-slot-dev-1", s: "a"} {c: "wm-slot-dev-2", s: "b"} {c: "wm-slot-dev-4", s: ""}]) $"sess=($sess | to json -r)") { $passed += 1 } else { $failed += 1 }
+"" | save -f $"($tmp)/mapspawn"
+let nspawn = (open $"($tmp)/spawn.log" | lines | length)
+let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
+let again = (open $"($tmp)/spawn.log" | lines | skip $nspawn)
+if (check "round-trip: second restore respawns the terminals with fresh slot classes and sessions" ($r.exit_code == 0 and $again == ["st -c wm-slot-dev-1 -e tmux attach -t a" "st -c wm-slot-dev-2 -e tmux attach -t b" "st -c wm-slot-dev-4"]) $"again=($again | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+let r = (run-ws $tmp $test_path $k ["save" "--workspace" "dev"])
+let sv2 = (open $cache | get workspaces | where name == "dev" | first)
+if (check "round-trip: a second save is stable (same layout, same state)" ($r.exit_code == 0 and $sv2.layout == $sv.layout and ($sv2.state | get "1" | get session) == "a" and ($sv2.state | get "2" | get session) == "b") $"layout1=($sv.layout | to json -r) layout2=($sv2.layout | to json -r)") { $passed += 1 } else { $failed += 1 }
+# A corrupt cache must not abort a FULL save: on main it is simply overwritten.
+"workspaces: [unclosed\n  - : : {" | save -f $cache
+let r = (run-ws $tmp $test_path $k ["save"])
+let healed = (try { open $cache | get workspaces | length } catch { -1 })
+if (check "round-trip: a full save over a corrupt cache succeeds and rewrites it" ($r.exit_code == 0 and $healed > 0) $"healed=($healed) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+^rm -f $"($tmp)/mapspawn"
+
 # ── 8. tmux down ──────────────────────────────────────────────────────────────
 print "\n[8] tmux-down-aborts"
 "" | save -f $"($tmp)/tmux-down"
@@ -492,8 +520,8 @@ let stub_calls = (if ($i3_log | path exists) { open $i3_log | str trim } else { 
 let verbs = ["append_layout" "get_marks" "con_mark" "mark "]
 let seen = ($verbs | where {|v| $rig_text | str contains $v })
 if (check "no-i3-verbs: no i3 verb in the rig's request log, no i3-msg/swaymsg call at all" (($seen | is-empty) and ($stub_calls | is-empty)) $"seen=($seen | to json -r) i3-msg log=($stub_calls)") { $passed += 1 } else { $failed += 1 }
-let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") })
-if (check "sandbox: the stub tmux was only asked list-sessions" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
+let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") and not ($l =~ '(^| )list-clients ') })
+if (check "sandbox: the stub tmux was only asked list-sessions / list-clients" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
 
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
