@@ -759,6 +759,27 @@ kwi3_start stop >/dev/null
 sleep 0.3
 [ "$(daemons_on "$XD")" = 0 ] || bad "teardown: the kwi3 daemon on $XD survived"
 
+# A hand restart from a terminal that never had $KWI3SOCK (tmux server env,
+# ssh): start finds the display's OWN conventional socket and adopts it when
+# kwi3 answers there - otherwise the daemon dispatches every chord over i3
+# IPC to nothing and its spawns cannot ask kwi3 for the focused workspace.
+OWN_RPC="$XDG_RUNTIME_DIR/kwi3-${XD#:}.rpc.sock"
+python3 "$T/rpcwm.py" "$OWN_RPC" rpc >"$T/rpcwm-own.log" 2>&1 &
+FAKEOWN_PID=$!
+for _t in 1 2 3 4 5 6 7 8 9 10; do [ -S "$OWN_RPC" ] && break; sleep 0.2; done
+out="$(env -u KWI3SOCK DISPLAY="$XD" "$HERE/hotkeyd.sh" start "$XD" 2>&1)"; rc=$?
+sleep 0.5
+_opid="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $XD" 2>/dev/null | head -1)"
+_ov=""; [ -n "$_opid" ] && _ov="$(tr '\0' '\n' <"/proc/$_opid/environ" \
+    | sed -n 's/^KWI3SOCK=//p')"
+[ "$rc" -eq 0 ] && [ "$_ov" = "$OWN_RPC" ] \
+    && ok "start with KWI3SOCK unset adopts $XD's own answering kwi3 socket" \
+    || bad "start with KWI3SOCK unset: rc=$rc KWI3SOCK='$_ov': $out"
+DISPLAY="$XD" "$HERE/hotkeyd.sh" stop "$XD" >/dev/null 2>&1
+sleep 0.3
+kill "$FAKEOWN_PID" 2>/dev/null; wait "$FAKEOWN_PID" 2>/dev/null
+rm -f "$OWN_RPC"
+
 # FAIL CLOSED. The gate is lifted only on a POSITIVE JSON-RPC answer on
 # $KWI3SOCK. Each case below is "not identified", and not identified keeps
 # today's refusal — rc=4 and no daemon. A daemon that did start is stopped
@@ -779,6 +800,12 @@ latched_on() { # <display> <description> [VAR=value ...]
 }
 
 latched_on "$XD" "no KWI3SOCK and no i3 on $XD"
+# The adoption above needs an ANSWER, not a file: a dead kwi3's leftover
+# socket at the display's own conventional path lifts nothing.
+python3 -c 'import socket, sys
+socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).bind(sys.argv[1])' "$OWN_RPC"
+latched_on "$XD" "no KWI3SOCK, $XD's own conventional socket stale"
+rm -f "$OWN_RPC"
 latched_on "$XD" "KWI3SOCK naming a path that does not exist" \
     KWI3SOCK="$T/no-such.rpc.sock"
 latched_on "$XD" "KWI3SOCK naming a stale socket nothing listens on" \

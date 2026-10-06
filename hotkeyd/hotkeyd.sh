@@ -374,6 +374,26 @@ case "$VERB" in
     start)
         need_display
         need_runtime
+        # $KWI3SOCK unset - a hand `restart` from a terminal that never had
+        # it (the tmux server's env, ssh). Adopt THIS display's own
+        # conventional socket when kwi3 ANSWERS on it, the same place
+        # hotkeyd-panic.sh's classify_display() looks. Without it the daemon
+        # dispatches every chord over i3 IPC to nothing, and its spawns
+        # (wm-launch-terminal -> wm-current-workspace) cannot ask kwi3 for
+        # the focused workspace, so every terminal joins tmux "local".
+        # A name for this display by construction, so kwi3sock_names_display
+        # below holds; a stale or missing socket adopts nothing and every
+        # check below fails closed exactly as before.
+        if [ -z "${KWI3SOCK:-}" ]; then
+            KWI3SOCK="${XDG_RUNTIME_DIR:-/tmp}/kwi3-$DPY_NUM.rpc.sock"
+            if [ -S "$KWI3SOCK" ] && kwi3_answers; then
+                export KWI3SOCK
+                printf 'hotkeyd.sh: KWI3SOCK unset; adopting %s (kwi3 '\
+'answers for %s)\n' "$KWI3SOCK" "$DPY_BASE" >&2
+            else
+                unset KWI3SOCK
+            fi
+        fi
         if linked; then
             if latch_applies; then
                 die "session is PANICKED (fallback linked at $FALLBACK_LINK) — \
