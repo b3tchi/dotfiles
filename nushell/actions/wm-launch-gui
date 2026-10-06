@@ -1,0 +1,17 @@
+#!/usr/bin/env nu
+# wm-launch-gui - start a GUI program detached, in the session's canonical
+# environment (sp038): `wm-launch-gui [--dry-run] <cmd...>` is exactly
+# `wm-launch-detach [--dry-run] -- <cmd...>`. No command -> exit 2.
+# Symlinked to ~/.local/bin/wm-launch-gui via rotz.
+
+def --wrapped main [...args] {
+    let dry = (($args | get -o 0) == "--dry-run")
+    let argv = if $dry { $args | skip 1 } else { $args }
+    if ($argv | is-empty) {
+        print -e "wm-launch-gui: no command given (usage: wm-launch-gui [--dry-run] <cmd...>)"
+        exit 2
+    }
+    let flags = if $dry { ["--dry-run"] } else { [] }
+    ^~/.local/bin/wm-launch-detach ...$flags -- ...$argv
+    exit $env.LAST_EXIT_CODE
+}

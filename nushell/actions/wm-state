@@ -2,6 +2,8 @@
 # wm-state: list, save, and restore workspace ↔ tmux session mappings
 # Works under sway (Wayland) and i3 (X11).
 
+# expand: ~/.local/bin/wm-state is a symlink; the sibling launcher lives beside the REAL file
+const wm_actions_dir = (path self | path expand | path dirname)
 const wm_ipc = '~/.local/bin/wm-ipc.nu'
 use $wm_ipc *
 
@@ -992,18 +994,9 @@ def is-leaf-key [k: string] {
 }
 
 # Terminal class/app_id flag tokens (separate flag + value so they survive quoting).
+# The mapping is owned by wm-launch-terminal (sp038 T3); this calls through.
 def term-class-flag [term: string, slot_id: string] {
-    if $term in ["kitty", "alacritty", "Alacritty"] {
-        $"--class ($slot_id)"
-    } else if $term == "foot" {
-        $"--app-id ($slot_id)"
-    } else if $term == "xterm" {
-        $"-class ($slot_id)"
-    } else if $term == "st" {
-        $"-c ($slot_id)"
-    } else {
-        ""
-    }
+    ^$nu.current-exe $"($wm_actions_dir)/wm-launch-terminal" class-flag $term $slot_id | str trim
 }
 
 # Recursive helper for build-respawn-plan. Produces { nodes, leaf_specs } for the
