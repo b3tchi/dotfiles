@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -44,22 +45,20 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 		t.Fatalf("writing i3 config: %v", err)
 	}
 
-	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp")
+	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset")
 	if err := xvfb.Start(); err != nil {
 		t.Fatalf("starting Xvfb: %v", err)
 	}
-	xSockPath := fmt.Sprintf("/tmp/.X11-unix/X%s", strings.TrimPrefix(display, ":"))
+	xSockPath := fmt.Sprintf("/tmp/.X11-unix/X%s", strings.TrimPrefix(display, ":")) // :97, stopXvfb below
 	if !waitForX(xSockPath, 5*time.Second) {
-		xvfb.Process.Kill()
-		xvfb.Wait()
+		stopXvfb(xvfb, 97)
 		t.Fatal("Xvfb did not create its socket in time")
 	}
 
 	i3Cmd := exec.Command("i3", "-c", cfgPath)
 	i3Cmd.Env = append(os.Environ(), "DISPLAY="+display)
 	if err := i3Cmd.Start(); err != nil {
-		xvfb.Process.Kill()
-		xvfb.Wait()
+		stopXvfb(xvfb, 97)
 		t.Fatalf("starting i3: %v", err)
 	}
 
@@ -74,8 +73,7 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 	}
 	cleanup = func() {
 		killI3()
-		xvfb.Process.Kill()
-		xvfb.Wait()
+		stopXvfb(xvfb, 97)
 		os.Remove(sockPath)
 	}
 
@@ -224,5 +222,32 @@ func TestIntegration_Client_I3Death(t *testing.T) {
 	}
 	if ok {
 		t.Error("ok = true dispatching to a dead i3, want false")
+	}
+}
+
+// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
+// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
+// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
+// leave one per test.
+func stopXvfb(cmd *exec.Cmd, dispNum int) {
+	cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		cmd.Process.Kill()
+		<-done
+	}
+	removeOwnXLock(dispNum, cmd.Process.Pid)
+}
+
+// removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb
+// that lost the display to another server must not take that server's
+// lock with it.
+func removeOwnXLock(dispNum, pid int) {
+	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
+	if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
+		os.Remove(lock)
 	}
 }

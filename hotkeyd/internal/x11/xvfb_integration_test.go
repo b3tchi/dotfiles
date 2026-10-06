@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -44,7 +45,7 @@ func startXvfb(t *testing.T, dispNum int, extraArgs ...string) (cleanup func()) 
 	requireBinary(t, "Xvfb")
 
 	sockPath := SocketPath(dispNum)
-	args := append([]string{fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-screen", "0", "320x240x24"}, extraArgs...)
+	args := append([]string{fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24"}, extraArgs...)
 	cmd := exec.Command("Xvfb", args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -53,15 +54,40 @@ func startXvfb(t *testing.T, dispNum int, extraArgs ...string) (cleanup func()) 
 	}
 
 	if !waitForSocket(sockPath, 5*time.Second) {
-		cmd.Process.Kill()
-		cmd.Wait()
+		stopXvfb(cmd, dispNum)
 		t.Fatalf("Xvfb did not create its socket in time: %s", stderr.String())
 	}
 
 	return func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		stopXvfb(cmd, dispNum)
 		os.Remove(sockPath)
+	}
+}
+
+// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
+// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
+// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
+// leave one per test.
+func stopXvfb(cmd *exec.Cmd, dispNum int) {
+	cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		cmd.Process.Kill()
+		<-done
+	}
+	removeOwnXLock(dispNum, cmd.Process.Pid)
+}
+
+// removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb
+// that lost the display to another server must not take that server's
+// lock with it.
+func removeOwnXLock(dispNum, pid int) {
+	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
+	if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
+		os.Remove(lock)
 	}
 }
 
@@ -199,4 +225,19 @@ func TestOpen_Xvfb_WithAuth_WithheldCookieFails(t *testing.T) {
 		t.Fatalf("error is %T, want *ErrSetupFailed: %v", err, err)
 	}
 	t.Logf("server refused as expected: %v", setupFailed)
+}
+
+// The rig must leave no /tmp/.X<n>-lock behind: a SIGKILLed Xvfb cannot
+// remove its own, and every run of this suite used to strand one per test.
+func TestStartXvfb_CleanupLeavesNoLock(t *testing.T) {
+	dispNum := pickFreeDisplay(t)
+	cleanup := startXvfb(t, dispNum)
+	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
+	if _, err := os.Stat(lock); err != nil {
+		t.Fatalf("Xvfb up but no lock at %s: %v", lock, err)
+	}
+	cleanup()
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left %s behind (stat err: %v)", lock, err)
+	}
 }

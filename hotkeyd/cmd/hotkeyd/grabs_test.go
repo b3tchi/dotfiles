@@ -647,15 +647,14 @@ func startIntegrationXvfb(t *testing.T, dispNum int) {
 	requireBinaryForIntegration(t, "Xvfb")
 
 	sockPath := fmt.Sprintf("/tmp/.X11-unix/X%d", dispNum)
-	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-screen", "0", "320x240x24")
+	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24") // -noreset: see startPrivateXvfb
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting Xvfb: %v", err)
 	}
 	t.Cleanup(func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		stopXvfb(cmd, dispNum)
 		os.Remove(sockPath)
 	})
 

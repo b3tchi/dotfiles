@@ -1900,11 +1900,11 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 		t.Fatalf("writing i3 config: %v", err)
 	}
 
-	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp")
+	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset")
 	if err := xvfb.Start(); err != nil {
 		t.Fatalf("starting Xvfb: %v", err)
 	}
-	t.Cleanup(func() { xvfb.Process.Kill(); xvfb.Wait() })
+	t.Cleanup(func() { stopXvfb(xvfb, 198) })
 	if !waitForXAccepting(198, 5*time.Second) {
 		t.Fatal("Xvfb did not create its socket in time")
 	}
@@ -2027,9 +2027,13 @@ func TestIntegration_XServerDeath_DaemonExitsFatally_Xvfb(t *testing.T) {
 	killed := false
 	t.Cleanup(func() {
 		if !killed {
-			xvfb.Process.Kill()
+			stopXvfb(xvfb, 187)
+			return
 		}
+		// SIGKILLed by the test itself, on purpose: it cannot have removed
+		// its lock, so the rig does.
 		xvfb.Wait()
+		removeOwnXLock(187, xvfb.Process.Pid)
 	})
 	if !waitForXAccepting(187, 5*time.Second) {
 		t.Fatalf("Xvfb did not start accepting connections on %s in time; Xvfb said: %s", display, xvfbLog.String())
@@ -2213,5 +2217,32 @@ func TestWarnIfKeyboardGrabbed_NamesDisplayReasonAndConsequence(t *testing.T) {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("warning does not mention %q: %s", want, lines[0])
 		}
+	}
+}
+
+// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
+// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
+// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
+// leave one per test.
+func stopXvfb(cmd *exec.Cmd, dispNum int) {
+	cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		cmd.Process.Kill()
+		<-done
+	}
+	removeOwnXLock(dispNum, cmd.Process.Pid)
+}
+
+// removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb
+// that lost the display to another server must not take that server's
+// lock with it.
+func removeOwnXLock(dispNum, pid int) {
+	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
+	if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
+		os.Remove(lock)
 	}
 }

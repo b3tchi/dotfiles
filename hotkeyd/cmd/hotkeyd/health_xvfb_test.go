@@ -65,7 +65,10 @@ func startPrivateXvfb(t *testing.T, dispNum int) (cleanup func()) {
 	requireXvfbBinary(t)
 
 	sockPath := x11.SocketPath(dispNum)
-	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-screen", "0", "320x240x24")
+	// -noreset: without it Xvfb regenerates the moment its last client
+	// disconnects, and a probe's own open/close followed by the test's next
+	// x11.Open races that reset ("connection reset by peer", ~1 in 5 runs).
+	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -74,13 +77,11 @@ func startPrivateXvfb(t *testing.T, dispNum int) (cleanup func()) {
 
 	if waitForXAccepting(dispNum, 5*time.Second) {
 		return func() {
-			cmd.Process.Kill()
-			cmd.Wait()
+			stopXvfb(cmd, dispNum)
 			os.Remove(sockPath)
 		}
 	}
-	cmd.Process.Kill()
-	cmd.Wait()
+	stopXvfb(cmd, dispNum)
 	t.Fatalf("private Xvfb did not create its socket in time: %s", stderr.String())
 	return nil
 }
@@ -226,5 +227,20 @@ func TestRunHealth_Xvfb_KeyboardGrabbed(t *testing.T) {
 	code, msg := runHealth(disp)
 	if code != HealthKeyboardGrabbed {
 		t.Fatalf("runHealth with an externally-held exclusive grab = %d, want %d (HealthKeyboardGrabbed): %s", code, HealthKeyboardGrabbed, msg)
+	}
+}
+
+// Same contract as internal/x11's TestStartXvfb_CleanupLeavesNoLock: the
+// rig stops its Xvfb so no /tmp/.X<n>-lock is stranded.
+func TestStartPrivateXvfb_CleanupLeavesNoLock(t *testing.T) {
+	dispNum := pickPrivateXvfbDisplay(t)
+	cleanup := startPrivateXvfb(t, dispNum)
+	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
+	if _, err := os.Stat(lock); err != nil {
+		t.Fatalf("Xvfb up but no lock at %s: %v", lock, err)
+	}
+	cleanup()
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left %s behind (stat err: %v)", lock, err)
 	}
 }
