@@ -11,6 +11,12 @@
 #   1a snapshot-written       1b drop-list-absent (one assertion per name)
 #   1c atomic-replace         1d no-runtime-dir-78     1e no-display-78
 #   1f per-display-files      1g newline-value-roundtrip
+#
+# Task 2 (wm-launch-detach; probes are `sleep`-ing children killed by exact pid):
+#   2a identical-children     2b fd-closer-has-teeth   2c set-passes-only-named
+#   2d dry-run-x11            2e dry-run-systemd       2f dry-run-windows
+#   2g no-backend-78          2h argv-verbatim         2i corrupt-snapshot-78
+#   2j display-not-cross-used 2k missing-command
 
 const here = (path self | path dirname)
 const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS]
@@ -39,6 +45,97 @@ def names-of [entries: list<string>] {
 def check [ok: bool, label: string] {
     if $ok { print $"  ok   ($label)" } else { print $"  FAIL ($label)" }
     $ok
+}
+
+# ---- Task 2 helpers -------------------------------------------------------
+
+const PROBE = '#!/bin/bash
+# probe: report what /proc says about this process, then sleep.
+out=$1; fifo=$2; shift 2
+echo $$ >> "$(dirname "$out")/pids"
+set -- "$@" ; args=("$@")
+read -r _ ppid pgrp sid _ < <(sed "s/^.*) //" /proc/$$/stat)
+{
+  echo "pid $$"; echo "ppid $ppid"; echo "pgrp $pgrp"; echo "sid $sid"
+  echo "cwd $(readlink /proc/$$/cwd)"
+  echo "fds $(for f in /proc/$$/fd/*; do echo ${f##*/}; done | sort -n | tr "\n" " ")"
+  tr "\0" "\n" < /proc/$$/environ | sort | sed -e "/^_=/d" -e "s/^/env /"
+} > "$out"
+if [ ${#args[@]} -gt 0 ]; then printf "%s\0" "${args[@]}" > "$out.args"; fi
+echo done > "$fifo"
+exec sleep 30
+'
+
+# Directory of just the tools the launcher and probes need - notably NO
+# systemctl, so "no systemd user manager" is a fact, not a hope.
+def toolbin [sb: string] {
+    let d = $"($sb)/toolbin"
+    ^mkdir -p $d
+    for t in [env setsid sh bash sleep cat sed cut sort tr diff dirname readlink install mv] {
+        let w = (^sh -c $"command -v ($t)" | complete | get stdout | str trim)
+        if $w != "" { ^ln -sf $w $"($d)/($t)" }
+    }
+    $d
+}
+
+# A sandbox with a snapshot for display :977 written by the real tool.
+def session [] {
+    let sb = (sandbox)
+    let tb = (toolbin $sb)
+    ^mkdir -p $"($sb)/home" $"($sb)/run"
+    $PROBE | save --raw $"($sb)/probe"
+    ^chmod +x $"($sb)/probe"
+    let base = [$"HOME=($sb)/home" $"XDG_RUNTIME_DIR=($sb)/run" $"PATH=($tb)" "DISPLAY=:977" "SESSIONVAR=kept"]
+    ^env -i ...$base $nu.current-exe $"($here)/wm-session-env-snapshot" | complete | ignore
+    {sb: $sb, tb: $tb, base: $base, snap: $"($sb)/run/wm-session-env-_977"}
+}
+
+const NOISE = ["TMUX=/tmp/tmux-1/default,1,0" "TMUX_PANE=%3" "PWD=/tmp" "SHLVL=4" "NU_VERSION=9" "OLDPWD=/x" "KEEPME=leak" "I3SOCK=/x/i3"]
+
+# Run the detacher from a caller shape and return the probe's report.
+#   hotkeyd: env -i <session env> setsid sh -c "nu detach ..." (proc.Run shape)
+#   tmux:    noisy env, cwd /tmp, non-CLOEXEC fds 7 and 9 open
+#   bare:    the probe itself, no launcher (the fd/env reference)
+def launch [s: record, tag: string, shape: string, extra_env: list<string>, flags: list<string>, probe_args: list<string> = []] {
+    let out = $"($s.sb)/out-($tag)"
+    let fifo = $"($s.sb)/fifo-($tag)"
+    ^mkfifo $fifo
+    let probe = $"($s.sb)/probe"
+    let detach = $"($here)/wm-launch-detach"
+    let nuexe = $nu.current-exe
+    let pa = ($probe_args | each {|a| $"'($a)'" } | str join " ")
+    let r = match $shape {
+        "bare" => { ^env -i ...$s.base ...$extra_env bash -c $"($probe) ($out) ($fifo) >/dev/null 2>&1 </dev/null &" | complete }
+        "hotkeyd" => {
+            ^env -i ...$s.base ...$extra_env setsid bash -c $"($nuexe) ($detach) ($flags | str join " ") -- ($probe) ($out) ($fifo) ($pa) >/dev/null 2>&1 </dev/null" | complete
+        }
+        _ => {
+            ^env -i ...$s.base ...$NOISE ...$extra_env bash -c $"exec 7>($s.sb)/f7; exec 9<($s.sb)/probe; cd /tmp; ($nuexe) ($detach) ($flags | str join " ") -- ($probe) ($out) ($fifo) ($pa) >/dev/null 2>&1 </dev/null" | complete
+        }
+    }
+    let got = (^timeout 10 cat $fifo | complete)
+    {exit: $r.exit_code, stderr: $r.stderr, started: ($got.exit_code == 0), out: $out, report: (if ($out | path exists) { open --raw $out | lines } else { [] })}
+}
+
+def field [rep: record, k: string] {
+    $rep.report | where {|l| $l | str starts-with $"($k) " } | each {|l| $l | str substring (($k | str length) + 1).. } | first
+}
+def envs-of [rep: record] { $rep.report | where {|l| $l | str starts-with "env " } }
+
+# Run the detacher where NOTHING may start: returns exit/stdout/stderr and
+# whether a probe wrote its fifo within 1s.
+def run-detach [s: record, tag: string, envl: list<string>, flags: list<string>] {
+    let out = $"($s.sb)/out-($tag)"
+    let fifo = $"($s.sb)/fifo-($tag)"
+    ^mkfifo $fifo
+    let r = (^env -i ...$envl $nu.current-exe $"($here)/wm-launch-detach" ...$flags -- $"($s.sb)/probe" $out $fifo | complete)
+    let got = (^timeout 1 cat $fifo | complete)
+    $r | merge {started: ($got.exit_code == 0 and ($got.stdout | str trim) == "done"), wrote: ($out | path exists)}
+}
+
+def kill-probes [sb: string] {
+    let f = $"($sb)/pids"
+    if ($f | path exists) { for p in (open --raw $f | lines | where {|l| $l != "" }) { try { ^kill $p } } }
 }
 
 def main [] {
@@ -105,6 +202,90 @@ def main [] {
     $oks = ($oks | append (check ($got == [$"MULTI=($tricky)"]) "1g newline-value-roundtrip: newline, = and unicode survive NUL framing"))
 
     for d in [$sb $sb2 $sb3 $sb4 $sb5] { ^rm -rf $d }
+
+    print "-- 2. wm-launch-detach"
+    let s = (session)
+    let dsb = [$s.sb]
+    try {
+        let det = $"($here)/wm-launch-detach"
+        let snapnames = (read-snapshot $s.snap | each {|e| $e | split row "=" | first })
+        let volatile = ["_" "PWD" "SHLVL"]   # bash (the sh) adds these itself
+
+        # 2a
+        let bare = (launch $s a0 bare [] [])
+        let A = (launch $s a1 hotkeyd [] [])
+        let B = (launch $s a2 tmux [] [])
+        let home = $"($s.sb)/home"
+        let ok_a = ($A.started and $B.started and $bare.started)
+        $oks = ($oks | append (check ($ok_a and (field $A ppid) == (field $B ppid)) "2a identical-children: ppid equal"))
+        $oks = ($oks | append (check ($ok_a and (field $A sid) == (field $A pgrp) and (field $A sid) == (field $A pid) and (field $B sid) == (field $B pgrp) and (field $B sid) == (field $B pid)) "2a sid == pgid == pid for both"))
+        $oks = ($oks | append (check ($ok_a and (field $A fds) == (field $bare fds) and (field $B fds) == (field $bare fds)) $"2a fds equal a bare probe's \(A '(field $A fds)', B '(field $B fds)', bare '(field $bare fds)'\)"))
+        $oks = ($oks | append (check ($ok_a and (envs-of $A) == (envs-of $B) and ((envs-of $A) | length) > 3) "2a environ diff empty"))
+        $oks = ($oks | append (check ($ok_a and (field $A cwd) == $home and (field $B cwd) == $home) "2a cwd == snapshot HOME for both"))
+        $oks = ($oks | append (check ($ok_a and not ((envs-of $B) | any {|e| ($e | str contains "TMUX") or ($e | str contains "KEEPME") or ($e | str contains "NU_VERSION") })) "2a tmux-shaped caller's TMUX/KEEPME/NU_VERSION did not reach the child"))
+
+        # 2b
+        let T = (launch $s b1 tmux ["WM_LAUNCH_TEST=1" "WM_LAUNCH_TEST_NO_FDCLOSE=1"] [])
+        let fds = if $T.started { field $T fds | split row " " } else { [] }
+        $oks = ($oks | append (check ($T.started and ("7" in $fds) and ("9" in $fds)) $"2b fd-closer-has-teeth: without it fds 7 and 9 leak \(got '($fds | str join ' ')'\)"))
+        let R = (run-detach $s b2 [...$s.base "WM_LAUNCH_TEST_NO_FDCLOSE=1"] [])
+        $oks = ($oks | append (check ($R.exit_code != 0 and not $R.started and not $R.wrote and ($R.stderr | str contains "WM_LAUNCH_TEST")) "2b knob refused without WM_LAUNCH_TEST=1, nothing started"))
+
+        # 2c
+        let C = (launch $s c1 tmux [] ["--set" "TMUX_TARGET=dev"])
+        let cn = (envs-of $C | each {|e| $e | str substring 4.. | split row "=" | first } | where {|n| not ($n in $volatile) } | sort)
+        let want = ($snapnames | append "TMUX_TARGET" | where {|n| not ($n in $volatile) } | sort)
+        $oks = ($oks | append (check ($C.started and (envs-of $C | any {|e| $e == "env TMUX_TARGET=dev" }) and $cn == $want) $"2c set-passes-only-named: TMUX_TARGET=dev plus exactly the snapshot, nothing from the caller \(got [($cn | str join ' ')]\)"))
+
+        # 2d / 2e / 2f
+        let d = (run-detach $s d1 $s.base ["--dry-run"])
+        $oks = ($oks | append (check ($d.exit_code == 0 and ($d.stdout | str trim) == $"x11 ($s.sb)/probe ($s.sb)/out-d1 ($s.sb)/fifo-d1" and not $d.started and not $d.wrote) "2d dry-run-x11: `x11 <argv>`, nothing started"))
+
+        let sb_e = (sandbox)
+        let tb_e = (toolbin $sb_e)
+        ^mkdir -p $"($sb_e)/stub" $"($sb_e)/home" $"($sb_e)/run"
+        "#!/bin/sh\nexit 0\n" | save --raw $"($sb_e)/stub/systemctl"
+        ^chmod +x $"($sb_e)/stub/systemctl"
+        let s_e = ($s | merge {sb: $s.sb})
+        let env_e = [$"HOME=($sb_e)/home" $"XDG_RUNTIME_DIR=($sb_e)/run" $"PATH=($sb_e)/stub:($s.tb)" "DISPLAY=:977"]
+        let e = (run-detach $s e1 $env_e ["--dry-run"])
+        $oks = ($oks | append (check ($e.exit_code == 0 and ($e.stdout | str trim) == $"systemd ($s.sb)/probe ($s.sb)/out-e1 ($s.sb)/fifo-e1" and not $e.started and not $e.wrote) "2e dry-run-systemd: stub systemctl + no snapshot -> `systemd <argv>`, nothing started"))
+        ^rm -rf $sb_e
+
+        let f = (run-detach $s f1 [...$s.base "WM_LAUNCH_TEST=1" "WM_LAUNCH_TEST_OS=windows"] ["--dry-run"])
+        $oks = ($oks | append (check ($f.exit_code == 0 and ($f.stdout | str trim) == $"windows ($s.sb)/probe ($s.sb)/out-f1 ($s.sb)/fifo-f1" and not $f.started and not $f.wrote) "2f dry-run-windows: `windows <argv>` even with a snapshot present, nothing started"))
+
+        # 2g: no snapshot for the display, no systemctl on PATH
+        let sb_g = (sandbox)
+        ^mkdir -p $"($sb_g)/run"
+        let g = (run-detach $s g1 [$"HOME=($sb_g)/home" $"XDG_RUNTIME_DIR=($sb_g)/run" $"PATH=($s.tb)" "DISPLAY=:977"] [])
+        let gmsg = $"wm-launch-detach: no launch backend for display :977 \(no snapshot at ($sb_g)/run/wm-session-env-_977, no systemd user manager\)"
+        $oks = ($oks | append (check ($g.exit_code == 78 and ($g.stderr | str trim) == $gmsg and not $g.started and not $g.wrote) $"2g no-backend-78: the plan's message, nothing started \(stderr '($g.stderr | str trim)'\)"))
+        ^rm -rf $sb_g
+
+        # 2h
+        let nasty = ["a b" "it's \"q\"" "$HOME $(id) `x`" "\u{e9}\u{4e2d}!" "--set" "*"]
+        let h = (launch $s h1 tmux [] [] ($nasty | each {|a| $a | str replace --all "'" "'\\''" }))
+        let got = if ($"($h.out).args" | path exists) { open --raw $"($h.out).args" | split row (char -i 0) | drop 1 } else { [] }
+        $oks = ($oks | append (check ($h.started and $got == $nasty) $"2h argv-verbatim: spaces, quotes, $, backticks, unicode, a glob and a fake flag arrive unchanged \(got ($got | to nuon)\)"))
+
+        # 2i
+        let bad = $"($s.sb)/run/wm-session-env-_966"
+        "PATH=/usr/bin\u{0}FOO=1\u{0}" | save --raw $bad
+        let i = (run-detach $s i1 [...$s.base "DISPLAY=:966"] [])
+        $oks = ($oks | append (check ($i.exit_code == 78 and ($i.stderr | str contains $bad) and not $i.started and not $i.wrote) "2i corrupt-snapshot-78: names the path, never the caller env"))
+
+        # 2j: :977 has a snapshot, :978 has none -> not cross-used
+        let j = (run-detach $s j1 $s.base ["--display" ":978"])
+        $oks = ($oks | append (check ($j.exit_code == 78 and ($j.stderr | str contains ":978") and ($j.stderr | str contains "wm-session-env-_978") and not $j.started and not $j.wrote) "2j display-not-cross-used: --display :978 refused though :977 has a snapshot"))
+
+        # 2k
+        let k = (^env -i ...$s.base $nu.current-exe $det -- no-such-cmd-xyzzy arg | complete)
+        $oks = ($oks | append (check ($k.exit_code != 0 and ($k.stderr | str contains "no-such-cmd-xyzzy")) "2k missing-command: non-zero and named \(a bare setsid -f would have said 0\)"))
+    } finally {
+        kill-probes $s.sb
+        ^rm -rf $s.sb
+    }
 
     let failed = ($oks | where {|x| not $x } | length)
     print ""

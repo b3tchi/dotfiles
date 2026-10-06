@@ -24,14 +24,30 @@ def refuse [var: string] {
     exit 78
 }
 
+# The snapshot path for a display: the ONE place the DISPLAY -> file-name rule
+# lives (wm-launch-detach asks here instead of keeping a second copy).
+def snapshot-path [runtime: string, display: string] {
+    let tag = ($display | str replace --all ":" "_" | str replace --all "." "_")
+    $"($runtime)/wm-session-env-($tag)"
+}
+
+# Print the snapshot path for <display> (default $DISPLAY) under
+# $XDG_RUNTIME_DIR; writes nothing. Exit 78 when either is unset.
+def "main path" [display?: string] {
+    let runtime = ($env | get -o XDG_RUNTIME_DIR | default "")
+    if $runtime == "" { refuse XDG_RUNTIME_DIR }
+    let d = ($display | default ($env | get -o DISPLAY | default ""))
+    if $d == "" { refuse DISPLAY }
+    print (snapshot-path $runtime $d)
+}
+
 def main [] {
     let runtime = ($env | get -o XDG_RUNTIME_DIR | default "")
     if $runtime == "" { refuse XDG_RUNTIME_DIR }
     let display = ($env | get -o DISPLAY | default "")
     if $display == "" { refuse DISPLAY }
 
-    let tag = ($display | str replace --all ":" "_" | str replace --all "." "_")
-    let dest = $"($runtime)/wm-session-env-($tag)"
+    let dest = (snapshot-path $runtime $display)
     let tmp = $"($dest).tmp.(random uuid)"
 
     # `env -0` is the environment as a child of this process sees it.
