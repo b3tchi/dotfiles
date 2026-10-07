@@ -1289,7 +1289,7 @@ def kwi3-assign-gui [gui: list<record>, live: list<record>] {
 }
 
 # Recursive body -> workspace.build nodes. { nodes, terms } where terms carries
-# one { key, class, exec } per terminal leaf, in tree order.
+# one { key, class, session } per terminal leaf, in tree order.
 def build-kwi3-nodes [body: record, state: record, term: string, ws_name: string, assign: record] {
     mut nodes = []
     mut terms = []
@@ -1301,14 +1301,8 @@ def build-kwi3-nodes [body: record, state: record, term: string, ws_name: string
             let session = ($entry | get -o session | default "")
             if (is-term-class $cls) {
                 let slot = $"wm-slot-($ws_name)-($key)"
-                let flag = (term-class-flag $term (shq $slot))
-                let exec = if ($session | is-not-empty) {
-                    $"($term) ($flag) -e tmux attach -t (shq $session)"
-                } else {
-                    $"($term) ($flag)"
-                }
                 $nodes = ($nodes | append { key: $key, swallows: [{ class: ("^" + (re-escape $slot) + "$") }] })
-                $terms = ($terms | append { key: $key, class: $slot, exec: $exec })
+                $terms = ($terms | append { key: $key, class: $slot, session: $session })
             } else if ($cls | is-not-empty) {
                 let live = ($assign | get -o $key)
                 if $live != null {
@@ -1363,7 +1357,7 @@ def kwi3-close-all [ids: list<int>, dry_run: bool] {
 # them AFTER the build (once the windows it pulls in have left the old workspace
 # - closing a placeholder that sits beside a window in a nested container
 # destroys the workspace and re-homes the window under a new con id on kwi3
-# today, see kwi3 bd issue kwi3-a1j.6 notes) and BEFORE the first exec. A
+# today, see kwi3 bd issue kwi3-a1j.6 notes) and BEFORE the first terminal launch. A
 # placeholder-only workspace has no windows to protect: it is closed here, which
 # removes the workspace itself and frees the name, and nothing is renamed.
 def isolate-kwi3 [tree: record, name: string, dry_run: bool] {
@@ -1391,7 +1385,27 @@ def isolate-kwi3 [tree: record, name: string, dry_run: bool] {
     }
 }
 
+# The launcher restore starts every terminal through (sp038 T4): the same
+# wm-launch-terminal a hotkey uses, so a restored terminal is born the way a
+# hand-started one is. Not a kwi3 RPC - kwi3's `exec` runs in KWin's own env.
+def wm-launcher-path [] { $env.HOME | path join ".local/bin/wm-launch-terminal" }
+
+# argv after the launcher: a saved tmux session attaches by --session (one
+# word, whatever it contains); a bare terminal has none, so it resolves its
+# target from its own workspace.
+def launcher-args [term: string, t: record, ws_name: string] {
+    let who = if ($t.session | is-not-empty) { ["--session" $t.session] } else { ["--workspace" $ws_name] }
+    [$term] | append $who | append ["--class" $t.class]
+}
+
 def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
+    # Before the first kwi3 call of any kind: a restore that cannot launch its
+    # terminals must not close or rename anything.
+    let launcher = (wm-launcher-path)
+    if not ($launcher | path exists) {
+        print -e $"wm-state: ($launcher) not found - restore needs wm-launch-terminal [rotz link nushell]; nothing was changed"
+        exit 1
+    }
     let start_ws = (try { kwi3-rpc "workspace.list" | where focused == true | get -o 0.name } catch { null })
 
     # Workspaces whose terminals were all launched: their old terminals are
@@ -1444,11 +1458,19 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
         # terminal maps (see isolate-kwi3).
         kwi3-close-all $iso.stale $dry_run
 
-        # One exec per terminal; a refusal is reported and the rest still go.
+        # One launcher call per terminal; a refusal is reported and the rest
+        # still go.
         let results = ($plan.terms | each {|t|
-            try { kwi3-do "exec" { command: $t.exec } $dry_run; true } catch {|e|
-                print -e $"  error: exec for slot ($t.class): ($e.msg)"
-                false
+            let args = (launcher-args $term $t $ws_name)
+            if $dry_run {
+                print $"  DRY: ~/.local/bin/wm-launch-terminal ($args | each {|a| shq $a } | str join ' ')"
+                true
+            } else {
+                let r = (do { ^$launcher ...$args } | complete)
+                if $r.exit_code != 0 {
+                    print -e $"  error: wm-launch-terminal for slot ($t.class) exited ($r.exit_code): ($r.stderr | str trim)"
+                    false
+                } else { true }
             }
         })
         if ($results | any {|r| not $r }) {

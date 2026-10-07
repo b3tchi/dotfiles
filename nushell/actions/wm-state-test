@@ -24,8 +24,12 @@
 #   placeholder-only-ws     only unmatched GUI leaves -> built as placeholders only
 #   name-unicode            spaces / unicode / shell + regex metacharacters
 #   tmux-down-aborts        no tmux -> exit 1 before any kwi3 call
-#   exec-refused            -32000 reported, the other terminals still launched,
-#                           the old terminals NOT closed
+#   launcher-refused        the launcher's exit 78 reported per terminal, the other
+#                           terminals still launched, the old terminals NOT closed
+#   launcher-missing-aborts-early  no ~/.local/bin/wm-launch-terminal -> exit 1
+#                           naming the path, before any kwi3 call
+#   no-exec-rpc             restore sends no `exec` RPC (sp038 T4: terminals go
+#                           through wm-launch-terminal, a stub in the sandbox)
 #
 # Safety: every nu run is `env -i`; HOME is a sandbox; PATH starts with stubs for
 # tmux (answers from a flag file, can never reach a real server), i3-msg, swaymsg
@@ -91,6 +95,28 @@ esac
 " | save -f $"($bin_i3)/i3-msg"
 "#!/bin/bash\nexit 1\n" | save -f $"($bin_i3)/swaymsg"
 "#!/bin/bash\nexit 1\n" | save -f $"($bin_i3)/i3"
+# Stub wm-launch-terminal (sp038 T4): restore on kwi3 launches terminals through
+# ~/.local/bin/wm-launch-terminal. The stub logs ONE line per call, args joined
+# with US (0x1f) so a word with spaces stays one word; exits 78 when a word of
+# the call contains a line of $tmp/launcher-refuse (the real launcher's refusal
+# code); and queues the --class value for the rig driver to map as a window.
+let launcher_log = $"($tmp)/launcher.log"
+let launcher_path = $"($home)/.local/bin/wm-launch-terminal"
+let launcher_body = $"#!/bin/bash
+for a in \"$@\"; do printf '%s\\037' \"$a\" >> ($launcher_log); done; echo >> ($launcher_log)
+if [ -s ($tmp)/launcher-refuse ]; then
+  for a in \"$@\"; do
+    while IFS= read -r pat; do
+      case \"$a\" in *\"$pat\"*) echo 'STUB launcher: refused' >&2; exit 78 ;; esac
+    done < ($tmp)/launcher-refuse
+  done
+fi
+prev=''
+for a in \"$@\"; do [ \"$prev\" = --class ] && echo \"$a\" >> ($tmp)/map.queue; prev=\"$a\"; done
+exit 0
+"
+$launcher_body | save -f $launcher_path
+^chmod +x $launcher_path
 ^cp $"($bin)/tmux" $"($bin_i3)/tmux"
 ^chmod +x ...(glob $"($bin)/*") ...(glob $"($bin_i3)/*")
 ^ln -s $kwi3_msg $"($bin_i3)/kwi3-msg"
@@ -132,13 +158,18 @@ rpc.start(sockPath, sources, { logCalls: true }).then((rig) => {
     h.rpcCall(ctx, 'workspace.focus', { name: seed.start });
     ctx.host.spawn = (cmd) => {
         fs.appendFileSync(tmp + '/spawn.log', cmd + '\n');
-        if (fs.existsSync(tmp + '/nospawn')) { return false; }
-        if (fs.existsSync(tmp + '/mapspawn')) {
-            const m = /(?:^|\s)-c ('(?:[^']|'\\'')*'|\S+)/.exec(cmd);
-            if (m) { open(m[1].replace(/^'|'$/g, '').replace(/'\\''/g, "'"), 'tmux'); }
-        }
-        return true;
+        return true;   // restore must never reach here any more (sp038 T4)
     };
+    // The stub launcher queues each --class it was given; with `mapspawn` set a
+    // terminal "appears" with that class, like a real one would.
+    let mapped = 0;
+    setInterval(() => {
+        let q;
+        try { q = fs.readFileSync(tmp + '/map.queue', 'utf8').split('\n').filter(Boolean); } catch (e) { return; }
+        for (; mapped < q.length; mapped++) {
+            if (fs.existsSync(tmp + '/mapspawn')) { open(q[mapped], 'tmux'); }
+        }
+    }, 40);
     console.log('READY');
     process.on('SIGTERM', () => process.exit(0));
 });
@@ -345,7 +376,7 @@ let saved = {
       {
         name: $uni_ws, ws_layout: "splith",
         layout: { "1": "st-256color" },
-        state: { "1": { wid: 3, pid: 31, class: "st-256color", title: "tmux", session_type: "local", session: "u1", tmux_window_id: "9" } }
+        state: { "1": { wid: 3, pid: 31, class: "st-256color", title: "tmux", session_type: "local", session: "séss ion 日本 u1", tmux_window_id: "9" } }
       }
     ]
 }
@@ -355,6 +386,14 @@ def rig-calls [log: string] { open $log | lines | where {|l| $l | str starts-wit
 def mutating [log: string] {
     rig-calls $log | where {|l| $l =~ '"method":"(workspace\.(rename|build|focus|move)|window\.|exec|layout\.|action\.)' }
 }
+
+# The stub launcher's calls since line $skip: one list of argv words per call.
+def launcher-calls [tmp: string, skip: int = 0] {
+    let f = $"($tmp)/launcher.log"
+    if not ($f | path exists) { return [] }
+    open $f --raw | lines | skip $skip | where {|l| $l | is-not-empty } | each {|l| $l | split row (char --integer 0x1f) | where {|w| $w | is-not-empty } }
+}
+def launcher-n [tmp: string] { launcher-calls $tmp | length }
 
 # Terminal slots for dev are wm-slot-dev-<key>.
 let tree_before_dry = (rig $test_path $sock "tree.get")
@@ -367,9 +406,9 @@ let want_dry = ([
     "Restoring workspace: dev"
     $"  DRY: kwi3-rpc workspace.rename {\"id\":($dev_id),\"name\":\"dev-old\"}"
     $"  DRY: kwi3-rpc workspace.build {\"name\":\"dev\",\"tree\":($tree_json)}"
-    "  DRY: kwi3-rpc exec {\"command\":\"st -c wm-slot-dev-1 -e tmux attach -t a\"}"
-    "  DRY: kwi3-rpc exec {\"command\":\"st -c wm-slot-dev-2 -e tmux attach -t b\"}"
-    "  DRY: kwi3-rpc exec {\"command\":\"st -c wm-slot-dev-4\"}"
+    "  DRY: ~/.local/bin/wm-launch-terminal st --session a --class wm-slot-dev-1"
+    "  DRY: ~/.local/bin/wm-launch-terminal st --session b --class wm-slot-dev-2"
+    "  DRY: ~/.local/bin/wm-launch-terminal st --workspace dev --class wm-slot-dev-4"
     "  DRY: sleep 600ms (let new terminals attach)"
     $"  DRY: kwi3-rpc window.close {\"id\":($T1)}"
     $"  DRY: kwi3-rpc window.close {\"id\":($T2)}"
@@ -380,8 +419,8 @@ let want_dry = ([
 ] | str join "\n")
 let r = (run-ws $tmp $test_path $k ["restore" "--dry-run" "--workspace" "dev"])
 let tree_after_dry = (rig $test_path $sock "tree.get")
-if (check "dry-run-kwi3: exact build params and exec lines" ($r.exit_code == 0 and $r.stdout == $want_dry) $"exit=($r.exit_code)\n--- got\n($r.stdout)\n--- want\n($want_dry)\nstderr=($r.stderr)") { $passed += 1 } else { $failed += 1 }
-if (check "dry-run-kwi3: rig tree unchanged, no mutating call, nothing spawned" ($tree_before_dry == $tree_after_dry and (mutating $rig_log | length) == $calls_before and (open $"($tmp)/spawn.log" | lines | is-empty)) "dry run changed the rig") { $passed += 1 } else { $failed += 1 }
+if (check "dry-run-kwi3: exact build params and launcher command lines" ($r.exit_code == 0 and $r.stdout == $want_dry) $"exit=($r.exit_code)\n--- got\n($r.stdout)\n--- want\n($want_dry)\nstderr=($r.stderr)") { $passed += 1 } else { $failed += 1 }
+if (check "dry-run-kwi3: rig tree unchanged, no mutating call, nothing spawned, launcher not run" ($tree_before_dry == $tree_after_dry and (mutating $rig_log | length) == $calls_before and (open $"($tmp)/spawn.log" | lines | is-empty) and (launcher-n $tmp) == 0) "dry run changed the rig or ran the launcher") { $passed += 1 } else { $failed += 1 }
 
 # ── 2. restore (first run) ────────────────────────────────────────────────────
 print "\n[2] restore dev"
@@ -404,8 +443,9 @@ let inner = if $dev == null { [] } else { ($dev.nodes | get 1).nodes | get perce
 let eq3 = ($shares | each {|p| ($p - 1.0 / 3.0) | math abs } | all {|d| $d < 0.001 })
 let eq2 = ($inner | each {|p| ($p - 0.5) | math abs } | all {|d| $d < 0.001 })
 if (check "restore-shape: shares equal (a save carries none)" ($eq3 and $eq2 and ($shares | length) == 3) $"shares=($shares | to json -r) inner=($inner | to json -r)") { $passed += 1 } else { $failed += 1 }
-let spawned = (if ($"($tmp)/spawn.log" | path exists) { open $"($tmp)/spawn.log" | lines } else { [] })
-if (check "restore-shape: one exec per terminal, slot class" ($spawned == ["st -c wm-slot-dev-1 -e tmux attach -t a" "st -c wm-slot-dev-2 -e tmux attach -t b" "st -c wm-slot-dev-4"]) $"spawned=($spawned | to json -r)") { $passed += 1 } else { $failed += 1 }
+let spawned = (launcher-calls $tmp)
+if (check "restore-shape: one launcher call per terminal, exact argv" ($spawned == [["st" "--session" "a" "--class" "wm-slot-dev-1"] ["st" "--session" "b" "--class" "wm-slot-dev-2"] ["st" "--workspace" "dev" "--class" "wm-slot-dev-4"]]) $"spawned=($spawned | to json -r)") { $passed += 1 } else { $failed += 1 }
+if (check "no-exec-rpc: restore sent no exec RPC (rig request log), the host spawned nothing" ((rig-calls $rig_log | where {|l| $l =~ '"method":"exec"' } | is-empty) and (open $"($tmp)/spawn.log" | lines | is-empty)) "an exec RPC reached the rig") { $passed += 1 } else { $failed += 1 }
 if (check "restore-gui-window-leaf: Zathura by saved con id, Firefox by class (first, not ff-2)" ($got_shape != null and $F1 != $F2 and ("w:($Z)" | is-not-empty) and (not ($got_shape | to json -r | str contains $"w:($F2)"))) $"got=($got_shape | to json -r)") { $passed += 1 } else { $failed += 1 }
 if (check "restore-gui-window-leaf: the pulled windows left `other`" (ws-node $t1 "other" | default {nodes: []} | leaves $in | where id in [$Z $F1] | is-empty) "windows still on other") { $passed += 1 } else { $failed += 1 }
 if (check "restore-gui-placeholder: Gone is a class placeholder" (($got_shape | to json -r) | str contains "ph:^Gone$") $"got=($got_shape | to json -r)") { $passed += 1 } else { $failed += 1 }
@@ -434,11 +474,11 @@ if (check "restore-old-stamped: no placeholder left on a -old workspace" (not $s
 
 # ── 4. placeholder-only workspace ─────────────────────────────────────────────
 print "\n[4] placeholder-only-ws"
-let nspawn = (open $"($tmp)/spawn.log" | lines | length)
+let nspawn = (launcher-n $tmp)
 let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "gui"])
 let t3 = (rig-json $test_path $sock "tree.get")
 let gui = (ws-node $t3 "gui")
-if (check "placeholder-only-ws: built as one placeholder, survives, nothing spawned" ($r.exit_code == 0 and $gui != null and ($gui.nodes | each {|k| shape $k }) == ["ph:^Nowhere$"] and (open $"($tmp)/spawn.log" | lines | length) == $nspawn) $"gui=($gui | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "placeholder-only-ws: built as one placeholder, survives, nothing spawned" ($r.exit_code == 0 and $gui != null and ($gui.nodes | each {|k| shape $k }) == ["ph:^Nowhere$"] and (launcher-n $tmp) == $nspawn) $"gui=($gui | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 
 # ── 5. unicode / metacharacter names ──────────────────────────────────────────
 print "\n[5] name-unicode"
@@ -447,33 +487,34 @@ let t4 = (rig-json $test_path $sock "tree.get")
 let uw = (ws-node $t4 $uni_ws)
 let uni_class = $"wm-slot-($uni_ws)-1"
 let want_re = $"^wm-slot-dév 日本 \\$x 'q'-1$"
-let spawn_all = (open $"($tmp)/spawn.log" | lines)
-let want_exec = "st -c 'wm-slot-dév 日本 $x '\\''q'\\''-1' -e tmux attach -t u1"
+let spawn_all = (launcher-calls $tmp)
+let want_exec = ["st" "--session" "séss ion 日本 u1" "--class" $uni_class]
 if (check "name-unicode: workspace built under its exact name, regex escaped" ($r.exit_code == 0 and $uw != null and ($uw.nodes | each {|k| shape $k }) == [$"ph:($want_re)"]) $"uw=($uw | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
-if (check "name-unicode: exec class is shell-quoted verbatim" (($spawn_all | last) == $want_exec) $"got=($spawn_all | last)\nwant=($want_exec)") { $passed += 1 } else { $failed += 1 }
+if (check "name-unicode: the slot class is ONE argv word, verbatim, no shell quoting" (($spawn_all | last) == $want_exec) $"got=($spawn_all | last | to json -r)\nwant=($want_exec)") { $passed += 1 } else { $failed += 1 }
 if (check "name-unicode: <name>-old holds the unsaved window" ((ws-node $t4 $"($uni_ws)-old" | default {nodes: []} | leaves $in | get window_properties.title) == ["keep-uni"]) "old workspace missing") { $passed += 1 } else { $failed += 1 }
 
-# ── 6. exec refused ───────────────────────────────────────────────────────────
-print "\n[6] exec-refused"
-"" | save -f $"($tmp)/nospawn"
-let nspawn = (open $"($tmp)/spawn.log" | lines | length)
+# ── 6. launcher refused ───────────────────────────────────────────────────────
+print "\n[6] launcher-refused"
+"wm-slot-ef-1\n" | save -f $"($tmp)/launcher-refuse"   # the launcher refuses slot 1 only (exit 78)
+let nspawn = (launcher-n $tmp)
 let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "ef"])
 let t5 = (rig-json $test_path $sock "tree.get")
-let attempted = (open $"($tmp)/spawn.log" | lines | skip $nspawn)
+let attempted = (launcher-calls $tmp $nspawn)
 let ef_old = (ws-node $t5 "ef-old")
 let ef_old_titles = if $ef_old == null { [] } else { leaves $ef_old | get window_properties.title }
-if (check "exec-refused: reported, every terminal still attempted, restore continues" ($r.exit_code == 0 and ($attempted | length) == 2 and (($r.stdout + $r.stderr) | str contains "-32000")) $"attempted=($attempted | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
-if (check "exec-refused: old terminals kept (their tmux clients are the only attachment left)" (($ef_old_titles | sort) == ["keep-ef" "old-e1" "old-e2"]) $"old=($ef_old_titles | to json -r)") { $passed += 1 } else { $failed += 1 }
-^rm -f $"($tmp)/nospawn"
+if (check "launcher-refused: reported per terminal (slot named), the other terminal still launched, restore continues" ($r.exit_code == 0 and ($attempted | length) == 2 and (($attempted | get 1) == ["st" "--session" "e2" "--class" "wm-slot-ef-2"]) and ($r.stderr | str contains "wm-slot-ef-1") and ($r.stderr | str contains "78")) $"attempted=($attempted | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "launcher-refused: old terminals kept (their tmux clients are the only attachment left)" (($ef_old_titles | sort) == ["keep-ef" "old-e1" "old-e2"]) $"old=($ef_old_titles | to json -r)") { $passed += 1 } else { $failed += 1 }
+^rm -f $"($tmp)/launcher-refuse"
 
 # ── 7. a spawned terminal fills its placeholder (the mapspawn leg) ─────────────
 print "\n[7] spawned terminals map into their placeholders"
 "" | save -f $"($tmp)/mapspawn"
 let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
+sleep 300ms   # the driver polls the stub launcher's queue every 40ms
 let t6 = (rig-json $test_path $sock "tree.get")
 let dev3 = (ws-node $t6 "dev")
 let filled = if $dev3 == null { [] } else { leaves $dev3 | get window_properties.class }
-if (check "restore: terminals mapped by `st -c wm-slot-...` land in dev, GUI leaves stay" ($r.exit_code == 0 and ($filled | where {|c| $c =~ '^wm-slot-dev-' } | length) == 3 and "Zathura" in $filled and "Firefox" in $filled) $"classes=($filled | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "restore: terminals the launcher started with `--class wm-slot-...` land in dev, GUI leaves stay" ($r.exit_code == 0 and ($filled | where {|c| $c =~ '^wm-slot-dev-' } | length) == 3 and "Zathura" in $filled and "Firefox" in $filled) $"classes=($filled | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 ^rm -f $"($tmp)/mapspawn"
 
 # ── 7b. save -> restore -> save -> restore (kwi3-a1j.9) ────────────────────────
@@ -490,10 +531,10 @@ if (check "round-trip: slot terminals are NOT skip_restore" ($term_entries | all
 let sess = ($term_entries | each {|e| { c: $e.v.class, s: ($e.v | get -o session | default "") } } | sort-by c)
 if (check "round-trip: tmux session association survives the save" ($sess == [{c: "wm-slot-dev-1", s: "a"} {c: "wm-slot-dev-2", s: "b"} {c: "wm-slot-dev-4", s: ""}]) $"sess=($sess | to json -r)") { $passed += 1 } else { $failed += 1 }
 "" | save -f $"($tmp)/mapspawn"
-let nspawn = (open $"($tmp)/spawn.log" | lines | length)
+let nspawn = (launcher-n $tmp)
 let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
-let again = (open $"($tmp)/spawn.log" | lines | skip $nspawn)
-if (check "round-trip: second restore respawns the terminals with fresh slot classes and sessions" ($r.exit_code == 0 and $again == ["st -c wm-slot-dev-1 -e tmux attach -t a" "st -c wm-slot-dev-2 -e tmux attach -t b" "st -c wm-slot-dev-4"]) $"again=($again | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+let again = (launcher-calls $tmp $nspawn)
+if (check "round-trip: second restore respawns the terminals with fresh slot classes and sessions" ($r.exit_code == 0 and $again == [["st" "--session" "a" "--class" "wm-slot-dev-1"] ["st" "--session" "b" "--class" "wm-slot-dev-2"] ["st" "--workspace" "dev" "--class" "wm-slot-dev-4"]]) $"again=($again | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 let r = (run-ws $tmp $test_path $k ["save" "--workspace" "dev"])
 let sv2 = (open $cache | get workspaces | where name == "dev" | first)
 if (check "round-trip: a second save is stable (same layout, same state)" ($r.exit_code == 0 and $sv2.layout == $sv.layout and ($sv2.state | get "1" | get session) == "a" and ($sv2.state | get "2" | get session) == "b") $"layout1=($sv.layout | to json -r) layout2=($sv2.layout | to json -r)") { $passed += 1 } else { $failed += 1 }
@@ -512,6 +553,16 @@ let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
 let calls_after = (rig-calls $rig_log | length)
 if (check "tmux-down-aborts: exit 1, says why, not one kwi3 call" ($r.exit_code == 1 and ($r.stderr | str contains "tmux server unreachable") and $calls_after == $calls_n) $"calls ($calls_n) -> ($calls_after) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 ^rm -f $"($tmp)/tmux-down"
+
+# ── 8b. launcher missing ──────────────────────────────────────────────────────
+print "\n[8b] launcher-missing-aborts-early"
+^mv $launcher_path $"($launcher_path).away"
+let calls_n = (mutating $rig_log | length)
+let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
+let r_dry = (run-ws $tmp $test_path $k ["restore" "--dry-run" "--workspace" "dev"])
+let calls_after = (mutating $rig_log | length)
+if (check "launcher-missing-aborts-early: exit 1, names the path, no mutating kwi3 call (live and dry-run)" ($r.exit_code == 1 and ($r.stderr | str contains $launcher_path) and $r_dry.exit_code == 1 and ($r_dry.stderr | str contains $launcher_path) and $calls_after == $calls_n) $"calls ($calls_n) -> ($calls_after) ($r | to nuon) ($r_dry | to nuon)") { $passed += 1 } else { $failed += 1 }
+^mv $"($launcher_path).away" $launcher_path
 
 # ── 9. no i3 verb anywhere ────────────────────────────────────────────────────
 print "\n[9] no-i3-verbs"
