@@ -19,6 +19,7 @@
 #   2g no-backend-78          2h argv-verbatim         2i corrupt-snapshot-78
 #   2j display-not-cross-used 2k missing-command
 #   2l screen-suffix-resolves 2m x11-display-never-systemd
+#   2n capture-returns-while-child-runs (live pipes; kwi3 et3u.10)
 
 const here = (path self | path dirname)
 const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS PROCESS_PATH]
@@ -55,12 +56,14 @@ const PROBE = '#!/bin/bash
 # probe: report what /proc says about this process, then sleep.
 out=$1; fifo=$2; shift 2
 echo $$ >> "$(dirname "$out")/pids"
+std="$(readlink /proc/$$/fd/0) $(readlink /proc/$$/fd/1) $(readlink /proc/$$/fd/2)"
 set -- "$@" ; args=("$@")
 read -r _ ppid pgrp sid _ < <(sed "s/^.*) //" /proc/$$/stat)
 {
   echo "pid $$"; echo "ppid $ppid"; echo "pgrp $pgrp"; echo "sid $sid"
   echo "cwd $(readlink /proc/$$/cwd)"
   echo "fds $(for f in /proc/$$/fd/*; do echo ${f##*/}; done | sort -n | tr "\n" " ")"
+  echo "std $std"
   tr "\0" "\n" < /proc/$$/environ | sort | sed -e "/^_=/d" -e "s/^/env /"
 } > "$out"
 if [ ${#args[@]} -gt 0 ]; then printf "%s\0" "${args[@]}" > "$out.args"; fi
@@ -73,7 +76,7 @@ exec sleep 30
 def toolbin [sb: string] {
     let d = $"($sb)/toolbin"
     ^mkdir -p $d
-    for t in [env setsid sh bash sleep cat sed cut sort tr diff dirname readlink install mv] {
+    for t in [env setsid timeout sh bash sleep cat sed cut sort tr diff dirname readlink install mv] {
         let w = (^sh -c $"command -v ($t)" | complete | get stdout | str trim)
         if $w != "" { ^ln -sf $w $"($d)/($t)" }
     }
@@ -107,6 +110,13 @@ def launch [s: record, tag: string, shape: string, extra_env: list<string>, flag
     let nuexe = $nu.current-exe
     let pa = ($probe_args | each {|a| $"'($a)'" } | str join " ")
     let r = match $shape {
+        "hotkeyd-pipe" => {
+            # LIVE pipes: bash's $(...) and 2>&1 capture, as nushell `complete` does
+            ^env -i ...$s.base ...$extra_env setsid timeout 5 bash -c $"exec >/dev/null 2>&1 </dev/null; x=$\(($nuexe) ($detach) ($flags | str join " ") -- ($probe) ($out) ($fifo) ($pa) 2>&1\); echo rc=$? > ($out).rc" | complete
+        }
+        "tmux-pipe" => {
+            ^env -i ...$s.base ...$NOISE ...$extra_env timeout 5 bash -c $"exec 7>($s.sb)/f7; exec 9<($s.sb)/probe; exec >/dev/null 2>&1 </dev/null; cd /tmp; x=$\(($nuexe) ($detach) ($flags | str join " ") -- ($probe) ($out) ($fifo) ($pa) 2>&1\); echo rc=$? > ($out).rc" | complete
+        }
         "bare" => { ^env -i ...$s.base ...$extra_env bash -c $"($probe) ($out) ($fifo) >/dev/null 2>&1 </dev/null &" | complete }
         "hotkeyd" => {
             ^env -i ...$s.base ...$extra_env setsid bash -c $"($nuexe) ($detach) ($flags | str join " ") -- ($probe) ($out) ($fifo) ($pa) >/dev/null 2>&1 </dev/null" | complete
@@ -246,6 +256,35 @@ def main [] {
         $oks = ($oks | append (check ($ok_a and (field $A cwd) == $home and (field $B cwd) == $home) "2a cwd == snapshot HOME for both"))
         $oks = ($oks | append (check ($ok_a and not ((envs-of $B) | any {|e| ($e | str contains "TMUX") or ($e | str contains "KEEPME") or ($e | str contains "NU_VERSION") })) "2a tmux-shaped caller's TMUX/KEEPME/NU_VERSION did not reach the child"))
 
+        # 2a (live pipes): the caller CAPTURES the launcher's output (bash $(...)
+        # and 2>&1, what nushell `complete` does) instead of redirecting it to
+        # /dev/null. The child's fds 0,1,2 must be /dev/null for both callers
+        # and for the bare reference - never the caller's capture pipe.
+        let AP = (launch $s a3 hotkeyd-pipe [] [])
+        let BP = (launch $s a4 tmux-pipe [] [])
+        let want_std = "/dev/null /dev/null /dev/null"
+        $oks = ($oks | append (check ($AP.started and $BP.started and $bare.started and (field $bare std) == $want_std and (field $A std) == $want_std and (field $B std) == $want_std and (field $AP std) == $want_std and (field $BP std) == $want_std) $"2a std-is-devnull: fds 0,1,2 -> /dev/null for redirected AND live-pipe callers \(hotkeyd-pipe '(if $AP.started { field $AP std } else { '?' })', tmux-pipe '(if $BP.started { field $BP std } else { '?' })'\)"))
+        $oks = ($oks | append (check ($AP.started and $BP.started and (field $AP fds) == (field $bare fds) and (field $BP fds) == (field $bare fds)) "2a fds equal a bare probe's for the live-pipe callers too"))
+
+        # 2n: a caller that captures output must get control back while the
+        # detached program keeps running (wm-state restore hung here: the st
+        # held restore's `complete` pipe as its fd 1). Real nushell `complete`
+        # in a nu child bounded by `timeout`, so a regression fails fast.
+        let nsb = $s.sb
+        let nout = $"($nsb)/out-n1"
+        let nfifo = $"($nsb)/fifo-n1"
+        ^mkfifo $nfifo
+        let nscript = $"($nsb)/n1.nu"
+        let base_words = ($s.base | each {|e| $"\"($e)\"" } | str join " ")
+        $"def main [] {\n  let r = \(^env -i ...[($base_words)] ($nu.current-exe) ($det) -- ($nsb)/probe ($nout) ($nfifo) | complete\)\n  print \($\"rc=\($r.exit_code\) err=[\($r.stderr | str trim\)]\"\)\n}\n" | save --raw $nscript
+        let t0 = (date now)
+        let nr = (^timeout 5 $nu.current-exe $nscript | complete)
+        let took = ((date now) - $t0)
+        let ngot = (^timeout 5 cat $nfifo | complete)
+        let npid = if ($nout | path exists) { open --raw $nout | lines | where {|l| $l | str starts-with "pid " } | first | str substring 4.. } else { "" }
+        let nalive = ($npid != "" and ($"/proc/($npid)" | path exists))
+        $oks = ($oks | append (check ($nr.exit_code == 0 and ($nr.stdout | str contains "rc=0") and $took < 2sec and $ngot.exit_code == 0 and $nalive) $"2n capture-returns-while-child-runs: nushell `complete` returned in ($took) \(exit ($nr.exit_code), out '($nr.stdout | str trim)'\), child pid '($npid)' still alive: ($nalive)"))
+
         # 2b
         let T = (launch $s b1 tmux ["WM_LAUNCH_TEST=1" "WM_LAUNCH_TEST_NO_FDCLOSE=1"] [])
         let fds = if $T.started { field $T fds | split row " " } else { [] }
@@ -280,6 +319,14 @@ def main [] {
         $oks = ($oks | append (check ($e2.exit_code == 0 and ($e2.stdout | str trim) == "systemd sleep 1") $"2e dry-run-systemd: real `sleep` is found on the systemd path \(exit ($e2.exit_code), stderr '($e2.stderr | str trim)'\)"))
         let e3 = (^env -i ...$env_e $nu.current-exe $det --dry-run -- no-such-cmd-xyzzy | complete)
         $oks = ($oks | append (check ($e3.exit_code == 127 and ($e3.stderr | str contains "no-such-cmd-xyzzy")) "2e dry-run-systemd: a missing command is still refused (127, named)"))
+
+        # 2e (stdio): the systemd backend hands the child to a transient unit,
+        # whose stdio is the journal/null unless --pipe/--pty/--wait/--scope is
+        # asked for. Prove the real call asks for none of them.
+        let e4 = (^env -i ...$env_e $nu.current-exe $det -- sleep 1 | complete)
+        let called = if ($"($sb_e)/systemd-run-called" | path exists) { open --raw $"($sb_e)/systemd-run-called" } else { "" }
+        $oks = ($oks | append (check ($e4.exit_code == 0 and ($called | str contains "--collect") and not ($called =~ '(--pipe|--pty|--wait|--scope| -P| -t| -S)') and ($e4.stdout | str trim) == "") $"2e systemd-stdio: systemd-run is not asked to attach the caller's stdio \(args '($called | str trim)'\)"))
+        ^rm -f $"($sb_e)/systemd-run-called"
 
         # 2m: an X11 display with no snapshot never falls through to systemd
         let m = (run-detach $s m1 [...$env_e "DISPLAY=:977"] [])
