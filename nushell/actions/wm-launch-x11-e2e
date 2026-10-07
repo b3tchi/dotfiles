@@ -1,0 +1,288 @@
+#!/usr/bin/env nu
+# wm-launch-x11-e2e - real-X11 proof for sp038 (Task 5): a terminal started
+# the hotkeyd way and one started the restore way are the same process shape.
+#
+#   env -u TMUX -u I3SOCK nushell/actions/wm-launch-x11-e2e <N>      (N >= 100)
+#   ... <N> --mutate fdclose   WM_LAUNCH_TEST_NO_FDCLOSE=1: the fd assertion
+#                              must go red (exit 1 is the EXPECTED result)
+#   ... <N> --mutate noenvi    wm-launch-detach copy without `env -i`: the
+#                              environ assertion must go red
+#
+# What it does, all inside mktemp dirs under /tmp (short: tmux's socket path
+# must stay under sun_path's 108 bytes):
+#   - Xvfb :N headless (own tmpfs on /tmp/.X11-unix via an unprivileged user
+#     namespace, since the WSLg mount is read-only / mode 777). Refuses
+#     N < 100, :10 :40 :60 and ANY display that answers a real connection.
+#   - sandbox HOME (own minimal .bashrc: attaches TMUX_TARGET on the sandbox
+#     tmux server - Jan's ~/.bashrc never runs), XDG_RUNTIME_DIR, tmux server
+#     on its own socket (`tmux -S`, asserted to live under the sandbox).
+#   - the snapshot is written by the real wm-session-env-snapshot for :N.
+#   - st #1 the hotkeyd way: env -i <clean session env> setsid sh -c
+#     "wm-launch-terminal st"  (wm-current-workspace / tmux-start are stubs
+#     in the sandbox bin: workspace resolution is not what is under test).
+#   - st #2 the restore way: wm-launch-terminal st --session S --class
+#     wm-slot-x-1 from a noisy tmux-pane-shaped caller (TMUX, PWD, NU_*,
+#     SHLVL, fds 7 and 9, cwd /tmp).
+#   - asserts: same ppid, own sessions, same fd sets, environ equal but for
+#     TMUX_TARGET (+ st's own WINDOWID), nothing caller-only, cwd HOME, both
+#     windows mapped, both attached on the sandbox server, Jan's default tmux
+#     server and the live displays untouched.
+# Exit: 0 pass, 1 fail, 77 skip (a needed tool is missing; named).
+# Everything started is killed by exact pid / process group; no pkill.
+
+const here = (path self | path dirname)
+const SYS_PATH = "/usr/local/bin:/usr/bin:/bin"
+const PROTECTED = [10 40 60]
+
+def skip-test [msg: string] { print $"SKIP: ($msg)"; exit 77 }
+
+def need [tool: string] {
+    let w = (which $tool)
+    if ($w | is-empty) { skip-test $"($tool) not found on PATH" }
+    $w | first | get path
+}
+
+# Everything runs from a clean env, never the caller's.
+def cleanenv [display: string] {
+    ["PATH=/usr/bin:/bin" $"DISPLAY=($display)"]
+}
+
+def x-answers [n: int] {
+    (^env -i "PATH=/usr/bin:/bin" $"DISPLAY=:($n)" timeout 3 xprop -root | complete).exit_code == 0
+}
+
+def stat-fields [pid: int] {
+    # after the ") " that ends comm: state ppid pgrp sid
+    let s = (open --raw $"/proc/($pid)/stat" | str replace --regex '^.*\) ' '' | split row " ")
+    {ppid: ($s | get 1 | into int), pgrp: ($s | get 2 | into int), sid: ($s | get 3 | into int)}
+}
+
+def environ-of [pid: int] {
+    open --raw $"/proc/($pid)/environ" | decode utf-8 | split row (char -i 0) | where {|e| $e != "" }
+}
+
+def fds-of [pid: int] {
+    ^find $"/proc/($pid)/fd" -mindepth 1 -printf '%f %l\n' | lines
+    | each {|l|
+        let p = ($l | split row " " | into string)
+        let n = ($p | first | into int)
+        let t = ($p | skip 1 | str join " ")
+        let k = if ($t | str starts-with "socket:") { "socket" } else if ($t | str starts-with "/dev/pts/") { "/dev/pts" } else if ($t | str starts-with "pipe:") { "pipe" } else { $t }
+        {n: $n, kind: $k}
+    }
+    | sort-by n
+}
+
+# st processes of THIS sandbox (identified by their own environ), by TMUX_TARGET.
+def find-st [sb: string, target: string] {
+    glob /proc/[0-9]*/comm
+    | each {|c|
+        let pid = ($c | path dirname | path basename | into int)
+        let ok = (try { (open --raw $c | str trim) == "st" } catch { false })
+        if not $ok { null } else {
+            let e = (try { environ-of $pid } catch { [] })
+            if ($e | any {|x| $x == $"XDG_RUNTIME_DIR=($sb)/run" }) and ($e | any {|x| $x == $"TMUX_TARGET=($target)" }) { $pid } else { null }
+        }
+    }
+    | compact
+}
+
+def wait-for [what: string, secs: int, probe: closure] {
+    mut n = 0
+    while $n < ($secs * 5) {
+        let r = (do $probe)
+        if $r != null and $r != false and $r != [] { return $r }
+        sleep 200ms
+        $n += 1
+    }
+    null
+}
+
+def --wrapped tmux-sb [sock: string, ...args] {
+    ^env -i "PATH=/usr/bin:/bin" tmux -S $sock ...$args | complete
+}
+
+def jan-tmux [] {
+    # Jan's default server, observed read-only. TMUX/TMUX_TMPDIR unset so the
+    # default socket is what is asked.
+    let s = (^env -i $"HOME=($env.HOME)" "PATH=/usr/bin:/bin" tmux list-sessions -F '#{session_name}' | complete)
+    let c = (^env -i $"HOME=($env.HOME)" "PATH=/usr/bin:/bin" tmux list-clients -F '#{client_name}' | complete)
+    {sessions: ($s.stdout | str trim), clients: ($c.stdout | lines | length)}
+}
+
+def main [display_num: int, --mutate: string = ""] {
+    if $display_num < 100 { print -e $"wm-launch-x11-e2e: display must be >= 100 \(got ($display_num)\)"; exit 2 }
+    if $display_num in $PROTECTED { print -e $"wm-launch-x11-e2e: refusing protected display :($display_num)"; exit 2 }
+    if $mutate not-in ["" "fdclose" "noenvi"] { print -e "wm-launch-x11-e2e: --mutate is fdclose|noenvi"; exit 2 }
+    let xvfb = (need Xvfb)
+    let st = (need st)
+    for t in [tmux xdotool xprop unshare setsid find timeout] { need $t | ignore }
+    let display = $":($display_num)"
+    if (x-answers $display_num) { print -e $"wm-launch-x11-e2e: display ($display) already answers - refusing to touch it"; exit 2 }
+
+    let sb = (^mktemp -d /tmp/sp038e.XXXX | str trim)
+    let sock = $"($sb)/t"
+    let home = $"($sb)/home"
+    let run = $"($sb)/run"
+    let bin = $"($home)/.local/bin"
+    ^mkdir -p $bin $run $"($sb)/mut"
+    ^chmod 700 $run
+
+    let jan_before = (jan-tmux)
+    mut fails = 0
+    mut xpgid = 0
+    mut st_pids = []
+
+    # ---- sandbox contents ----
+    let scripts = ["wm-launch-terminal" "wm-launch-detach" "wm-session-env-snapshot"]
+    for s in $scripts { ^ln -sf $"($here)/($s)" $"($bin)/($s)" }
+    if $mutate == "noenvi" {
+        let src = (open --raw $"($here)/wm-launch-detach")
+        let mutated = ($src | str replace '^env -i ...$senv' '^env ...$senv')
+        if $mutated == $src { print -e "mutation did not apply (wm-launch-detach changed shape?)"; exit 2 }
+        $mutated | save --raw $"($sb)/mut/wm-launch-detach"
+        ^chmod +x $"($sb)/mut/wm-launch-detach"
+        ^ln -sf $"($sb)/mut/wm-launch-detach" $"($bin)/wm-launch-detach"
+    }
+    ^ln -sf $st $"($bin)/st"
+    "#!/bin/sh\necho sp038e-ws\n" | save --raw $"($bin)/wm-current-workspace"
+    "#!/bin/sh\necho sp038e-hk\n" | save --raw $"($bin)/tmux-start"
+    ^chmod +x $"($bin)/wm-current-workspace" $"($bin)/tmux-start"
+    # st resets the shell's HOME to the passwd entry (Jan's real one), so the
+    # sandbox rc is not found by HOME. SHELL is a wrapper that pins HOME and
+    # reads ONLY the sandbox rc: Jan's ~/.bashrc cannot run in a test terminal.
+    r#'export PS1='$ '
+export TERM=xterm-256color
+if [ -n "$TMUX_TARGET" ]; then exec tmux -S "$SP038E_TMUX_SOCK" new-session -A -s "$TMUX_TARGET"; fi
+'# | save --raw $"($sb)/rc"
+    $"#!/bin/sh\nHOME=($home); export HOME\nexec /bin/bash --noprofile --rcfile ($sb)/rc -i\n" | save --raw $"($bin)/sp038e-shell"
+    ^chmod +x $"($bin)/sp038e-shell"
+
+    let sess_env = [
+        $"HOME=($home)" $"XDG_RUNTIME_DIR=($run)" $"DISPLAY=($display)"
+        $"PATH=($bin):($SYS_PATH)" $"SHELL=($bin)/sp038e-shell" "LANG=C.UTF-8" "USER=sp038e"
+        $"SP038E_TMUX_SOCK=($sock)" "SESSIONVAR=kept"
+    ]
+
+    let fatal = (try {
+        # ---- sandbox tmux server: assert it is OURS before anything else ----
+        let t0 = (tmux-sb $sock new-session -d -s sentinel)
+        if $t0.exit_code != 0 { error make {msg: $"sandbox tmux failed: ($t0.stderr)"} }
+        let sp = (tmux-sb $sock display-message -p -t sentinel '#{socket_path}' | get stdout | str trim)
+        if not ($sp | str starts-with $"($sb)/") { error make {msg: $"tmux socket_path '($sp)' is not under ($sb) - aborting"} }
+        print $"  ok   sandbox tmux socket is ($sp)"
+
+        # ---- Xvfb ----
+        let log = $"($sb)/xvfb.log"
+        let xs = (^bash -c $"setsid unshare -Urm bash -c 'mount -t tmpfs -o mode=1777 tmpfs /tmp/.X11-unix; exec ($xvfb) ($display) -screen 0 1024x768x24 -nolisten tcp -ac' >($log) 2>&1 </dev/null & echo $!" | str trim | into int)
+        $xpgid = $xs
+        let up = (wait-for "Xvfb" 10 { if (x-answers $display_num) { true } else { null } })
+        if $up == null {
+            print (try { open --raw $log } catch { "" })
+            error make {msg: $"Xvfb ($display) present but did not come up - FAIL"}
+        }
+        print $"  ok   Xvfb ($display) up \(pgid ($xs)\)"
+
+        # ---- snapshot, written by the real tool ----
+        let snap_r = (^env -i ...$sess_env $nu.current-exe $"($here)/wm-session-env-snapshot" | complete)
+        if $snap_r.exit_code != 0 { error make {msg: $"snapshot failed: ($snap_r.stderr)"} }
+        let snap_file = $"($run)/wm-session-env-_($display_num)"
+        let snap = (open --raw $snap_file | decode utf-8 | split row (char -i 0) | where {|e| $e != "" })
+
+        let mut_env = if $mutate == "fdclose" { ["WM_LAUNCH_TEST=1" "WM_LAUNCH_TEST_NO_FDCLOSE=1"] } else { [] }
+
+        # ---- A: the hotkeyd way (clean env, own session, no extra fds) ----
+        let ra = (^env -i ...$sess_env ...$mut_env setsid bash -c $"($bin)/wm-launch-terminal st >/dev/null 2>&1 </dev/null" | complete)
+        print $"  hotkeyd-way launcher exit ($ra.exit_code)"
+
+        # ---- B: the restore way (noisy tmux-pane-shaped caller) ----
+        let noise = ["TMUX=/tmp/nonexistent/default,1,0" "TMUX_PANE=%3" "PWD=/tmp" "SHLVL=4" "NU_VERSION=9" "OLDPWD=/x" "KEEPME=leak" "I3SOCK=/x/i3" "CALLERONLY=1"]
+        let rb = (^env -i ...$sess_env ...$noise ...$mut_env bash -c $"exec 7>($sb)/f7; exec 9<($bin)/st; cd /tmp; ($bin)/wm-launch-terminal st --session sp038e-rs --class wm-slot-x-1 >/dev/null 2>&1 </dev/null" | complete)
+        print $"  restore-way launcher exit ($rb.exit_code)"
+
+        let pa = (wait-for "st A" 10 { find-st $sb "sp038e-hk" | first | default null })
+        let pb = (wait-for "st B" 10 { find-st $sb "sp038e-rs" | first | default null })
+        mut checks = []
+        $checks = ($checks | append [{ok: ($ra.exit_code == 0), l: "hotkeyd-way launcher exited 0"} {ok: ($rb.exit_code == 0), l: "restore-way launcher exited 0"}])
+        if $pa == null or $pb == null {
+            error make {msg: $"st did not start: hotkeyd=($pa) restore=($pb)"}
+        }
+        $st_pids = [$pa $pb]
+        # settle first: st is still opening files (Compose, ...) until its shell is attached
+        let att = {|name| wait-for $name 15 { let c = (tmux-sb $sock list-clients -t $name -F '#{client_name}'); if $c.exit_code == 0 and ($c.stdout | str trim) != "" { $c.stdout | lines | length } else { null } } }
+        let na = (do $att "sp038e-hk")
+        let nb = (do $att "sp038e-rs")
+        let sa = (stat-fields $pa)
+        let sbb = (stat-fields $pb)
+        let ea = (environ-of $pa)
+        let eb = (environ-of $pb)
+        let my_sid = (stat-fields $nu.pid).sid
+
+        $checks = ($checks | append [
+            {ok: ($sa.ppid == $sbb.ppid), l: $"equal ppid \(($sa.ppid) vs ($sbb.ppid)\)"}
+            {ok: ($sa.sid == $pa and $sbb.sid == $pb and $pa != $pb), l: $"each st is its own session leader \(sid ($sa.sid)/($sbb.sid) pid ($pa)/($pb)\)"}
+            {ok: ($sa.sid != $my_sid and $sbb.sid != $my_sid), l: "neither shares the test's session"}
+        ])
+        let fa = (fds-of $pa)
+        let fb = (fds-of $pb)
+        $checks = ($checks | append {ok: ($fa == $fb), l: $"equal fd sets \(A: ($fa | each {|f| $'($f.n):($f.kind)' } | str join ' ') | B: ($fb | each {|f| $'($f.n):($f.kind)' } | str join ' ')\)"})
+        let st_own = ["WINDOWID"]
+        let strip = {|e| $e | where {|x| ($x | split row "=" | first) not-in ($st_own | append "TMUX_TARGET") } | sort }
+        let only_a = (do $strip $ea)
+        let only_b = (do $strip $eb)
+        $checks = ($checks | append {ok: ($only_a == $only_b), l: "environ equal except TMUX_TARGET (and st's WINDOWID)"})
+        # sh (the fd-closer) writes its own PWD/SHLVL; they must be derived (HOME, 0/1), never the caller's
+        let allowed = ($snap | each {|x| $x | split row "=" | first } | append ($st_own | append ["TMUX_TARGET" "PWD" "SHLVL"]))
+        let alien = ($ea | append $eb | where {|x| ($x | split row "=" | first) not-in $allowed })
+        let derived_bad = ($ea | append $eb | where {|x| $x == "PWD=/tmp" or $x == "SHLVL=4" or ($x | str starts-with "NU_") })
+        $checks = ($checks | append {ok: (($alien | is-empty) and ($derived_bad | is-empty)), l: $"nothing caller-only in either environ \(found: ($alien | append $derived_bad | str join ' ')\)"})
+        $checks = ($checks | append {ok: (($eb | where {|x| $x | str starts-with "TMUX=" } | is-empty) and ($ea | where {|x| $x | str starts-with "TMUX=" } | is-empty)), l: "no TMUX in either"})
+        $checks = ($checks | append {ok: (($ea | any {|x| $x == "TMUX_TARGET=sp038e-hk" }) and ($eb | any {|x| $x == "TMUX_TARGET=sp038e-rs" })), l: "each carries its own TMUX_TARGET"})
+        let ca = (^readlink $"/proc/($pa)/cwd" | str trim)
+        let cb = (^readlink $"/proc/($pb)/cwd" | str trim)
+        $checks = ($checks | append {ok: ($ca == $home and $cb == $home), l: $"cwd is the snapshot HOME \(($ca), ($cb)\)"})
+        $checks = ($checks | append {ok: (not ($ea | append $eb | any {|x| $x | str contains ".dotfiles" })), l: "no real-HOME path in either environ"})
+
+        # ---- windows mapped (xdotool on that display) ----
+        let wa = (wait-for "win A" 10 { let r = (^env -i ...(cleanenv $display) xdotool search --onlyvisible --pid $pa | complete); if $r.exit_code == 0 and ($r.stdout | str trim) != "" { $r.stdout | lines | first } else { null } })
+        let wb = (wait-for "win B" 10 { let r = (^env -i ...(cleanenv $display) xdotool search --onlyvisible --pid $pb | complete); if $r.exit_code == 0 and ($r.stdout | str trim) != "" { $r.stdout | lines | first } else { null } })
+        $checks = ($checks | append {ok: ($wa != null), l: "hotkeyd-way window mapped on the display"})
+        $checks = ($checks | append {ok: ($wb != null), l: "restore-way window mapped on the display"})
+        if $wb != null {
+            let cls = (^env -i ...(cleanenv $display) xprop -id $wb WM_CLASS | complete | get stdout)
+            $checks = ($checks | append {ok: ($cls | str contains "wm-slot-x-1"), l: $"restore-way window class is wm-slot-x-1 \(($cls | str trim)\)"})
+        }
+
+        # ---- both attached on the sandbox tmux server ----
+        $checks = ($checks | append {ok: ($na == 1), l: $"hotkeyd-way st attached to its sandbox session \(clients: ($na)\)"})
+        $checks = ($checks | append {ok: ($nb == 1), l: $"restore-way st attached to its sandbox session \(clients: ($nb)\)"})
+
+        for c in $checks { if $c.ok { print $"  ok   ($c.l)" } else { print $"  FAIL ($c.l)"; $fails += 1 } }
+        ""
+    } catch {|e| $e.msg })
+    if $fatal != "" { print -e $"  FAIL ($fatal)"; $fails += 1 }
+
+    # ---- teardown: exact pids / pgid / the sandbox tmux socket only ----
+    for p in $st_pids { try { ^kill $p } }
+    if ($sock | path exists) { ^env -i "PATH=/usr/bin:/bin" tmux -S $sock kill-server | complete | ignore }
+    if $xpgid > 0 { ^kill -TERM $"-($xpgid)" | complete | ignore }
+    sleep 300ms
+    if $xpgid > 0 { ^kill -KILL $"-($xpgid)" | complete | ignore }
+    # sandbox-by-environ sweep: any st still holding our run dir, by exact pid
+    for c in (glob /proc/[0-9]*/environ) {
+        let pid = ($c | path dirname | path basename | into int)
+        let mine = (try { (open --raw $c | decode utf-8 | str contains $"XDG_RUNTIME_DIR=($run)") } catch { false })
+        if $mine and $pid != $nu.pid { try { ^kill $pid } }
+    }
+
+    # ---- Jan's side untouched ----
+    let jan_after = (jan-tmux)
+    let jan_ok = ($jan_before == $jan_after)
+    if $jan_ok { print "  ok   Jan's default tmux server unchanged (session list + client count)" } else { print $"  FAIL Jan's tmux changed: ($jan_before | to nuon) -> ($jan_after | to nuon)"; $fails += 1 }
+    ^rm -rf $sb
+    if $fails > 0 {
+        print $"wm-launch-x11-e2e: ($fails) FAILED"
+        exit 1
+    }
+    print "wm-launch-x11-e2e: all passed"
+}
