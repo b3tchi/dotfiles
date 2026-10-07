@@ -1,0 +1,234 @@
+#!/usr/bin/env nu
+# tmux-cleanup-test - tmux-cleanup and the @wm-restore-pending mark
+# (sp038, dotfiles-et3u.12), in the wm-launch-test pattern.
+#
+# wm-state restore closes the old terminals once the new ones are started,
+# but st starts its shell only when its window is first MAPPED: a terminal
+# restored onto a hidden workspace has no tmux client yet, so the old
+# client's detach ran tmux-cleanup (tmux.conf client-detached hook) and it
+# killed the session nobody was attached to. Restore now marks each session
+# it hands over with `@wm-restore-pending <unix time>`; tmux-cleanup treats a
+# LIVE mark (younger than 24h) like an attached client; tmux.conf's
+# client-attached hook clears it.
+#
+# Cases:
+#   1 unit (tmux-cleanup run once, no hooks on the server):
+#     unmarked-killed       unattached unmarked session in a group / alone: killed
+#     marked-survives       live mark: session and its current window survive
+#     mark-wins-all-unattached  all-unattached group: the marked one is kept,
+#                           not the "last by name" one
+#     expired-killed        mark older than 24h, and a non-number (`1`): killed
+#     just-under-ttl        a mark 60s short of 24h still protects
+#     attached-untouched    attached session untouched; its stale mark cleared
+#     live-mark-kept        cleanup never clears a live mark
+#   2 hook: tmux.conf's client-attached line clears the mark of the session a
+#     client attaches to, and only that one
+#   3 e2e: tmux.conf's REAL client-detached + client-attached hooks running the
+#     real tmux-cleanup: an old client detaching leaves the marked session
+#     alive, an unmarked control is killed, the new client's attach clears the
+#     mark, and its later detach lets cleanup kill the session again.
+#
+# Safety: a throwaway tmux server on `-S <mktemp -d /tmp/sp038c.XXXX>/s`, its
+# socket_path asserted before anything else runs and again through the exact
+# TMUX= env tmux-cleanup is given; every run is `env -i` with HOME and
+# TMUX_TMPDIR in the sandbox, so even a lost TMUX falls back to a sandbox
+# socket, never Jan's default server. Clients are `script` ptys killed by pid.
+#
+# Run:  nu nushell/actions/tmux-cleanup-test
+# Pass: exits 0 and prints "tmux-cleanup-test: N passed, 0 failed"
+
+const here = (path self | path dirname)
+const MARK = "@wm-restore-pending"
+const TTL = 86400
+
+def check [ok: bool, label: string] {
+    if $ok { print $"  ok   ($label)" } else { print $"  FAIL ($label)" }
+    $ok
+}
+
+def sandbox [] {
+    let d = (^mktemp -d /tmp/sp038c.XXXX | str trim)
+    let home = $"($d)/home"
+    ^mkdir -p $"($home)/.local/bin"
+    ^ln -s ($here | path join "tmux-cleanup") $"($home)/.local/bin/tmux-cleanup"
+    # The server's only config. Every pane runs sleep, not a shell: a `script`
+    # client on </dev/null forwards EOF to its pane, and a shell there would
+    # log out and take the window (and the whole group) with it.
+    "set -g default-command 'exec sleep 86400'\n" | save -f $"($d)/tmux.conf"
+    let path = ([($nu.current-exe | path dirname) "/usr/bin" "/bin"] | str join ":")
+    { d: $d, sock: $"($d)/s", home: $home, conf: $"($d)/tmux.conf", base: [$"HOME=($home)" $"PATH=($path)" $"TMUX_TMPDIR=($d)" "TERM=xterm"] }
+}
+
+# tmux against the sandbox server only (-S), with the sandbox config only.
+def --wrapped tx [sb: record, ...args] {
+    ^env -i ...$sb.base tmux -f $sb.conf -S $sb.sock ...$args | complete
+}
+
+# Die unless the server answering on the sandbox socket says it IS that
+# socket - and the same through TMUX=, the way tmux-cleanup reaches it.
+def assert-sandbox [sb: record] {
+    let a = (tx $sb display-message -p '#{socket_path}' | get stdout | str trim)
+    let b = (^env -i ...$sb.base $"TMUX=($sb.sock),0,0" tmux display-message -p '#{socket_path}' | complete | get stdout | str trim)
+    if $a != $sb.sock or $b != $sb.sock {
+        print -e $"FATAL: sandbox tmux answers as '($a)' / '($b)', not ($sb.sock) - refusing to run tmux-cleanup"
+        tx $sb kill-server | ignore
+        ^rm -rf $sb.d
+        exit 2
+    }
+}
+
+def run-cleanup [sb: record] {
+    ^env -i ...$sb.base $"TMUX=($sb.sock),0,0" $nu.current-exe ($here | path join "tmux-cleanup") | complete
+}
+
+def sessions [sb: record] {
+    tx $sb list-sessions -F '#{session_name}' | get stdout | lines | where {|l| $l != "" }
+}
+def mark-of [sb: record, s: string] {
+    tx $sb show-options -t $"=($s):" -v $MARK | get stdout | str trim
+}
+def set-mark [sb: record, s: string, v: string] {
+    tx $sb set-option -t $"=($s):" $MARK $v | ignore
+}
+def cur-window [sb: record, s: string] {
+    tx $sb display-message -t $"=($s):" -p '#{window_id}' | get stdout | str trim
+}
+def windows [sb: record] {
+    tx $sb list-windows -a -F '#{window_id}' | get stdout | lines | where {|l| $l != "" } | uniq
+}
+def attached [sb: record, s: string] {
+    tx $sb list-sessions -F '#{session_name} #{session_attached}' | get stdout | lines | any {|l| $l == $"($s) 1" }
+}
+
+# A real client on a pty, attached to session s; returns the script pid.
+def attach [sb: record, s: string] {
+    let env_words = ($sb.base | each {|w| $"'($w)'" } | str join " ")
+    let pid = (^bash -c $"env -i ($env_words) script -qfc \"tmux -f /dev/null -S '($sb.sock)' attach -t '=($s):'\" /dev/null </dev/null >/dev/null 2>&1 & echo $!" | str trim | into int)
+    for _ in 1..50 { if (attached $sb $s) { break }; sleep 100ms }
+    $pid
+}
+def stop-client [sb: record, s: string, pid: int] {
+    tx $sb detach-client -s $"=($s):" | ignore
+    do { ^kill $pid } | complete | ignore
+}
+
+# Poll (up to 10s) for a condition on the server; returns whether it held.
+def wait-for [sb: record, cond: closure] {
+    for _ in 1..100 { if (do $cond $sb) { return true }; sleep 100ms }
+    false
+}
+
+def main [] {
+    mut oks = []
+    let now = (date now | format date '%s' | into int)
+
+    # ── 1. unit ───────────────────────────────────────────────────────────────
+    print "\n[1] tmux-cleanup, one run, no hooks"
+    let sb = (sandbox)
+    try {
+        tx $sb new-session -d -s local_0 -t local | ignore
+        assert-sandbox $sb
+        for s in [local_1 local_2 local_3 local_4 local_5] {
+            tx $sb new-session -d -s $s -t local | ignore
+            tx $sb new-window -t $"=($s):" | ignore   # its own current window, like tmux-start
+        }
+        for s in [g2_0 g2_1] { tx $sb new-session -d -s $s -t g2 | ignore }
+        for s in [solo solo_m] { tx $sb new-session -d -s $s | ignore }
+        set-mark $sb local_2 $"($now)"
+        set-mark $sb local_3 $"($now - $TTL - 60)"
+        set-mark $sb local_4 "1"
+        set-mark $sb local_5 $"($now - $TTL + 60)"
+        set-mark $sb g2_0 $"($now)"
+        set-mark $sb solo_m $"($now)"
+        set-mark $sb local_0 $"($now - $TTL - 60)"
+        let w2 = (cur-window $sb local_2)
+        let w5 = (cur-window $sb local_5)
+        let wm = (cur-window $sb solo_m)
+        let c0 = (attach $sb local_0)
+        let r = (run-cleanup $sb)
+        let left = (sessions $sb)
+        let wins = (windows $sb)
+        $oks = ($oks | append (check ($r.exit_code == 0) $"cleanup exits 0 \(stderr '($r.stderr | str trim)'\)"))
+        $oks = ($oks | append (check (not ("local_1" in $left)) $"unmarked-killed: unattached unmarked local_1 in a group with an attached session \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check (not ("solo" in $left)) $"unmarked-killed: unattached unmarked ungrouped solo \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check ("local_2" in $left and $w2 in $wins and (cur-window $sb local_2) == $w2) $"marked-survives: local_2 and its current window ($w2) \(left ($left | to nuon), windows ($wins | to nuon)\)"))
+        $oks = ($oks | append (check ("solo_m" in $left and $wm in $wins) $"marked-survives: ungrouped solo_m and its window \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check ("g2_0" in $left and not ("g2_1" in $left)) $"mark-wins-all-unattached: g2_0 \(marked\) kept, g2_1 \(last by name\) killed \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check (not ("local_3" in $left)) $"expired-killed: a mark ($TTL + 60)s old does not protect \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check (not ("local_4" in $left)) $"expired-killed: a mark that is not a unix time \('1'\) does not protect \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check ("local_5" in $left and $w5 in $wins) $"just-under-ttl: a mark ($TTL - 60)s old still protects \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check ("local_0" in $left and (attached $sb local_0)) $"attached-untouched: local_0 still there and attached \(left ($left | to nuon)\)"))
+        $oks = ($oks | append (check ((mark-of $sb local_0) == "") $"attached-untouched: its expired mark was cleared \(got '(mark-of $sb local_0)'\)"))
+        $oks = ($oks | append (check ((mark-of $sb local_2) == $"($now)" and (mark-of $sb g2_0) == $"($now)") "live-mark-kept: cleanup leaves a live mark as it is"))
+        stop-client $sb local_0 $c0
+    } catch {|e| print $"  FAIL unit cases raised: ($e.msg)"; tx $sb kill-server | ignore; ^rm -rf $sb.d; exit 1 }
+    tx $sb kill-server | ignore
+    ^rm -rf $sb.d
+
+    # The shipped hook lines, read out of tmux.conf (exactly one each).
+    let conf = ($here | path join "../../tmux/tmux.conf" | path expand)
+    let hook_lines = (open --raw $conf | lines | where {|l| $l =~ '^set-hook -g client-(attached|detached) ' })
+    let attached_line = ($hook_lines | where {|l| $l =~ 'client-attached' })
+    $oks = ($oks | append (check (($attached_line | length) == 1 and ($hook_lines | length) == 2) $"tmux.conf has one client-attached and one client-detached hook \(got ($hook_lines | to nuon)\)"))
+
+    # ── 2. hook ───────────────────────────────────────────────────────────────
+    print "\n[2] tmux.conf client-attached hook clears the mark"
+    let sb = (sandbox)
+    try {
+        tx $sb new-session -d -s h | ignore
+        assert-sandbox $sb
+        tx $sb new-session -d -s h2 | ignore
+        ($attached_line | str join "\n") + "\n" | save -f $"($sb.d)/hook.conf"
+        let src = (tx $sb source-file $"($sb.d)/hook.conf")
+        set-mark $sb h $"($now)"
+        set-mark $sb h2 $"($now)"
+        let c = (attach $sb h)
+        let cleared = (wait-for $sb {|s| (mark-of $s h) == "" })
+        $oks = ($oks | append (check ($src.exit_code == 0 and (attached $sb h) and $cleared) $"hook: attaching to h cleared its mark \(source rc ($src.exit_code) '($src.stderr | str trim)', mark '(mark-of $sb h)'\)"))
+        $oks = ($oks | append (check ((mark-of $sb h2) == $"($now)") $"hook: h2, which nobody attached to, keeps its mark \(got '(mark-of $sb h2)'\)"))
+        stop-client $sb h $c
+    } catch {|e| print $"  FAIL hook case raised: ($e.msg)"; tx $sb kill-server | ignore; ^rm -rf $sb.d; exit 1 }
+    tx $sb kill-server | ignore
+    ^rm -rf $sb.d
+
+    # ── 3. e2e with the real hooks ────────────────────────────────────────────
+    print "\n[3] e2e: real client-detached / client-attached hooks"
+    let sb = (sandbox)
+    try {
+        tx $sb new-session -d -s r_k -t r | ignore
+        assert-sandbox $sb
+        for s in [r_0 r_1] {
+            tx $sb new-session -d -s $s -t r | ignore
+            tx $sb new-window -t $"=($s):" | ignore
+        }
+        ($hook_lines | str join "\n") + "\n" | save -f $"($sb.d)/hooks.conf"
+        let src = (tx $sb source-file $"($sb.d)/hooks.conf")
+        $oks = ($oks | append (check ($src.exit_code == 0) $"e2e: tmux.conf's hook lines source cleanly \('($src.stderr | str trim)'\)"))
+        let ck = (attach $sb r_k)
+        let ca = (attach $sb r_0)   # the old terminal holding r_0
+        let cb = (attach $sb r_1)   # an old terminal nobody hands over (control)
+        let w0 = (cur-window $sb r_0)
+        # restore: mark what it hands over, then close the old terminals
+        set-mark $sb r_0 $"($now)"
+        stop-client $sb r_0 $ca
+        stop-client $sb r_1 $cb
+        let control_gone = (wait-for $sb {|s| not ("r_1" in (sessions $s)) })
+        $oks = ($oks | append (check $control_gone $"e2e: the unmarked control r_1 is killed by the real hook \(left ((sessions $sb) | to nuon)\)"))
+        $oks = ($oks | append (check ("r_0" in (sessions $sb) and $w0 in (windows $sb)) $"e2e: the marked r_0 and its window ($w0) outlive their old client's detach \(left ((sessions $sb) | to nuon)\)"))
+        # the new terminal maps late (hidden workspace) and attaches
+        let cc = (attach $sb r_0)
+        let cleared = (wait-for $sb {|s| (mark-of $s r_0) == "" })
+        $oks = ($oks | append (check ((attached $sb r_0) and $cleared and (cur-window $sb r_0) == $w0) $"e2e: the new client attaches to r_0 on ($w0) and the mark is cleared \(mark '(mark-of $sb r_0)', attached (attached $sb r_0), window (cur-window $sb r_0)\)"))
+        stop-client $sb r_0 $cc
+        let gone = (wait-for $sb {|s| not ("r_0" in (sessions $s)) })
+        $oks = ($oks | append (check $gone $"e2e: with the mark gone, r_0's next detach lets cleanup kill it as before \(left ((sessions $sb) | to nuon)\)"))
+        stop-client $sb r_k $ck
+    } catch {|e| print $"  FAIL e2e case raised: ($e.msg)"; tx $sb kill-server | ignore; ^rm -rf $sb.d; exit 1 }
+    tx $sb kill-server | ignore
+    ^rm -rf $sb.d
+
+    let failed = ($oks | where {|x| not $x } | length)
+    print ""
+    print $"tmux-cleanup-test: (($oks | length) - $failed) passed, ($failed) failed"
+    if $failed > 0 { exit 1 }
+}

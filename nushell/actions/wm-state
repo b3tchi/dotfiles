@@ -913,6 +913,11 @@ def "main restore" [
             continue
         }
 
+        # Before any of this workspace's terminals is launched - and so before
+        # its old ones are killed in phase 2 - mark the sessions handed over.
+        # A terminal whose exec could not be built is not launched: no mark.
+        mark-restore-pending ($term_specs | where {|s| ($s | get -o exec_cmd | default "") | is-not-empty } | each {|s| $s | get -o session | default "" }) $dry_run
+
         # Write append_layout JSON + apply.
         if not ($json_nodes | is-empty) {
             let tmpfile = $"(restore-tmpdir)/wm-restore-($ws_name).json"
@@ -959,7 +964,9 @@ def "main restore" [
     # The new clients now hold those sessions open, so destroy-unattached +
     # tmux-cleanup will not destroy them when the old clients detach. A
     # workspace whose terminals did not ALL appear keeps its old ones: the old
-    # tmux client may be the only one its session has.
+    # tmux client may be the only one its session has. (A terminal on a hidden
+    # workspace has no client until it is first shown - st starts its shell on
+    # map - which is what the @wm-restore-pending mark set above covers.)
     if not ($respawned_ws | is-empty) {
         let timeout_ms = (i3-attach-timeout-ms)
         let slots = $slots_by_ws
@@ -1015,6 +1022,47 @@ def "main restore" [
     }
 
     if $dry_run { print "Dry run complete" } else { print "Restore complete" }
+}
+
+# ── the restore-pending mark (sp038, dotfiles-et3u.12) ───────────────────────
+# st starts its shell - and with it the tmux client - only once its window is
+# first MAPPED, and a terminal restored onto a hidden workspace stays unmapped
+# until it is shown. Closing the old terminal then detaches the session's last
+# client and tmux.conf's client-detached hook (tmux-cleanup) kills it. So
+# before any old terminal is closed, each session restore hands over to a new
+# terminal gets `@wm-restore-pending <unix time>`: tmux-cleanup spares a
+# session with a live mark (younger than 24h), and tmux.conf's client-attached
+# hook clears it once the new client arrives. A terminal that resolves its
+# target by --workspace has no saved session and needs none (its group is
+# made by its shell on first map). A `thin_*` session lives on `tmux -L thin`
+# (distro/bashrc's rule), which runs no tmux-cleanup: not marked.
+const restore_mark = "@wm-restore-pending"
+
+def restore-mark-sessions [sessions: list<string>] {
+    $sessions | where {|s| ($s | is-not-empty) and not ($s | str starts-with "thin_") } | uniq
+}
+
+# Mark the sessions (a dry run prints the commands instead). A session tmux
+# does not know is warned about, never fatal: the mark only spares sessions.
+def mark-restore-pending [sessions: list<string>, dry_run: bool] {
+    let now = (date now | format date '%s')
+    for s in (restore-mark-sessions $sessions) {
+        if $dry_run {
+            print $"  DRY: tmux set-option -t (shq $"=($s):") ($restore_mark) <unix-time>"
+        } else {
+            let r = (do { ^tmux set-option -t $"=($s):" $restore_mark $now } | complete)
+            if $r.exit_code != 0 { print -e $"  warn: tmux session ($s): could not set ($restore_mark): ($r.stderr | str trim)" }
+        }
+    }
+}
+
+# Take the mark back off sessions that will NOT be handed over after all (the
+# build failed, or their launcher refused): the old terminal stays theirs.
+def unmark-restore-pending [sessions: list<string>, dry_run: bool] {
+    if $dry_run { return }
+    for s in (restore-mark-sessions $sessions) {
+        do { ^tmux set-option -u -t $"=($s):" $restore_mark } | complete | ignore
+    }
 }
 
 # Does restoring these workspaces launch any terminal? (A GUI-only restore
@@ -1179,6 +1227,7 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
                     id: $key,
                     swallow_kind: "title",
                     slot: $slot,
+                    session: $session,
                     exec_cmd: (i3-launch-cmd $term $slot $session $ws_name $wm),
                 })
             } else if $is_term {
@@ -1589,6 +1638,10 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
             continue
         }
 
+        # Before the first close (isolate-kwi3 closes leftovers; phase 2 the old
+        # terminals): mark every saved session this workspace hands over.
+        let handed = ($plan.terms | get session)
+        mark-restore-pending $handed $dry_run
         let iso = (isolate-kwi3 $tree $ws_name $dry_run)
         let built = (try {
             kwi3-do "workspace.build" { name: $ws_name, tree: $plan.tree } $dry_run
@@ -1603,6 +1656,7 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
             if $iso.id != null and not $dry_run {
                 try { kwi3-rpc "workspace.rename" { id: $iso.id, name: $ws_name } | ignore } catch {|e| print -e $"  warn: could not restore the name ($ws_name): ($e.msg)" }
             }
+            unmark-restore-pending $handed $dry_run
             continue
         }
 
@@ -1614,7 +1668,7 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
         # still go.
         let results = ($plan.terms | each {|t|
             let args = (launcher-args $term $t $ws_name)
-            if $dry_run {
+            let ok = if $dry_run {
                 print $"  DRY: ~/.local/bin/wm-launch-terminal ($args | each {|a| shq $a } | str join ' ')"
                 true
             } else {
@@ -1624,8 +1678,13 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
                     false
                 } else { true }
             }
+            { session: $t.session, ok: $ok }
         })
-        if ($results | any {|r| not $r }) {
+        # A refused launcher hands nothing over: its session keeps no mark
+        # (unless another terminal of the same session did launch).
+        let launched = ($results | where ok | get session)
+        unmark-restore-pending ($results | where {|r| not $r.ok and not ($r.session in $launched) } | get session) $dry_run
+        if ($results | any {|r| not $r.ok }) {
             print -e $"  warn: ($ws_name): a terminal could not be launched - keeping the old terminals on ($ws_name)-old"
         } else if ($plan.terms | is-not-empty) {
             $respawned = ($respawned | append { name: $ws_name, terminals: $iso.terminals })
@@ -1634,6 +1693,8 @@ def restore-kwi3 [workspaces: list<record>, term: string, dry_run: bool] {
 
     # Phase 2: once the new terminals have attached, close the old ones - the
     # new clients hold the sessions open, so destroy-unattached does not fire.
+    # One still unmapped (hidden workspace) has no client yet: its session is
+    # spared by the @wm-restore-pending mark set before isolate-kwi3.
     if ($respawned | is-not-empty) {
         if $dry_run {
             print "  DRY: sleep 600ms (let new terminals attach)"

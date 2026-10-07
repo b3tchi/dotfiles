@@ -44,6 +44,12 @@
 #                           at once; a word-per-write record interleaved)
 #   i3-restore-tmpdir       the i3 append_layout file honours a safe $TMPDIR, so
 #                           concurrent restores/suites never share /tmp/wm-restore-*
+#   [10] restore-pending mark (dotfiles-et3u.12): each handed-over session gets
+#   `@wm-restore-pending <unix time>` BEFORE the first old-terminal close
+#   (kwi3: one events.log both the stub tmux and the rig append to, in order;
+#   i3: stub tmux timestamps vs the stub i3's kill times); --workspace, thin_
+#   and refused-launcher sessions carry no mark; a dry run prints the
+#   set-option lines and sets nothing.
 #
 # Safety: every nu run is `env -i`; HOME is a sandbox; PATH starts with stubs for
 # tmux (answers from a flag file, can never reach a real server), i3-msg, swaymsg
@@ -83,8 +89,12 @@ for s in [wm-ipc.nu wm-state] {
 # Stub tmux: logs argv, "down" while $tmp/tmux-down exists. First on PATH, so a
 # real tmux server is unreachable from every run below.
 let tmux_log = $"($tmp)/tmux.log"
+# events.log (dotfiles-et3u.12): the rig driver appends its CALL lines there
+# too, so the order of tmux calls vs kwi3 calls is the file's order.
+let events_log = $"($tmp)/events.log"
 $"#!/bin/bash
 echo \"$*\" >> ($tmux_log)
+printf 'TMUX %s %s\\n' \"$\(date +%s.%N)\" \"$*\" >> ($events_log)
 if [ -e ($tmp)/tmux-down ]; then echo 'no server running' >&2; exit 1; fi
 case \"$1\" in list-sessions) echo 'a: 1 windows' ;; esac
 exit 0
@@ -170,6 +180,14 @@ const sources = fs.readdirSync(root + '/core').filter((f) => f.endsWith('.js'))
     .map((f) => root + '/core/' + f)
     .concat([root + '/adapters/kwin/contents/code/adapter.js']);
 const [sockPath, seedPath, tmp] = process.argv.slice(2);
+// dotfiles-et3u.12: every CALL line also goes to events.log (append), where
+// the stub tmux appends too - one ordered record of both.
+const stdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = (chunk, ...rest) => {
+    const t = String(chunk);
+    if (t.startsWith('CALL ')) fs.appendFileSync(tmp + '/events.log', t.endsWith('\n') ? t : t + '\n');
+    return stdoutWrite(chunk, ...rest);
+};
 const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
 rpc.start(sockPath, sources, { logCalls: true }).then((rig) => {
     const ctx = rig.ctx, ws = rig.world.ws;
@@ -322,6 +340,10 @@ if ($env | get -o WM_STATE_CAPTURE_GOLDEN | default "" | is-not-empty) {
     print $"captured golden -> ($env.WM_STATE_CAPTURE_GOLDEN)"
 }
 let want_golden = if ($golden | path exists) { open $golden --raw } else { "<missing golden>" }
+# dotfiles-et3u.12 adds `DRY: tmux set-option ... @wm-restore-pending` lines on
+# purpose; they are checked in [10], everything else must still be the golden.
+let i3r_stdout = $i3r.stdout
+let i3r = ($i3r | update stdout ($i3r.stdout | lines | where {|l| not ($l | str starts-with "  DRY: tmux set-option ") } | each {|l| $l + "\n" } | str join ""))
 if (check "i3-dry-run-unchanged: byte-identical to the golden from main" ($i3r.exit_code == 0 and $i3r.stdout == $want_golden and ($i3r.stdout | str contains "append_layout")) $"exit=($i3r.exit_code)\n--- got\n($i3r.stdout)\n--- golden\n($want_golden)\nstderr=($i3r.stderr)") { $passed += 1 } else { $failed += 1 }
 # sp038 T6: the golden changed ON PURPOSE (Jan, 2026-10-06) - and only on its
 # exec lines. The pre-sp038 golden is kept beside it; every line that differs
@@ -811,6 +833,8 @@ print "\n[1] dry-run-kwi3"
 let tree_json = $"{\"layout\":\"splith\",\"nodes\":[{\"key\":\"1\",\"swallows\":[{\"class\":\"^wm-slot-dev-1$\"}]},{\"layout\":\"splitv\",\"nodes\":[{\"key\":\"2\",\"swallows\":[{\"class\":\"^wm-slot-dev-2$\"}]},{\"key\":\"3\",\"window\":($Z)}]},{\"layout\":\"tabbed\",\"nodes\":[{\"key\":\"4\",\"swallows\":[{\"class\":\"^wm-slot-dev-4$\"}]},{\"key\":\"5\",\"window\":($F1)},{\"key\":\"6\",\"swallows\":[{\"class\":\"^Gone$\"}]}]}]}"
 let want_dry = ([
     "Restoring workspace: dev"
+    "  DRY: tmux set-option -t =a: @wm-restore-pending <unix-time>"
+    "  DRY: tmux set-option -t =b: @wm-restore-pending <unix-time>"
     $"  DRY: kwi3-rpc workspace.rename {\"id\":($dev_id),\"name\":\"dev-old\"}"
     $"  DRY: kwi3-rpc workspace.build {\"name\":\"dev\",\"tree\":($tree_json)}"
     "  DRY: ~/.local/bin/wm-launch-terminal st --session a --class wm-slot-dev-1"
@@ -971,6 +995,94 @@ let calls_after = (mutating $rig_log | length)
 if (check "launcher-missing-aborts-early: exit 1, names the path, no mutating kwi3 call (live and dry-run)" ($r.exit_code == 1 and ($r.stderr | str contains $launcher_path) and $r_dry.exit_code == 1 and ($r_dry.stderr | str contains $launcher_path) and $calls_after == $calls_n) $"calls ($calls_n) -> ($calls_after) ($r | to nuon) ($r_dry | to nuon)") { $passed += 1 } else { $failed += 1 }
 ^mv $"($launcher_path).away" $launcher_path
 
+# ── 10. the restore-pending mark (dotfiles-et3u.12) ───────────────────────────
+# st starts its shell only once its window is mapped, so a terminal restored
+# onto a hidden workspace has no tmux client yet when restore closes the old
+# terminal; tmux-cleanup (client-detached hook) then killed the session.
+# Restore marks each handed-over session first (tmux-cleanup-test covers the
+# tmux side). These cases are additive: they read the shared stub logs only
+# from the line count they start at.
+print "\n[10] restore-pending mark"
+def ev-lines [f: string, skip: int] {
+    if not ($f | path exists) { return [] }
+    open $f --raw | lines | skip $skip | where {|l| $l | is-not-empty }
+}
+def ev-n [f: string] { ev-lines $f 0 | length }
+# The stub tmux's set-option calls in events lines: { unset, session, value, t, i }
+def ev-marks [evs: list<string>] {
+    $evs | enumerate | where {|e| $e.item =~ '^TMUX [0-9.]+ set-option ' and ($e.item | str contains "@wm-restore-pending") } | each {|e|
+        let m = ($e.item | parse --regex '^TMUX (?P<t>[0-9.]+) set-option (?P<u>-u )?-t =(?P<s>.*): @wm-restore-pending ?(?P<v>[0-9]*)$' | get -o 0)
+        if $m == null { { unset: false, session: $"<unparsed ($e.item)>", value: "", t: 0.0, i: $e.index } } else {
+            { unset: ($m.u | is-not-empty), session: $m.s, value: $m.v, t: ($m.t | into float), i: $e.index }
+        }
+    }
+}
+let marked_saved = ($saved | update workspaces ($saved.workspaces | where name in ["dev" "ef"] | append {
+    name: "pm", ws_layout: "splith",
+    layout: { "1": "st-256color", "2": "st-256color", "3": "st" },
+    state: {
+        "1": { wid: 41, pid: 41, class: "st-256color", title: "tmux", session_type: "local", session: "p1", tmux_window_id: "11" },
+        "2": { wid: 42, pid: 42, class: "st-256color", title: "tmux", session_type: "thin", session: "thin_0", tmux_window_id: "12" },
+        "3": { wid: 43, pid: 43, class: "st", title: "bash" }
+    }
+}))
+$marked_saved | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+
+# kwi3 dry run: prints the set-option lines, sets nothing
+let n0 = (ev-n $events_log)
+let r = (run-ws $tmp $test_path $k ["restore" "--dry-run" "--workspace" "dev"])
+let dry_marks = ($r.stdout | lines | where {|l| $l | str contains "@wm-restore-pending" })
+let first_close = ($r.stdout | lines | enumerate | where {|e| $e.item | str contains "window.close" } | get -o 0.index | default 9999)
+let mark_idx = ($r.stdout | lines | enumerate | where {|e| $e.item | str contains "@wm-restore-pending" } | get index)
+let last_mark = if ($mark_idx | is-empty) { 9999 } else { $mark_idx | math max }
+if (check "kwi3-mark-dry-run: prints one set-option per saved session (a, b - not the --workspace one), before the first close" ($r.exit_code == 0 and $dry_marks == ["  DRY: tmux set-option -t =a: @wm-restore-pending <unix-time>" "  DRY: tmux set-option -t =b: @wm-restore-pending <unix-time>"] and $last_mark < $first_close) $"marks=($dry_marks | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "kwi3-mark-dry-run: the dry run sets nothing (no set-option reached the stub tmux)" ((ev-marks (ev-lines $events_log $n0)) | is-empty) $"events=(ev-lines $events_log $n0 | to json -r)") { $passed += 1 } else { $failed += 1 }
+
+# kwi3 live: a, b marked with a unix time, and both BEFORE the first close
+let n0 = (ev-n $events_log)
+let t_before = (date now | format date '%s' | into int)
+let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "dev"])
+let t_after = (date now | format date '%s' | into int)
+let evs = (ev-lines $events_log $n0)
+let marks = (ev-marks $evs)
+let closes = ($evs | enumerate | where {|e| $e.item =~ '^CALL .*"method":"window\.close"' } | get index)
+let set_marks = ($marks | where {|m| not $m.unset })
+if (check "kwi3-mark-set: exactly a and b marked, each with a unix time of this run" ($r.exit_code == 0 and ($set_marks | get session) == ["a" "b"] and ($set_marks | all {|m| ($m.value | is-not-empty) and ($m.value | into int) >= $t_before and ($m.value | into int) <= $t_after }) and ($marks | where unset | is-empty)) $"marks=($marks | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "kwi3-mark-before-close: every set-option precedes the first window.close (rig + stub tmux, one ordered log)" (($closes | is-not-empty) and ($set_marks | is-not-empty) and (($set_marks | get i | math max) < ($closes | math min))) $"marks=($marks | to json -r) closes=($closes | to json -r) events=($evs | to json -r)") { $passed += 1 } else { $failed += 1 }
+
+# kwi3: --workspace and thin_ sessions carry no mark
+let n0 = (ev-n $events_log)
+let nl = (launcher-n $tmp)
+let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "pm"])
+let marks = (ev-marks (ev-lines $events_log $n0))
+if (check "kwi3-mark-scope: only p1 is marked - not thin_0 (tmux -L thin runs no tmux-cleanup), not the --workspace terminal" ($r.exit_code == 0 and ($marks | get session) == ["p1"] and ((launcher-calls $tmp $nl) | length) == 3) $"marks=($marks | to json -r) launcher=(launcher-calls $tmp $nl | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+# kwi3: a refused launcher takes its session's mark back (the old terminal stays)
+"wm-slot-ef-1\n" | save -f $"($tmp)/launcher-refuse"
+let n0 = (ev-n $events_log)
+let r = (run-ws $tmp $test_path $k ["restore" "--workspace" "ef"])
+let marks = (ev-marks (ev-lines $events_log $n0))
+^rm -f $"($tmp)/launcher-refuse"
+if (check "kwi3-mark-refused: e1 and e2 marked, then e1 (its launcher refused) unmarked, e2 kept" ($r.exit_code == 0 and ($marks | where {|m| not $m.unset } | get session) == ["e1" "e2"] and ($marks | where unset | get session) == ["e1"]) $"marks=($marks | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+
+# i3 dry run (captured above, before the golden filter)
+let i3_lines = ($i3r_stdout | lines)
+let i3_marks = ($i3_lines | where {|l| $l | str contains "@wm-restore-pending" })
+let i3_exec_at = ($i3_lines | enumerate | where {|e| $e.item | str contains "ipc-raw exec " } | get -o 0.index | default (-1))
+let i3_mark_at = ($i3_lines | enumerate | where {|e| $e.item | str contains "@wm-restore-pending" } | get -o 0.index | default 9999)
+if (check "i3-mark-dry-run: one set-option line for session a, printed before its exec" ($i3_marks == ["  DRY: tmux set-option -t =a: @wm-restore-pending <unix-time>"] and $i3_mark_at < $i3_exec_at) $"lines=($i3_lines | to json -r)") { $passed += 1 } else { $failed += 1 }
+
+# i3 live (stub i3): s1 s2 s3 marked (not wb's bare terminal), all before the first kill
+$live_state | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+i3live-reset $L "0" []
+let n0 = (ev-n $events_log)
+let r = (run-ws $tmp $test_path_i3live $live_env ["restore"])
+let marks = (ev-marks (ev-lines $events_log $n0))
+let kills = (i3live-cmds $L | where {|c| $c.cmd =~ '^\[id=\d+\] kill$' })
+if (check "i3-mark-set: exactly s1 s2 s3 marked (wb's bare terminal has no saved session)" ($r.exit_code == 0 and ($marks | where {|m| not $m.unset } | get session | sort) == ["s1" "s2" "s3"] and ($marks | where unset | is-empty)) $"marks=($marks | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
+if (check "i3-mark-before-kill: every set-option happened before the first [id=..] kill" (($kills | is-not-empty) and ($marks | is-not-empty) and (($marks | get t | math max) < ($kills | get t | math min))) $"marks=($marks | to json -r) kills=($kills | to json -r)") { $passed += 1 } else { $failed += 1 }
+"" | save -f $launcher_log
+
 # ── 9. no i3 verb anywhere ────────────────────────────────────────────────────
 print "\n[9] no-i3-verbs"
 let rig_text = (open $rig_log)
@@ -978,8 +1090,8 @@ let stub_calls = (if ($i3_log | path exists) { open $i3_log | str trim } else { 
 let verbs = ["append_layout" "get_marks" "con_mark" "mark "]
 let seen = ($verbs | where {|v| $rig_text | str contains $v })
 if (check "no-i3-verbs: no i3 verb in the rig's request log, no i3-msg/swaymsg call at all" (($seen | is-empty) and ($stub_calls | is-empty)) $"seen=($seen | to json -r) i3-msg log=($stub_calls)") { $passed += 1 } else { $failed += 1 }
-let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") and not ($l =~ '(^| )list-clients ') })
-if (check "sandbox: the stub tmux was only asked list-sessions / list-clients" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
+let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") and not ($l =~ '(^| )list-clients ') and not ($l =~ '^set-option (-u )?-t =.*: @wm-restore-pending( [0-9]+)?$') })
+if (check "sandbox: the stub tmux was only asked list-sessions / list-clients / the @wm-restore-pending mark" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
 
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
