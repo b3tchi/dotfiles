@@ -19,7 +19,7 @@
 #   restore-renames-old     old workspace renamed <name>-old, old terminals closed
 #   restore-old-stamped     a second restore stamps the leftover <name>-old
 #   no-i3-verbs             no append_layout/mark/get_marks/con_mark, no i3-msg call
-#   i3-dry-run-unchanged    the i3 path's dry-run is byte-identical to the golden
+#   i3-dry-run-unchanged    the i3 dry-run equals the golden (changed on exec lines only, sp038 T6)
 #                           file captured from main before this task
 #   placeholder-only-ws     only unmatched GUI leaves -> built as placeholders only
 #   name-unicode            spaces / unicode / shell + regex metacharacters
@@ -282,6 +282,41 @@ if ($env | get -o WM_STATE_CAPTURE_GOLDEN | default "" | is-not-empty) {
 }
 let want_golden = if ($golden | path exists) { open $golden --raw } else { "<missing golden>" }
 if (check "i3-dry-run-unchanged: byte-identical to the golden from main" ($i3r.exit_code == 0 and $i3r.stdout == $want_golden and ($i3r.stdout | str contains "append_layout")) $"exit=($i3r.exit_code)\n--- got\n($i3r.stdout)\n--- golden\n($want_golden)\nstderr=($i3r.stderr)") { $passed += 1 } else { $failed += 1 }
+# sp038 T6: the golden changed ON PURPOSE (Jan, 2026-10-06) - and only on its
+# exec lines. The pre-sp038 golden is kept beside it; every line that differs
+# must be an `ipc-raw exec` line on BOTH sides, and the line count is equal.
+let old_lines = (open $"($HERE)/wm-state-test.i3-dry-run.pre-sp038.golden" --raw | lines)
+let new_lines = ($i3r.stdout | lines)
+let changed = if ($old_lines | length) == ($new_lines | length) { $old_lines | zip $new_lines | where {|p| $p.0 != $p.1 } } else { [[bad]; ["length"]] }
+let non_exec = ($changed | where {|p| not (($p.0 | str contains "ipc-raw exec ") and ($p.1 | str contains "ipc-raw exec ")) })
+if (check "i3-golden-exec-only: same line count, every changed line is an exec line, >=1 changed" (($old_lines | length) == ($new_lines | length) and ($changed | is-not-empty) and ($non_exec | is-empty)) $"changed=($changed | to json -r)") { $passed += 1 } else { $failed += 1 }
+let exec_new = ($new_lines | where {|l| $l | str contains "ipc-raw exec " })
+if (check "i3-exec-uses-launcher: exec ~/.local/bin/wm-launch-terminal <term> --session a --class wm-slot-1" ($exec_new == ["  DRY: ipc-raw exec ~/.local/bin/wm-launch-terminal kitty --session a --class wm-slot-1"]) $"exec=($exec_new | to json -r)") { $passed += 1 } else { $failed += 1 }
+
+# Nasty names: the exec string goes to /bin/sh inside i3, so run each emitted
+# exec line through sh (sandbox HOME, stub launcher logging argv) and prove the
+# words arrive intact and nothing in them executed.
+let nasty_sess = "x'; touch PWN1 #$(touch PWN2) `touch PWN3` \"é 日本 $HOME"
+let nasty_ws = "w s'; touch PWN4 $(touch PWN5)"
+"" | save -f $launcher_log
+$"($tmp)/pwn" | ignore
+^mkdir -p $"($tmp)/pwn"
+open $i3_tree | update nodes.0.nodes.0.nodes.0.name $nasty_ws | to json -r | save -f $i3_tree
+{ workspaces: [{ name: $nasty_ws, ws_layout: "splith",
+    layout: { "1": "st", "2": "st" },
+    state: {
+      "1": { wid: 100, pid: 4242, class: "st", title: "t", session_type: "local", session: $nasty_sess, tmux_window_id: "5" },
+      "2": { wid: 101, pid: 4243, class: "st", title: "t2" } } }] } | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+let nr = (run-ws $tmp $test_path_i3 [$"I3SOCK=($tmp)/i3.sock"] ["restore" "--dry-run" "--workspace" $nasty_ws])
+let nexecs = ($nr.stdout | lines | where {|l| $l | str contains "ipc-raw exec " } | each {|l| $l | str replace "  DRY: ipc-raw exec " "" })
+for c in $nexecs { do { ^env -i $"HOME=($home)" "PATH=/usr/bin:/bin" $"PWD=($tmp)/pwn" sh -c $"cd ($tmp)/pwn; ($c)" } | complete | ignore }
+let argv_log = (open $launcher_log --raw | lines | each {|l| $l | split row (char -u '1f') | where {|w| $w != "" } })
+let want_a = ["kitty" "--session" $nasty_sess "--class" "wm-slot-1"]
+let want_b = ["kitty" "--workspace" $nasty_ws "--class" "wm-slot-2"]
+if (check "i3-exec-nasty-names: sh delivers session/workspace/class as single intact words" ($nr.exit_code == 0 and ($nexecs | length) == 2 and $want_a in $argv_log and $want_b in $argv_log) $"exit=($nr.exit_code) execs=($nexecs | to json -r) argv=($argv_log | to json -r) stderr=($nr.stderr)") { $passed += 1 } else { $failed += 1 }
+"" | save -f $launcher_log   # the kwi3 sections below count launcher calls
+let pwned = (^ls $"($tmp)/pwn" | lines)
+if (check "i3-exec-nasty-names: nothing in a name executed (no PWN* file)" ($pwned | is-empty) $"created=($pwned | to json -r)") { $passed += 1 } else { $failed += 1 }
 let i3_verbs_seen = (open $i3_run_log | str contains "get_marks")
 if (check "i3 path still reads get_marks (it is the i3 path)" $i3_verbs_seen "the i3 dry-run no longer asks i3 for marks") { $passed += 1 } else { $failed += 1 }
 

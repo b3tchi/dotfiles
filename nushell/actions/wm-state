@@ -999,6 +999,18 @@ def term-class-flag [term: string, slot_id: string] {
     ^$nu.current-exe $"($wm_actions_dir)/wm-launch-terminal" class-flag $term $slot_id | str trim
 }
 
+# The i3 `exec` string for one restored terminal (sp038 T6): i3 runs it through
+# /bin/sh, so every word that comes from saved state (session, class, workspace
+# name) is single-quoted by shq - a `;` or `$(..)` in a name is data, never
+# shell. The launcher path stays a bare `~/` so sh expands it. Mirrors the
+# kwi3 rule: a saved session attaches by --session, a bare terminal resolves
+# its target from --workspace.
+def i3-launch-cmd [term: string, slot: string, session: string, ws_name: string] {
+    let who = if ($session | is-not-empty) { ["--session" $session] } else { ["--workspace" $ws_name] }
+    let words = ([$term] | append $who | append ["--class" $slot] | each {|a| shq $a } | str join " ")
+    $"~/.local/bin/wm-launch-terminal ($words)"
+}
+
 # Recursive helper for build-respawn-plan. Produces { nodes, leaf_specs } for the
 # given container body. ws_name parameterises the per-ws mark prefix used by
 # GUI placeholders (`wm-gui-<ws>-<id>`).
@@ -1029,7 +1041,7 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
                 $leaf_specs = ($leaf_specs | append {
                     id: $key,
                     swallow_kind: "title",
-                    exec_cmd: $"($term) -e tmux attach -t ($session)",
+                    exec_cmd: (i3-launch-cmd $term (slot-id-for $key) $session $ws_name),
                 })
             } else if $is_term {
                 # Best-effort fallback: terminal entry without a usable
@@ -1041,7 +1053,7 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
                 $leaf_specs = ($leaf_specs | append {
                     id: $key,
                     swallow_kind: "class",
-                    exec_cmd: $term,
+                    exec_cmd: (i3-launch-cmd $term (slot-id-for $key) "" $ws_name),
                 })
             } else if ($cls | is-not-empty) {
                 # GUI leaf (skip_restore or non-terminal). Emit placeholder con
