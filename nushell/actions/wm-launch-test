@@ -11,15 +11,17 @@
 #   1a snapshot-written       1b drop-list-absent (one assertion per name)
 #   1c atomic-replace         1d no-runtime-dir-78     1e no-display-78
 #   1f per-display-files      1g newline-value-roundtrip
+#   1h display-normalised (:N == :N.S, host:N kept distinct)
 #
 # Task 2 (wm-launch-detach; probes are `sleep`-ing children killed by exact pid):
 #   2a identical-children     2b fd-closer-has-teeth   2c set-passes-only-named
 #   2d dry-run-x11            2e dry-run-systemd       2f dry-run-windows
 #   2g no-backend-78          2h argv-verbatim         2i corrupt-snapshot-78
 #   2j display-not-cross-used 2k missing-command
+#   2l screen-suffix-resolves 2m x11-display-never-systemd
 
 const here = (path self | path dirname)
-const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS]
+const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS PROCESS_PATH]
 
 
 def sandbox [] {
@@ -146,7 +148,7 @@ def main [] {
     let sb = (sandbox)
     let run = $"($sb)/run"
     let base = [$"HOME=($sb)/home" $"XDG_RUNTIME_DIR=($run)" "PATH=/usr/bin:/bin" "DISPLAY=:977"]
-    let noise = ["TMUX=/tmp/tmux-1/default,1,0" "TMUX_PANE=%3" "I3SOCK=/x/i3" "HOTKEYD_I3SOCK=/x/i3" "OLDPWD=/elsewhere" "SHLVL=4" "CURRENT_FILE=/f" "FILE_PWD=/p" "LAST_EXIT_CODE=3" "NU_VERSION=0.1" "CMD_DURATION_MS=12" "KEEPME=yes"]
+    let noise = ["TMUX=/tmp/tmux-1/default,1,0" "TMUX_PANE=%3" "I3SOCK=/x/i3" "HOTKEYD_I3SOCK=/x/i3" "OLDPWD=/elsewhere" "SHLVL=4" "CURRENT_FILE=/f" "FILE_PWD=/p" "LAST_EXIT_CODE=3" "NU_VERSION=0.1" "CMD_DURATION_MS=12" "PROCESS_PATH=/pp" "KEEPME=yes"]
 
     # 1a
     let r = (run-under $snap [...$base ...$noise])
@@ -165,6 +167,14 @@ def main [] {
     for n in $DROPPED {
         $oks = ($oks | append (check (not ($n in $names)) $"1b drop-list-absent: ($n)"))
     }
+    # 1b audit: every var nushell itself injects into a script's children
+    # (measured now, under env -i, not remembered) is on the drop list.
+    let audit = $"($sb)/audit"
+    "#!/usr/bin/env nu\ndef main [] { ^env -0 | decode utf-8 | split row (char -i 0) | where {|e| $e != \"\" } | each {|e| $e | split row \"=\" | first } | str join \" \" | print }\n" | save --raw $audit
+    let injected = (^env -i "PATH=/usr/bin:/bin" $nu.current-exe $audit | str trim | split row " " | where {|n| $n != "" and $n != "PATH" })
+    let unlisted = ($injected | where {|n| not ($n in $DROPPED) })
+    let leaked = ($injected | where {|n| $n in $names })
+    $oks = ($oks | append (check (($injected | length) > 0 and ($unlisted | is-empty) and ($leaked | is-empty)) $"1b nushell-injected vars all dropped \(injected [($injected | str join ' ')], not on this test's list [($unlisted | str join ' ')], in the snapshot [($leaked | str join ' ')]\)"))
 
     # 1c
     let r2 = (run-under $snap [...$base "KEEPME=second" "NEWVAR=1"])
@@ -190,8 +200,20 @@ def main [] {
     run-under $snap [...$b4 "DISPLAY=:10" "WHO=ten"] | ignore
     run-under $snap [...$b4 "DISPLAY=:40.1" "WHO=forty"] | ignore
     let f10 = $"($sb4)/run/wm-session-env-_10"
-    let f40 = $"($sb4)/run/wm-session-env-_40_1"
+    let f40 = $"($sb4)/run/wm-session-env-_40"
     $oks = ($oks | append (check (($f10 | path exists) and ($f40 | path exists) and ((read-snapshot $f10) | any {|e| $e == "WHO=ten" }) and ((read-snapshot $f40) | any {|e| $e == "WHO=forty" })) "1f per-display-files: :10 and :40.1 -> two files, neither overwrites"))
+
+    # 1h: one file per X server - the screen suffix is not part of the name
+    let sb6 = (sandbox)
+    let b6 = [$"HOME=($sb6)/home" $"XDG_RUNTIME_DIR=($sb6)/run" "PATH=/usr/bin:/bin"]
+    let pth = {|d| ^env -i ...$b6 $nu.current-exe $snap path $d | complete | get stdout | str trim }
+    run-under $snap [...$b6 "DISPLAY=:60.0"] | ignore
+    let f60 = $"($sb6)/run/wm-session-env-_60"
+    $oks = ($oks | append (check (($f60 | path exists) and (do $pth ":60") == $f60 and (do $pth ":60.0") == $f60) $"1h display-normalised: written with :60.0, `path :60` and `path :60.0` both name ($f60)"))
+    run-under $snap [...$b6 "DISPLAY=:61"] | ignore
+    $oks = ($oks | append (check ((do $pth ":61.0") == $"($sb6)/run/wm-session-env-_61" and ($"($sb6)/run/wm-session-env-_61" | path exists)) "1h display-normalised: written with :61, `path :61.0` resolves it"))
+    let lh = (do $pth "localhost:10.0")
+    $oks = ($oks | append (check ($lh == $"($sb6)/run/wm-session-env-localhost_10" and (do $pth "localhost:10") == $lh and $lh != (do $pth ":10")) $"1h host:N kept distinct from :N \(ssh -X's localhost:10.0 is not the local :10\), screen still stripped \(got ($lh)\)"))
 
     # 1g
     let sb5 = (sandbox)
@@ -201,7 +223,7 @@ def main [] {
     let got = (read-snapshot $"($sb5)/run/wm-session-env-_977" | where {|e| $e | str starts-with "MULTI=" })
     $oks = ($oks | append (check ($got == [$"MULTI=($tricky)"]) "1g newline-value-roundtrip: newline, = and unicode survive NUL framing"))
 
-    for d in [$sb $sb2 $sb3 $sb4 $sb5] { ^rm -rf $d }
+    for d in [$sb $sb2 $sb3 $sb4 $sb5 $sb6] { ^rm -rf $d }
 
     print "-- 2. wm-launch-detach"
     let s = (session)
@@ -245,11 +267,26 @@ def main [] {
         let tb_e = (toolbin $sb_e)
         ^mkdir -p $"($sb_e)/stub" $"($sb_e)/home" $"($sb_e)/run"
         "#!/bin/sh\nexit 0\n" | save --raw $"($sb_e)/stub/systemctl"
-        ^chmod +x $"($sb_e)/stub/systemctl"
+        # stub systemd-run: records that it was asked, never starts a unit
+        $"#!/bin/sh\necho \"$*\" >> ($sb_e)/systemd-run-called\nexit 0\n" | save --raw $"($sb_e)/stub/systemd-run"
+        ^chmod +x $"($sb_e)/stub/systemctl" $"($sb_e)/stub/systemd-run"
         let s_e = ($s | merge {sb: $s.sb})
-        let env_e = [$"HOME=($sb_e)/home" $"XDG_RUNTIME_DIR=($sb_e)/run" $"PATH=($sb_e)/stub:($s.tb)" "DISPLAY=:977"]
+        # systemd is the backend only with no DISPLAY (a Wayland/KWin host)
+        let env_e = [$"HOME=($sb_e)/home" $"XDG_RUNTIME_DIR=($sb_e)/run" $"PATH=($sb_e)/stub:($s.tb)"]
         let e = (run-detach $s e1 $env_e ["--dry-run"])
-        $oks = ($oks | append (check ($e.exit_code == 0 and ($e.stdout | str trim) == $"systemd ($s.sb)/probe ($s.sb)/out-e1 ($s.sb)/fifo-e1" and not $e.started and not $e.wrote) "2e dry-run-systemd: stub systemctl + no snapshot -> `systemd <argv>`, nothing started"))
+        $oks = ($oks | append (check ($e.exit_code == 0 and ($e.stdout | str trim) == $"systemd ($s.sb)/probe ($s.sb)/out-e1 ($s.sb)/fifo-e1" and not $e.started and not $e.wrote) "2e dry-run-systemd: stub systemctl + no DISPLAY -> `systemd <argv>`, nothing started"))
+        # a REAL command found through the caller's PATH (a list in nushell)
+        let e2 = (^env -i ...$env_e $nu.current-exe $det --dry-run -- sleep 1 | complete)
+        $oks = ($oks | append (check ($e2.exit_code == 0 and ($e2.stdout | str trim) == "systemd sleep 1") $"2e dry-run-systemd: real `sleep` is found on the systemd path \(exit ($e2.exit_code), stderr '($e2.stderr | str trim)'\)"))
+        let e3 = (^env -i ...$env_e $nu.current-exe $det --dry-run -- no-such-cmd-xyzzy | complete)
+        $oks = ($oks | append (check ($e3.exit_code == 127 and ($e3.stderr | str contains "no-such-cmd-xyzzy")) "2e dry-run-systemd: a missing command is still refused (127, named)"))
+
+        # 2m: an X11 display with no snapshot never falls through to systemd
+        let m = (run-detach $s m1 [...$env_e "DISPLAY=:977"] [])
+        let mmsg = $"wm-launch-detach: no launch backend for display :977 \(no snapshot at ($sb_e)/run/wm-session-env-_977; systemd is only used when DISPLAY is unset\)"
+        $oks = ($oks | append (check ($m.exit_code == 78 and ($m.stderr | str trim) == $mmsg and not $m.started and not $m.wrote and not ($"($sb_e)/systemd-run-called" | path exists)) $"2m x11-display-never-systemd: DISPLAY set + no snapshot + systemd answering -> 78 naming the snapshot \(exit ($m.exit_code), stderr '($m.stderr | str trim)'\)"))
+        let m2 = (^env -i ...$env_e "DISPLAY=:977" $nu.current-exe $det --dry-run -- sleep 1 | complete)
+        $oks = ($oks | append (check ($m2.exit_code == 78 and ($m2.stdout | str trim) == "") "2m x11-display-never-systemd: --dry-run too, nothing printed"))
         ^rm -rf $sb_e
 
         let f = (run-detach $s f1 [...$s.base "WM_LAUNCH_TEST=1" "WM_LAUNCH_TEST_OS=windows"] ["--dry-run"])
@@ -259,15 +296,18 @@ def main [] {
         let sb_g = (sandbox)
         ^mkdir -p $"($sb_g)/run"
         let g = (run-detach $s g1 [$"HOME=($sb_g)/home" $"XDG_RUNTIME_DIR=($sb_g)/run" $"PATH=($s.tb)" "DISPLAY=:977"] [])
-        let gmsg = $"wm-launch-detach: no launch backend for display :977 \(no snapshot at ($sb_g)/run/wm-session-env-_977, no systemd user manager\)"
+        let gmsg = $"wm-launch-detach: no launch backend for display :977 \(no snapshot at ($sb_g)/run/wm-session-env-_977; systemd is only used when DISPLAY is unset\)"
         $oks = ($oks | append (check ($g.exit_code == 78 and ($g.stderr | str trim) == $gmsg and not $g.started and not $g.wrote) $"2g no-backend-78: the plan's message, nothing started \(stderr '($g.stderr | str trim)'\)"))
+        let g2 = (run-detach $s g2 [$"HOME=($sb_g)/home" $"XDG_RUNTIME_DIR=($sb_g)/run" $"PATH=($s.tb)"] [])
+        let g2msg = "wm-launch-detach: no launch backend (DISPLAY is unset and there is no systemd user manager)"
+        $oks = ($oks | append (check ($g2.exit_code == 78 and ($g2.stderr | str trim) == $g2msg and not $g2.started and not $g2.wrote) $"2g no-backend-78: no DISPLAY, no systemd \(stderr '($g2.stderr | str trim)'\)"))
         ^rm -rf $sb_g
 
         # 2h
-        let nasty = ["a b" "it's \"q\"" "$HOME $(id) `x`" "\u{e9}\u{4e2d}!" "--set" "*"]
+        let nasty = ["a b" "it's \"q\"" "$HOME $(id) `x`" "\u{e9}\u{4e2d}!" "--set" "*" "true" "false" "1" "1.5" "1.50" "null" "{}" "[]" "-1" "--"]
         let h = (launch $s h1 tmux [] [] ($nasty | each {|a| $a | str replace --all "'" "'\\''" }))
         let got = if ($"($h.out).args" | path exists) { open --raw $"($h.out).args" | split row (char -i 0) | drop 1 } else { [] }
-        $oks = ($oks | append (check ($h.started and $got == $nasty) $"2h argv-verbatim: spaces, quotes, $, backticks, unicode, a glob and a fake flag arrive unchanged \(got ($got | to nuon)\)"))
+        $oks = ($oks | append (check ($h.started and $got == $nasty) $"2h argv-verbatim: spaces, quotes, $, backticks, unicode, a glob, a fake flag and nu literals \(true false 1 1.5 1.50 null {} [] -1 --\) arrive unchanged \(got ($got | to nuon)\)"))
 
         # 2i
         let bad = $"($s.sb)/run/wm-session-env-_966"
@@ -282,6 +322,10 @@ def main [] {
         # 2k
         let k = (^env -i ...$s.base $nu.current-exe $det -- no-such-cmd-xyzzy arg | complete)
         $oks = ($oks | append (check ($k.exit_code != 0 and ($k.stderr | str contains "no-such-cmd-xyzzy")) "2k missing-command: non-zero and named \(a bare setsid -f would have said 0\)"))
+
+        # 2l: the session snapshot (written with :977) serves a caller with :977.0
+        let l = (run-detach $s l1 [...$s.base "DISPLAY=:977.0"] ["--dry-run"])
+        $oks = ($oks | append (check ($l.exit_code == 0 and ($l.stdout | str trim) == $"x11 ($s.sb)/probe ($s.sb)/out-l1 ($s.sb)/fifo-l1" and not $l.started) $"2l screen-suffix-resolves: DISPLAY=:977.0 finds the :977 snapshot \(exit ($l.exit_code), stderr '($l.stderr | str trim)'\)"))
     } finally {
         kill-probes $s.sb
         ^rm -rf $s.sb

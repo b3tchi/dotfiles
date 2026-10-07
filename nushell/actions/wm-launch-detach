@@ -12,8 +12,10 @@
 #   1 windows  Start-Process via powershell
 #   2 x11      snapshot for the display exists: env -i <snapshot> setsid -f
 #              /bin/sh -c '<close fds > 2>; exec "$@"' sh <argv>
-#   3 systemd  `systemctl --user show-environment` ok: systemd-run --user
-#              --slice=app.slice --collect --quiet -- <argv>
+#   3 systemd  no display at all (Wayland/KWin host) and `systemctl --user
+#              show-environment` ok: systemd-run --user --slice=app.slice
+#              --collect --quiet -- <argv>. NEVER on an X11 display: the
+#              manager's env (no DISPLAY, short PATH) is not the session's.
 #   4 none     exit 78 naming the display and the snapshot path
 # --dry-run prints `<backend> <argv>` on one line and starts nothing.
 # Exit 0 once the child is started; never waits for it.
@@ -51,7 +53,10 @@ def test-knob [name: string] {
     $v
 }
 
-def --wrapped main [...args: string] {
+# `...args` is deliberately UNTYPED: nushell re-parses a script's argv words
+# as nu literals, so a `string` rest parameter refuses `true`, `false` and
+# `null` ("expected string"). Untyped, every word arrives as the string it was.
+def --wrapped main [...args] {
     mut display = ($env | get -o DISPLAY | default "")
     mut sets = []
     mut dry = false
@@ -91,19 +96,20 @@ def --wrapped main [...args: string] {
     if $os == "windows" {
         $backend = "windows"
     } else {
-        if $display != "" and $runtime != "" {
+        if $display != "" {
+            # An X11 display: its snapshot or nothing - never systemd.
+            if $runtime == "" { die $"no launch backend for display ($display) \(XDG_RUNTIME_DIR is unset, so there is no snapshot to read\)" 78 }
             $snap_path = (snapshot-path $display)
-            if ($snap_path | path exists) { $backend = "x11" }
-        }
-        if $backend == "" {
-            if (which systemctl | is-not-empty) and ((^systemctl --user show-environment | complete).exit_code == 0) {
-                $backend = "systemd"
+            if not ($snap_path | path exists) {
+                die $"no launch backend for display ($display) \(no snapshot at ($snap_path); systemd is only used when DISPLAY is unset\)" 78
             }
+            $backend = "x11"
+        } else if (which systemctl | is-not-empty) and ((^systemctl --user show-environment | complete).exit_code == 0) {
+            $backend = "systemd"
         }
     }
     if $backend == "" {
-        let shown = if $snap_path == "" { $"($runtime)/wm-session-env-<display>" } else { $snap_path }
-        die $"no launch backend for display ($display) \(no snapshot at ($shown), no systemd user manager\)" 78
+        die "no launch backend (DISPLAY is unset and there is no systemd user manager)" 78
     }
 
     # ---- x11: read the snapshot ----
@@ -124,7 +130,11 @@ def --wrapped main [...args: string] {
     # ---- command must exist (checked before anything is detached) ----
     let cmd = ($argv | first)
     if $backend != "windows" {
-        let search = if $backend == "x11" { $path_var } else { $env | get -o PATH | default "" | default "" }
+        # $env.PATH is a LIST in nushell; a string only if never converted.
+        let search = if $backend == "x11" { $path_var } else {
+            let p = ($env | get -o PATH | default "")
+            if ($p | describe | str starts-with "list") { $p | str join (char esep) } else { $p }
+        }
         let found = (^env -i $"PATH=($search)" /bin/sh -c 'command -v -- "$1" >/dev/null 2>&1' sh $cmd | complete)
         if $found.exit_code != 0 { die $"command not found: ($cmd)" 127 }
     }

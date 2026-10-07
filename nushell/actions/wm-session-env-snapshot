@@ -4,7 +4,8 @@
 # whatever env the caller happens to carry (a tmux pane, nushell, ...).
 #
 # Writes $XDG_RUNTIME_DIR/wm-session-env-<display>, <display> being $DISPLAY
-# with ':' and '.' replaced by '_' (:10 -> _10). Format: `env -0` - every
+# without its screen suffix and with ':' and '.' replaced by '_' (:10 -> _10,
+# :60.0 -> _60, localhost:10.0 -> localhost_10). Format: `env -0` - every
 # NAME=value entry terminated by NUL, so values may hold newlines and '='.
 # Read back with: open --raw <file> | split row (char -i 0)
 # Atomic (tmp + mv), mode 0600.
@@ -16,6 +17,7 @@ const DROP = [
     TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK
     OLDPWD PWD SHLVL _
     CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS
+    PROCESS_PATH
 ]
 
 # Exit 78 (EX_CONFIG) naming the missing variable, writing nothing.
@@ -26,8 +28,13 @@ def refuse [var: string] {
 
 # The snapshot path for a display: the ONE place the DISPLAY -> file-name rule
 # lives (wm-launch-detach asks here instead of keeping a second copy).
+# One file per X SERVER: the screen suffix is dropped, so `:60` and `:60.0`
+# (xrdp sets the latter) name the same snapshot. The host part is kept:
+# `localhost:10.0` (ssh -X forwarding) is a different server from the local
+# `:10`, so it gets `localhost_10`, never `_10`.
 def snapshot-path [runtime: string, display: string] {
-    let tag = ($display | str replace --all ":" "_" | str replace --all "." "_")
+    let server = ($display | str replace --regex '^(.*:[0-9]+)\.[0-9]+$' '$1')
+    let tag = ($server | str replace --all ":" "_" | str replace --all "." "_")
     $"($runtime)/wm-session-env-($tag)"
 }
 
