@@ -11,7 +11,7 @@
 # Backend probe, first match wins:
 #   1 windows  Start-Process via powershell
 #   2 x11      snapshot for the display exists: env -i <snapshot> setsid -f
-#              /bin/sh -c '<close fds > 2>; exec "$@"' sh <argv>
+#              /bin/sh -c '<close fds > 2>; 0-2 -> /dev/null; exec "$@"' sh <argv>
 #   3 systemd  no display at all (Wayland/KWin host) and `systemctl --user
 #              show-environment` ok: systemd-run --user --slice=app.slice
 #              --collect --quiet -- <argv>. NEVER on an X11 display: the
@@ -146,8 +146,14 @@ def --wrapped main [...args] {
 
     match $backend {
         "x11" => {
-            let closer = if $nofdclose { 'exec "$@"' } else {
-                'for f in /proc/self/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] && eval "exec $n>&-"; done 2>/dev/null; exec "$@"'
+            # stdio: the child gets /dev/null on 0/1/2 (hotkeyd's proc.Run does
+            # the same), never the caller's - a caller that captures our output
+            # (nushell `complete`, `$(...)`, a pipe) would otherwise block until
+            # the detached program exits (kwi3 dotfiles-et3u.10). /dev/null, not
+            # a log: keeps "identical processes" across callers. Errors before
+            # this point (127/78) were already printed to the caller's stderr.
+            let closer = if $nofdclose { 'exec </dev/null >/dev/null 2>&1; exec "$@"' } else {
+                'for f in /proc/self/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] && eval "exec $n>&-"; done 2>/dev/null; exec </dev/null >/dev/null 2>&1; exec "$@"'
             }
             let setsid = (which setsid | get -o 0.path | default "")
             if $setsid == "" { die "setsid (util-linux) not found" 127 }
