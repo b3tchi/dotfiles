@@ -824,6 +824,17 @@ def "main restore" [
         return
     }
 
+    # Pre-flight (sp038 T6), before ANY i3 command: i3 runs `exec` on its own
+    # and never reports the launcher's exit, so a launcher that would refuse
+    # (no session-env snapshot for this display, no backend - exit 78) must be
+    # caught here, while nothing has been renamed or killed yet.
+    if (i3-restore-needs-launcher $workspaces) {
+        i3-launcher-preflight $term
+    }
+    # Every window that exists before restore spawns anything: the attach poll
+    # counts only windows that are not in this set.
+    let baseline = (i3-window-ids)
+
     # Remember the workspace the user is currently on so we can return at the end.
     let start_ws = (do {
         let r = (do { ipc "-t get_workspaces" } | complete)
@@ -843,8 +854,10 @@ def "main restore" [
     #   Phase 3 (after kill): for each respawned ws, place GUI leaves by
     #                        moving their live wid into the placeholder mark.
     #
-    # Track which ws had a real respawn so phase 2/3 only touches those.
+    # Track which ws had a real respawn so phase 2/3 only touches those, and
+    # the slot class of every terminal each one launched.
     mut respawned_ws = []
+    mut slots_by_ws = {}
     mut gui_specs_by_ws = {}
 
     # Drop any stale wm-gui-* anchors left from a prior failed restore so
@@ -936,20 +949,41 @@ def "main restore" [
             $gui_specs_by_ws = ($gui_specs_by_ws | upsert $ws_name $gui_specs)
         }
         $respawned_ws = ($respawned_ws | append $ws_name)
+        # Every terminal slot, launched or not: one that could not be launched
+        # never appears, so its workspace keeps the old terminals.
+        $slots_by_ws = ($slots_by_ws | upsert $ws_name ($term_specs | get -o slot | default [] | compact))
     }
 
-    # Phase 2: wait for new terminals to map + tmux-attach, then kill old
-    # terminals on each -old workspace. The new clients now hold those
-    # sessions open, so destroy-unattached + tmux-cleanup will not destroy
-    # them when the old clients detach.
+    # Phase 2: wait for the new terminals to map, give their tmux clients a
+    # moment to attach, then kill the old terminals on each -old workspace.
+    # The new clients now hold those sessions open, so destroy-unattached +
+    # tmux-cleanup will not destroy them when the old clients detach. A
+    # workspace whose terminals did not ALL appear keeps its old ones: the old
+    # tmux client may be the only one its session has.
     if not ($respawned_ws | is-empty) {
+        let timeout_ms = (i3-attach-timeout-ms)
+        let slots = $slots_by_ws
+        let expected = ($respawned_ws | each {|w| ($slots | get -o $w | default []) | each {|c| { ws: $w, class: $c } } } | flatten)
+        let missing = if $dry_run {
+            print -e $"  DRY: wait up to ($timeout_ms)ms for ($expected | get -o class | default [] | str join ', ') to map"
+            []
+        } else {
+            i3-wait-for-slots $expected $baseline $timeout_ms
+        }
         if $dry_run {
             print "  DRY: sleep 600ms (let new terminals attach)"
-        } else {
+        } else if ($missing | length) < ($expected | length) {
             sleep 600ms
         }
         for ws_name in $respawned_ws {
-            kill-old-terminals $"($ws_name)-old" --dry-run=$dry_run
+            let gone = ($missing | where ws == $ws_name)
+            if ($gone | is-empty) {
+                kill-old-terminals $"($ws_name)-old" --dry-run=$dry_run
+            } else {
+                for m in $gone {
+                    print -e $"  warn: ($ws_name): terminal ($m.class) did not appear within ($timeout_ms)ms - keeping the old terminals on ($ws_name)-old"
+                }
+            }
         }
     }
 
@@ -983,6 +1017,73 @@ def "main restore" [
     if $dry_run { print "Dry run complete" } else { print "Restore complete" }
 }
 
+# Does restoring these workspaces launch any terminal? (A GUI-only restore
+# never runs wm-launch-terminal, so it must not be refused for the launcher.)
+def i3-restore-needs-launcher [workspaces: list<record>] {
+    $workspaces | any {|w|
+        ($w | get -o state | default {}) | values | any {|e|
+            (is-term-class ($e | get -o class | default "")) and not ($e | get -o skip_restore | default false)
+        }
+    }
+}
+
+# Exit 1 unless wm-launch-terminal is there and would launch on this display.
+# Its own --dry-run runs the backend probe and starts nothing; --session skips
+# the tmux target resolution, so the probe cannot create a session either.
+def i3-launcher-preflight [term: string] {
+    let launcher = (wm-launcher-path)
+    if not ($launcher | path exists) {
+        print -e $"wm-state: ($launcher) not found - restore needs wm-launch-terminal [rotz link nushell]; nothing was changed"
+        exit 1
+    }
+    let r = (do { ^$launcher $term --session wm-state-preflight --class wm-slot-preflight --dry-run } | complete)
+    if $r.exit_code != 0 {
+        print -e $"wm-state: wm-launch-terminal cannot launch a terminal here \(exit ($r.exit_code)\): ($r.stderr | str trim)"
+        print -e "wm-state: restore aborted before any i3 command; nothing was changed"
+        exit 1
+    }
+}
+
+# How long phase 2 waits for the new terminals; WM_STATE_ATTACH_TIMEOUT_MS
+# overrides the 5s default.
+def i3-attach-timeout-ms [] {
+    try { $env | get -o WM_STATE_ATTACH_TIMEOUT_MS | default "5000" | into int } catch { 5000 }
+}
+
+# Every window leaf of an i3/sway tree as { id, class } (con id, so a Wayland
+# window with no X id counts too). Never asks X for anything.
+def i3-tree-windows [node: record] {
+    let kids = (($node | get -o nodes | default []) | append ($node | get -o floating_nodes | default []))
+    let own = if (($node | get -o window) != null or ($node | get -o app_id) != null) and ($node | get -o type | default "con") in ["con" "floating_con"] {
+        [{ id: ($node | get -o id | default 0), class: (node-class $node) }]
+    } else { [] }
+    $own | append ($kids | each {|k| i3-tree-windows $k } | flatten)
+}
+
+def i3-window-ids [] {
+    let r = (do { ipc "-t get_tree" } | complete)
+    if $r.exit_code != 0 { return [] }
+    try { i3-tree-windows ($r.stdout | from json) | get id } catch { [] }
+}
+
+# Poll get_tree (100ms steps, up to timeout_ms) until a NEW window - one not in
+# the baseline - of every expected slot class is there, wherever it mapped.
+# Returns the { ws, class } that never appeared.
+def i3-wait-for-slots [expected: list<record>, baseline: list<int>, timeout_ms: int] {
+    let deadline = ((date now) + ($timeout_ms * 1ms))
+    mut missing = $expected
+    loop {
+        let r = (do { ipc "-t get_tree" } | complete)
+        if $r.exit_code == 0 {
+            let fresh = (try { i3-tree-windows ($r.stdout | from json) | where {|w| not ($w.id in $baseline) } | get class } catch { [] })
+            $missing = ($expected | where {|e| not ($e.class in $fresh) })
+        }
+        if ($missing | is-empty) or ((date now) >= $deadline) { break }
+        sleep 100ms
+    }
+    $missing
+}
+
 # Unique per-slot identifier derived from leaf id (for class/app_id swallow).
 def slot-id-for [id: string] {
     $"wm-slot-($id)"
@@ -999,16 +1100,41 @@ def term-class-flag [term: string, slot_id: string] {
     ^$nu.current-exe $"($wm_actions_dir)/wm-launch-terminal" class-flag $term $slot_id | str trim
 }
 
-# The i3 `exec` string for one restored terminal (sp038 T6): i3 runs it through
-# /bin/sh, so every word that comes from saved state (session, class, workspace
-# name) is single-quoted by shq - a `;` or `$(..)` in a name is data, never
-# shell. The launcher path stays a bare `~/` so sh expands it. Mirrors the
-# kwi3 rule: a saved session attaches by --session, a bare terminal resolves
-# its target from --workspace.
-def i3-launch-cmd [term: string, slot: string, session: string, ws_name: string] {
+# The class a restored i3/sway terminal is launched with (sp038 T6): unique per
+# workspace AND leaf, like kwi3's, so the slot's class swallow and the attach
+# poll can never take another workspace's terminal for this one.
+def i3-slot-class [ws_name: string, key: string] {
+    $"wm-slot-($ws_name)-($key)"
+}
+
+# Quote a string for i3's command parser (commands_parser.c parse_string): an
+# unquoted argument ends at `,` or `;`, so the whole payload goes in double
+# quotes, inside which only `\` and `\"` are escapes.
+def i3q [s: string] {
+    '"' + ($s | str replace -a '\' '\\' | str replace -a '"' '\"') + '"'
+}
+
+# The argument of the `exec` for one restored terminal (sp038 T6). Two
+# parsers read it: the WM's (a `,` or `;` in a name must not end the command)
+# and then /bin/sh's (shq on every word from saved state - a `$(..)` or `'` in
+# a name is data, never shell). The launcher path stays a bare `~/` so sh
+# expands it. Mirrors the kwi3 rule: a saved session attaches by --session, a
+# bare terminal resolves its target from --workspace.
+#
+# i3 unescapes `\` and `\"` inside its double quotes (i3q). sway strips the
+# quotes but unescapes nothing, so there a `\` passes as it is and a `"`
+# cannot be carried at all: that terminal is not launched (returns "") and
+# its workspace keeps its old terminals. Both measured against the real WM.
+def i3-launch-cmd [term: string, slot: string, session: string, ws_name: string, wm: string] {
     let who = if ($session | is-not-empty) { ["--session" $session] } else { ["--workspace" $ws_name] }
     let words = ([$term] | append $who | append ["--class" $slot] | each {|a| shq $a } | str join " ")
-    $"~/.local/bin/wm-launch-terminal ($words)"
+    let payload = $"~/.local/bin/wm-launch-terminal ($words)"
+    if $wm != "sway" { return (i3q $payload) }
+    if ($payload | str contains '"') {
+        print -e $"  warn: ($ws_name): ($slot): a name holds a double quote, which sway's exec cannot carry - not launched"
+        return ""
+    }
+    '"' + $payload + '"'
 }
 
 # Recursive helper for build-respawn-plan. Produces { nodes, leaf_specs } for the
@@ -1038,22 +1164,26 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
                 # only regex metacharacters in the pattern come from the literal
                 # `.*` and `$` we add ourselves.
                 $nodes = ($nodes | append { swallows: [{ title: $".* ($wid)$" }], type: "con" })
+                let slot = (i3-slot-class $ws_name $key)
                 $leaf_specs = ($leaf_specs | append {
                     id: $key,
                     swallow_kind: "title",
-                    exec_cmd: (i3-launch-cmd $term (slot-id-for $key) $session $ws_name),
+                    slot: $slot,
+                    exec_cmd: (i3-launch-cmd $term $slot $session $ws_name $wm),
                 })
             } else if $is_term {
-                # Best-effort fallback: terminal entry without a usable
-                # tmux_window_id (legacy save, tmux query failed at save time,
-                # or saved title was empty). Class swallow is shared across all
-                # instances of the same terminal — placement is non-deterministic
-                # if multiple new terminals appear concurrently.
-                $nodes = ($nodes | append { swallows: [{ class: $"^($cls)$" }], type: "con" })
+                # Fallback: terminal entry without a usable tmux_window_id
+                # (legacy save, tmux query failed at save time, or saved title
+                # was empty). The launcher gives the new terminal its own slot
+                # class (sp038 T6), so the swallow is on that, not on the saved
+                # class the new window no longer carries.
+                let slot = (i3-slot-class $ws_name $key)
+                $nodes = ($nodes | append { swallows: [{ class: $"^(re-escape $slot)$" }], type: "con" })
                 $leaf_specs = ($leaf_specs | append {
                     id: $key,
                     swallow_kind: "class",
-                    exec_cmd: (i3-launch-cmd $term (slot-id-for $key) "" $ws_name),
+                    slot: $slot,
+                    exec_cmd: (i3-launch-cmd $term $slot "" $ws_name $wm),
                 })
             } else if ($cls | is-not-empty) {
                 # GUI leaf (skip_restore or non-terminal). Emit placeholder con
