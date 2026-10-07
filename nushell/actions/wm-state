@@ -915,7 +915,7 @@ def "main restore" [
 
         # Write append_layout JSON + apply.
         if not ($json_nodes | is-empty) {
-            let tmpfile = $"/tmp/wm-restore-($ws_name).json"
+            let tmpfile = $"(restore-tmpdir)/wm-restore-($ws_name).json"
             let append_cmd = $"append_layout ($tmpfile)"
             if $dry_run {
                 print $"  DRY: write ($tmpfile)"
@@ -1042,6 +1042,16 @@ def i3-launcher-preflight [term: string] {
         print -e "wm-state: restore aborted before any i3 command; nothing was changed"
         exit 1
     }
+}
+
+# Where the i3 path writes its append_layout files: $TMPDIR, else /tmp. A fixed
+# /tmp was shared by every restore on the machine, so two at once (two test
+# suites, dotfiles-et3u.11) read and deleted each other's layout. The path goes
+# UNQUOTED into `append_layout <path>`, so a $TMPDIR i3 would split or unescape
+# (anything outside [A-Za-z0-9._/-]) falls back to /tmp rather than break it.
+def restore-tmpdir [] {
+    let t = ($env | get -o TMPDIR | default "" | str trim --right --char "/")
+    if ($t =~ '^/[A-Za-z0-9._/-]*$') and ($t | path exists) { $t } else { "/tmp" }
 }
 
 # How long phase 2 waits for the new terminals; WM_STATE_ATTACH_TIMEOUT_MS
