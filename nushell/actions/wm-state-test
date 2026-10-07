@@ -39,6 +39,11 @@
 #                           naming the path, before any kwi3 call
 #   no-exec-rpc             restore sends no `exec` RPC (sp038 T4: terminals go
 #                           through wm-launch-terminal, a stub in the sandbox)
+#   stub-launcher-atomic    160 concurrent stub-launcher calls leave 160 intact
+#                           log records (dotfiles-et3u.11: i3/sway exec launchers
+#                           at once; a word-per-write record interleaved)
+#   i3-restore-tmpdir       the i3 append_layout file honours a safe $TMPDIR, so
+#                           concurrent restores/suites never share /tmp/wm-restore-*
 #
 # Safety: every nu run is `env -i`; HOME is a sandbox; PATH starts with stubs for
 # tmux (answers from a flag file, can never reach a real server), i3-msg, swaymsg
@@ -109,10 +114,15 @@ esac
 # with US (0x1f) so a word with spaces stays one word; exits 78 when a word of
 # the call contains a line of $tmp/launcher-refuse (the real launcher's refusal
 # code); and queues the --class value for the rig driver to map as a window.
+# The record is ONE write(2), newline included (dotfiles-et3u.11): i3 and sway
+# exec two launchers at once, and a word-per-printf record interleaved with the
+# other's (`kitty`, `kitty`, `--session`, `--workspace`, ...) - measured 123 of
+# 300 concurrent pairs. Readers count only newline-terminated records.
 let launcher_log = $"($tmp)/launcher.log"
 let launcher_path = $"($home)/.local/bin/wm-launch-terminal"
 let launcher_body = $"#!/bin/bash
-for a in \"$@\"; do printf '%s\\037' \"$a\" >> ($launcher_log); done; echo >> ($launcher_log)
+rec=''; for a in \"$@\"; do rec+=\"$a\"$'\\037'; done
+printf '%s\\n' \"$rec\" >> ($launcher_log)
 if [ -s ($tmp)/launcher-refuse ]; then
   for a in \"$@\"; do
     while IFS= read -r pat; do
@@ -263,6 +273,17 @@ def check [name: string, cond: bool, detail: string] {
     $cond
 }
 
+# The stub launcher's log is what every launcher assertion reads, and i3/sway
+# exec launchers concurrently: 40 rounds of 4 at once must leave 160 intact
+# records (dotfiles-et3u.11 - the word-per-printf stub failed this ~40% of pairs).
+"" | save -f $launcher_log
+^bash -c $"for r in $\(seq 40); do for k in 1 2 3 4; do '($launcher_path)' kitty --session \"s $k\" --class \"wm-slot-c-$k\" & done; wait; done"
+let conc = (launcher-calls $tmp)
+let conc_bad = ($conc | where {|c| ($c | length) != 5 or ($c | get 0) != "kitty" or ($c | get 1) != "--session" or ($c | get 3) != "--class" or ($c | get 2 | str replace "s " "wm-slot-c-") != ($c | get 4) })
+if (check "sandbox: concurrent stub-launcher calls each leave ONE intact record" (($conc | length) == 160 and ($conc_bad | is-empty)) $"records=($conc | length) bad=($conc_bad | first 3 | to json -r)") { $passed += 1 } else { $failed += 1 }
+"" | save -f $launcher_log
+^rm -f $"($tmp)/map.queue"
+
 # ── i3 fixture + (re)capture of the golden file ───────────────────────────────
 # A real i3 get_tree shape: root > output > content > workspace dev holding a
 # terminal (st) and a GUI window (Firefox). `pid` is set on every leaf so
@@ -314,6 +335,15 @@ let exec_new = ($new_lines | where {|l| $l | str contains "ipc-raw exec " })
 if (check "i3-exec-uses-launcher: exec \"~/.local/bin/wm-launch-terminal <term> --session a --class wm-slot-dev-1\" (one i3 double-quoted string)" ($exec_new == ["  DRY: ipc-raw exec \"~/.local/bin/wm-launch-terminal kitty --session a --class wm-slot-dev-1\""]) $"exec=($exec_new | to json -r)") { $passed += 1 } else { $failed += 1 }
 let dry_mut = (open $i3_run_log | lines | where {|l| ($l | is-not-empty) and not ($l =~ '(^| )-t get_') })
 if (check "i3-dry-run-read-only: the dry run sent i3 only -t get_* queries, no command" ($dry_mut | is-empty) $"sent=($dry_mut | to json -r)") { $passed += 1 } else { $failed += 1 }
+# dotfiles-et3u.11: the append_layout file honours $TMPDIR (a fixed /tmp path was
+# shared, read and deleted by every concurrent restore), but goes unquoted into
+# `append_layout <path>`, so a $TMPDIR i3 would split falls back to /tmp.
+let td_ok = $"($tmp)/td-ok"
+let td_bad = $"($tmp)/td bad"
+^mkdir -p $td_ok $td_bad
+let wtd = (run-ws $tmp $test_path_i3 [$"I3SOCK=($tmp)/i3.sock" $"TMPDIR=($td_ok)/"] ["restore" "--dry-run" "--workspace" "dev"] | get stdout | lines | where {|l| $l =~ 'wm-restore-dev' })
+let btd = (run-ws $tmp $test_path_i3 [$"I3SOCK=($tmp)/i3.sock" $"TMPDIR=($td_bad)"] ["restore" "--dry-run" "--workspace" "dev"] | get stdout | lines | where {|l| $l =~ 'wm-restore-dev' })
+if (check "i3-restore-tmpdir: append_layout file under $TMPDIR; one with a space falls back to /tmp" ($wtd == [$"  DRY: write ($td_ok)/wm-restore-dev.json" $"  DRY: ipc-raw append_layout ($td_ok)/wm-restore-dev.json"] and $btd == ["  DRY: write /tmp/wm-restore-dev.json" "  DRY: ipc-raw append_layout /tmp/wm-restore-dev.json"]) $"ok=($wtd | to json -r) bad=($btd | to json -r)") { $passed += 1 } else { $failed += 1 }
 
 # ── nasty names through i3's OWN command parser (sp038 T6) ────────────────────
 # i3 ends an unquoted `exec` argument at `,` or `;` (commands_parser.c
@@ -362,7 +392,7 @@ if ($real_i3 | is-empty) or ($real_i3msg | is-empty) or ($xvfb | is-empty) or no
         let replies = ($nexecs | each {|c| do { ^$real_i3msg -s $rsock $c } | complete })
         mut calls = []
         for _ in 1..50 {
-            $calls = (open $launcher_log --raw | lines | where {|l| $l | is-not-empty } | each {|l| $l | split row (char -u '1f') | where {|w| $w != "" } })
+            $calls = (launcher-calls $tmp)
             if ($calls | length) >= 2 { break }
             sleep 100ms
         }
@@ -436,7 +466,7 @@ if ($real_sway | is-empty) or ($real_swaymsg | is-empty) {
         let replies = ($sexecs | each {|c| do { ^$real_swaymsg -s $sock $c } | complete })
         mut calls = []
         for _ in 1..50 {
-            $calls = (open $launcher_log --raw | lines | where {|l| $l | is-not-empty } | each {|l| $l | split row (char -u '1f') | where {|w| $w != "" } })
+            $calls = (launcher-calls $tmp)
             if ($calls | length) >= 2 { break }
             sleep 100ms
         }
@@ -600,7 +630,11 @@ let live_state = {
                  "2": { wid: 302, pid: 4302, class: "kitty", title: "bash" } } }
     ]
 }
-let live_env = [$"I3SOCK=($L)/i3.sock"]
+# The live restores' append_layout files go to the sandbox's own $TMPDIR, never
+# the machine-wide /tmp another run (or a real restore) also writes and deletes.
+let live_tmpdir = $"($tmp)/tmpdir"
+^mkdir -p $live_tmpdir
+let live_env = [$"I3SOCK=($L)/i3.sock" $"TMPDIR=($live_tmpdir)"]
 
 print "\n[i3 live] launcher refuses (no snapshot / no backend): restore aborts before any i3 mutation"
 $live_state | to yaml | save -f $"($home)/.cache/sway-state.yaml"
@@ -634,7 +668,7 @@ let r = (run-ws $tmp $test_path_i3live ($live_env | append "WM_STATE_ATTACH_TIME
 let cmds = (i3live-cmds $L | get cmd)
 if (check "i3-slot-never-maps: no kill for wa's old terminals, wb's old terminal killed" ($r.exit_code == 0 and not ("[id=201] kill" in $cmds) and not ("[id=202] kill" in $cmds) and ("[id=301] kill" in $cmds)) $"cmds=($cmds | to json -r) ($r | to nuon)") { $passed += 1 } else { $failed += 1 }
 if (check "i3-slot-never-maps: the warning names the missing terminal and wa-old, not the ones that came" (($r.stderr | str contains "wm-slot-wa-2") and ($r.stderr | str contains "wa-old") and not ($r.stderr | str contains "wm-slot-wa-1") and not ($r.stderr | str contains "wm-slot-wb-1")) $"stderr=($r.stderr)") { $passed += 1 } else { $failed += 1 }
-let wb_layout = (try { open /tmp/wm-restore-wb.json --raw | from json } catch { {} })
+let wb_layout = (try { open $"($live_tmpdir)/wm-restore-wb.json" --raw | from json } catch { {} })
 let wb_sw = ($wb_layout | get -o nodes | default [] | each {|n| $n | get -o swallows | default [] } | flatten)
 if (check "i3-bare-terminal-swallow: a bare terminal's placeholder swallows its slot class (the class it is launched with), launched by --workspace" (({ class: "^wm-slot-wb-2$" } in $wb_sw) and (["kitty" "--workspace" "wb" "--class" "wm-slot-wb-2"] in (launcher-calls $tmp))) $"swallows=($wb_sw | to json -r) launcher=(launcher-calls $tmp | to json -r)") { $passed += 1 } else { $failed += 1 }
 if (check "i3-slot-never-maps: wa-old still holds both old terminals" ((i3live-ws $L "wa-old") == [201 202]) $"state=(open $"($L)/state.json" | to json -r)") { $passed += 1 } else { $failed += 1 }
@@ -759,10 +793,12 @@ def mutating [log: string] {
 }
 
 # The stub launcher's calls since line $skip: one list of argv words per call.
+# Only newline-terminated records count: whatever follows the last "\n" is a
+# record still being written (or nothing), never a call (dotfiles-et3u.11).
 def launcher-calls [tmp: string, skip: int = 0] {
     let f = $"($tmp)/launcher.log"
     if not ($f | path exists) { return [] }
-    open $f --raw | lines | skip $skip | where {|l| $l | is-not-empty } | each {|l| $l | split row (char --integer 0x1f) | where {|w| $w | is-not-empty } }
+    open $f --raw | collect | into string | split row "\n" | drop 1 | skip $skip | where {|l| $l | is-not-empty } | each {|l| $l | split row (char --integer 0x1f) | where {|w| $w | is-not-empty } }
 }
 def launcher-n [tmp: string] { launcher-calls $tmp | length }
 
@@ -950,7 +986,6 @@ if (check "sandbox: the stub tmux was only asked list-sessions / list-clients" (
 ^kill $rig_pid
 sleep 200ms
 ^rm -rf $tmp
-^rm -f /tmp/wm-restore-wa.json /tmp/wm-restore-wb.json   # the i3 live restores' append_layout files
 
 print ""
 for s in $skips { print $"SKIP: ($s)" }
