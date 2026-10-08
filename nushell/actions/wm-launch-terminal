@@ -1,60 +1,97 @@
 #!/usr/bin/env nu
-# Launch a terminal with TMUX_TARGET set for the focused WM workspace.
-# Resolves the workspace via wm-current-workspace, looks up the project
-# registry entry, and branches:
-#   local  (no entry or no ssh field):
-#     TMUX_TARGET=$(tmux-start start 0 <ws>) <term_cmd>
-#   remote (ssh field present):
-#     TMUX_TARGET=$(tmux-to-workstation connect --no-attach -g <ws> --cwd <path> -- <ssh>) <term_cmd>
-# Both branches set TMUX_TARGET; distro/bashrc pattern-matches ^thin_ to
-# select the right tmux socket.
+# Launch a terminal with TMUX_TARGET set, detached from the caller (sp038).
+#
+#   wm-launch-terminal <term_cmd> [--workspace W] [--session S] [--class C] [--dry-run]
+#   wm-launch-terminal class-flag <term> <class>     (prints the class flag words)
+#
+# No flags: resolves the focused workspace via wm-current-workspace, looks up
+# the project registry entry, and branches:
+#   local  (no entry or no ssh field):  tmux-start start 0 <ws>
+#   remote (ssh field present):         tmux-to-workstation connect --no-attach -g <ws> --cwd <path> -- <ssh>
+# and ends in
+#   wm-launch-detach [--dry-run] --set TMUX_TARGET=<target> -- <term argv + class flag>
+# so it exits 0 once the terminal is STARTED (it no longer blocks for the
+# terminal's life, and the terminal runs in the session's canonical env).
+#   --workspace W  resolve the target for W instead of the focused workspace
+#   --session S    TMUX_TARGET=S, no resolution (exclusive with --workspace; exit 2)
+#   --class C      the terminal's class/app-id: st -c, foot --app-id,
+#                  kitty|alacritty --class, xterm -class. Any other terminal
+#                  -> exit 2 naming it (never a launch without the class).
+#   --dry-run      forwarded to wm-launch-detach (prints, starts nothing)
+# The class-flag mapping lives HERE; wm-state's term-class-flag calls
+# `class-flag` rather than keeping a second copy.
 # Symlinked to ~/.local/bin/wm-launch-terminal via rotz.
 
 const project_mod = '~/.config/nushell/scripts/project/mod.nu'
 
-def main [
-    term_cmd: string  # Terminal command to launch (may be multi-word, e.g. 'wezterm-gui start')
-] {
-    # Resolve focused workspace name. Falls back to "local" when no WM is available.
-    let ws = (do { ^~/.local/bin/wm-current-workspace } | complete)
-    let ws_name = if $ws.exit_code == 0 {
-        let trimmed = ($ws.stdout | str trim)
-        if ($trimmed | is-empty) { "local" } else { $trimmed }
-    } else {
-        "local"
-    }
-
-    # Look up registry entry via project module.
-    # use is a parse-time directive so we guard with path exists to avoid
-    # hard-failing on machines where the module is not yet linked.
-    let entry = if ($project_mod | path expand | path exists) {
-        use $project_mod *
-        lookup $ws_name
+# The class flag as an argv fragment, or null for a terminal with no known one.
+def class-words [term: string, cls: string] {
+    if $term in ["kitty", "alacritty", "Alacritty"] {
+        ["--class" $cls]
+    } else if $term == "foot" {
+        ["--app-id" $cls]
+    } else if $term == "xterm" {
+        ["-class" $cls]
+    } else if $term == "st" {
+        ["-c" $cls]
     } else {
         null
     }
+}
 
-    let ssh_profile = if $entry != null { $entry | get -o ssh | default null } else { null }
-    let project_path = if $entry != null { $entry | get -o path | default null } else { null }
+def usage-die [msg: string] {
+    print -e $"wm-launch-terminal: ($msg)"
+    exit 2
+}
 
-    # Determine TMUX_TARGET via the appropriate primitive.
-    let target_result = if $ssh_profile != null {
-        # Remote branch: create thin session without attaching; print session name.
-        let cwd_args = if $project_path != null { [--cwd $project_path] } else { [] }
-        do { ^~/.local/bin/tmux-to-workstation connect --no-attach -g $ws_name ...$cwd_args -- $ssh_profile } | complete
-    } else {
-        # Local branch: start/join a local tmux session group.
-        do { ^~/.local/bin/tmux-start start 0 $ws_name } | complete
+# wm-state's term-class-flag calls this: the words, space-joined, no newline.
+def "main class-flag" [term: string, cls: string] {
+    let w = (class-words $term $cls)
+    if $w == null { print -n "" } else { print -n ($w | str join " ") }
+}
+
+# --wrapped + manual parsing: typed string params make nu reject the literal
+# words true/false/null/{} and turn 1.50 into 1.5 (a session or workspace
+# can be named that), so every word is taken as the raw string it was typed.
+def --wrapped main [...args] {
+    mut term_cmd = ""
+    mut have_term = false
+    mut workspace: any = null
+    mut session: any = null
+    mut class: any = null
+    mut dry_run = false
+    mut i = 0
+    while $i < ($args | length) {
+        let a = ($args | get $i)
+        if $a in ["--workspace" "--session" "--class"] {
+            $i += 1
+            if $i >= ($args | length) { usage-die $"($a) needs a value" }
+            let v = ($args | get $i)
+            match $a {
+                "--workspace" => { $workspace = $v }
+                "--session" => { $session = $v }
+                _ => { $class = $v }
+            }
+        } else if $a == "--dry-run" {
+            $dry_run = true
+        } else if ($a | str starts-with "--") {
+            usage-die $"unknown option '($a)'"
+        } else if not $have_term {
+            $term_cmd = $a
+            $have_term = true
+        } else {
+            usage-die $"unexpected argument '($a)'"
+        }
+        $i += 1
     }
-
-    # Surface errors from tmux-start / tmux-to-workstation; do NOT launch terminal.
-    if $target_result.exit_code != 0 {
-        print -e $"wm-launch-terminal: failed to resolve TMUX_TARGET for workspace '($ws_name)'"
-        print -e ($target_result.stderr | str trim)
-        exit $target_result.exit_code
+    if not $have_term { usage-die "usage: wm-launch-terminal <term_cmd> [--workspace W] [--session S] [--class C] [--dry-run]" }
+    let workspace: any = $workspace
+    let session: any = $session
+    let class: any = $class
+    let term_cmd: string = $term_cmd
+    if $workspace != null and $session != null {
+        usage-die "--workspace and --session are mutually exclusive"
     }
-
-    let tmux_target = ($target_result.stdout | str trim)
 
     # Split term_cmd on whitespace so multi-word commands are dispatched correctly.
     let parts = ($term_cmd | split row " " | where { |p| $p | is-not-empty })
@@ -62,12 +99,63 @@ def main [
         print -e "wm-launch-terminal: term_cmd is empty"
         exit 1
     }
-
     let bin = ($parts | first)
     let args = ($parts | skip 1)
 
-    # Launch terminal with TMUX_TARGET in its environment.
-    # Exit with the same status as the launched process.
-    let launch_result = (do { with-env { TMUX_TARGET: $tmux_target } { ^$bin ...$args } } | complete)
-    exit $launch_result.exit_code
+    let cls_words = if $class != null {
+        let w = (class-words $bin $class)
+        if $w == null { usage-die $"--class is not supported for terminal '($bin)'" }
+        $w
+    } else { [] }
+
+    let tmux_target = if $session != null { $session } else {
+        # Resolve the workspace name (--workspace, else the focused one). Falls back to "local" when no WM is available.
+        let ws = if $workspace != null { null } else { do { ^~/.local/bin/wm-current-workspace } | complete }
+        let ws_name = if $workspace != null { $workspace } else if $ws.exit_code == 0 {
+            let trimmed = ($ws.stdout | str trim)
+            if ($trimmed | is-empty) { "local" } else { $trimmed }
+        } else {
+            "local"
+        }
+
+        # Look up registry entry via project module.
+        # use is a parse-time directive so we guard with path exists to avoid
+        # hard-failing on machines where the module is not yet linked.
+        # `use` is resolved when the SCRIPT is parsed, so a missing module would
+        # break every invocation (even --session and class-flag); load it in a
+        # child nu instead, at run time, only when the file is there.
+        let mod_path = ($project_mod | path expand)
+        let entry = if ($mod_path | path exists) {
+            let r = (^$nu.current-exe -n -c $"use '($mod_path)' *; lookup ($ws_name | to nuon) | to json" | complete)
+            if $r.exit_code == 0 and ($r.stdout | str trim | is-not-empty) { $r.stdout | from json } else { null }
+        } else {
+            null
+        }
+
+        let ssh_profile = if $entry != null { $entry | get -o ssh | default null } else { null }
+        let project_path = if $entry != null { $entry | get -o path | default null } else { null }
+
+        # Determine TMUX_TARGET via the appropriate primitive.
+        let target_result = if $ssh_profile != null {
+            # Remote branch: create thin session without attaching; print session name.
+            let cwd_args = if $project_path != null { [--cwd $project_path] } else { [] }
+            do { ^~/.local/bin/tmux-to-workstation connect --no-attach -g $ws_name ...$cwd_args -- $ssh_profile } | complete
+        } else {
+            # Local branch: start/join a local tmux session group.
+            do { ^~/.local/bin/tmux-start start 0 $ws_name } | complete
+        }
+
+        # Surface errors from tmux-start / tmux-to-workstation; do NOT launch terminal.
+        if $target_result.exit_code != 0 {
+            print -e $"wm-launch-terminal: failed to resolve TMUX_TARGET for workspace '($ws_name)'"
+            print -e ($target_result.stderr | str trim)
+            exit $target_result.exit_code
+        }
+
+        ($target_result.stdout | str trim)
+    }
+
+    let dry = if $dry_run { ["--dry-run"] } else { [] }
+    ^~/.local/bin/wm-launch-detach ...$dry --set $"TMUX_TARGET=($tmux_target)" -- $bin ...$args ...$cls_words
+    exit $env.LAST_EXIT_CODE
 }

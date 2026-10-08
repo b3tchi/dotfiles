@@ -20,6 +20,13 @@
 #   2j display-not-cross-used 2k missing-command
 #   2l screen-suffix-resolves 2m x11-display-never-systemd
 #   2n capture-returns-while-child-runs (live pipes; kwi3 et3u.10)
+#
+# Task 3 (wm-launch-terminal flags, wm-launch-gui; stubs in sandbox
+# HOME/.local/bin come first - the real tmux server is never reached):
+#   3a no-flags-focused  3b callers-unchanged  3c workspace-flag
+#   3d session-flag-no-resolve  3e workspace-session-exclusive
+#   3f class-per-terminal  3g class-unknown-term-2  3h gui-argv
+#   3i gui-empty-2  3j ssh-entry  3k tmux-start-fails  3l dry-run-real-detach
 
 const here = (path self | path dirname)
 const DROPPED = [TMUX TMUX_PANE I3SOCK HOTKEYD_I3SOCK OLDPWD PWD SHLVL _ CURRENT_FILE FILE_PWD LAST_EXIT_CODE NU_VERSION CMD_DURATION_MS PROCESS_PATH]
@@ -148,6 +155,49 @@ def run-detach [s: record, tag: string, envl: list<string>, flags: list<string>]
 def kill-probes [sb: string] {
     let f = $"($sb)/pids"
     if ($f | path exists) { for p in (open --raw $f | lines | where {|l| $l != "" }) { try { ^kill $p } } }
+}
+
+# ---- Task 3 helpers -------------------------------------------------------
+
+# Sandbox HOME with stub launchers. Every stub appends its argv (one word per
+# line, then a "--" line) to $sb/log-<name>. detach is a stub too, so no test
+# depends on a display, a terminal or a backend.
+def stub-home [] {
+    let sb = (sandbox)
+    let bin = $"($sb)/home/.local/bin"
+    ^mkdir -p $bin $"($sb)/home/.config/nushell/scripts/project"
+    let rec = {|name| r#'printf '%s\n' "$@" >> "@SB@/log-@N@"; echo @@END@@ >> "@SB@/log-@N@"'# | str replace --all "@SB@" $sb | str replace --all "@N@" $name }
+    $"#!/bin/sh\necho \"${STUB_WS:-focusedws}\"\n" | save --raw $"($bin)/wm-current-workspace"
+    # tmux-start: log argv, print a session name derived from the ws (arg 3)
+    $"#!/bin/sh\n(do $rec tmux-start)\nif [ -n \"$STUB_TS_FAIL\" ]; then echo 'tmux-start boom' >&2; exit 7; fi\necho \"sess-$3\"\n" | save --raw $"($bin)/tmux-start"
+    $"#!/bin/sh\n(do $rec tmux-to-workstation)\necho thin_remote\n" | save --raw $"($bin)/tmux-to-workstation"
+    $"#!/bin/sh\n(do $rec detach)\n" | save --raw $"($bin)/wm-launch-detach"
+    r#'export def lookup [name: string] {
+  if $name == "sshws" { {ssh: "myhost", path: "/srv/p"} } else { null }
+}
+'# | save --raw $"($sb)/home/.config/nushell/scripts/project/mod.nu"
+    for f in (glob $"($bin)/*") { ^chmod +x $f }
+    $sb
+}
+
+def t3-run [sb: string, script: string, args: list<string>, extra: list<string> = []] {
+    let tb = (toolbin $sb)
+    ^env -i $"HOME=($sb)/home" $"PATH=($tb)" ...$extra $nu.current-exe $"($here)/($script)" ...$args | complete
+}
+
+def logw [sb: string, name: string] {
+    let f = $"($sb)/log-($name)"
+    if ($f | path exists) { open --raw $f | lines } else { [] }
+}
+
+# The argv a stub recorded for call number n (0-based), without the end marker.
+def calls [lines: list<string>] {
+    mut out = []
+    mut cur = []
+    for l in $lines {
+        if $l == "@@END@@" { $out = ($out | append [$cur]); $cur = [] } else { $cur = ($cur | append $l) }
+    }
+    $out
 }
 
 def main [] {
@@ -377,6 +427,128 @@ def main [] {
         kill-probes $s.sb
         ^rm -rf $s.sb
     }
+
+    print "-- 3. wm-launch-terminal / wm-launch-gui"
+    let T = "wm-launch-terminal"
+
+    # 3a: no flags = focused workspace, launched via detach, exit 0
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st"] ["STUB_WS=focusedws"])
+    let ts = (calls (logw $sb tmux-start))
+    let dt = (calls (logw $sb detach))
+    $oks = ($oks | append (check ($r.exit_code == 0 and $ts == [["start" "0" "focusedws"]] and $dt == [["--set" "TMUX_TARGET=sess-focusedws" "--" "st"]]) $"3a no-flags-focused: tmux-start start 0 focusedws, detach --set TMUX_TARGET=sess-focusedws -- st \(tmux-start ($ts | to nuon), detach ($dt | to nuon), stderr '($r.stderr | str trim)'\)"))
+    # multi-word term_cmd still split
+    let r = (t3-run $sb $T ["wezterm-gui start"])
+    let dt = (calls (logw $sb detach))
+    $oks = ($oks | append (check ($r.exit_code == 0 and ($dt | last) == ["--set" "TMUX_TARGET=sess-focusedws" "--" "wezterm-gui" "start"]) "3a multi-word term_cmd split into argv words"))
+    # the stubs, not the real tools, were what ran
+    let ws = (^env -i $"HOME=($sb)/home" "PATH=/usr/bin:/bin" /bin/sh -c 'command -v tmux-start' | complete)
+    $oks = ($oks | append (check (($sb | path exists) and (open --raw $"($sb)/home/.local/bin/tmux-start" | str contains "log-tmux-start")) "3a sandbox: tmux-start resolves to the stub under the sandbox HOME"))
+    ^rm -rf $sb
+
+    # 3b: callers unchanged
+    let zz = ($here | path dirname | path dirname | path join "i3/config.d/zz-fallback-binds.conf")
+    let go = ($here | path dirname | path dirname | path join "hotkeyd/cmd/hotkeyd/config.go")
+    let zzok = (open --raw $zz | lines | any {|l| $l == "bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal st" })
+    let gook = (open --raw $go | str contains "Chord: \"$mod+Return\", Actions: runAction(\"~/.local/bin/wm-launch-terminal st\")")
+    $oks = ($oks | append (check ($zzok and $gook) "3b callers-unchanged: i3 fallback bind and hotkeyd $mod+Return still say `wm-launch-terminal st`"))
+
+    # 3c: --workspace resolves for W, not the focused one
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st" "--workspace" "other"] ["STUB_WS=focusedws"])
+    let ts = (calls (logw $sb tmux-start))
+    let dt = (calls (logw $sb detach))
+    $oks = ($oks | append (check ($r.exit_code == 0 and $ts == [["start" "0" "other"]] and $dt == [["--set" "TMUX_TARGET=sess-other" "--" "st"]]) $"3c workspace-flag: tmux-start called with 'other' only \(($ts | to nuon)\)"))
+    ^rm -rf $sb
+
+    # 3d: --session skips resolution
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st" "--session" "my sess"] ["STUB_WS=focusedws"])
+    let dt = (calls (logw $sb detach))
+    $oks = ($oks | append (check ($r.exit_code == 0 and (logw $sb tmux-start) == [] and (logw $sb tmux-to-workstation) == [] and $dt == [["--set" "TMUX_TARGET=my sess" "--" "st"]]) $"3d session-flag-no-resolve: no tmux-start call, TMUX_TARGET=my sess \(detach ($dt | to nuon)\)"))
+    ^rm -rf $sb
+
+    # 3e: exclusive
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st" "--session" "a" "--workspace" "b"])
+    $oks = ($oks | append (check ($r.exit_code == 2 and ($r.stderr | str contains "--workspace") and ($r.stderr | str contains "--session") and (logw $sb detach) == [] and (logw $sb tmux-start) == []) "3e workspace-session-exclusive: exit 2, nothing resolved or launched"))
+    ^rm -rf $sb
+
+    # 3f: class per terminal (table); failure names the terminal
+    let sb = (stub-home)
+    let table = [[term want]; ["st" ["-c" "SLOT"]] ["foot" ["--app-id" "SLOT"]] ["kitty" ["--class" "SLOT"]] ["alacritty" ["--class" "SLOT"]] ["xterm" ["-class" "SLOT"]]]
+    for row in $table {
+        let n = (calls (logw $sb detach) | length)
+        let r = (t3-run $sb $T [$row.term "--session" "s1" "--class" "SLOT"])
+        let dt = (calls (logw $sb detach))
+        let got = if ($dt | length) > $n { $dt | last } else { [] }
+        $oks = ($oks | append (check ($r.exit_code == 0 and $got == (["--set" "TMUX_TARGET=s1" "--" $row.term] | append $row.want)) $"3f class-per-terminal: ($row.term) -> ($row.want | str join ' ') \(got ($got | to nuon), stderr '($r.stderr | str trim)'\)"))
+    }
+    ^rm -rf $sb
+
+    # 3g: unknown terminal + --class
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["wezterm-gui start" "--session" "s1" "--class" "SLOT"])
+    $oks = ($oks | append (check ($r.exit_code == 2 and ($r.stderr | str contains "wezterm-gui") and (logw $sb detach) == []) "3g class-unknown-term-2: exit 2 naming the terminal, nothing launched"))
+    ^rm -rf $sb
+
+    # 3h / 3i: gui
+    let sb = (stub-home)
+    let r = (t3-run $sb "wm-launch-gui" ["firefox" "--new-window" "a b"])
+    $oks = ($oks | append (check ($r.exit_code == 0 and (calls (logw $sb detach)) == [["--" "firefox" "--new-window" "a b"]]) $"3h gui-argv: detach -- firefox --new-window 'a b' \(got (calls (logw $sb detach) | to nuon), stderr '($r.stderr | str trim)'\)"))
+    # literal words nu would otherwise type as bool/null/number/record/list must arrive verbatim
+    let lit = ["true" "false" "null" "1.50" "{}" "[]" "-1" "--"]
+    let r = (t3-run $sb "wm-launch-gui" ["--dry-run" "echo" ...$lit])
+    $oks = ($oks | append (check ($r.exit_code == 0 and (calls (logw $sb detach) | last) == ["--dry-run" "--" "echo" ...$lit]) $"3h gui-literal-words: true false null 1.50 {} [] -1 -- arrive verbatim \(got (calls (logw $sb detach) | last | to nuon), stderr '($r.stderr | str trim)'\)"))
+    # wm-launch-terminal's string-typed params with the same words
+    let r = (t3-run $sb $T ["true" "--session" "null" "--class" "false"])
+    $oks = ($oks | append (check ($r.exit_code == 2 and ($r.stderr | str contains "'true'")) $"3h terminal: term_cmd `true` stays a string \(exit 2 naming it; got ($r.exit_code), '($r.stderr | str trim)'\)"))
+    let n0 = (calls (logw $sb detach) | length)
+    let r = (t3-run $sb $T ["st" "--session" "1.50" "--class" "true"])
+    let r2 = (t3-run $sb $T ["st" "--session" "null" "--class" "{}"])
+    let r3 = (t3-run $sb $T ["st" "--workspace" "false"])
+    let d = (calls (logw $sb detach) | skip $n0)
+    $oks = ($oks | append (check ($r.exit_code == 0 and $r2.exit_code == 0 and $r3.exit_code == 0 and $d == [["--set" "TMUX_TARGET=1.50" "--" "st" "-c" "true"] ["--set" "TMUX_TARGET=null" "--" "st" "-c" "{}"] ["--set" "TMUX_TARGET=sess-false" "--" "st"]]) $"3h terminal: --session/--class/--workspace take true null 1.50 {} verbatim, no parse error \(got ($d | to nuon), '($r.stderr | str trim)($r2.stderr | str trim)($r3.stderr | str trim)'\)"))
+    let n = (logw $sb detach | length)
+    let r = (t3-run $sb "wm-launch-gui" [])
+    $oks = ($oks | append (check ($r.exit_code == 2 and (logw $sb detach | length) == $n) "3i gui-empty-2: exit 2, nothing launched"))
+    ^rm -rf $sb
+
+    # 3j: ssh registry entry
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st" "--workspace" "sshws"])
+    let tw = (calls (logw $sb tmux-to-workstation))
+    $oks = ($oks | append (check ($r.exit_code == 0 and $tw == [["connect" "--no-attach" "-g" "sshws" "--cwd" "/srv/p" "--" "myhost"]] and (logw $sb tmux-start) == [] and (calls (logw $sb detach)) == [["--set" "TMUX_TARGET=thin_remote" "--" "st"]]) $"3j ssh-entry: --workspace takes the remote branch \(($tw | to nuon)\)"))
+    let r = (t3-run $sb $T ["st" "--workspace" "sshws" "--session" "x"])
+    let r2 = (t3-run $sb $T ["st" "--session" "x"] ["STUB_WS=sshws"])
+    $oks = ($oks | append (check ($r.exit_code == 2 and $r2.exit_code == 0 and (calls (logw $sb tmux-to-workstation) | length) == 1 and (calls (logw $sb detach) | last) == ["--set" "TMUX_TARGET=x" "--" "st"]) "3j ssh-entry: --session still wins over a focused ssh workspace (no second remote connect)"))
+    ^rm -rf $sb
+
+    # 3k: tmux-start fails
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st"] ["STUB_TS_FAIL=1"])
+    $oks = ($oks | append (check ($r.exit_code == 7 and ($r.stderr | str contains "tmux-start boom") and (logw $sb detach) == []) "3k tmux-start-fails: its exit code and stderr surface, nothing launched"))
+    ^rm -rf $sb
+
+    # 3l: --dry-run is forwarded to detach (and tested end to end with the REAL detach)
+    let sb = (stub-home)
+    let r = (t3-run $sb $T ["st" "--session" "s1" "--class" "C" "--dry-run"])
+    $oks = ($oks | append (check ($r.exit_code == 0 and (calls (logw $sb detach)) == [["--dry-run" "--set" "TMUX_TARGET=s1" "--" "st" "-c" "C"]]) "3l dry-run forwarded first to detach"))
+    let r = (t3-run $sb "wm-launch-gui" ["--dry-run" "firefox"])
+    $oks = ($oks | append (check ($r.exit_code == 0 and (calls (logw $sb detach) | last) == ["--dry-run" "--" "firefox"]) "3l gui dry-run forwarded to detach"))
+    ^rm -rf $sb
+    let rs = (session)
+    try {
+        ^mkdir -p $"($rs.sb)/home/.local/bin" $"($rs.sb)/home/.config/nushell/scripts/project"
+        # wm-launch-terminal `use`s the project module at PARSE time, so it must exist even to run --session
+        "export def lookup [name: string] { null }\n" | save --raw $"($rs.sb)/home/.config/nushell/scripts/project/mod.nu"
+        $"#!/bin/sh\nexec ($nu.current-exe) ($here)/wm-launch-detach \"$@\"\n" | save --raw $"($rs.sb)/home/.local/bin/wm-launch-detach"
+        ^chmod +x $"($rs.sb)/home/.local/bin/wm-launch-detach"
+        "#!/bin/sh\nexit 0\n" | save --raw $"($rs.tb)/st"
+        ^chmod +x $"($rs.tb)/st"
+        let r = (^env -i ...$rs.base $nu.current-exe $"($here)/wm-launch-terminal" st --session s1 --class C --dry-run | complete)
+        $oks = ($oks | append (check ($r.exit_code == 0 and ($r.stdout | str trim) == "x11 st -c C") $"3l real detach dry-run prints `x11 st -c C` \(got '($r.stdout | str trim)', stderr '($r.stderr | str trim)'\)"))
+    } finally { ^rm -rf $rs.sb }
 
     let failed = ($oks | where {|x| not $x } | length)
     print ""

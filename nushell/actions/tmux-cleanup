@@ -1,21 +1,53 @@
 #!/usr/bin/env nu
 # Kill unattached tmux sessions and cleanup unpinned panes
 # Replaces kill_local_unattached() from bashrc
+#
+# @wm-restore-pending (sp038, dotfiles-et3u.12): wm-state restore sets this
+# session option to a unix time on every session it hands over to a new
+# terminal, before it closes the old one. st starts its shell (and so its tmux
+# client) only once its window is first mapped, and a terminal restored onto a
+# hidden workspace is not mapped until it is shown - so for a while such a
+# session has no client at all. A LIVE mark stands in for that client: the
+# session counts as attached and its current window as viewed. tmux.conf's
+# client-attached hook clears the mark when the client arrives. A mark older
+# than PENDING_TTL (24h: the new terminal was closed before it was ever shown)
+# or one that is not a unix time is stale: it protects nothing and is unset.
+const PENDING_MARK = "@wm-restore-pending"
+const PENDING_TTL = 86400
 
-# Get all tmux sessions with their metadata
-def get_sessions [] {
-    tmux list-sessions -F "#{session_name} #{session_group} #{session_attached}"
-    | lines
-    | where $it != ""
-    | parse "{name} {group} {attached}"
-    | update attached { |row| $row.attached | into int }
+# Is a mark value a live pending mark at unix time `now`?
+def mark_live [value: string, now: int] {
+    let ts = (try { $value | into int } catch { null })
+    if $ts == null { return false }
+    let age = ($now - $ts)
+    $age >= 0 and $age < $PENDING_TTL
 }
 
-# Get all windows with their metadata
+# Get all tmux sessions with their metadata. A session name never holds ':'
+# (tmux replaces it), so ':' separates; the mark is last and takes the rest.
+def get_sessions [] {
+    let now = (date now | format date '%s' | into int)
+    tmux list-sessions -F $"#{session_id}:#{session_attached}:#{window_id}:#{session_group}:#{session_name}:#{($PENDING_MARK)}"
+    | lines
+    | where $it != ""
+    | each { |l|
+        let p = ($l | split row ":")
+        let mark = ($p | skip 5 | str join ":")
+        {
+            id: $p.0, attached: ($p.1 | into int), window: $p.2, group: $p.3, name: $p.4,
+            mark: $mark, pending: (mark_live $mark $now)
+        }
+    }
+}
+
+# Get all windows with their metadata. `-a` lists a window once per session
+# that holds it (every session of a group), so dedupe: a second kill-window of
+# the same id fails and would abort the whole run.
 def get_windows [] {
     tmux list-windows -a -F "#{window_id} #{window_active_clients}"
     | lines
     | where $it != ""
+    | uniq
     | parse "{id} {clients}"
     | update clients { |row| $row.clients | into int }
 }
@@ -62,7 +94,17 @@ def main [] {
     # the old and new session might appear unattached
     sleep 200ms
 
-    let sessions = (get_sessions)
+    let all_sessions = (get_sessions)
+
+    # Stale marks protect nothing: unset them (by session id, never a name).
+    for sess in ($all_sessions | where { |s| $s.mark != "" and not $s.pending }) {
+        log $"Clearing stale ($PENDING_MARK) on ($sess.name): '($sess.mark)'"
+        tmux set-option -u -t $"($sess.id):" $PENDING_MARK
+    }
+
+    # A live mark counts as an attached client (see the header).
+    let sessions = ($all_sessions | update attached { |s| if $s.pending { [$s.attached 1] | math max } else { $s.attached } })
+    let pending_windows = ($all_sessions | where pending | get window)
 
     # Process session groups
     let groups = ($sessions | where group != "" | get group | uniq)
@@ -101,8 +143,9 @@ def main [] {
         }
     }
 
-    # Process unattached windows
-    let windows = (get_windows | where clients == 0)
+    # Process unattached windows (a pending session's current window counts
+    # as viewed: it is what the new client will show)
+    let windows = (get_windows | where {|w| $w.clients == 0 and not ($w.id in $pending_windows) })
 
     for window in $windows {
         let panes = (get_panes $window.id)
