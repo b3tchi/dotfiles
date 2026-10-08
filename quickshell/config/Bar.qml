@@ -389,6 +389,11 @@ PanelWindow {
         Kwi3Client.on("workspace.created",   function () { root._kwi3Refresh() })
         Kwi3Client.on("workspace.destroyed", function () { root._kwi3Refresh() })
         Kwi3Client.on("workspace.urgent",    function () { root._kwi3Refresh() })
+        // `workspace.renamed` (kwi3 v0.2.8, kwi3-xdac): a rename fires no
+        // focus/create/destroy, so without this the label stayed stale.
+        // Kwi3Client subscribes per name, so an older kwi3 that refuses this
+        // one name loses nothing else (dotfiles-nxg4, PHASE 8 of the test).
+        Kwi3Client.on("workspace.renamed",   function () { root._kwi3Refresh() })
         if (Kwi3Client.available) { root._kwi3Refresh() }
     }
 
