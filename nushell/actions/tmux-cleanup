@@ -102,7 +102,12 @@ def main [] {
         tmux set-option -u -t $"($sess.id):" $PENDING_MARK
     }
 
-    # A live mark counts as an attached client (see the header).
+    # A live mark counts as an attached client (see the header). Say so when
+    # it is the only thing keeping a session: a protection must leave a trace.
+    let now = (date now | format date '%s' | into int)
+    for sess in ($all_sessions | where { |s| $s.pending and $s.attached == 0 }) {
+        log $"Sparing unattached session ($sess.name) and its window ($sess.window) - ($PENDING_MARK) set ($now - ($sess.mark | into int))s ago"
+    }
     let sessions = ($all_sessions | update attached { |s| if $s.pending { [$s.attached 1] | math max } else { $s.attached } })
     let pending_windows = ($all_sessions | where pending | get window)
 

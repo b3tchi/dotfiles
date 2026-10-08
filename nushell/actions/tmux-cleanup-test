@@ -160,6 +160,9 @@ def main [] {
         $oks = ($oks | append (check ("local_0" in $left and (attached $sb local_0)) $"attached-untouched: local_0 still there and attached \(left ($left | to nuon)\)"))
         $oks = ($oks | append (check ((mark-of $sb local_0) == "") $"attached-untouched: its expired mark was cleared \(got '(mark-of $sb local_0)'\)"))
         $oks = ($oks | append (check ((mark-of $sb local_2) == $"($now)" and (mark-of $sb g2_0) == $"($now)") "live-mark-kept: cleanup leaves a live mark as it is"))
+        let logl = (try { open --raw ($sb.home | path join ".tmux.log") | lines } catch { [] })
+        let spared = ($logl | where {|l| $l =~ 'Sparing unattached session ' } | each {|l| $l | parse -r 'session (?<s>\S+) ' | get -o 0.s })
+        $oks = ($oks | append (check (($spared | sort) == ([g2_0 local_2 local_5 solo_m] | sort)) $"spared-logged: one 'Sparing' line per unattached session a live mark kept, none for expired or attached ones \(got ($spared | to nuon)\)"))
         stop-client $sb local_0 $c0
     } catch {|e| print $"  FAIL unit cases raised: ($e.msg)"; tx $sb kill-server | ignore; ^rm -rf $sb.d; exit 1 }
     tx $sb kill-server | ignore
