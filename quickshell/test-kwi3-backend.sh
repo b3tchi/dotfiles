@@ -904,6 +904,13 @@ require(rpcServer).start(sockPath, sources, {}).then((rig) => {
                 rig.openWindow('alpha2-keeper'); // keeper: switching away must not reap it
                 rig.ctx.RPC_METHODS['workspace.focus'].run(null, { name: 'gamma' });
                 console.log('PROJECT ' + JSON.stringify(rig.ctx.workspacesJson()));
+            } else if (name === 'rename') {
+                // dotfiles-nxg4: a bare rename, NOTHING else - no focus, no
+                // create, no destroy - so the workspace.renamed event
+                // (kwi3-xdac) is the only thing that can tell the bar.
+                const ws = rig.ctx.rpcWorkspaceList().find((w) => w.name === 'alpha_1');
+                rig.ctx.RPC_METHODS['workspace.rename'].run(null, { id: ws.id, name: 'alpha_one' });
+                console.log('RENAMED ' + JSON.stringify(rig.ctx.workspacesJson()));
             } else if (name === 'wslist') {
                 // dotfiles-4wkc: the SERVER's own workspace.list (not the
                 // bar's rows) - what a click really focused, and how many
@@ -1797,6 +1804,37 @@ for (const name of ["alpha_1", "alpha_2", "gamma"]) {
             pixcheck6 "project names, 10x24 pixels" "gamma,alpha_1"
 
             # ------------------------------------------------------------------
+            # dotfiles-nxg4: a rename alone (kwi3 workspace.renamed) must
+            # re-list the bar - no focus/create/destroy/urgent follows it, so
+            # without a workspace.renamed listener the label stays stale.
+            # ------------------------------------------------------------------
+            scenario "dotfiles-nxg4: a rename over RPC updates the bar's label with no other event"
+            bar_cmd rename
+            RENAMED=""
+            for i in $(seq 1 30); do
+                RENAMED="$(grep -a '^RENAMED ' "$BAR_RIG_LOG" | tail -1)"
+                [ -n "$RENAMED" ] && break
+                sleep 0.1
+            done
+            [ -n "$RENAMED" ] && pass "the rig renamed alpha_1 -> alpha_one (no other event)" \
+                || fail "the rig renamed alpha_1 -> alpha_one" "a RENAMED line" "(timed out)"
+            got_ren=""
+            for i in $(seq 1 40); do
+                ipc6 call bar6 rows "ren$i"
+                sleep 0.15
+                got_ren="$(last6 rows "ren$i")"
+                case "$got_ren" in *'"name":"alpha_one"'*) break ;; esac
+            done
+            case "$got_ren" in
+                *'"name":"alpha_one"'*) pass "the bar's row list carries the new name (alpha_one)" ;;
+                *) fail "the bar's row list carries the new name (alpha_one)" '"name":"alpha_one"' "$got_ren" ;;
+            esac
+            case "$got_ren" in
+                *'"name":"alpha_1"'*) fail "the old name is gone from the bar's rows" "no alpha_1" "$got_ren" ;;
+                *) pass "the old name (alpha_1) is gone from the bar's rows" ;;
+            esac
+
+            # ------------------------------------------------------------------
             # kwi3-55l.16 (Jan's own report, precise this time): the tab did not
             # show a bare number and did not go missing - it showed "…". Every
             # kwi3-path Kwi3Client.call had already been proven to reach the
@@ -2532,6 +2570,108 @@ else
 fi
 kill "$HOST8_PID" 2>/dev/null
 kill "$OLD_PID" 2>/dev/null
+
+# ============================================================================
+# PHASE 9 (dotfiles-nxg4) — the REAL pre-kwi3-xdac core (tag v0.2.7, extracted
+# with `git archive`) refuses events.subscribe ["workspace.renamed"] as an
+# unknown name. The Bar now listens for it; every OTHER event must still
+# arrive from that old server (Kwi3Client subscribes one name per call). Also
+# proves the NEW core delivers workspace.renamed to the same harness.
+# ============================================================================
+OLDTAG="${KWI3_OLD_TAG:-v0.2.7}"
+OLDTREE="$TMP/kwi3-old-tree"
+mkdir -p "$OLDTREE"
+if ! git -C "$KWI3_REPO" archive "$OLDTAG" i3kwin 2>/dev/null | tar -x -C "$OLDTREE" 2>/dev/null \
+   || [ ! -r "$OLDTREE/i3kwin/test/rpc-server.js" ]; then
+    scenario "PHASE 9: SKIP - $OLDTAG not extractable from $KWI3_REPO"
+else
+scenario "PHASE 9: real $OLDTAG core refuses workspace.renamed, workspace.focused must still arrive"
+CFG9="$TMP/cfg9"
+mkdir -p "$CFG9" "$TMP/run9" "$TMP/cache9"
+chmod 700 "$TMP/run9"
+ln -sf "$COMMON_DIR" "$CFG9/Common"
+cat > "$CFG9/shell.qml" <<'QMLEOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+ShellRoot {
+    id: host
+    function emit(name, payload) { console.log("KWI3TEST9 " + name + " " + payload) }
+    property int focusedCount: 0
+    property int renamedCount: 0
+    Component.onCompleted: {
+        Kwi3Client.on("workspace.focused", function (p) { host.focusedCount++ })
+        Kwi3Client.on("workspace.renamed", function (p) { host.renamedCount++ })
+    }
+    IpcHandler {
+        target: "kwi3test9"
+        function avail(tag: string): void { host.emit("avail", tag + " " + (Kwi3Client.available ? "1" : "0")) }
+        function counts(tag: string): void { host.emit("counts", tag + " " + host.focusedCount + " " + host.renamedCount) }
+        function newws(tag: string, name: string): void {
+            Kwi3Client.call("workspace.focus", { name: name }, function (err, res) { host.emit("newws", tag) })
+        }
+        function rename(tag: string, name: string): void {
+            Kwi3Client.call("workspace.list", undefined, function (err, list) {
+                var w = list[list.length - 1]
+                Kwi3Client.call("workspace.rename", { id: w.id, name: name }, function (e2, r2) {
+                    host.emit("rename", tag + " " + JSON.stringify({ err: e2 }))
+                })
+            })
+        }
+    }
+}
+QMLEOF
+
+# run9 <label> <repo-root-of-server> -> sets nothing; echoes pass/fail
+run_phase9() { # <label> <rpc-server.js> <expect-renamed-count>
+    local label="$1" server="$2" want_ren="$3" sock="$TMP/kwi3-p9-$1.sock" log="$TMP/p9-$1.log" qlog="$TMP/qs9-$1.log"
+    local rig_pid qs_pid i got
+    node "$GRID_DRIVER" "$server" "$sock" >"$log" 2>&1 &
+    rig_pid=$!; PIDS+=("$rig_pid")
+    if ! wait_for_socket "$sock" 15; then
+        fail "$label: rig bound its socket" "socket present" "missing"; cat "$log" >&2; kill "$rig_pid" 2>/dev/null; return
+    fi
+    env -u I3SOCK -u SWAYSOCK -u WAYLAND_DISPLAY -u DISPLAY \
+        HOME="$TMP/home" KWI3SOCK="$sock" QT_QPA_PLATFORM=offscreen \
+        XDG_CONFIG_HOME="$CFG9" XDG_RUNTIME_DIR="$TMP/run9" XDG_CACHE_HOME="$TMP/cache9" \
+        "$QUICKSHELL" -p "$CFG9" >"$qlog" 2>&1 &
+    qs_pid=$!; PIDS+=("$qs_pid")
+    ipc9() { env XDG_CONFIG_HOME="$CFG9" XDG_RUNTIME_DIR="$TMP/run9" XDG_CACHE_HOME="$TMP/cache9" \
+                 "$QUICKSHELL" ipc --pid "$qs_pid" "$@" >/dev/null 2>&1; }
+    last9() { grep -a "KWI3TEST9 $1 $2 " "$qlog" | tail -1 | sed "s/^.*KWI3TEST9 $1 $2 //"; }
+    got=""
+    for i in $(seq 1 60); do
+        ipc9 call kwi3test9 avail "a$i"; sleep 0.15
+        [ "$(last9 avail "a$i")" = "1" ] && { got=1; break; }
+    done
+    if [ -z "$got" ]; then
+        fail "$label: Kwi3Client connected" "available=1" "never"; tail -20 "$qlog" >&2
+    else
+        # a workspace create+focus (workspace.focused), then a rename alone
+        ipc9 call kwi3test9 newws "n" "p9new"; sleep 0.5
+        ipc9 call kwi3test9 rename "r" "p9renamed"; sleep 0.5
+        got=""
+        for i in $(seq 1 30); do
+            ipc9 call kwi3test9 counts "c$i"; sleep 0.15
+            got="$(last9 counts "c$i")"
+            case "$got" in "0 "*|"") ;; *) break ;; esac
+        done
+        case "$got" in
+            [1-9]*" "*) pass "$label: workspace.focused still arrives (counts=$got)" ;;
+            *) fail "$label: workspace.focused still arrives" "focusedCount>=1" "counts=$got" ;;
+        esac
+        case "$want_ren" in
+            1) case "$got" in *" "[1-9]*) pass "$label: workspace.renamed delivered" ;; *) fail "$label: workspace.renamed delivered" "renamedCount>=1" "counts=$got" ;; esac ;;
+            0) case "$got" in *" 0") pass "$label: workspace.renamed refused, none delivered" ;; *) fail "$label: workspace.renamed not delivered by old core" "renamedCount=0" "counts=$got" ;; esac ;;
+        esac
+    fi
+    kill "$qs_pid" 2>/dev/null; kill "$rig_pid" 2>/dev/null
+}
+run_phase9 old "$OLDTREE/i3kwin/test/rpc-server.js" 0
+run_phase9 new "$RPC_SERVER" 1
+fi
 
 # ============================================================================
 
