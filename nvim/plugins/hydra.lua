@@ -261,8 +261,14 @@ return {
 				end, { desc = "close all folds" } },
 
 				-- Foldlevel adjustment
-				{ "m", "zm", { desc = "decrease foldlevel" } },
-				{ "r", "zr", { desc = "increase foldlevel" } },
+				-- Native zm/zr lower 'foldlevel'; ufo then re-closes every fold it
+				-- rebuilds after an edit. closeFoldsWith keeps foldlevel at 99.
+				{ "m", function()
+					require("config.fold").shift(-1)
+				end, { desc = "decrease foldlevel" } },
+				{ "r", function()
+					require("config.fold").shift(1)
+				end, { desc = "increase foldlevel" } },
 
 				-- Navigation
 				{ "j", function()

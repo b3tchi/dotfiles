@@ -10,6 +10,13 @@ return {
 		vim.o.foldenable = true
 	end,
 	config = function()
+		-- Native zR/zr/zm change 'foldlevel'; with foldlevel < 99 ufo re-closes
+		-- folds rebuilt after every edit. Route through ufo instead.
+		local fold = require("config.fold")
+		fold.setup()
+		vim.keymap.set("n", "zR", function() fold.set(math.huge) end, { desc = "Open all folds" })
+		vim.keymap.set("n", "zr", function() fold.shift(1) end, { desc = "Fold less" })
+		vim.keymap.set("n", "zm", function() fold.shift(-1) end, { desc = "Fold more" })
 		require("ufo").setup({
 			provider_selector = function(bufnr, filetype, buftype)
 				return { "treesitter", "indent" }
