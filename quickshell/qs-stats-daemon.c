@@ -15,6 +15,7 @@
  *   disk <pct>
  *   bat <pct> <status>
  *   net <iface> [ssid]
+ *   net off|searching|connecting|none   (no default route; see poll_net)
  *   vol <pct> <yes|no>
  *
  * Sources:
@@ -264,6 +265,61 @@ static void poll_battery(void) {
 
 /* ----------------------------- network ----------------------------- */
 
+/* First line of a sysfs file into buf; 0 on success. */
+static int read_line(const char *path, char *buf, size_t cap) {
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    if (!fgets(buf, (int)cap, f)) { fclose(f); return -1; }
+    fclose(f);
+    buf[strcspn(buf, "\n")] = 0;
+    return 0;
+}
+
+/* Why there is no default route, from sysfs alone (no NetworkManager needed;
+ * unreadable on Termux -> plain "none"):
+ *   off        - a wlan rfkill switch is blocked (wifi button / airplane)
+ *   connecting - a wifi iface has carrier (associated), waiting on DHCP
+ *   searching  - wifi radio on, not associated (scanning / no known AP)
+ *   none       - no wifi at all */
+static const char *net_down_state(void) {
+    char path[300], val[32];
+    DIR *d = opendir("/sys/class/rfkill");
+    if (d) {
+        struct dirent *e;
+        int blocked = 0;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            snprintf(path, sizeof(path), "/sys/class/rfkill/%s/type", e->d_name);
+            if (read_line(path, val, sizeof(val)) || strcmp(val, "wlan")) continue;
+            snprintf(path, sizeof(path), "/sys/class/rfkill/%s/soft", e->d_name);
+            if (!read_line(path, val, sizeof(val)) && val[0] == '1') blocked = 1;
+            snprintf(path, sizeof(path), "/sys/class/rfkill/%s/hard", e->d_name);
+            if (!read_line(path, val, sizeof(val)) && val[0] == '1') blocked = 1;
+        }
+        closedir(d);
+        if (blocked) return "off";
+    }
+    const char *state = "none";
+    d = opendir("/sys/class/net");
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            struct stat st;
+            snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", e->d_name);
+            if (stat(path, &st) < 0) continue;
+            state = "searching";
+            snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", e->d_name);
+            if (!read_line(path, val, sizeof(val)) && !strcmp(val, "up")) {
+                state = "connecting";
+                break;
+            }
+        }
+        closedir(d);
+    }
+    return state;
+}
+
 static void poll_net(void) {
     /* Cheap: scan /proc/net/route for first non-default-iface UP entry,
      * fall back to /sys/class/net dirs. SSID via iwgetid -r if present. */
@@ -284,7 +340,7 @@ static void poll_net(void) {
         }
         fclose(r);
     }
-    if (iface[0] == 0) { emit("net none"); return; }
+    if (iface[0] == 0) { emit("net %s", net_down_state()); return; }
 
     char ssid[64] = "";
     FILE *p = popen("iwgetid -r 2>/dev/null", "r");
@@ -355,13 +411,14 @@ static void handle_netlink(int fd) {
     buf[n] = 0;
 
     /* uevent: header line then NUL-separated KEY=VALUE entries */
-    int is_power = 0, is_net = 0;
+    int is_power = 0, is_net = 0;  /* rfkill counts as net: off <-> on */
     char *p = buf;
     char *end = buf + n;
     while (p < end) {
         size_t len = strnlen(p, (size_t)(end - p));
         if (!strncmp(p, "SUBSYSTEM=power_supply", 22)) is_power = 1;
         else if (!strncmp(p, "SUBSYSTEM=net", 13))    is_net = 1;
+        else if (!strncmp(p, "SUBSYSTEM=rfkill", 16)) is_net = 1;
         p += len + 1;
         if (len == 0) break;
     }

@@ -792,10 +792,16 @@ PanelWindow {
     property string ramVal:  "?"
     property string diskVal: "?"
     property string netVal:  ""
-    // No default route (wifi button / rfkill, dropped AP, cable out). An alert
-    // like MUTED: shown at every density, since a narrow bar hiding NET is
-    // otherwise indistinguishable from being offline.
-    property bool netDown: false
+    // No default route. netDownState says why (daemon only; the polling
+    // fallback just knows "none"): off (wifi button / rfkill), searching
+    // (radio on, not associated), connecting (associated, awaiting DHCP),
+    // none. An alert like MUTED: shown at every density, since a narrow bar
+    // hiding NET is otherwise indistinguishable from being offline.
+    property string netDownState: ""
+    readonly property bool netDown: netDownState !== ""
+    readonly property var netDownText: ({ off: "WIFI OFF", searching: "SEARCHING",
+                                          connecting: "CONNECTING", none: "OFFLINE" })
+    function isNetDownState(v) { return netDownText.hasOwnProperty(v) }
     property string volVal:  ""
     property bool volMuted: false
     property string batVal:  ""
@@ -868,7 +874,7 @@ PanelWindow {
                     if (bs < 0) { root.batVal = rest; root.batStatus = "" }
                     else { root.batVal = rest.substring(0, bs); root.batStatus = rest.substring(bs + 1) }
                 } else if (key === "net") {
-                    root.netDown = (rest === "none")
+                    root.netDownState = root.isNetDownState(rest) ? rest : ""
                     root.netVal = root.netDown ? "" : rest
                 } else if (key === "vol") {
                     var vs = rest.indexOf(" ")
@@ -919,7 +925,7 @@ PanelWindow {
         stdout: SplitParser {
             onRead: data => {
                 var v = data.trim()
-                root.netDown = (v === "none")
+                root.netDownState = (v === "none") ? "none" : ""
                 root.netVal = root.netDown ? "" : v
             }
         }
@@ -1366,7 +1372,7 @@ PanelWindow {
 
             // Stats (hidden during ticker)
             Text { width: root.gw(implicitWidth); visible: root.netShown && !root.netDown; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gw(implicitWidth); visible: root.netShown; text: root.netDown ? "OFFLINE" : root.netVal; color: root.netDown ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.netShown; text: root.netDown ? root.netDownText[root.netDownState] : root.netVal; color: !root.netDown ? "#fdf6e3" : (root.netDownState === "searching" || root.netDownState === "connecting") ? "#b58900" : "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
