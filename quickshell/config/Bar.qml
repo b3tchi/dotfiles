@@ -799,8 +799,11 @@ PanelWindow {
     // hiding NET is otherwise indistinguishable from being offline.
     property string netDownState: ""
     readonly property bool netDown: netDownState !== ""
-    readonly property var netDownText: ({ off: "WIFI OFF", searching: "SEARCHING",
-                                          connecting: "CONNECTING", none: "OFFLINE" })
+    // off/none are OFFLINE (red, no label); searching/connecting are on their
+    // way up, so they keep the NET: label and show in yellow.
+    readonly property var netDownText: ({ off: "OFFLINE", none: "OFFLINE",
+                                          searching: "searching", connecting: "connecting" })
+    readonly property bool netPending: netDownState === "searching" || netDownState === "connecting"
     function isNetDownState(v) { return netDownText.hasOwnProperty(v) }
     property string volVal:  ""
     property bool volMuted: false
@@ -1371,8 +1374,8 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { width: root.gw(implicitWidth); visible: root.netShown && !root.netDown; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gw(implicitWidth); visible: root.netShown; text: root.netDown ? root.netDownText[root.netDownState] : root.netVal; color: !root.netDown ? "#fdf6e3" : (root.netDownState === "searching" || root.netDownState === "connecting") ? "#b58900" : "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.netShown && (!root.netDown || root.netPending); text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.netShown; text: root.netDown ? root.netDownText[root.netDownState] : root.netVal; color: !root.netDown ? "#fdf6e3" : root.netPending ? "#b58900" : "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
