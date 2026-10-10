@@ -21,6 +21,8 @@
  *   - timerfd 10s tick   -> cpu, ram          (no kernel event source)
  *   - timerfd 60s tick   -> disk              (cheap, mostly static)
  *   - netlink uevent     -> battery, net link (kernel hotplug)
+ *   - rtnetlink          -> net link/route changes (wifi toggle, rfkill,
+ *                           roaming) - uevents only cover iface add/remove
  *   - pactl subscribe    -> volume + mute     (PulseAudio change events)
  */
 
@@ -45,6 +47,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 
 #define BUF 4096
 
@@ -366,6 +369,30 @@ static void handle_netlink(int fd) {
     if (is_net)   poll_net();
 }
 
+/* rtnetlink: link up/down + route add/del. A wifi button (rfkill) or a
+ * dropped AP fires none of the kobject uevents above - the iface stays, only
+ * its link and default route go - so without this the bar kept showing the
+ * last SSID. Bursts are drained and coalesced into one poll_net(). */
+static int open_rtnetlink(void) {
+    int fd = socket(AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK,
+                    NETLINK_ROUTE);
+    if (fd < 0) return -1;
+    struct sockaddr_nl sa = {0};
+    sa.nl_family = AF_NETLINK;
+    sa.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE;
+    if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void handle_rtnetlink(int fd) {
+    char buf[BUF];
+    while (recv(fd, buf, sizeof(buf), MSG_DONTWAIT) > 0) {}
+    poll_net();
+}
+
 /* ----------------------------- pactl child ----------------------------- */
 
 static pid_t pactl_pid = -1;
@@ -438,6 +465,9 @@ int main(int argc, char **argv) {
                 strerror(errno));
     }
 
+    /* Android denies NETLINK_ROUTE binds to apps; the slow tick covers it. */
+    int rt_fd = open_rtnetlink();
+
     int tfd_fast = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     int tfd_slow = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     /* fallback timer for bat+net when netlink unavailable; otherwise unused */
@@ -467,9 +497,10 @@ int main(int argc, char **argv) {
     poll_disk();
 
     while (!want_exit) {
-        struct pollfd pfds[5];
+        struct pollfd pfds[6];
         int nf = 0;
         if (nl_fd >= 0)        { pfds[nf].fd = nl_fd;        pfds[nf].events = POLLIN; nf++; }
+        if (rt_fd >= 0)        { pfds[nf].fd = rt_fd;        pfds[nf].events = POLLIN; nf++; }
         if (tfd_fast >= 0)     { pfds[nf].fd = tfd_fast;     pfds[nf].events = POLLIN; nf++; }
         if (tfd_slow >= 0)     { pfds[nf].fd = tfd_slow;     pfds[nf].events = POLLIN; nf++; }
         if (tfd_fallback >= 0) { pfds[nf].fd = tfd_fallback; pfds[nf].events = POLLIN; nf++; }
@@ -487,6 +518,8 @@ int main(int argc, char **argv) {
             int fd = pfds[k].fd;
             if (fd == nl_fd) {
                 handle_netlink(nl_fd);
+            } else if (fd == rt_fd) {
+                handle_rtnetlink(rt_fd);
             } else if (fd == tfd_fast) {
                 uint64_t exp; (void)read(tfd_fast, &exp, sizeof(exp));
                 poll_cpu();
@@ -500,6 +533,8 @@ int main(int argc, char **argv) {
                  * Skip when tfd_fallback is active (no netlink): it
                  * already polls battery on the same 30s cadence. */
                 if (tfd_fallback < 0) poll_battery();
+                /* no rtnetlink -> link/route changes are invisible; poll */
+                if (tfd_fallback < 0 && rt_fd < 0) poll_net();
             } else if (fd == tfd_fallback) {
                 uint64_t exp; (void)read(tfd_fallback, &exp, sizeof(exp));
                 poll_battery();

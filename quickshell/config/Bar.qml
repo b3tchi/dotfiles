@@ -121,6 +121,7 @@ PanelWindow {
     // stats block so a narrow xrdp viewport / small monitor stays uncluttered.
     readonly property string density: Session.densityFor(screen ? screen.width : 1920)
     readonly property bool showNet:  density === "full"
+    readonly property bool netShown: !tickerActive && (netDown || (showNet && netVal !== ""))
     readonly property bool showDisk: density === "full"
     readonly property bool showCpu:  density !== "minimal"
     readonly property bool showRam:  density !== "minimal"
@@ -260,7 +261,7 @@ PanelWindow {
     // where HDD is hidden - Jan), and none ever sits at the Row's left edge.
     // The bell is always shown and closes the Row, so nothing trails it.
     readonly property var segShown: [
-        showNet && !tickerActive && netVal !== "",      // 0 NET
+        netShown,                                       // 0 NET / OFFLINE
         showCpu && !tickerActive && cpuVal !== "?",     // 1 CPU
         showRam && !tickerActive && ramVal !== "?",     // 2 RAM
         showDisk && !tickerActive && diskVal !== "?",   // 3 HDD
@@ -791,6 +792,10 @@ PanelWindow {
     property string ramVal:  "?"
     property string diskVal: "?"
     property string netVal:  ""
+    // No default route (wifi button / rfkill, dropped AP, cable out). An alert
+    // like MUTED: shown at every density, since a narrow bar hiding NET is
+    // otherwise indistinguishable from being offline.
+    property bool netDown: false
     property string volVal:  ""
     property bool volMuted: false
     property string batVal:  ""
@@ -863,7 +868,8 @@ PanelWindow {
                     if (bs < 0) { root.batVal = rest; root.batStatus = "" }
                     else { root.batVal = rest.substring(0, bs); root.batStatus = rest.substring(bs + 1) }
                 } else if (key === "net") {
-                    root.netVal = (rest === "none") ? "" : rest
+                    root.netDown = (rest === "none")
+                    root.netVal = root.netDown ? "" : rest
                 } else if (key === "vol") {
                     var vs = rest.indexOf(" ")
                     if (vs < 0) { root.volVal = rest; root.volMuted = false }
@@ -908,8 +914,15 @@ PanelWindow {
         id: netProc
         running: !root.daemonMode
         command: ["sh", "-c",
-            "iwgetid -r 2>/dev/null && exit; ip -brief addr | awk '!/^lo /{if($2==\"UP\") print $1; exit}'"]
-        stdout: SplitParser { onRead: data => root.netVal = data.trim() }
+            "iwgetid -r 2>/dev/null && exit; " +
+            "ip -brief addr | awk '!/^lo /{if($2==\"UP\"){print $1; f=1; exit}} END{if(!f) print \"none\"}'"]
+        stdout: SplitParser {
+            onRead: data => {
+                var v = data.trim()
+                root.netDown = (v === "none")
+                root.netVal = root.netDown ? "" : v
+            }
+        }
         onExited: { if (!root.daemonMode) netTimer.restart() }
     }
     Timer { id: netTimer; interval: 10000; onTriggered: if (!root.daemonMode) netProc.running = true }
@@ -1352,8 +1365,8 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { width: root.gw(implicitWidth); visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.netShown && !root.netDown; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { width: root.gw(implicitWidth); visible: root.netShown; text: root.netDown ? "OFFLINE" : root.netVal; color: root.netDown ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
