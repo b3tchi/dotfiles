@@ -12,6 +12,7 @@ depends:
   - ssh
   - glab
   - azcli
+  - databricks
   - claude
   - opencode
   - pi

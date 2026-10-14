@@ -1,0 +1,21 @@
+windows:
+  installs:
+    cmd: |
+      scoop bucket add databricks https://github.com/databricks/scoop-bucket.git
+      scoop install databricks
+
+# ~/.databrickscfg holds tokens — not linked; run `databricks auth login` per host.
+linux:
+  installs:
+    cmd: |
+      # Not in pacman repos; official installer drops the binary in /usr/local/bin.
+      # Installer refuses to overwrite — to upgrade: sudo rm /usr/local/bin/databricks
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      echo "databricks: Termux not supported by setup-cli installer — skipping"
+      {{else}}
+      if command -v databricks >/dev/null 2>&1; then
+        echo "skip databricks: $(databricks --version) present"
+      else
+        curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sudo sh
+      fi
+      {{/if}}
