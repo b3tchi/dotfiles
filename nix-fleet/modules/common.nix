@@ -20,6 +20,8 @@ let
     nixos-rebuild switch --flake "path:${mnt}/$cur#default" \
       --override-input nixpkgs ${channel} --no-write-lock-file
     mkdir -p /var/lib/nixos-pull && echo "$cur" > /var/lib/nixos-pull/version
+    # small SD cards: keep only the last 3 system generations (weekly gc frees them)
+    nix-env --profile /nix/var/nix/profiles/system --delete-generations +3
   '';
   applyPath = with pkgs; [ coreutils util-linux nix config.system.build.nixos-rebuild ];
 in {
@@ -27,7 +29,7 @@ in {
   networking.useDHCP = true;        # IP comes from the MAC reservation; no static IP here
 
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
-  nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 14d"; };
+  nix.gc = { automatic = true; dates = "weekly"; };  # generations pruned to 3 by nixos-pull-apply
   # Optional: EliteDesk binary cache
   # nix.settings.substituters = [ "http://192.168.1.22:5000" ];
   # nix.settings.trusted-public-keys = [ "elitedesk:..." ];
