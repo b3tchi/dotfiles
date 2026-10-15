@@ -53,6 +53,8 @@ in {
   # Pull: rebuild when the published version changed.
   systemd.services.nixos-pull = {
     description = "Apply config from NFS if changed";
+    # Activation must not restart the unit that is running it (same as system.autoUpgrade).
+    restartIfChanged = false;
     path = applyPath;
     serviceConfig = { Type = "oneshot"; ExecStart = "${apply} changed"; };
   };
@@ -65,6 +67,7 @@ in {
   # nixpkgs, independent of the publisher and of other hosts.
   systemd.services.nixos-security-update = {
     description = "Rebuild current config against newest ${channel}";
+    restartIfChanged = false;
     path = applyPath;
     serviceConfig = { Type = "oneshot"; ExecStart = "${apply} always"; };
   };
