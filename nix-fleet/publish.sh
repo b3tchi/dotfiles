@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Publish a new version to each host's NAS share over SSH, then switch atomically.
-# Usage: ./publish.sh            (all hosts)
-#        ./publish.sh revo pi    (selected hosts)
+# Usage: ./publish.sh                     (all hosts)
+#        ./publish.sh revo pi             (selected hosts)
+#        ./publish.sh --update [hosts]    (bump nixpkgs in flake.lock first:
+#                                          security updates; run weekly by timer)
 #
 # Each host has its own folder /volume1/nixos-<host> on the NAS, NFS-exported
 # read-only to that host. This PC writes to it over SSH (no local mount/sudo).
@@ -17,12 +19,16 @@ VER="v$(date +%Y%m%d-%H%M%S)"
 
 SSH=(ssh -i "$NAS_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -p "$NAS_PORT")
 
-# Ensure flake.lock exists/pinned. Fall back to a container when nix is absent.
+# `flake lock` takes the flake positionally; `flake update` needs --flake.
+LOCK_CMD="lock"
+[ "${1:-}" = "--update" ] && { LOCK_CMD="update --flake"; shift; }
+
+# Pin (lock) or bump (update) flake.lock. Fall back to a container when nix is absent.
 if command -v nix >/dev/null; then
-  nix --extra-experimental-features 'nix-command flakes' flake lock "path:$SRC"
+  nix --extra-experimental-features 'nix-command flakes' flake $LOCK_CMD "path:$SRC"
 else
   docker run --rm -v "$SRC":/src -w /src "$NIX_IMAGE" sh -c \
-    "nix --extra-experimental-features 'nix-command flakes' flake lock path:/src \
+    "nix --extra-experimental-features 'nix-command flakes' flake $LOCK_CMD path:/src \
      && chown $(id -u):$(id -g) /src/flake.lock"
 fi
 
