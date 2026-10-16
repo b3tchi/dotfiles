@@ -1,0 +1,79 @@
+#!/bin/bash
+# edge-cdp — run Windows-host Edge with a CDP port, drive it from WSL.
+# Host Edge carries corporate SSO / device compliance; WSL-side Playwright
+# attaches with chromium.connectOverCDP(`edge-cdp endpoint`).
+# Needs WSL mirrored networking (host 127.0.0.1 == WSL 127.0.0.1).
+set -euo pipefail
+
+PORT="${EDGE_CDP_PORT:-9222}"
+PROFILE="${EDGE_CDP_PROFILE:-pw-edge}"   # dir name under %LOCALAPPDATA%
+EDGE="/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+BASE="http://127.0.0.1:$PORT"
+
+usage() {
+  cat <<EOF
+usage: edge-cdp <command> [args]
+
+  start [url]   launch host Edge with CDP on :$PORT (no-op if already up)
+  stop          close the Edge instance using profile '$PROFILE'
+  status        print browser version or 'down' (exit 1 when down)
+  endpoint      print CDP http endpoint (for connectOverCDP / --cdp-endpoint)
+  ws            print browser websocket debugger url
+  open <url>    open url in a new tab (starts Edge if needed)
+  tabs          list open tabs (title<TAB>url)
+  mcp           print Playwright MCP args for this endpoint
+
+env: EDGE_CDP_PORT (default 9222), EDGE_CDP_PROFILE (default pw-edge)
+EOF
+}
+
+up() { curl -sf --max-time 1 "$BASE/json/version" >/dev/null; }
+
+profile_dir() {
+  local lad
+  lad=$("$PS" -NoProfile -Command '[Environment]::GetFolderPath("LocalApplicationData")' | tr -d '\r')
+  printf '%s\\%s' "$lad" "$PROFILE"
+}
+
+start() {
+  if up; then return 0; fi
+  [ -x "$EDGE" ] || { echo "edge-cdp: msedge.exe not found" >&2; exit 1; }
+  # Separate user-data-dir required: Chromium refuses the debug port on the
+  # default profile. Sign this profile into the work account once.
+  "$EDGE" --remote-debugging-port="$PORT" --user-data-dir="$(profile_dir)" \
+    --no-first-run --no-default-browser-check "${1:-about:blank}" >/dev/null 2>&1 &
+  disown
+  for _ in $(seq 1 40); do up && return 0; sleep 0.25; done
+  echo "edge-cdp: no CDP on :$PORT after 10s (Edge with same profile already running without the flag?)" >&2
+  exit 1
+}
+
+stop() {
+  # Match only processes whose command line carries our profile dir.
+  "$PS" -NoProfile -Command "
+    Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" |
+      Where-Object { \$_.CommandLine -like '*--user-data-dir=*\\$PROFILE*' } |
+      ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }
+  " | tr -d '\r'
+  for _ in $(seq 1 20); do up || { echo stopped; return 0; }; sleep 0.25; done
+  echo "edge-cdp: still answering on :$PORT" >&2; exit 1
+}
+
+json() { python3 -I -c "import json,sys; $1" ; }
+
+case "${1:-}" in
+  start)    shift; start "${1:-}"; echo "$BASE" ;;
+  stop)     stop ;;
+  status)   if up; then curl -s "$BASE/json/version" | json 'print(json.load(sys.stdin)["Browser"])'; else echo down; exit 1; fi ;;
+  endpoint) echo "$BASE" ;;
+  ws)       up || { echo "edge-cdp: down (run: edge-cdp start)" >&2; exit 1; }
+            curl -s "$BASE/json/version" | json 'print(json.load(sys.stdin)["webSocketDebuggerUrl"])' ;;
+  open)     [ -n "${2:-}" ] || { usage >&2; exit 2; }
+            start; curl -sf -X PUT "$BASE/json/new?$2" >/dev/null ;;
+  tabs)     up || { echo "edge-cdp: down" >&2; exit 1; }
+            curl -s "$BASE/json/list" | json '[print(t["title"]+"\t"+t["url"]) for t in json.load(sys.stdin) if t["type"]=="page"]' ;;
+  mcp)      echo "npx @playwright/mcp@latest --cdp-endpoint $BASE" ;;
+  -h|--help|help|"") usage ;;
+  *)        usage >&2; exit 2 ;;
+esac

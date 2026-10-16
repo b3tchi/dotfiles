@@ -1,6 +1,7 @@
 linux:
   links:
     xdg-open: ~/.local/bin/xdg-open
+    edge-cdp: ~/.local/bin/edge-cdp
   installs:
     cmd: |
       # runtime WSL check (env.WSL_DISTRO_NAME unreliable: unset in
