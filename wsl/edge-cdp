@@ -22,6 +22,9 @@ usage: edge-cdp <command> [args]
   ws            print browser websocket debugger url
   open <url>    open url in a new tab (starts Edge if needed)
   tabs          list open tabs (title<TAB>url)
+  html [match]  print live DOM (outerHTML) of tab whose url/title contains
+                match (default: most recently active tab)
+  eval <js> [match]  evaluate js in tab, print result (JSON for non-strings)
   mcp           print Playwright MCP args for this endpoint
 
 env: EDGE_CDP_PORT (default 9222), EDGE_CDP_PROFILE (default pw-edge)
@@ -62,6 +65,35 @@ stop() {
 
 json() { python3 -I -c "import json,sys; $1" ; }
 
+# Runtime.evaluate in one tab over its page websocket (node>=22 WebSocket).
+page_eval() {
+  up || { echo "edge-cdp: down (run: edge-cdp start)" >&2; exit 1; }
+  BASE="$BASE" node - "$1" "${2:-}" <<'JS'
+const [expr, match] = process.argv.slice(2);
+const tabs = (await (await fetch(process.env.BASE + '/json/list')).json())
+  .filter(t => t.type === 'page');
+const m = match.toLowerCase();
+const tab = tabs.find(t => !m || t.url.toLowerCase().includes(m) || t.title.toLowerCase().includes(m));
+if (!tab) { console.error(`edge-cdp: no tab matching '${match}'`); process.exit(1); }
+const ws = new WebSocket(tab.webSocketDebuggerUrl);
+ws.onerror = () => { console.error('edge-cdp: websocket error'); process.exit(1); };
+ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate',
+  params: { expression: expr, returnByValue: true, awaitPromise: true } }));
+ws.onmessage = ev => {
+  const msg = JSON.parse(ev.data);
+  if (msg.id !== 1) return;
+  const r = msg.result ?? {};
+  if (msg.error || r.exceptionDetails) {
+    console.error('edge-cdp:', JSON.stringify(msg.error ?? r.exceptionDetails.exception?.description ?? r.exceptionDetails));
+    process.exit(1);
+  }
+  const v = r.result?.value;
+  process.stdout.write((typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? '') + '\n');
+  ws.close(); process.exit(0);
+};
+JS
+}
+
 case "${1:-}" in
   start)    shift; start "${1:-}"; echo "$BASE" ;;
   stop)     stop ;;
@@ -73,6 +105,9 @@ case "${1:-}" in
             start; curl -sf -X PUT "$BASE/json/new?$2" >/dev/null ;;
   tabs)     up || { echo "edge-cdp: down" >&2; exit 1; }
             curl -s "$BASE/json/list" | json '[print(t["title"]+"\t"+t["url"]) for t in json.load(sys.stdin) if t["type"]=="page"]' ;;
+  html)     page_eval 'document.documentElement.outerHTML' "${2:-}" ;;
+  eval)     [ -n "${2:-}" ] || { usage >&2; exit 2; }
+            page_eval "$2" "${3:-}" ;;
   mcp)      echo "npx @playwright/mcp@latest --cdp-endpoint $BASE" ;;
   -h|--help|help|"") usage ;;
   *)        usage >&2; exit 2 ;;
