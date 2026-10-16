@@ -25,7 +25,9 @@ usage: edge-cdp <command> [args]
   html [match]  print live DOM (outerHTML) of tab whose url/title contains
                 match (default: most recently active tab)
   eval <js> [match]  evaluate js in tab, print result (JSON for non-strings)
-  mcp           print Playwright MCP args for this endpoint
+  devtools [match]   print Edge DevTools URL for tab (needs a Chromium view)
+  inspect [match]    open that DevTools in the preview window
+  mcp          print Playwright MCP args for this endpoint
 
 env: EDGE_CDP_PORT (default 9222), EDGE_CDP_PROFILE (default pw-edge)
 EOF
@@ -44,7 +46,10 @@ start() {
   [ -x "$EDGE" ] || { echo "edge-cdp: msedge.exe not found" >&2; exit 1; }
   # Separate user-data-dir required: Chromium refuses the debug port on the
   # default profile. Sign this profile into the work account once.
-  "$EDGE" --remote-debugging-port="$PORT" --user-data-dir="$(profile_dir)" \
+  # allow-origins: only Edge's own DevTools page (served from this port) may
+  # open the CDP websocket — needed by `edge-cdp devtools`. User-approved.
+  "$EDGE" --remote-debugging-port="$PORT" --remote-allow-origins="$BASE" \
+    --user-data-dir="$(profile_dir)" \
     --no-first-run --no-default-browser-check "${1:-about:blank}" >/dev/null 2>&1 &
   disown
   for _ in $(seq 1 40); do up && return 0; sleep 0.25; done
@@ -94,8 +99,20 @@ ws.onmessage = ev => {
 JS
 }
 
+# DevTools frontend served by Edge itself, attached to the matching tab.
+devtools_url() {
+  up || { echo "edge-cdp: down (run: edge-cdp start)" >&2; exit 1; }
+  curl -s "$BASE/json/list" | M="$1" BASE="$BASE" json '
+import os
+m, base = os.environ["M"].lower(), os.environ["BASE"]
+tabs = [t for t in json.load(sys.stdin) if t["type"] == "page"
+        and (not m or m in t["url"].lower() or m in t["title"].lower())]
+if not tabs: sys.exit("edge-cdp: no matching tab")
+print(base + "/devtools/inspector.html?ws=" + base.split("//")[1] + "/devtools/page/" + tabs[0]["id"])'
+}
+
 case "${1:-}" in
-  start)    shift; start "${1:-}"; echo "$BASE" ;;
+  start)   shift; start "${1:-}"; echo "$BASE" ;;
   stop)     stop ;;
   status)   if up; then curl -s "$BASE/json/version" | json 'print(json.load(sys.stdin)["Browser"])'; else echo down; exit 1; fi ;;
   endpoint) echo "$BASE" ;;
@@ -108,6 +125,12 @@ case "${1:-}" in
   html)     page_eval 'document.documentElement.outerHTML' "${2:-}" ;;
   eval)     [ -n "${2:-}" ] || { usage >&2; exit 2; }
             page_eval "$2" "${3:-}" ;;
+  devtools) devtools_url "${2:-}" ;;
+  inspect)  # preview takes file paths: hand it a redirect page.
+            f="${XDG_RUNTIME_DIR:-/tmp}/edge-cdp-devtools.html"
+            printf '<!doctype html><meta charset="utf-8"><title>Edge DevTools</title><meta http-equiv="refresh" content="0;url=%s">\n' \
+              "$(devtools_url "${2:-}")" > "$f"
+            preview show "$f" ;;
   mcp)      echo "npx @playwright/mcp@latest --cdp-endpoint $BASE" ;;
   -h|--help|help|"") usage ;;
   *)        usage >&2; exit 2 ;;
