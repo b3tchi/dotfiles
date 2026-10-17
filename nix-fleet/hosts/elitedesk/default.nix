@@ -1,6 +1,6 @@
 { ... }: {
-  # HP EliteDesk — builder, binary cache, main services
-  imports = [ ./hardware-configuration.nix ];
+  # HP EliteDesk — HTPC (Kodi) first; builder, binary cache, background jobs
+  imports = [ ./hardware-configuration.nix ../../modules/htpc.nix ];
   nixpkgs.hostPlatform = "x86_64-linux";
 
   boot.loader.systemd-boot.enable = true;       # UEFI
