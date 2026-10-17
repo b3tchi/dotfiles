@@ -13,7 +13,9 @@
 # pass through a shell. Current default leaves Wi-Fi OPEN; set WPA2-AES first.
 #
 # Edit per box:
-AP_IP=192.168.1.2            # free address on the MAIN router's subnet
+AP_IP=192.168.1.3            # free addr on MAIN subnet, outside DHCP pool;
+                             # also reserve it on the edge (static lease by MAC)
+                             # so nothing else claims it (.1.2 was taken)
 MAIN_ROUTER=192.168.1.1      # gateway + DNS = the edge router
 
 set -e
