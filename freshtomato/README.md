@@ -94,6 +94,21 @@ Each peer: generate keypair, server-side Allowed IPs = that peer's `/32`
 Endpoint = the WAN public IP; it's dynamic, so set DDNS (Basic -> DDNS) and use
 the hostname as the endpoint. Forward/open UDP `51820` on the edge.
 
+## AP mode (N18U — 2.4 GHz access point)
+
+Final role of the N18U: bridged 2.4 GHz AP behind the main router, same LAN.
+Band split — main router keeps `b3net-5g` (5 GHz, drop its 2.4 radio), N18U
+carries `b3net` (2.4 GHz). Both SSIDs on one subnet, clients pick by band.
+
+`ap-mode.sh` sets the network side (LAN IP on the main subnet, gateway/DNS = edge
+router, DHCP server off via `lan_proto=static`, WAN disabled). Apply **at install
+time**, cabled main-LAN -> N18U LAN port — it drops any link that relied on the
+N18U's own DHCP.
+
+Wi-Fi is set in the GUI, not scripted (the PSK shouldn't pass through a shell):
+SSID `b3net`, 2.4 GHz, **WPA2-Personal / AES** (default ships OPEN — fix before
+going live), channel 1. WireGuard does not run in AP mode; it lives on the edge.
+
 ## Cutover order (staged)
 
 1. N18U -> FreshTomato, run as temporary edge; prove DHCP/DNS as edge.
