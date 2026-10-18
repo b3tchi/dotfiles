@@ -4,6 +4,10 @@ Replace the old ASUS edge router with two FreshTomato boxes: the RT-AC66U B1 as
 the new dual-band edge, the RT-N18U as a 2.4 GHz access point. Keep the existing
 `192.168.1.0/24` subnet so nothing with a hardcoded IP breaks.
 
+Staged: the N18U takes the edge role first (interim), which frees the old router
+and the bench so the B1 can be flashed and configured without time pressure;
+a second cutover then makes the B1 the edge and the N18U an AP. See the phases.
+
 ## Current state (2026-10)
 
 | Device | Role | Addr | Notes |
@@ -36,59 +40,80 @@ From the old router's admin UI, write down:
 - Wi-Fi: exact SSIDs (`b3net`, `b3net-5g`), password, security (WPA2-AES).
 - Any port forwards / static leases / DDNS hostname to recreate.
 
-## Phase 1 — bench-prep the B1 (no downtime; old router stays live)
+Strategy: the **N18U goes live as an interim edge first**. That retires the old
+router and frees the bench (USB-ethernet link), so the B1 can be flashed and
+configured unhurried while the N18U carries the live network. A second cutover
+then promotes the B1 to edge and demotes the N18U to its final AP role.
 
-Same proven flow as the N18U, over the USB-ethernet bench link:
-1. Connect B1 LAN port -> laptop USB-ethernet; `nmcli con up asus-lan`.
+Two cutovers, each a ~2 min drop. Reuse ONE WireGuard server key across both so
+peer configs never change.
+
+### Interim-edge limitation — no 5 GHz
+
+The N18U is **2.4 GHz only**. While it is the edge, there is **no `b3net-5g`** —
+all Wi-Fi is 2.4 GHz `b3net`. 5 GHz returns when the B1 takes over. Accept this
+for the interim window, or keep the old router's 5 GHz radio alive briefly as a
+dumb AP if the gap matters (adds an SSID-clash risk — simplest is to live
+without 5 GHz for the window).
+
+## Phase 1 — N18U to interim edge (cutover #1)
+
+The N18U is already FreshTomato 2026.4 with `setup-core.sh` applied. To make it
+edge:
+1. GUI: set LAN to `192.168.1.1` (from bench `.2.1`); DHCP on (`.100-.200`).
+2. WAN: set the type from Phase 0 (DHCP / PPPoE creds / static). MAC-clone the
+   old WAN MAC if the ISP binds to it.
+3. Wi-Fi: `b3net` 2.4 GHz, WPA2-AES, real password, channel 1. (Currently OPEN.)
+4. WireGuard (optional for the interim): `wg0` server already keyed — add peers
+   + DDNS if you want remote admin during the window. Keep that server key for
+   the B1 later.
+5. Cutover: (optional) shut down revo cleanly. **Power off the old ASUS.** Move
+   the ISP/WAN cable -> N18U WAN; wired LAN devices -> N18U LAN ports.
+6. Clients reconnect to `b3net` (2.4) in ~2 min. Verify internet + DHCP + DNS.
+
+The old router is now free — keep it configured on the shelf for rollback.
+
+## Phase 2 — bench-prep the B1 (no rush; network is live on the N18U)
+
+Laptop rejoins Wi-Fi (`b3net`); its USB-ethernet bench link is now free for the B1.
+1. B1 LAN port -> laptop USB-ethernet; `nmcli con up asus-lan`.
 2. Flash `freshtomato-RT-AC66U_B1-K26ARM-2026.4-VPN-64K.trx` (reset-to-defaults).
-3. Reach it (subnet-clash host-route trick if needed); set a temp LAN, e.g. `192.168.2.1`.
-4. Set admin password; enable SSH (key in Authorized Keys); HTTPS-only.
-5. Push `setup-core.sh` (edit `LAN_IP` — keep `192.168.2.1` for the bench).
-6. Wi-Fi in GUI: `b3net-5g` on 5 GHz + `b3net` on 2.4 GHz (WPA2-AES, real password).
-   (B1 keeps its own 2.4 only until the N18U takes 2.4 over — then disable B1 2.4.)
-7. WireGuard in GUI: `wg0` server, `10.22.0.1/24`, port `51820`, split tunnel;
-   add peers (phone QR, laptop config). DNS push `192.168.1.1`.
-   Reuse ONE server key here; peers won't need re-pairing later.
-8. WAN: set the type from Phase 0 (don't connect WAN cable yet).
+3. Reach it (host-route trick for the subnet clash); temp LAN `192.168.2.1`.
+4. Admin password; SSH key; HTTPS-only.
+5. Push `setup-core.sh` (keep `LAN_IP=192.168.2.1` for the bench).
+6. Wi-Fi in GUI: `b3net-5g` 5 GHz + `b3net` 2.4 GHz, WPA2-AES.
+7. WireGuard in GUI: `wg0` server, `10.22.0.1/24`, `51820`, split tunnel, peers,
+   DNS push `192.168.1.1`. **Reuse the same server key as the N18U** so peers
+   don't re-pair.
+8. WAN: set the type (don't connect the WAN cable yet).
 
-## Phase 2 — bench-prep the N18U (already mostly done)
+## Phase 3 — promote B1 to edge, N18U to AP (cutover #2)
 
-- Core config already applied.
-- GUI: Wi-Fi `b3net` 2.4 GHz, WPA2-AES, channel 1. (Currently OPEN — must fix.)
-- Leave `ap-mode.sh` UNAPPLIED until cutover (it drops the bench link).
+1. Set the B1 LAN to `192.168.1.1`, reboot.
+2. **Power off the N18U.** Move ISP/WAN cable -> B1 WAN; LAN devices -> B1 LAN.
+3. Bring the N18U back cabled **N18U LAN -> B1 LAN**; apply `ap-mode.sh`
+   (-> `192.168.1.3`, DHCP off); confirm its 2.4 `b3net` WPA2.
+4. On the B1: reserve `.1.3` for the N18U MAC (static lease); the B1 serves 5 GHz
+   `b3net-5g`, the N18U serves 2.4 `b3net` — disable the B1's own 2.4 radio.
+5. Clients reconnect to `b3net` / `b3net-5g` in ~2 min. **5 GHz is back.**
 
-## Phase 3 — cutover (the downtime window, ~a few minutes is fine)
+## Phase 4 — verify (after each cutover)
 
-Single edge/DHCP on the LAN at a time. Clean swap:
-
-1. (optional) Shut down revo cleanly so it isn't mid-write during the drop.
-2. Set the B1's LAN to `192.168.1.1` (from the bench `.2.1`), reboot.
-3. **Power off the old ASUS** (kills its DHCP + Wi-Fi).
-4. Move the **ISP/WAN cable** -> B1 **WAN** port. MAC-clone if Phase 0 said so.
-5. Move existing wired LAN devices -> B1 **LAN** ports.
-6. Cable **N18U LAN -> B1 LAN** port. Apply `ap-mode.sh` to the N18U
-   (-> `192.168.1.3`, DHCP off). Confirm its 2.4 `b3net` WPA2 is set.
-7. On the B1, add the static lease reserving `.1.3` for the N18U MAC;
-   disable the B1's own 2.4 radio (N18U owns 2.4 now).
-8. Clients reconnect to `b3net` / `b3net-5g` (same SSID+pass) within ~2 min.
-
-## Phase 4 — verify
-
-- Internet from a wired client and from each band.
-- DHCP: a client gets `192.168.1.100-200`; revo still answers at `.1.2`.
-- DNS: `nslookup dnssec.works` resolves (DoT path works with a real WAN now).
-- Both SSIDs present; 2.4 served by N18U, 5 GHz by B1.
+- Internet from wired + each available band.
+- DHCP: client gets `192.168.1.100-200`; revo still answers at `.1.2`.
+- DNS: `nslookup dnssec.works` resolves (DoT works once there's a real WAN).
+- After #2: both SSIDs present — 2.4 on N18U, 5 GHz on B1.
 - WireGuard-in: phone on mobile data -> tunnel up -> reach `https://192.168.1.1`
-  and resolve a LAN name. Set DDNS + use the hostname as the WG endpoint.
-- Confirm no WAN admin exposed (remote_management / remote_mgt_https = 0).
+  + resolve a LAN name. DDNS hostname as the WG endpoint.
+- No WAN admin exposed (`remote_management` / `remote_mgt_https` = 0).
 
-## Phase 5 — rollback (if the swap goes wrong)
+## Phase 5 — rollback (either cutover)
 
-1. Power off the B1.
+1. Power off the FreshTomato edge (N18U or B1).
 2. Reconnect the old ASUS: ISP cable -> its WAN, LAN devices -> its LAN ports.
-3. Power it on — back to the old edge in ~2 min (its config was untouched).
+3. Power on — back to the old edge in ~2 min (its config was untouched).
 
-Keep the old router configured and on the shelf until the new setup has run
+Keep the old router configured and on the shelf until the final setup has run
 clean for a few days.
 
 ## Open items
