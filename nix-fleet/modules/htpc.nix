@@ -149,6 +149,9 @@ in {
       TimeoutStopSec = 20;
     };
   };
+  # tty1 belongs to Kodi: a getty there (e.g. started by an update) would push Kodi off.
+  systemd.services."getty@tty1".enable = false;
+  systemd.services."autovt@tty1".enable = false;
   systemd.services.kodi-setup = {
     description = "Prepare Kodi settings and library paths";
     serviceConfig = { Type = "oneshot"; ExecStart = setup; };
