@@ -22,6 +22,9 @@ let
   gui = {
     "locale.language" = "resource.language.cs_cz";
     "lookandfeel.skincolors" = "pink";        # Estuary's closest to magenta
+    # Keep the audio device open (stream silence). Reopening it through PipeWire
+    # froze the menu for seconds; LibreELEC opened ALSA directly and never noticed.
+    "audiooutput.streamsilence" = "-1";
   };
   hiddenMenu = [ "TV" "Radio" "Games" "Pictures" "Fav" "Weather" "Music" "MusicVideo" ];
   userdata = "/home/kodi/.kodi/userdata";
@@ -171,7 +174,14 @@ in {
 
   hardware.graphics.enable = true;
   security.rtkit.enable = true;
-  services.pipewire = { enable = true; alsa.enable = true; pulse.enable = true; };
+  services.pipewire = {
+    enable = true; alsa.enable = true; pulse.enable = true;
+    # Don't suspend idle outputs: waking the USB sound card stalls Kodi.
+    wireplumber.extraConfig."51-htpc-no-suspend"."monitor.alsa.rules" = [{
+      matches = [{ "node.name" = "~alsa_output.*"; }];
+      actions.update-props."session.suspend-timeout-seconds" = 0;
+    }];
+  };
   services.avahi = { enable = true; nssmdns4 = true; publish = { enable = true; userServices = true; }; };
 
   # Only the listed NAS folders, read-only, mounted on first access.
