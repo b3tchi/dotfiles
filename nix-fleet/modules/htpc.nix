@@ -30,8 +30,9 @@ let
   # Only these NAS folders are mounted and shown. Content type and scraper
   # live in Kodi's DB, so kodi-setup writes them there (Kodi stopped).
   libs = [
-    { name = "Movies"; content = "movies";  scraper = "metadata.themoviedb.org.python";         recursive = 2147483647; }
-    { name = "Series"; content = "tvshows"; scraper = "metadata.tvshows.themoviedb.org.python"; recursive = 0; }
+    # metadata.local = "Local information only": names, .nfo and art next to the files, no online lookups.
+    { name = "Movies"; content = "movies";  scraper = "metadata.local"; recursive = 2147483647; }
+    { name = "Series"; content = "tvshows"; scraper = "metadata.local"; recursive = 0; }
   ];
 
   # Declarative sources; Kodi can't edit them from the GUI (symlink into the store).
@@ -51,6 +52,9 @@ let
                       strSettings, noUpdate, exclude, allAudio, dateAdded)
       SELECT '${media}/${l.name}/', '${l.content}', '${l.scraper}', ${toString l.recursive}, 0, ''', 0, 0, 0, datetime('now')
       WHERE NOT EXISTS (SELECT 1 FROM path WHERE strPath = '${media}/${l.name}/');
+    UPDATE path SET strContent = '${l.content}', strScraper = '${l.scraper}', scanRecursive = ${toString l.recursive}
+      WHERE strPath = '${media}/${l.name}/'
+        AND (strContent IS NOT '${l.content}' OR strScraper IS NOT '${l.scraper}');
   '';
 
   # Runs before Kodi on every boot; each step only acts when something is missing.
