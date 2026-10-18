@@ -30,9 +30,6 @@ in {
 
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
   nix.gc = { automatic = true; dates = "weekly"; };  # generations pruned to 3 by nixos-pull-apply
-  # Optional: EliteDesk binary cache
-  # nix.settings.substituters = [ "http://htpc:5000" ];
-  # nix.settings.trusted-public-keys = [ "elitedesk:..." ];
 
   services.openssh = {
     enable = true;
