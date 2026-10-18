@@ -3,7 +3,7 @@
 # LibreELEC; Kodi under the cage compositor rendered black on the 705 G2's
 # Radeon R6). Kodi has priority; background work goes into background.slice.
 let
-  nas = "192.168.1.245";
+  nas = "nas";      # DNS name from the router (DHCP reservation)
   media = "/mnt/media";
   kodi = pkgs.kodi-gbm.withPackages (p: [
     p.inputstream-adaptive

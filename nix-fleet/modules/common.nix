@@ -1,6 +1,6 @@
 { config, pkgs, lib, hostName, ... }:
 let
-  nas = "192.168.1.245";            # ASUSTOR AS1102TL (reserve this IP in DHCP)
+  nas = "nas";                      # ASUSTOR AS1102TL, DNS name from its router DHCP reservation
   exportBase = "/volume1/nixos";    # per-host shared folders: ${exportBase}-<host> (ADM NFS is per share)
   mnt = "/etc/nixos-remote";
   # Each host takes security fixes on its own: build the NAS config against the
@@ -31,7 +31,7 @@ in {
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
   nix.gc = { automatic = true; dates = "weekly"; };  # generations pruned to 3 by nixos-pull-apply
   # Optional: EliteDesk binary cache
-  # nix.settings.substituters = [ "http://192.168.1.22:5000" ];
+  # nix.settings.substituters = [ "http://htpc:5000" ];
   # nix.settings.trusted-public-keys = [ "elitedesk:..." ];
 
   services.openssh = {

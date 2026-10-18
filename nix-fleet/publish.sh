@@ -9,7 +9,7 @@
 # read-only to that host. This PC writes to it over SSH (no local mount/sudo).
 set -euo pipefail
 
-NAS="${NAS:-b3tchi@192.168.1.245}"
+NAS="${NAS:-b3tchi@nas}"
 NAS_PORT="${NAS_PORT:-10022}"
 NAS_KEY="${NAS_KEY:-$HOME/.ssh/id_nas_b3tchi}"
 NAS_BASE="${NAS_BASE:-/volume1/nixos}"        # share = ${NAS_BASE}-<host>
