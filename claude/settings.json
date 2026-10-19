@@ -104,5 +104,6 @@
   "theme": "dark",
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "switchModelsOnFlag": false
 }
