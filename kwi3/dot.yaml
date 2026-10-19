@@ -241,9 +241,9 @@ linux:
         rm -f "$HOME/.local/bin/kwi3-recover"
       fi
       # kwi3-restart (kwi3-tusy.1): what hotkeyd's $mod+Shift+c runs on a
-      # kwi3 session - wm-state save, kwi3 restarted in place under the same
-      # pid (so a build this step just made is loaded without a logout),
-      # wm-state restore. Guarded like kwi3-recover: older tags lack it.
+      # kwi3 session - kwi3 restarted in place under the same pid, layout
+      # kept, so a build this step just made is loaded without a logout.
+      # Guarded like kwi3-recover: older tags lack it.
       if [ -e "$SRC/i3kwin/session/kwi3-restart" ]; then
         ln -sf "$SRC/i3kwin/session/kwi3-restart" "$HOME/.local/bin/kwi3-restart"
       else
