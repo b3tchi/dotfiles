@@ -483,6 +483,16 @@ func buildBinds() []bind.Bind {
 // `check --ownership` run against the real i3/config.common — is completely
 // unaffected; main.go's effectiveBinds is the only thing that ever sees
 // both slices at once.
+//
+// $mod+Shift+c is i3's own "reload" chord, absent from Binds for the same
+// reason. On kwi3 it restarts the window manager in place (kwi3-tusy.1):
+// kwi3-restart saves the layout with wm-state, has kwi3 exec itself under
+// the same pid - so this daemon and the bar stay up - and restores it. A
+// Run, not a Command: the restart takes the rpc socket down mid-call, and
+// the wrapper is what waits for the new one. Named by $HOME/.local/bin,
+// where rotz's kwi3 dot links it, because a display-manager login's PATH
+// need not include that directory.
 var Kwi3OnlyBinds = []bind.Bind{
 	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
+	{Chord: "$mod+Shift+c", Actions: runAction("$HOME/.local/bin/kwi3-restart")},
 }

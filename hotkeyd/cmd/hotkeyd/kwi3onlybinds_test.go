@@ -176,8 +176,9 @@ func TestKwi3OnlyBinds_OwnershipFlipsWithSession(t *testing.T) {
 	}
 }
 
-// TestKwi3OnlyBinds_Chords is a small named-table guard: exactly one chord
-// today, $mod+Shift+q -> kill. A future addition to Kwi3OnlyBinds should
+// TestKwi3OnlyBinds_Chords is a small named-table guard: exactly two chords
+// today, $mod+Shift+q -> kill and $mod+Shift+c -> kwi3-restart (kwi3-tusy.1).
+// A future addition to Kwi3OnlyBinds should
 // make this test fail by name (forcing a deliberate update) rather than
 // silently pass a bigger table.
 func TestKwi3OnlyBinds_Chords(t *testing.T) {
@@ -186,7 +187,7 @@ func TestKwi3OnlyBinds_Chords(t *testing.T) {
 		got = append(got, b.Chord)
 	}
 	sort.Strings(got)
-	want := []string{"$mod+Shift+q"}
+	want := []string{"$mod+Shift+c", "$mod+Shift+q"}
 	if len(got) != len(want) {
 		t.Fatalf("Kwi3OnlyBinds chords = %v, want %v", got, want)
 	}
@@ -195,4 +196,25 @@ func TestKwi3OnlyBinds_Chords(t *testing.T) {
 			t.Fatalf("Kwi3OnlyBinds chords = %v, want %v", got, want)
 		}
 	}
+}
+
+// TestKwi3OnlyBinds_RestartRunsTheWrapper: $mod+Shift+c on kwi3 is a Run of
+// kwi3-restart (kwi3-tusy.1), never a Command - the restart takes the rpc
+// socket away mid-call, and only the wrapper waits for the new host and
+// puts the layout back.
+func TestKwi3OnlyBinds_RestartRunsTheWrapper(t *testing.T) {
+	for _, b := range Kwi3OnlyBinds {
+		if b.Chord != "$mod+Shift+c" {
+			continue
+		}
+		if len(b.Actions) != 1 {
+			t.Fatalf("$mod+Shift+c has %d actions, want exactly 1", len(b.Actions))
+		}
+		run, ok := b.Actions[0].(bind.Run)
+		if !ok || run.Cmd != "$HOME/.local/bin/kwi3-restart" {
+			t.Fatalf("$mod+Shift+c's action = %#v, want bind.Run{Cmd: \"$HOME/.local/bin/kwi3-restart\"}", b.Actions[0])
+		}
+		return
+	}
+	t.Fatal("Kwi3OnlyBinds has no $mod+Shift+c")
 }
