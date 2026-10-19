@@ -148,7 +148,7 @@ linux:
       CUR_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
       # adapters/x11/Makefile needs g++, pkg-config and Qt6's moc (all from
-      # qt6-base + qt6-declarative), plus xcb + xcb-randr (libxcb). Checked
+      # qt6-base + qt6-declarative), plus xcb + xcb-randr + xcb-xinput (libxcb). Checked
       # up front so a missing dependency is named -- qt6-base,
       # qt6-declarative, libxcb, pkgconf -- rather than surfacing as a raw
       # pkg-config/g++ error out of `make`.
@@ -158,7 +158,7 @@ linux:
       else
         pkg-config --exists Qt6Core Qt6Gui Qt6Network 2>/dev/null || MISSING="$MISSING qt6-base"
         pkg-config --exists Qt6Qml 2>/dev/null || MISSING="$MISSING qt6-declarative"
-        pkg-config --exists xcb xcb-randr 2>/dev/null || MISSING="$MISSING libxcb"
+        pkg-config --exists xcb xcb-randr xcb-xinput 2>/dev/null || MISSING="$MISSING libxcb"
       fi
       MISSING=$(echo "$MISSING" | sed -e 's/^ *//' -e 's/ *$//')
       if ! command -v g++ >/dev/null 2>&1; then
