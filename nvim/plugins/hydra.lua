@@ -53,8 +53,65 @@ return {
 
 		-- local Hydra = require("hydra")
 
-		hydra({
+		local tbl = require("config.table")
+		local table_hydra
+		local function back()
+			vim.schedule(function()
+				table_hydra:activate()
+			end)
+		end
+		local function sub(name, hint, heads)
+			for _, d in ipairs({ "h", "j", "k", "l" }) do
+				heads[#heads + 1] = { d, cmd("call tablemode#spreadsheet#cell#Motion('" .. d .. "')"), { desc = false } }
+			end
+			heads[#heads + 1] = { "<Esc>", back, { exit = true, desc = false } }
+			heads[#heads + 1] = { "q", nil, { exit = true, nowait = true, desc = false } }
+			return hydra({
+				name = name,
+				hint = "Move _h__j__k__l_ | " .. hint .. " | _<Esc>_ back _q_uit",
+				config = { color = "pink", hint = { type = "window" } },
+				mode = "n",
+				heads = heads,
+			})
+		end
+
+		local cell_hydra = sub("TableCell", "Swap _H__J__K__L_ | _y_ank _d_ cut _p_aste | _x_ clear", {
+			{ "H", function() tbl.cell_swap("h") end },
+			{ "J", function() tbl.cell_swap("j") end },
+			{ "K", function() tbl.cell_swap("k") end },
+			{ "L", function() tbl.cell_swap("l") end },
+			{ "y", function() tbl.cell_yank(false) end },
+			{ "d", function() tbl.cell_yank(true) end },
+			{ "p", tbl.cell_paste },
+			{ "x", tbl.cell_clear },
+		})
+		local column_hydra = sub("TableColumn", "Swap _H__L_ | _d_elete | _a_dd after _A_ before | _x_ clear", {
+			{ "H", function() tbl.col_swap("h") end },
+			{ "L", function() tbl.col_swap("l") end },
+			{ "d", tbl.col_delete },
+			{ "a", function() tbl.col_add(true) end },
+			{ "A", function() tbl.col_add(false) end },
+			{ "x", tbl.col_clear },
+		})
+		local row_hydra = sub("TableRow", "Swap _J__K_ | _d_elete | _a_dd below _A_ above | _x_ clear", {
+			{ "J", function() tbl.row_swap("j") end },
+			{ "K", function() tbl.row_swap("k") end },
+			{ "d", tbl.row_delete },
+			{ "a", function() tbl.row_add(true) end },
+			{ "A", function() tbl.row_add(false) end },
+			{ "x", tbl.row_clear },
+		})
+		local function enter(h)
+			return function()
+				vim.schedule(function()
+					h:activate()
+				end)
+			end
+		end
+
+		table_hydra = hydra({
 			name = "TableMode",
+			hint = "Move _h__j__k__l_ | Edit _c_ell _C_olumn _R_ow | _r_ealign _s_/_S_ sort _f_/_e_ formula _?_ cell | _m_ode _t_ableize _q_uit",
 			config = {
 				color = "pink",
 				invoke_on_body = true,
@@ -63,20 +120,25 @@ return {
 				},
 			},
 			mode = "n",
-			body = "<leader>t,",
+			body = "<leader>t",
 			heads = {
 				{ "h", cmd("call tablemode#spreadsheet#cell#Motion('h')") },
-				{ "l", cmd("call tablemde#spreadsheet#cell#Motion('l')") },
+				{ "j", cmd("call tablemode#spreadsheet#cell#Motion('j')") },
+				{ "k", cmd("call tablemode#spreadsheet#cell#Motion('k')") },
+				{ "l", cmd("call tablemode#spreadsheet#cell#Motion('l')") },
+				{ "c", enter(cell_hydra), { exit = true } },
+				{ "C", enter(column_hydra), { exit = true } },
+				{ "R", enter(row_hydra), { exit = true } },
+				{ "r", cmd("call tablemode#table#Realign('.')") },
 				{ "s", cmd("TableSort!") },
 				{ "S", cmd("TableSort") },
-				{ "?", cmd("call tablemode#spreadsheet#EchoCell()") },
-				{ "c", cmd("call tablemode#spreadsheet#InsertColumn(0)"), { exit = true, desc = "add col after" } },
-				{ "C", cmd("call tablemode#spreadsheet#InsertColumn(1)"), { exit = true, desc = "add cal before" } },
-				{ "d", cmd("call tablemode#spreadsheet#DeleteColumn()") },
-				{ "r", cmd("call tablemode#table#Realign('.')") },
-				{ "f", cmd("call tablemode#spreadsheet#formula#Add()"), { exit = true, desc = "add formula" } },
+				{ "f", cmd("call tablemode#spreadsheet#formula#Add()"), { exit = true } },
 				{ "e", cmd("call tablemode#spreadsheet#formula#EvaluateFormulaLine()") },
-				{ "<Esc>", nil, { exit = true, mode = "n" } },
+				{ "?", cmd("call tablemode#spreadsheet#EchoCell()") },
+				{ "m", cmd("TableModeToggle") },
+				{ "t", cmd("Tableize"), { exit = true } },
+				{ "q", nil, { exit = true, nowait = true, desc = false } },
+				{ "<Esc>", nil, { exit = true, desc = false } },
 			},
 		})
 

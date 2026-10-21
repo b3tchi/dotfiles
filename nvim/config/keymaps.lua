@@ -21,6 +21,9 @@ vim.keymap.set(
 	{ noremap = true, silent = true, desc = "replace word from clipboard" }
 )
 
+-- reload the whole config; :restart keeps buffers/windows via its own session
+vim.keymap.set("n", "<leader>R", "<cmd>silent wall | restart<CR>", { desc = "restart nvim (reload config)" })
+
 --keep clipboard same when pasting over content
 vim.keymap.set("x", "p", function()
 	return 'pgv"' .. vim.v.register .. "y"
