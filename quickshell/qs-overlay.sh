@@ -24,22 +24,33 @@ OVERLAY="$HOME/.dotfiles/quickshell/overlay"
 # `-p <overlay>` process if this session runs one, else the session's main
 # instance. qs-clip.sh / qs-notif.sh already resolve their target this way,
 # which is why $mod+v and $mod+n never had this failure.
+#
+# NEWEST WINS within a shape (dotfiles-72f7). A session recreated on the same
+# display number can find the previous session's quickshell still alive,
+# orphaned, with the same DISPLAY in its environ; its X server is gone and an
+# ipc call to it hangs forever. pgrep lists lowest pid first, which is the OLD
+# one, so of several matches the one started last is taken - by start time
+# (/proc/<pid>/stat field 22), not pid, because pids wrap.
+qs_start_time() {
+    # Strip through the ")" closing comm first: comm may contain spaces.
+    sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f20
+}
+
 qs_target_pid() {
-    _main=""
+    _ovl=""; _ovl_t=-1; _main=""; _main_t=-1
     for _pid in $(pgrep -x quickshell 2>/dev/null); do
         qs_same_session "$_pid" || continue
+        _t="$(qs_start_time "$_pid")"
+        [ -n "$_t" ] || continue            # exited since pgrep
         if tr '\0' '\n' <"/proc/$_pid/cmdline" | grep -Fxq -- "$OVERLAY"; then
-            echo "$_pid"                    # dedicated overlay process wins
-            return 0
-        fi
+            [ "$_t" -gt "$_ovl_t" ] && { _ovl="$_pid"; _ovl_t="$_t"; }
         # main instance = this session's quickshell with no -p profile at all.
-        # Remembered rather than returned, so a dedicated process later in the
-        # pgrep order still takes precedence.
-        if [ -z "$_main" ] \
-           && ! tr '\0' '\n' <"/proc/$_pid/cmdline" | grep -Fxq -- '-p'; then
-            _main="$_pid"
+        elif ! tr '\0' '\n' <"/proc/$_pid/cmdline" | grep -Fxq -- '-p'; then
+            [ "$_t" -gt "$_main_t" ] && { _main="$_pid"; _main_t="$_t"; }
         fi
     done
+    # A dedicated overlay process wins over the main instance.
+    [ -n "$_ovl" ] && { echo "$_ovl"; return 0; }
     [ -n "$_main" ] || return 1
     echo "$_main"
 }
@@ -49,7 +60,9 @@ qs_call() {
         echo "qs-overlay: no quickshell instance for $QS_DPY_VAR=$QS_DPY_VAL" >&2
         exit 1
     }
-    exec quickshell ipc --pid "$_tpid" call "$@"
+    # Bounded: a target that stopped answering must cost one lost keypress,
+    # not one more hung process per keypress (dotfiles-72f7).
+    exec timeout 5 quickshell ipc --pid "$_tpid" call "$@"
 }
 
 # Sourcing this file with QS_OVERLAY_LIB=1 loads the helpers WITHOUT

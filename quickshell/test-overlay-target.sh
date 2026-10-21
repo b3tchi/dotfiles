@@ -37,6 +37,7 @@ cleanup() {
   [ -n "${MAIN_PID:-}" ]    && kill "$MAIN_PID"    2>/dev/null
   [ -n "${OVERLAY_PID:-}" ] && kill "$OVERLAY_PID" 2>/dev/null
   [ -n "${OTHER_PID:-}" ]   && kill "$OTHER_PID"   2>/dev/null
+  [ -n "${STALE_PID:-}" ]   && kill "$STALE_PID"   2>/dev/null
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -119,6 +120,29 @@ kill "$MAIN_PID" 2>/dev/null; MAIN_PID=""
 sleep 0.4
 assert_eq "with only the notif profile left there is NO target" \
   "NONE" "$(qs_target_pid || echo NONE)"
+
+# ---------------------------------------------------------------------------
+scenario "a stale instance left by a dead session never wins (dotfiles-72f7)"
+# The kwi3 :40 xrdp session was recreated on the same display number while the
+# previous session's main quickshell lived on, orphaned, with DISPLAY=:40.0
+# still in its environ. Both matched; pgrep lists lowest pid first, so the OLD
+# one won and every `quickshell ipc --pid <old> call ...` hung forever. Of two
+# matching instances of the same shape the newest by start time is the one
+# its session is actually running.
+start_instance; STALE_PID="$LAST_PID"
+sleep 1.1   # start time is in clock ticks; keep the two clearly apart
+start_instance; MAIN_PID="$LAST_PID"
+sleep 0.6
+assert_eq "of two main instances the newer one is the target" \
+  "$MAIN_PID" "$(qs_target_pid || echo NONE)"
+
+start_instance -p "$HOME/.dotfiles/quickshell/overlay"; OVERLAY_PID="$LAST_PID"
+sleep 0.6
+assert_eq "a dedicated overlay host still wins over a newer main instance" \
+  "$OVERLAY_PID" "$(qs_target_pid || echo NONE)"
+kill "$OVERLAY_PID" "$STALE_PID" "$MAIN_PID" 2>/dev/null
+OVERLAY_PID=""; MAIN_PID=""; STALE_PID=""
+sleep 0.4
 
 # ---------------------------------------------------------------------------
 scenario "another session's instance is never borrowed"
