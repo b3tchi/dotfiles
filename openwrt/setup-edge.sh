@@ -28,7 +28,7 @@ fi
 WG_KEY=$(cat /etc/wireguard/wg0.key)
 echo "SERVER PUBKEY (put in peer configs): $(cat /etc/wireguard/wg0.pub)"
 
-uci -q delete network.wg0
+uci -q delete network.wg0 || true   # tolerate absence (set -e)
 uci set network.wg0=interface
 uci set network.wg0.proto='wireguard'
 uci set network.wg0.private_key="$WG_KEY"
@@ -43,7 +43,7 @@ uci add_list network.wg0.addresses='10.22.0.1/24'
 #   uci set network.wgpeer_phone.description='phone'
 
 # --- firewall: wg0 into the lan zone (reach LAN over tunnel), open the port ---
-uci -q delete firewall.wg
+uci -q delete firewall.wg || true   # tolerate absence (set -e)
 uci set firewall.wg=rule
 uci set firewall.wg.name='Allow-WireGuard'
 uci set firewall.wg.src='wan'
@@ -54,6 +54,9 @@ uci set firewall.wg.target='ACCEPT'
 uci add_list firewall.@zone[0].network='wg0' 2>/dev/null || true
 
 uci commit
-/etc/init.d/network reload
+# network RESTART (not reload): a freshly apk-installed proto handler
+# (wireguard.sh) is only picked up by a full netifd restart; a reload leaves
+# wg0 as proto 'none' / NO_DEVICE. Restart briefly bounces WAN (~5s).
+/etc/init.d/network restart
 /etc/init.d/firewall reload
 echo "edge committed — add peers (see commented block), set DDNS, test from mobile"
