@@ -154,6 +154,10 @@ in {
       ExecStart = "${kodi}/bin/kodi-standalone";
       Restart = "always";
       RestartSec = 5;
+      # A leaking Kodi once filled RAM and thrashed the box for 35 min (fan at
+      # max, no ssh). Over the cap the kernel kills Kodi and it restarts in 5 s.
+      MemoryMax = "5G";
+      MemorySwapMax = "512M";
       TimeoutStopSec = 20;
     };
   };
