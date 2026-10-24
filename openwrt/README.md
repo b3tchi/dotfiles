@@ -55,10 +55,19 @@ in `setup-edge.sh`.
 
 OpenWrt 25.12 uses `apk`, not `opkg`.
 
-## Post-cutover checklist
+## As-built (2026-10)
 
-- `apk` works (WAN up), run `setup-edge.sh`.
-- Wi-Fi `b3net` (2.4, radio0) + `b3net-5g` (5, radio1), WPA2-AES (or WPA3), PSK in LuCI.
-- WireGuard peers added (public keys), DDNS set, endpoint = DDNS host:51820.
-- DNS leaves over DoH/DoT, not plaintext :53.
-- No admin/SSH exposed to WAN (default firewall drops wan input; only UDP 51820 open).
+- Edge live: WAN DHCP (`78.44.49.38`), LAN `192.168.1.1`, DHCP `.100-.200`.
+- Wi-Fi `b3net` (2.4, radio0) + `b3net-5g` (5, radio1), WPA2-AES, same PSK (set in LuCI).
+- DNS over DoH (Cloudflare + Quad9) via https-dns-proxy; names resolve (`nas.lan`, etc.).
+- `nas` static-host record -> `192.168.1.245` (NAS has a static IP, no lease to auto-name).
+- WireGuard-in `wg0` `10.22.0.1/24` :51820; peer `motorola-razr` (`10.22.0.2/32`),
+  handshake confirmed. Endpoint is the raw public IP (see DDNS note).
+- Lockdown: SSH key-only, HTTPS-only UI, no WAN admin, only UDP 51820 open on wan.
+
+### DDNS (optional, not enabled)
+
+`ddns-scripts` + `luci-app-ddns` are installed but dormant. The public IP has been
+stable, so the WireGuard endpoint uses the raw IP. If the IP ever changes you lose
+remote access until home — enable DDNS then (LuCI -> Services -> Dynamic DNS;
+DuckDNS = subdomain + token) and switch the client Endpoint to the hostname.

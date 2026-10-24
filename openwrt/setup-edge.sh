@@ -35,12 +35,16 @@ uci set network.wg0.private_key="$WG_KEY"
 uci set network.wg0.listen_port='51820'
 uci add_list network.wg0.addresses='10.22.0.1/24'
 
-# Peer(s): paste each device's PUBLIC key + its tunnel /32. Repeat the block.
-#   uci -q delete network.wgpeer_phone
-#   uci set network.wgpeer_phone=wireguard_wg0
-#   uci set network.wgpeer_phone.public_key='<PHONE_PUBKEY>'
-#   uci add_list network.wgpeer_phone.allowed_ips='10.22.0.2/32'
-#   uci set network.wgpeer_phone.description='phone'
+# Peer(s): a device's PUBLIC key (not secret) + its tunnel /32. One block each.
+# Client config built on the box, imported via QR (qrencode -t SVG/ANSIUTF8),
+# then the /tmp config wiped. Client side: Address 10.22.0.N/32, DNS
+# 192.168.1.1, AllowedIPs '192.168.1.0/24, 10.22.0.0/24' (split tunnel),
+# Endpoint <public-ip-or-ddns>:51820, PersistentKeepalive 25.
+uci -q delete network.wgphone || true
+uci set network.wgphone=wireguard_wg0
+uci set network.wgphone.public_key='pFTJW+ZfUaAPnq2PsGPfjZWJ+gG1eBWNdpELakEiH0o='   # motorola-razr
+uci add_list network.wgphone.allowed_ips='10.22.0.2/32'
+uci set network.wgphone.description='motorola-razr'
 
 # --- firewall: wg0 into the lan zone (reach LAN over tunnel), open the port ---
 uci -q delete firewall.wg || true   # tolerate absence (set -e)

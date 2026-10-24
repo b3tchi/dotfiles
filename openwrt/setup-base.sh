@@ -21,14 +21,35 @@ uci set network.lan.netmask='255.255.255.0'
 uci set dhcp.lan.start='100'
 uci set dhcp.lan.limit='101'
 uci set dhcp.lan.leasetime='1d'
-# Static reservation example (reserve the old .1.2 for revo, etc.):
-#   uci add dhcp host; uci set dhcp.@host[-1].mac='D0:27:88:..'; \
-#   uci set dhcp.@host[-1].ip='192.168.1.2'; uci set dhcp.@host[-1].name='revo'
+# Static DHCP reservation example (restore an old fixed IP, outside the pool):
+#   uci add dhcp host; uci set dhcp.@host[-1].mac='FC:3F:DB:0D:4E:C3'; \
+#   uci set dhcp.@host[-1].ip='192.168.1.99'; uci set dhcp.@host[-1].name='elitedesk'
 
-# --- Wi-Fi: structure only; enable + set SSID/PSK in LuCI (PSK stays off-repo) ---
-# radio0 = 2.4GHz (b3net), radio1 = 5GHz (b3net-5g). Set country, leave enabled.
+# --- Static DNS record for the NAS (static IP .245, no DHCP lease to auto-name) ---
+# makes 'nas' / 'nas.lan' resolve. Add similar for any other static-IP host.
+uci -q delete dhcp.nas || true
+uci set dhcp.nas=domain
+uci set dhcp.nas.name='nas'
+uci set dhcp.nas.ip='192.168.1.245'
+
+# --- Wi-Fi: SSID/band/encryption structure; PSK stays off-repo (set in LuCI) ---
+# radio0 = 2.4GHz (b3net), radio1 = 5GHz (b3net-5g).
 uci set wireless.radio0.country='CZ'
+uci set wireless.radio0.channel='1'
 uci set wireless.radio1.country='CZ'
+uci set wireless.radio1.channel='36'
+uci set wireless.radio1.htmode='HE80'
+# iface0 -> b3net (2.4), iface1 -> b3net-5g (5). encryption psk2 (WPA2-AES).
+uci set wireless.default_radio0.ssid='b3net'
+uci set wireless.default_radio0.encryption='psk2'
+uci set wireless.default_radio0.network='lan'
+uci set wireless.default_radio0.disabled='0'
+uci set wireless.default_radio1.ssid='b3net-5g'
+uci set wireless.default_radio1.encryption='psk2'
+uci set wireless.default_radio1.network='lan'
+uci set wireless.default_radio1.disabled='0'
+# PSK NOT set here — set both radios' key in LuCI (or: uci set
+# wireless.default_radioN.key='...'; same password on both for one roaming net).
 
 # --- SSH: key is in /etc/dropbear/authorized_keys; keep LAN-only (default).
 #     Leave PasswordAuth until the root password is set in LuCI, then lock:
