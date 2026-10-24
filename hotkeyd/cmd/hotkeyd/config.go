@@ -52,6 +52,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
 	"hotkeyd/internal/bind"
 )
@@ -452,6 +453,44 @@ func buildBinds() []bind.Bind {
 	// One chord: the ten resize verbs live in Layers["resize"].
 	out = append(out, bind.Bind{Chord: "$mod+r", Actions: []bind.Action{bind.EnterLayer{Layer: "resize"}}})
 
+	return applyHostOverrides(out, hostOverrides())
+}
+
+// applyHostOverrides lays this machine's overrides (host_*.go, picked by
+// build tag) over the shared table: a chord already in it keeps its place
+// and takes the override's actions, a nil override drops the chord, and a
+// chord the table lacks is appended, in sorted order so the build is
+// reproducible. The shared table stays the one source for every chord a
+// machine does not name.
+func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind.Bind {
+	if len(over) == 0 {
+		return binds
+	}
+	out := make([]bind.Bind, 0, len(binds)+len(over))
+	seen := map[string]bool{}
+	for _, b := range binds {
+		acts, ok := over[b.Chord]
+		if !ok {
+			out = append(out, b)
+			continue
+		}
+		seen[b.Chord] = true
+		if acts == nil {
+			continue
+		}
+		b.Actions = acts
+		out = append(out, b)
+	}
+	extra := make([]string, 0, len(over))
+	for chord, acts := range over {
+		if !seen[chord] && acts != nil {
+			extra = append(extra, chord)
+		}
+	}
+	sort.Strings(extra)
+	for _, chord := range extra {
+		out = append(out, bind.Bind{Chord: chord, Actions: over[chord]})
+	}
 	return out
 }
 
