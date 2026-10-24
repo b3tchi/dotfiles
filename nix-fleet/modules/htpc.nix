@@ -25,6 +25,11 @@ let
     # Keep the audio device open (stream silence). Reopening it through PipeWire
     # froze the menu for seconds; LibreELEC opened ALSA directly and never noticed.
     "audiooutput.streamsilence" = "-1";
+    # Suspend after 30 idle minutes in the menu (never during playback).
+    # Kodi's PowerState enum: 3 = suspend. A running system update holds a
+    # sleep inhibitor (common.nix), so logind refuses until it finishes.
+    "powermanagement.shutdowntime" = "30";
+    "powermanagement.shutdownstate" = "3";
   };
   hiddenMenu = [ "TV" "Radio" "Games" "Pictures" "Fav" "Weather" "Music" "MusicVideo" ];
   userdata = "/home/kodi/.kodi/userdata";
@@ -190,6 +195,20 @@ in {
     fsType = "nfs";
     options = [ "ro" "noauto" "x-systemd.automount" "x-systemd.idle-timeout=600" "nfsvers=4" ];
   }) libs);
+
+  # Kodi suspends through logind; allow it even if its session isn't "active".
+  security.polkit.enable = true;
+  security.polkit.extraConfig = ''
+    polkit.addRule(function(action, subject) {
+      if (subject.user == "kodi" && action.id.indexOf("org.freedesktop.login1.suspend") == 0)
+        return polkit.Result.YES;
+    });
+  '';
+  # Wake from suspend by magic packet (Kore/Yatse "Wake up"); USB remote/keyboard
+  # wakes it too. Every wired NIC, so no interface name in the config.
+  services.udev.extraRules = ''
+    ACTION=="add", SUBSYSTEM=="net", KERNEL=="en*", RUN+="${pkgs.ethtool}/bin/ethtool -s $name wol g"
+  '';
 
   # Kodi web/JSON-RPC (Kore, Yatse) and event server (remotes).
   networking.firewall = { allowedTCPPorts = [ 8080 9090 ]; allowedUDPPorts = [ 9777 ]; };

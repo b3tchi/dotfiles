@@ -17,7 +17,9 @@ let
     last=$(cat /var/lib/nixos-pull/version 2>/dev/null || true)
     if [ "$1" = changed ] && [ "$cur" = "$last" ]; then exit 0; fi
     # build from the resolved version dir: path: flakes copy a symlink as-is
-    nixos-rebuild switch --flake "path:${mnt}/$cur#default" \
+    # (sleep inhibited: an idle suspend mid-build would leave a half switch)
+    ${pkgs.systemd}/bin/systemd-inhibit --what=sleep --who=nixos-pull --why="system update" \
+      nixos-rebuild switch --flake "path:${mnt}/$cur#default" \
       --override-input nixpkgs ${channel} --no-write-lock-file
     mkdir -p /var/lib/nixos-pull && echo "$cur" > /var/lib/nixos-pull/version
     # small SD cards: keep only the last 3 system generations (weekly gc frees them)
