@@ -1,0 +1,25 @@
+# GTK theme for X11 sessions (i3, kwi3, proot i3/Termux:X11).
+#
+# On X11, GTK reads its theme from an XSETTINGS daemon (xfsettingsd,
+# gsd-xsettings, xsettingsd) and falls back to these files when none runs.
+# Our WM sessions run no daemon, so without these files Thunar & co fall
+# back to plain Adwaita even though gsettings names a theme. Wayland GTK
+# (sway) reads gsettings directly; these files are harmless there.
+#
+# Values mirror org.gnome.desktop.interface (gtk-theme, icon-theme,
+# cursor-theme, font-name) — keep both in sync when changing the theme.
+linux:
+  links:
+    settings.ini:
+      - ~/.config/gtk-3.0/settings.ini
+      - ~/.config/gtk-4.0/settings.ini
+    gtkrc-2.0: ~/.gtkrc-2.0
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm matcha-gtk-theme papirus-maia-icon-theme elementary-icon-theme ttf-iosevka-nerd
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      yay -S --needed --noconfirm matcha-gtk-theme papirus-maia-icon-theme elementary-icon-theme ttf-iosevka-nerd
+      {{/if}}

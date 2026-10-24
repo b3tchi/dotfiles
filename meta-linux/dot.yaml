@@ -19,6 +19,7 @@ depends:
   - i3
   - hotkeyd
   - quickshell
+  - gtk
   - rotz-nightly
   - xterm
   - emacs

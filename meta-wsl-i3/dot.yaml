@@ -19,6 +19,7 @@ depends:
   - st
   - hotkeyd
   - quickshell
+  - gtk
   - docker
 
 installs:

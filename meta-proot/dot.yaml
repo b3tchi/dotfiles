@@ -14,5 +14,6 @@ depends:
   - i3
   - hotkeyd
   - quickshell
+  - gtk
   - st
   - xrdp
