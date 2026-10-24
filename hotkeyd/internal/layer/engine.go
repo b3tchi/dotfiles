@@ -512,6 +512,25 @@ func (e *Engine) ShutdownActions() []bind.Action {
 	return e.exitActions(e.layerName)
 }
 
+// Reset returns the engine to the default layer with no held modifiers or
+// keys down, for an input source that lost its grabs (the KWin plugin
+// connection dropped): nothing the engine believed about a layer or a held
+// key can be trusted once the grabs behind it are gone. Returns the layer's
+// on_exit actions for the caller to dispatch (the overlay must not stay up)
+// and publishes the change. A no-op on a fresh default-layer engine apart
+// from clearing held/down.
+func (e *Engine) Reset() []bind.Action {
+	var out []bind.Action
+	if e.layerName != "" && e.layerName != DefaultLayer {
+		out = e.exitActions(e.layerName)
+	}
+	e.layerName = DefaultLayer
+	e.held = map[string]time.Time{}
+	e.down = map[string]time.Time{}
+	e.publish(nil, "reset")
+	return out
+}
+
 // ReconcileHoldLayer ends the current hold layer when down is false — i.e.
 // the server confirms its modifier is NOT down. Returns the actions to
 // dispatch (on_hold_release, then an implicit exit).

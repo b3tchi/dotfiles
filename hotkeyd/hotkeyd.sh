@@ -456,8 +456,14 @@ in and has no --binds flag (python was removed at dotfiles-ylmp.16) -- unset \
 HOTKEYD_BINDS, or point HOTKEYD_GO_DAEMON at a binary built with the table \
 you want" 78
         fi
+        # KWI3_INPUT=kwin: the keys come from the kwi3keys KWin plugin, not
+        # XI2 grabs (--input kwin; the daemon then opens no X connection and
+        # refuses to start without $KWI3SOCK). --display stays so the
+        # pid lookup above still finds the process.
+        INPUT_ARG=
+        [ "${KWI3_INPUT:-}" = kwin ] && INPUT_ARG=kwin
         env -u I3SOCK -u TMUX -u TMUX_PANE DISPLAY="$DPY_BASE" \
-            setsid "$DAEMON" --display "$DPY_BASE" >>"$LOG" 2>&1 &
+            setsid "$DAEMON" --display "$DPY_BASE" ${INPUT_ARG:+--input "$INPUT_ARG"} >>"$LOG" 2>&1 &
         # Give it long enough to fail loudly (bad table, no X, lock held) rather
         # than reporting success for a process that died on startup.
         sleep 0.4

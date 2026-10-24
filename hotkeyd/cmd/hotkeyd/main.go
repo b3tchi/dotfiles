@@ -25,6 +25,7 @@ import (
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/i3"
 	"hotkeyd/internal/kwi3rpc"
+	"hotkeyd/internal/kwin"
 	"hotkeyd/internal/layer"
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
@@ -59,7 +60,16 @@ func main() {
 func run(argv []string) int {
 	fs := flag.NewFlagSet("hotkeyd", flag.ContinueOnError)
 	displayFlag := fs.String("display", "", "X display (default: $DISPLAY)")
+	inputFlag := fs.String("input", "x11", "key source: x11 (XI2 grabs) or kwin (kwi3keys plugin)")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	switch *inputFlag {
+	case "x11":
+	case "kwin":
+		return runKwin(kwin.SocketPath())
+	default:
+		daemonLog(fmt.Sprintf("unknown --input %q (x11 or kwin)", *inputFlag))
 		return 2
 	}
 
