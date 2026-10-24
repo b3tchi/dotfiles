@@ -131,6 +131,7 @@ let
 in {
   users.users.kodi = {
     isNormalUser = true;
+    uid = 1000;                   # pinned: the memory cap below names user-1000.slice
     extraGroups = [ "video" "audio" "input" "render" ];
   };
 
@@ -154,13 +155,14 @@ in {
       ExecStart = "${kodi}/bin/kodi-standalone";
       Restart = "always";
       RestartSec = 5;
-      # A leaking Kodi once filled RAM and thrashed the box for 35 min (fan at
-      # max, no ssh). Over the cap the kernel kills Kodi and it restarts in 5 s.
-      MemoryMax = "5G";
-      MemorySwapMax = "512M";
       TimeoutStopSec = 20;
     };
   };
+  # A leaking Kodi once filled RAM and thrashed the box for 35 min (fan at max,
+  # no ssh). PAMName moves kodi.bin into the user's session scope, so the cap
+  # sits on the user slice, not kodi.service: over it the kernel kills Kodi
+  # and the service restarts it.
+  systemd.slices."user-1000".sliceConfig = { MemoryMax = "5G"; MemorySwapMax = "512M"; };
   # tty1 belongs to Kodi: a getty there (e.g. started by an update) would push Kodi off.
   systemd.services."getty@tty1".enable = false;
   systemd.services."autovt@tty1".enable = false;
