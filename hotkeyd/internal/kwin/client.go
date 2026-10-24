@@ -40,6 +40,9 @@ func SocketPath() string {
 
 // Event is one decoded plugin message that is not hello. Kind is "press",
 // "release" or "mods" (a bare modifier-state change, Keysym/Device unset).
+// The client itself also emits "lost" (the connection dropped) and "up"
+// (it reconnected and the set was re-sent), in order with the key events, so
+// a consumer can drop any state that depended on grabs the plugin cleared.
 type Event struct {
 	Kind   string
 	Keysym uint32
@@ -239,6 +242,7 @@ func (c *Client) run(conn net.Conn, br *bufio.Reader) {
 		c.sent = nil
 		c.mu.Unlock()
 		conn.Close()
+		c.emit(Event{Kind: "lost"})
 
 		for {
 			select {
@@ -250,12 +254,21 @@ func (c *Client) run(conn net.Conn, br *bufio.Reader) {
 			if err == nil {
 				conn, br = nc, nbr
 				c.log("kwi3keys reconnected")
+				c.emit(Event{Kind: "up"})
 				break
 			}
 			if delay *= 2; delay > c.max {
 				delay = c.max
 			}
 		}
+	}
+}
+
+// emit delivers a client-originated event, giving up if the client closes.
+func (c *Client) emit(ev Event) {
+	select {
+	case c.events <- ev:
+	case <-c.done:
 	}
 }
 

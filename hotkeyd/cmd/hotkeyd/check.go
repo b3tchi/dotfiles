@@ -34,6 +34,10 @@ func usageText() string {
   hotkeyd [--display DISPLAY]
         start the daemon
 
+  hotkeyd --input kwin
+        start the daemon on the kwi3keys KWin plugin ($XDG_RUNTIME_DIR/
+        kwi3keys.sock) instead of an X display; needs $KWI3SOCK
+
   hotkeyd --check
         validate the compiled bind table and exit; no grabs, no X
         connection, no i3 -- runs with no $DISPLAY set (us020 AC2)
@@ -101,6 +105,7 @@ func Dispatch(argv []string) int {
 	check := fs.Bool("check", false, "validate the compiled bind table headless and exit")
 	health := fs.Bool("health", false, "report whether this display's daemon is SERVING")
 	display := fs.String("display", "", "X display (default: $DISPLAY)")
+	fs.String("input", "x11", "key source: x11 or kwin (handled by the daemon start path)")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
