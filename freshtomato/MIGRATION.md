@@ -1,12 +1,24 @@
 # Router migration plan
 
-Replace the old ASUS edge router with two FreshTomato boxes: the RT-AC66U B1 as
-the new dual-band edge, the RT-N18U as a 2.4 GHz access point. Keep the existing
-`192.168.1.0/24` subnet so nothing with a hardcoded IP breaks.
+Replace the old ASUS edge router with an **ASUS RT-AX53U running OpenWrt** as the
+sole edge + Wi-Fi (dual-band, Wi-Fi 6). Keep the existing `192.168.1.0/24` subnet
+so nothing with a hardcoded IP breaks. The Broadcom boxes (RT-AC66U B1, RT-N18U)
+and the old router become shelved spares / rollback.
 
-Staged: the N18U takes the edge role first (interim), which frees the old router
-and the bench so the B1 can be flashed and configured without time pressure;
-a second cutover then makes the B1 the edge and the N18U an AP. See the phases.
+> Earlier revisions staged a FreshTomato edge (N18U interim -> B1). The AX53U
+> purchase supersedes that: it's a better radio (Wi-Fi 6) and MediaTek, so it
+> runs OpenWrt and goes straight in as the edge. FreshTomato notes below are kept
+> for the spare Broadcom boxes; the AX53U config lives in `../openwrt/`.
+
+## Why OpenWrt here (not FreshTomato)
+
+The AX53U is **MediaTek MT7621A** (ramips/mt7621), not Broadcom. FreshTomato /
+DD-WRT / Merlin are Broadcom-oriented and don't support it; OpenWrt's MediaTek
+drivers are first-class (the opposite of the Broadcom situation, where OpenWrt's
+Wi-Fi is weak). WireGuard is in-kernel on OpenWrt and fine on MT7621.
+
+Trade-off: two firmware worlds. OpenWrt uses UCI (`/etc/config/*`, `uci` CLI),
+not nvram — the FreshTomato `setup-core.sh` does NOT apply to the AX53U.
 
 ## Current state (2026-10)
 
@@ -14,9 +26,10 @@ a second cutover then makes the B1 the edge and the N18U an AP. See the phases.
 |---|---|---|---|
 | old ASUS | edge | `192.168.1.1` | `b3net` 2.4 + `b3net-5g` 5 GHz, DHCP for LAN |
 | revo | NixOS host | `192.168.1.2` | nix-fleet box |
-| RT-N18U | bench | `192.168.2.1` | FreshTomato 2026.4, core config done, WG server keyed (no peers) |
-| RT-AC66U B1 | stock, untouched | — | to become edge |
-| laptop | — | `192.168.1.60` (wifi) | USB-ethernet bench link to the N18U |
+| RT-AX53U | new, boxed | — | MediaTek MT7621, to become the OpenWrt edge |
+| RT-N18U | bench | `192.168.2.1` | FreshTomato 2026.4, configured — now a SPARE |
+| RT-AC66U B1 | stock, untouched | — | now a SPARE |
+| laptop | — | `192.168.1.60` (wifi) | USB-ethernet bench link |
 
 Public IP `78.44.49.38` — routable (not CGNAT), so WireGuard-in is viable.
 
@@ -24,101 +37,67 @@ Public IP `78.44.49.38` — routable (not CGNAT), so WireGuard-in is viable.
 
 | Device | Role | LAN IP | Wi-Fi | DHCP |
 |---|---|---|---|---|
-| **B1** | edge | `192.168.1.1` | `b3net-5g` (5 GHz) | server: dynamic `.100-.200`, statics `.2-.50` |
-| **N18U** | AP (bridged) | `192.168.1.3` | `b3net` (2.4 GHz) | off |
-| old ASUS | retired | — | — | — |
+| **AX53U** | edge (OpenWrt) | `192.168.1.1` | `b3net` 2.4 + `b3net-5g` 5 GHz | server: dynamic `.100-.200`, statics `.2-.50` |
+| old ASUS / B1 / N18U | shelved spares | — | — | — |
 
-- Edge does WAN + DHCP + DNS (DoT/DNSSEC) + WireGuard-in.
-- Band split: 5 GHz on the B1, 2.4 GHz on the N18U, one subnet, clients pick by band.
-- `.1.2` stays revo; N18U AP reserved at `.1.3` by MAC `38:2C:4A:65:19:40`.
+Edge does WAN + DHCP + DNS (DoT) + WireGuard-in + both Wi-Fi bands. `.1.2` stays
+revo.
 
-## Phase 0 — capture the old router's settings (before touching anything)
+## Phase 0 — capture the old router's settings
 
-From the old router's admin UI, write down:
-- WAN type (DHCP / PPPoE / static). If PPPoE: username + password.
-- WAN MAC (for MAC-clone, if the ISP binds to it).
-- Wi-Fi: exact SSIDs (`b3net`, `b3net-5g`), password, security (WPA2-AES).
-- Any port forwards / static leases / DDNS hostname to recreate.
+WAN type (DHCP / PPPoE creds / static), WAN MAC (for clone), Wi-Fi SSIDs
+(`b3net`, `b3net-5g`) + password + security, port forwards, DDNS hostname.
 
-Strategy: the **N18U goes live as an interim edge first**. That retires the old
-router and frees the bench (USB-ethernet link), so the B1 can be flashed and
-configured unhurried while the N18U carries the live network. A second cutover
-then promotes the B1 to edge and demotes the N18U to its final AP role.
+## Phase 1 — bench-flash + configure the AX53U (no downtime; old router live)
 
-Two cutovers, each a ~2 min drop. Reuse ONE WireGuard server key across both so
-peer configs never change.
+See `../openwrt/README.md` for the exact flash method (no web-UI flash on this
+model — recovery-mode initramfs -> sysupgrade, or `mtd-write` over SSH; pick the
+OpenWrt version carefully, bootloop reports exist).
 
-### Interim-edge limitation — no 5 GHz
+1. Connect AX53U LAN -> laptop USB-ethernet; flash OpenWrt per `../openwrt/`.
+2. Temp LAN `192.168.2.1` on the bench (avoid clashing with the live `.1.x`).
+3. Apply `../openwrt/setup.sh` (UCI): LAN, DHCP (`.100-.200`), DNS (DoT via
+   https-dns-proxy or stubby), firewall, SSH key, both Wi-Fi bands (WPA2/WPA3),
+   WireGuard-in (`wg0`, split tunnel, peers, DNS push `192.168.1.1`).
+4. WAN: set the type from Phase 0 (don't connect the WAN cable yet).
 
-The N18U is **2.4 GHz only**. While it is the edge, there is **no `b3net-5g`** —
-all Wi-Fi is 2.4 GHz `b3net`. 5 GHz returns when the B1 takes over. Accept this
-for the interim window, or keep the old router's 5 GHz radio alive briefly as a
-dumb AP if the gap matters (adds an SSID-clash risk — simplest is to live
-without 5 GHz for the window).
+## Phase 2 — cutover (single, ~2 min drop)
 
-## Phase 1 — N18U to interim edge (cutover #1)
+1. (optional) Shut down revo cleanly.
+2. Set the AX53U LAN to `192.168.1.1`, reboot.
+3. **Power off the old ASUS.**
+4. ISP/WAN cable -> AX53U WAN (MAC-clone if Phase 0 said so). Wired LAN
+   devices -> AX53U LAN ports.
+5. Clients reconnect to `b3net` / `b3net-5g` (same SSID+pass) in ~2 min.
 
-The N18U is already FreshTomato 2026.4 with `setup-core.sh` applied. To make it
-edge:
-1. GUI: set LAN to `192.168.1.1` (from bench `.2.1`); DHCP on (`.100-.200`).
-2. WAN: set the type from Phase 0 (DHCP / PPPoE creds / static). MAC-clone the
-   old WAN MAC if the ISP binds to it.
-3. Wi-Fi: `b3net` 2.4 GHz, WPA2-AES, real password, channel 1. (Currently OPEN.)
-4. WireGuard (optional for the interim): `wg0` server already keyed — add peers
-   + DDNS if you want remote admin during the window. Keep that server key for
-   the B1 later.
-5. Cutover: (optional) shut down revo cleanly. **Power off the old ASUS.** Move
-   the ISP/WAN cable -> N18U WAN; wired LAN devices -> N18U LAN ports.
-6. Clients reconnect to `b3net` (2.4) in ~2 min. Verify internet + DHCP + DNS.
+## Phase 3 — verify
 
-The old router is now free — keep it configured on the shelf for rollback.
-
-## Phase 2 — bench-prep the B1 (no rush; network is live on the N18U)
-
-Laptop rejoins Wi-Fi (`b3net`); its USB-ethernet bench link is now free for the B1.
-1. B1 LAN port -> laptop USB-ethernet; `nmcli con up asus-lan`.
-2. Flash `freshtomato-RT-AC66U_B1-K26ARM-2026.4-VPN-64K.trx` (reset-to-defaults).
-3. Reach it (host-route trick for the subnet clash); temp LAN `192.168.2.1`.
-4. Admin password; SSH key; HTTPS-only.
-5. Push `setup-core.sh` (keep `LAN_IP=192.168.2.1` for the bench).
-6. Wi-Fi in GUI: `b3net-5g` 5 GHz + `b3net` 2.4 GHz, WPA2-AES.
-7. WireGuard in GUI: `wg0` server, `10.22.0.1/24`, `51820`, split tunnel, peers,
-   DNS push `192.168.1.1`. **Reuse the same server key as the N18U** so peers
-   don't re-pair.
-8. WAN: set the type (don't connect the WAN cable yet).
-
-## Phase 3 — promote B1 to edge, N18U to AP (cutover #2)
-
-1. Set the B1 LAN to `192.168.1.1`, reboot.
-2. **Power off the N18U.** Move ISP/WAN cable -> B1 WAN; LAN devices -> B1 LAN.
-3. Bring the N18U back cabled **N18U LAN -> B1 LAN**; apply `ap-mode.sh`
-   (-> `192.168.1.3`, DHCP off); confirm its 2.4 `b3net` WPA2.
-4. On the B1: reserve `.1.3` for the N18U MAC (static lease); the B1 serves 5 GHz
-   `b3net-5g`, the N18U serves 2.4 `b3net` — disable the B1's own 2.4 radio.
-5. Clients reconnect to `b3net` / `b3net-5g` in ~2 min. **5 GHz is back.**
-
-## Phase 4 — verify (after each cutover)
-
-- Internet from wired + each available band.
+- Internet wired + both bands.
 - DHCP: client gets `192.168.1.100-200`; revo still answers at `.1.2`.
-- DNS: `nslookup dnssec.works` resolves (DoT works once there's a real WAN).
-- After #2: both SSIDs present — 2.4 on N18U, 5 GHz on B1.
+- DNS: a lookup resolves and goes out over DoT (not plaintext :53 to the ISP).
 - WireGuard-in: phone on mobile data -> tunnel up -> reach `https://192.168.1.1`
   + resolve a LAN name. DDNS hostname as the WG endpoint.
-- No WAN admin exposed (`remote_management` / `remote_mgt_https` = 0).
+- No WAN admin / SSH exposed to the internet.
 
-## Phase 5 — rollback (either cutover)
+## Phase 4 — rollback
 
-1. Power off the FreshTomato edge (N18U or B1).
-2. Reconnect the old ASUS: ISP cable -> its WAN, LAN devices -> its LAN ports.
-3. Power on — back to the old edge in ~2 min (its config was untouched).
+Power off the AX53U; reconnect the old ASUS (ISP -> WAN, devices -> LAN); power
+on — old edge back in ~2 min, config untouched. Keep the old router (and the
+FreshTomato N18U) on the shelf as backup edges until the AX53U has run clean for
+a few days.
 
-Keep the old router configured and on the shelf until the final setup has run
-clean for a few days.
+### Optional: N18U as a stop-gap edge
+
+Only if you must retire the old router *before* the AX53U is ready (e.g. need the
+bench or the box gone): the N18U is already FreshTomato-configured and can take
+the edge for a window — but it's **2.4 GHz only** (no `b3net-5g` until the AX53U
+lands). Set its LAN `.1.1`, DHCP on, WAN type, Wi-Fi `b3net` 2.4 WPA2, then swap.
+Not needed if the old router can stay live until AX53U cutover.
 
 ## Open items
 
-- DDNS hostname for the WG endpoint (public IP is dynamic).
-- Decide whether the N18U keeps the GUI-made WG server (AP mode doesn't use it)
-  or it's removed; WG lives on the B1 regardless.
+- Pick the OpenWrt release for the AX53U + confirm the flash path (recovery vs mtd).
+- DDNS hostname for the WG endpoint (dynamic public IP).
+- DNS-over-TLS package choice on OpenWrt: `https-dns-proxy` (DoH) vs `stubby` (DoT).
+- Decide WPA3 vs WPA2 on the AX53U (Wi-Fi 6 supports WPA3; check old-device compat).
 - revo host-key mismatch blocks `ssh revo` (`ssh-keygen -R revo` + re-scan when ready).
