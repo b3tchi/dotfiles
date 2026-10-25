@@ -32,6 +32,24 @@ uci set dhcp.swift.mac='74:4c:a1:50:86:4f'
 uci set dhcp.swift.ip='192.168.1.60'
 uci set dhcp.swift.name='swift'
 
+# nix-fleet hosts: these MUST keep fixed IPs — the NAS NFS exports are
+# IP-restricted (/volume1/nixos-<host> allows only each host's fixed IP + .60
+# the publisher). Without these reservations the boxes grab pool IPs, fall off
+# the NAS allow-list, and the NFS config-pull fails ('access denied').
+uci -q delete dhcp.revo || true
+uci set dhcp.revo=host
+uci set dhcp.revo.mac='d0:27:88:c3:fe:02'
+uci set dhcp.revo.ip='192.168.1.2'
+uci set dhcp.revo.name='revo'
+uci -q delete dhcp.elitedesk || true
+uci set dhcp.elitedesk=host
+uci set dhcp.elitedesk.mac='fc:3f:db:0d:4e:c3'
+uci set dhcp.elitedesk.ip='192.168.1.99'
+uci set dhcp.elitedesk.name='elitedesk'
+# pi -> 192.168.1.6 (NAS export allows .6). MAC unknown — fill when pi is up:
+#   uci set dhcp.pi=host; uci set dhcp.pi.mac='<pi-mac>'; \
+#   uci set dhcp.pi.ip='192.168.1.6'; uci set dhcp.pi.name='pi'
+
 # --- Static DNS record for the NAS (static IP .245, no DHCP lease to auto-name) ---
 # makes 'nas' / 'nas.lan' resolve. Add similar for any other static-IP host.
 uci -q delete dhcp.nas || true
