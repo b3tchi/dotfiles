@@ -1,0 +1,22 @@
+#!/bin/bash
+# Target menu, run inside xterm so FreeRDP can prompt for NLA credentials
+# (KRDP) on the terminal; xrdp targets show their own login screen instead.
+# Targets: /etc/thinclient.targets, one "host:port [xfreerdp args]" per line,
+# e.g. "192.168.1.60:3392 /rfx" (xrdp) or "phone.lan:3389 /gfx /u:jan" (KRDP).
+mapfile -t targets < <(grep -v '^\s*#' /etc/thinclient.targets | grep .)
+
+clear
+PS3='target> '
+select t in "${targets[@]}"; do
+  [ -n "$t" ] && break
+done
+
+# FreeRDP 2 syntax (Debian 12). /cert-tofu: trust a self-signed cert on
+# first connect. /f = full native panel (1366x768), /bpp:32 = full colour.
+# Codec is per target: /rfx for xrdp (4:4:4, no H.264 chroma washout);
+# KRDP needs /gfx (H.264), which is the heavier decode on the Atom.
+read -r hostport extra <<<"$t"
+# shellcheck disable=SC2086  # extra = per-target args, split on purpose
+xfreerdp /v:"$hostport" /f /bpp:32 /network:lan $extra \
+  -wallpaper -themes +clipboard +auto-reconnect /cert-tofu
+echo "session ended ($?)"; sleep 2

@@ -1,16 +1,9 @@
 #!/bin/sh
-# Fullscreen RDP, reconnect forever. No creds passed: xrdp shows its own
-# login screen, so nothing secret lives on the netbook.
-. /etc/thinclient.conf
-
+# Target menu in a fullscreen xterm, forever. No creds stored: xrdp shows
+# its own login screen, KRDP (NLA) prompts in the xterm.
 xset s off -dpms                 # never blank: the remote session is the screen
 
 while :; do
-  # FreeRDP 2 syntax (Debian 12). /cert-tofu: trust xrdp's self-signed cert
-  # on first connect. /f = full native panel (1366x768, too small to spare
-  # pixels); /bpp:32 + RFX (4:4:4, no H.264 chroma washout) = full colour.
-  # Wallpaper/themes off keep the Atom decode cheap.
-  xfreerdp /v:"$RDP_HOST":"$RDP_PORT" /f /bpp:32 /network:lan /rfx \
-    -wallpaper -themes +clipboard +auto-reconnect /cert-tofu
-  sleep 3                        # server down / logged out: retry
+  xterm -fa Monospace -fs 14 -geometry 120x33+0+0 -e /usr/local/bin/rdp-pick
+  sleep 1
 done

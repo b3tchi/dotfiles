@@ -5,22 +5,24 @@
 # rotz has no i686 build, so this is a plain script instead of a dot.yaml.
 #
 # Usage (as root, from this directory):
-#   ./setup.sh <rdp-host> [port]      e.g. ./setup.sh 192.168.1.20 3391
-# Re-run to change the target; idempotent.
+#   ./setup.sh '<host:port> [xfreerdp args]'...
+#   e.g. ./setup.sh '192.168.1.60:3392 /rfx' 'phone.lan:3389 /gfx /u:jan' 
+# Each target becomes a menu entry. Re-run to change targets; idempotent.
 set -eu
-host=${1:?usage: setup.sh <rdp-host> [port]}
-port=${2:-3391}                  # 3391 = WSL i3 xrdp (see xrdp/dot.yaml)
+[ $# -gt 0 ] || { echo "usage: setup.sh <host:port>..." >&2; exit 1; }
 user=rdp
 here=$(cd "$(dirname "$0")" && pwd)
 
 apt-get update
 apt-get install -y --no-install-recommends \
   xserver-xorg-core xserver-xorg-input-libinput xserver-xorg-video-nouveau \
-  xinit x11-xserver-utils freerdp2-x11
+  xinit x11-xserver-utils xterm fonts-dejavu-core freerdp2-x11
 
 id "$user" >/dev/null 2>&1 || useradd -m -s /bin/bash "$user"
 
-printf 'RDP_HOST=%s\nRDP_PORT=%s\n' "$host" "$port" > /etc/thinclient.conf
+printf '%s\n' "$@" > /etc/thinclient.targets
+rm -f /etc/thinclient.conf      # pre-menu single-target config
+install -m 0755 "$here/rdp-pick" /usr/local/bin/rdp-pick
 
 install -o "$user" -m 0644 "$here/xinitrc" "/home/$user/.xinitrc"
 install -o "$user" -m 0644 "$here/bash_profile" "/home/$user/.bash_profile"
@@ -44,4 +46,4 @@ EOF
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 
 systemctl daemon-reload
-echo "done: reboot to start the RDP session ($host:$port)"
+echo "done: reboot to start the RDP menu ($*)"
