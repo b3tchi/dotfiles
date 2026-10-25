@@ -1,13 +1,16 @@
 { pkgs, ... }:
 let
+  apiUrl = "http://revo.lan:3030/";
+  uiUrl = "http://revo.lan";
   lens = pkgs.callPackage ./lens-backend.nix { };
+  lensUi = pkgs.callPackage ./lens-frontend.nix { inherit apiUrl; };
   migrations = [                    # same list as upstream backend/entry.sh
     "addInitialTosPp" "createDefaultSiteConfig" "addOauthToSiteConfig"
     "addOidcProviderToSiteConfig" "addFooterToSiteConfig"
     "addDefaultAdminUser" "createDefaultPublisherEntries"
   ];
 in {
-  # Ondsel Lens backend only (API on :3030; no frontend, FC-Worker or S3).
+  # Ondsel Lens: API on :3030, web UI on :80 (no FC-Worker or S3).
   # Mongo 5+ needs AVX, which the E-450 lacks: FerretDB 1.x on SQLite stands in.
   # FerretDB 1.x has no update arrayFilters, so file thumbnails and share links
   # fail; login, upload, versions and download work.
@@ -24,7 +27,11 @@ in {
       NODE_CONFIG_DIR = "${lens}/config";
       PORT = "3030";
       DB_URL = "mongodb://127.0.0.1:27017/backend-db";
-      VITE_APP_API_URL = "http://revo.lan:3030/";  # base of signed download URLs
+      VITE_APP_API_URL = apiUrl;    # base of signed download URLs
+      FRONTEND_URL = uiUrl;
+      # The UI talks socket.io, whose CORS list (config "origins") has no env
+      # mapping; node-config takes it from NODE_CONFIG instead.
+      NODE_CONFIG = builtins.toJSON { origins = [ uiUrl ]; };
     };
     script = ''
       # Secrets are made once on this host: never in the store or the NAS share.
@@ -51,5 +58,16 @@ in {
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 3030 ];
+  # Static UI. Upstream's openresty Lua blocks (share-link previews, sitemaps,
+  # pretty download URLs) are left out; the SPA fallback is all the UI needs.
+  services.nginx = {
+    enable = true;
+    virtualHosts.lens = {
+      default = true;
+      root = lensUi;
+      locations."/".tryFiles = "$uri $uri/ /index.html";
+    };
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 3030 ];
 }
