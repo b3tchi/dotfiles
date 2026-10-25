@@ -45,5 +45,24 @@ IdleAction=ignore
 EOF
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 
+# Fast, quiet boot: no GRUB wait, Plymouth splash straight into X.
+# nouveau in the initramfs gives Plymouth KMS from the start; MODULES=dep
+# keeps the initramfs small (unpacking is slow on the Atom).
+apt-get install -y --no-install-recommends plymouth plymouth-themes
+grep -qx nouveau /etc/initramfs-tools/modules || echo nouveau >> /etc/initramfs-tools/modules
+sed -i 's/^MODULES=.*/MODULES=dep/' /etc/initramfs-tools/initramfs.conf
+plymouth-set-default-theme spinner
+sed -i -e 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=0/' \
+  -e 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"/' \
+  /etc/default/grub
+for kv in GRUB_TIMEOUT_STYLE=hidden GRUB_GFXMODE=1366x768 GRUB_GFXPAYLOAD_LINUX=keep; do
+  grep -q "^${kv%%=*}=" /etc/default/grub || echo "$kv" >> /etc/default/grub
+done
+update-initramfs -u
+update-grub
+# Wired-only RDP box: nothing below is needed at boot.
+systemctl disable --now bluetooth.service wpa_supplicant.service \
+  e2scrub_reap.service man-db.timer 2>/dev/null || true
+
 systemctl daemon-reload
 echo "done: reboot to start the RDP menu ($*)"
