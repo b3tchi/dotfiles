@@ -277,8 +277,11 @@ func layerRepr(l bind.Layer) dumpLayer {
 // so marking a real chord-bearing layer External to duck this comparison
 // fails there (and at R28) instead of passing silently here.
 func goldenDumpFromGoTable() dumpTable {
-	binds := make([]dumpBind, len(Binds))
-	for i, b := range Binds {
+	// The golden dump is the SHARED table; a host's overrides are pinned by
+	// its own host_<tag>_test.go.
+	shared := buildSharedBinds()
+	binds := make([]dumpBind, len(shared))
+	for i, b := range shared {
 		binds[i] = bindRepr(b)
 	}
 	layers := map[string]dumpLayer{}

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"hotkeyd/internal/bind"
 	"hotkeyd/internal/kwin"
 	"hotkeyd/internal/layer"
 )
@@ -256,7 +257,13 @@ func TestKwinRunSpawns(t *testing.T) {
 	r.plugin.waitGrab(func(g grabSet) bool { return hasKey(g, ksReturn, modSuper) }, "default set has $mod+Return")
 	r.press(ksReturn, modSuper)
 	waitFor(t, "spawn", func() bool { return len(r.runList()) == 1 })
-	if got := r.runList()[0]; !strings.Contains(got, "wm-launch-terminal") {
+	want := ""
+	for _, b := range Binds {
+		if b.Chord == "$mod+Return" {
+			want = b.Actions[0].(bind.Run).Cmd
+		}
+	}
+	if got := r.runList()[0]; want == "" || !strings.Contains(got, want) {
 		t.Fatalf("spawned %q", got)
 	}
 	if n := len(r.k.sent()); n != 0 {

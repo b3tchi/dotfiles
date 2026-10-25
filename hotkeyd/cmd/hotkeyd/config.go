@@ -346,7 +346,14 @@ var Layers = map[string]bind.Layer{
 // Binds is the daemon's global bind table.
 var Binds = buildBinds()
 
+// buildBinds is the shared table with this machine's overrides laid over it.
 func buildBinds() []bind.Bind {
+	shared, _ := splitHostOverrides(hostOverrides(), Kwi3OnlyBinds)
+	return applyHostOverrides(buildSharedBinds(), shared)
+}
+
+// buildSharedBinds is the table every machine starts from.
+func buildSharedBinds() []bind.Bind {
 	out := []bind.Bind{
 		// SCOPED TO THE T6 CUTOVER (dotfiles-hwds.16): only the nav entry
 		// chord, because nav is the group T6 migrates.
@@ -453,7 +460,27 @@ func buildBinds() []bind.Bind {
 	// One chord: the ten resize verbs live in Layers["resize"].
 	out = append(out, bind.Bind{Chord: "$mod+r", Actions: []bind.Action{bind.EnterLayer{Layer: "resize"}}})
 
-	return applyHostOverrides(out, hostOverrides())
+	return out
+}
+
+// splitHostOverrides parts this machine's overrides into those for the
+// shared table and those for a chord of kwi3Only, which effectiveBinds
+// appends after it - so each chord is overridden in one place only and a
+// kwi3-only chord is never added a second time as an extra.
+func splitHostOverrides(over map[string][]bind.Action, kwi3Only []bind.Bind) (shared, kwi3 map[string][]bind.Action) {
+	only := map[string]bool{}
+	for _, b := range kwi3Only {
+		only[b.Chord] = true
+	}
+	shared, kwi3 = map[string][]bind.Action{}, map[string][]bind.Action{}
+	for chord, acts := range over {
+		if only[chord] {
+			kwi3[chord] = acts
+		} else {
+			shared[chord] = acts
+		}
+	}
+	return shared, kwi3
 }
 
 // applyHostOverrides lays this machine's overrides (host_*.go, picked by

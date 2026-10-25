@@ -291,7 +291,8 @@ func effectiveBinds(kwi3Sock string) []bind.Bind {
 	}
 	out := make([]bind.Bind, 0, len(Binds)+len(Kwi3OnlyBinds))
 	out = append(out, Binds...)
-	out = append(out, Kwi3OnlyBinds...)
+	_, kwi3Over := splitHostOverrides(hostOverrides(), Kwi3OnlyBinds)
+	out = append(out, applyHostOverrides(Kwi3OnlyBinds, kwi3Over)...)
 	return out
 }
 
