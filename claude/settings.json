@@ -102,8 +102,8 @@
     }
   },
   "theme": "dark",
+  "switchModelsOnFlag": false,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true,
-  "switchModelsOnFlag": false
+  "skipAutoPermissionPrompt": true
 }
