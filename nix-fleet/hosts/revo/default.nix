@@ -1,6 +1,6 @@
 { ... }: {
   # Acer Revo RL70 — AMD E-450, light services
-  imports = [ ./hardware-configuration.nix ];
+  imports = [ ./hardware-configuration.nix ./lens.nix ];
   nixpkgs.hostPlatform = "x86_64-linux";
 
   # Firmware boots UEFI (installer came up with /sys/firmware/efi).
