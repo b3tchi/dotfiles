@@ -2,7 +2,7 @@
 // server (sp011 Task 8/9). The plugin is a translator only: hotkeyd sends
 // the set of (keysym, mods) chords it wants swallowed, and the plugin
 // reports presses/releases of exactly those chords over one NDJSON unix
-// socket ($XDG_RUNTIME_DIR/kwi3keys.sock). Protocol:
+// socket ($XDG_RUNTIME_DIR/kwi3keys-<wayland socket>.sock). Protocol:
 //
 //	-> {"grab":[{"keysym":u32,"mods":u32},...]}   replaces the whole set
 //	<- {"hello":1,"kwin":"6.8.1"}                 on connect
@@ -26,16 +26,25 @@ import (
 	"time"
 )
 
-// SocketName is the plugin's socket file under $XDG_RUNTIME_DIR.
-const SocketName = "kwi3keys.sock"
+// SocketName is the plugin's socket file under $XDG_RUNTIME_DIR for the
+// KWin serving the Wayland socket display: one per KWin, so two KWins of one
+// user (the RDP session, the phone's own screen) never share a grab server.
+// An empty display is Wayland's default, wayland-0.
+func SocketName(display string) string {
+	if display == "" {
+		display = "wayland-0"
+	}
+	return "kwi3keys-" + filepath.Base(display) + ".sock"
+}
 
-// SocketPath is where the plugin listens by default.
+// SocketPath is where the plugin of the KWin this process is a client of
+// listens: hotkeyd runs inside that KWin, so $WAYLAND_DISPLAY names it.
 func SocketPath() string {
 	dir := os.Getenv("XDG_RUNTIME_DIR")
 	if dir == "" {
 		dir = "/tmp"
 	}
-	return filepath.Join(dir, SocketName)
+	return filepath.Join(dir, SocketName(os.Getenv("WAYLAND_DISPLAY")))
 }
 
 // Event is one decoded plugin message that is not hello. Kind is "press",

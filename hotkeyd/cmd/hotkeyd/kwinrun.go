@@ -29,7 +29,7 @@ func runKwin(grabPath string) int {
 		daemonLog(errKwinNeedsKwi3Sock.Error())
 		return 78
 	}
-	display := kwinDisplay
+	display := kwinDisplay()
 	mod := bind.DefaultMod
 
 	lock, err := proc.AcquireLock(proc.LockPath(display))

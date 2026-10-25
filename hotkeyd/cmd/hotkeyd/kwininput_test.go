@@ -181,7 +181,7 @@ func newKwinRig(t *testing.T) *kwinRig {
 			mu.Unlock()
 			return nil
 		},
-		Binds: Binds, Layers: Layers, Mod: "Mod4", Display: kwinDisplay,
+		Binds: Binds, Layers: Layers, Mod: "Mod4", Display: kwinDisplay(),
 		Log:      func(string) {},
 		IdleTick: 10 * time.Second, HoldTick: 10 * time.Second,
 	})
@@ -377,4 +377,18 @@ func TestKwinNoDisplay(t *testing.T) {
 			t.Fatal("daemon did not stop")
 		}
 	})
+}
+
+// Two KWins of one user each get their own lock/state/ctl names, so the
+// second `--input kwin` daemon does not exit 3 on the first one's lock.
+func TestKwinDisplay_OnePerWaylandSocket(t *testing.T) {
+	if a, b := kwinDisplayFor("krdp-kwin"), kwinDisplayFor("kwi3-phone"); a == b {
+		t.Fatalf("both KWins map to %q", a)
+	}
+	if got := kwinDisplayFor("/run/user/1000/krdp-kwin"); got != "kwin-krdp-kwin" {
+		t.Fatalf("kwinDisplayFor(absolute) = %q", got)
+	}
+	if got := kwinDisplayFor(""); got != "kwin-wayland-0" {
+		t.Fatalf("kwinDisplayFor(\"\") = %q", got)
+	}
 }

@@ -36,7 +36,8 @@ func usageText() string {
 
   hotkeyd --input kwin
         start the daemon on the kwi3keys KWin plugin ($XDG_RUNTIME_DIR/
-        kwi3keys.sock) instead of an X display; needs $KWI3SOCK
+        kwi3keys-$WAYLAND_DISPLAY.sock) instead of an X display; needs
+        $KWI3SOCK
 
   hotkeyd --check
         validate the compiled bind table and exit; no grabs, no X

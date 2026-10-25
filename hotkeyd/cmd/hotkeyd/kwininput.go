@@ -8,6 +8,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/kwin"
@@ -15,8 +17,18 @@ import (
 )
 
 // kwinDisplay names the daemon's per-instance files (lock, state socket,
-// control socket, grab report) when there is no X display to key them on.
-const kwinDisplay = "kwin"
+// control socket, grab report) when there is no X display to key them on:
+// "kwin-<socket>" after the KWin this daemon is a client of ($WAYLAND_DISPLAY),
+// as the plugin names its grab socket, so a second KWin of the same user
+// gets a second daemon instead of exit 3 on the first one's lock.
+func kwinDisplay() string { return kwinDisplayFor(os.Getenv("WAYLAND_DISPLAY")) }
+
+func kwinDisplayFor(wayland string) string {
+	if wayland == "" {
+		wayland = "wayland-0"
+	}
+	return "kwin-" + filepath.Base(wayland)
+}
 
 // kwinModBits maps the grab server's X11-valued mods to canonical modifiers.
 var kwinModBits = []struct {
