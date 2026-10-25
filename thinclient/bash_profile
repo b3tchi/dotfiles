@@ -1,0 +1,4 @@
+# tty1 autologin starts the RDP session; other ttys stay plain shells.
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
+  exec startx -- -nolisten tcp
+fi

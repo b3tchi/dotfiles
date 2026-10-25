@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fullscreen RDP, reconnect forever. No creds passed: xrdp shows its own
+# login screen, so nothing secret lives on the netbook.
+. /etc/thinclient.conf
+
+xset s off -dpms                 # never blank: the remote session is the screen
+
+while :; do
+  # FreeRDP 2 syntax (Debian 12). /cert-tofu: trust xrdp's self-signed cert
+  # on first connect. Wallpaper/themes off + RFX keep the Atom decode cheap.
+  xfreerdp /v:"$RDP_HOST":"$RDP_PORT" /f /network:lan /rfx \
+    -wallpaper -themes +clipboard +auto-reconnect /cert-tofu
+  sleep 3                        # server down / logged out: retry
+done
