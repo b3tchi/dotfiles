@@ -18,6 +18,8 @@ if [ -n "$off" ]; then
   rm -f "$conf"
   ufw delete allow in on "$iface" || true
   ufw route delete allow in on "$iface" || true
+  iptables -D FORWARD -i "$iface" -j ACCEPT || true
+  iptables -D FORWARD -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
 else
   if [ ! -e "$root/pxelinux.0" ]; then
     mkdir -p "$root"
@@ -42,6 +44,11 @@ EOF
   # NAT; the cable leads only to the mini, so trust it wholesale.
   ufw allow in on "$iface"
   ufw route allow in on "$iface"
+  # Docker sets the iptables FORWARD policy to DROP, which kills NM's NAT.
+  iptables -C FORWARD -i "$iface" -j ACCEPT 2>/dev/null ||
+    iptables -I FORWARD 1 -i "$iface" -j ACCEPT
+  iptables -C FORWARD -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null ||
+    iptables -I FORWARD 1 -o "$iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 fi
 
 nmcli con down "$con" >/dev/null 2>&1 || true
