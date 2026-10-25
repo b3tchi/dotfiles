@@ -16,16 +16,32 @@ iface=$(nmcli -g GENERAL.DEVICES con show "$con")
 
 if [ -n "$off" ]; then
   rm -f "$conf"
-  ufw delete allow in on "$iface" to any port 69 proto udp || true
+  ufw delete allow in on "$iface" || true
+  ufw route delete allow in on "$iface" || true
 else
   if [ ! -e "$root/pxelinux.0" ]; then
     mkdir -p "$root"
     curl -fL "$url" | tar -xz -C "$root"
   fi
+  # Boot straight into the unattended install; preseed.cfg comes over HTTP:
+  #   python3 -m http.server -b <cable-ip> -d thinclient 8000
+  # Set the BIOS to boot the disk first and pick network one-time (boot
+  # menu), or every reboot reinstalls.
+  ip=$(nmcli -g IP4.ADDRESS con show "$con" | cut -d/ -f1)
+  cat > "$root/pxelinux.cfg/default" <<EOF
+default auto
+prompt 0
+timeout 0
+label auto
+  kernel debian-installer/i386/linux
+  append initrd=debian-installer/i386/initrd.gz auto=true priority=critical url=http://$ip:8000/preseed.cfg hostname=mini311 domain= locale=en_US.UTF-8 keymap=us vga=788 --- quiet
+EOF
   mkdir -p "$(dirname "$conf")"
   printf 'enable-tftp\ntftp-root=%s\ndhcp-boot=pxelinux.0\n' "$root" > "$conf"
-  # NM's shared mode opens DHCP/DNS, not TFTP.
-  ufw allow in on "$iface" to any port 69 proto udp
+  # ufw (default INPUT+FORWARD DROP) blocks NM shared mode's DNS/TFTP and
+  # NAT; the cable leads only to the mini, so trust it wholesale.
+  ufw allow in on "$iface"
+  ufw route allow in on "$iface"
 fi
 
 nmcli con down "$con" >/dev/null 2>&1 || true
