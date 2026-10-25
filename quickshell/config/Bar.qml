@@ -1593,54 +1593,89 @@ PanelWindow {
     // second override-redirect popup): `rect` follows `ringScreenRect`,
     // which already picked the workspace tab or the mode segment above, so
     // this Window neither knows nor cares which one it is currently over.
+    //
+    // Wayland (kwi3 on KWin, the phone's krdp-kwin session) has no
+    // override_redirect: BypassWindowManagerHint is ignored and a plain
+    // Window cannot place itself, so KWin hands it to kwi3 as an ordinary
+    // toplevel and it gets TILED. There the ring is a layer-shell surface
+    // instead - overlay layer, no exclusive zone, no focus, click-through -
+    // placed by margins from the output's top-left.
     Loader {
         active: Kwi3Grid.active
-        sourceComponent: Component {
-            Window {
-                id: wsFocusHighlight
-                readonly property var rect: root.ringScreenRect
-                readonly property int thickness: Kwi3Grid.frameThickness
-                // Off entirely when the window ring itself is off
-                // (focusFrame: false) or there is nothing to mark (no focused
-                // tab at rest, no visible mode segment while a layer is up) -
-                // "unfocused tabs have none" generalised to "none at all
-                // fires none".
-                //
-                // kwi3-55l.30: frameEnabled gates the AT-REST (workspace)
-                // ring only. grid.get's frame.enabled is now EFFECTIVE - false
-                // while kwi3's modeFrame hides the window ring for the current
-                // mode (Jan's config.js: '*': 'none' for system/switcher/...)
-                // - and the stripe over the mode pill is the pill's own
-                // accent, independent of the window ring (kwi3-55l.27), so a
-                // mode that hides the window ring must not also take the
-                // pill's highlight away.
-                visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
-                         && rect !== null && thickness > 0
-                x: rect ? rect.x : 0
-                y: rect ? rect.y - thickness : 0
-                width: rect ? Math.max(1, rect.w) : 1
-                height: Math.max(1, thickness)
-                flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
-                title: "kwi3-bar-focus-ring"
-                color: "transparent"
+        sourceComponent: Qt.platform.pluginName === "wayland" ? wsFocusLayer : wsFocusX11
+    }
+    Component {
+        id: wsFocusLayer
+        PanelWindow {
+            readonly property var rect: root.ringScreenRect
+            readonly property int thickness: Kwi3Grid.frameThickness
+            screen: root.screen
+            visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                     && rect !== null && thickness > 0
+            anchors { top: true; left: true }
+            margins {
+                left: rect ? rect.x : 0
+                top: rect ? Math.max(0, rect.y - thickness) : 0
+            }
+            implicitWidth: rect ? Math.max(1, rect.w) : 1
+            implicitHeight: Math.max(1, thickness)
+            aboveWindows: true
+            exclusiveZone: 0
+            focusable: false
+            mask: Region {}
+            color: "transparent"
+            Rectangle {
+                anchors.fill: parent
+                color: root.ringColor
+            }
+        }
+    }
+    Component {
+        id: wsFocusX11
+        Window {
+            id: wsFocusHighlight
+            readonly property var rect: root.ringScreenRect
+            readonly property int thickness: Kwi3Grid.frameThickness
+            // Off entirely when the window ring itself is off
+            // (focusFrame: false) or there is nothing to mark (no focused
+            // tab at rest, no visible mode segment while a layer is up) -
+            // "unfocused tabs have none" generalised to "none at all
+            // fires none".
+            //
+            // kwi3-55l.30: frameEnabled gates the AT-REST (workspace)
+            // ring only. grid.get's frame.enabled is now EFFECTIVE - false
+            // while kwi3's modeFrame hides the window ring for the current
+            // mode (Jan's config.js: '*': 'none' for system/switcher/...)
+            // - and the stripe over the mode pill is the pill's own
+            // accent, independent of the window ring (kwi3-55l.27), so a
+            // mode that hides the window ring must not also take the
+            // pill's highlight away.
+            visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                     && rect !== null && thickness > 0
+            x: rect ? rect.x : 0
+            y: rect ? rect.y - thickness : 0
+            width: rect ? Math.max(1, rect.w) : 1
+            height: Math.max(1, thickness)
+            flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
+            title: "kwi3-bar-focus-ring"
+            color: "transparent"
 
-                // An opaque fill Rectangle, not this Window's own `color`:
-                // Overlay.qml's own note applies here too - a Window's
-                // `color` is not always honoured as the opaque clear colour
-                // under X11/FramelessWindowHint, which would leave this
-                // strip showing through to whatever the compositor-less
-                // "transparent" actually renders as. Square ends (no
-                // radius): a single top line has no corners to round.
-                //
-                // kwi3-55l.27: root.ringColor, not Kwi3Grid.frameColor
-                // directly - the workspace ring's own green at rest, the
-                // mode pill's own accent while a mode is up (see
-                // ringColor's own comment above for why it is not
-                // Kwi3Grid.frameColor unconditionally).
-                Rectangle {
-                    anchors.fill: parent
-                    color: root.ringColor
-                }
+            // An opaque fill Rectangle, not this Window's own `color`:
+            // Overlay.qml's own note applies here too - a Window's
+            // `color` is not always honoured as the opaque clear colour
+            // under X11/FramelessWindowHint, which would leave this
+            // strip showing through to whatever the compositor-less
+            // "transparent" actually renders as. Square ends (no
+            // radius): a single top line has no corners to round.
+            //
+            // kwi3-55l.27: root.ringColor, not Kwi3Grid.frameColor
+            // directly - the workspace ring's own green at rest, the
+            // mode pill's own accent while a mode is up (see
+            // ringColor's own comment above for why it is not
+            // Kwi3Grid.frameColor unconditionally).
+            Rectangle {
+                anchors.fill: parent
+                color: root.ringColor
             }
         }
     }
