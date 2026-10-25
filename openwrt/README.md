@@ -61,6 +61,7 @@ OpenWrt 25.12 uses `apk`, not `opkg`.
 - Wi-Fi `b3net` (2.4, radio0) + `b3net-5g` (5, radio1), WPA2-AES, same PSK (set in LuCI).
 - DNS over DoH (Cloudflare + Quad9) via https-dns-proxy; names resolve (`nas.lan`, etc.).
 - `nas` static-host record -> `192.168.1.245` (NAS has a static IP, no lease to auto-name).
+- `swift` DHCP reservation (Acer Swift laptop) -> fixed `192.168.1.60`, resolves `swift.lan`.
 - WireGuard-in `wg0` `10.22.0.1/24` :51820; peer `motorola-razr` (`10.22.0.2/32`),
   handshake confirmed. Endpoint is the raw public IP (see DDNS note).
 - Lockdown: SSH key-only, HTTPS-only UI, no WAN admin, only UDP 51820 open on wan.

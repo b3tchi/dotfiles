@@ -24,6 +24,13 @@ uci set dhcp.lan.leasetime='1d'
 # Static DHCP reservation example (restore an old fixed IP, outside the pool):
 #   uci add dhcp host; uci set dhcp.@host[-1].mac='FC:3F:DB:0D:4E:C3'; \
 #   uci set dhcp.@host[-1].ip='192.168.1.99'; uci set dhcp.@host[-1].name='elitedesk'
+# swift (Acer Swift laptop, wlp1s0) -> fixed .60 + name 'swift' (resolves swift.lan).
+# NB: if NetworkManager randomizes MAC per-SSID this won't match — pin the real MAC.
+uci -q delete dhcp.swift || true
+uci set dhcp.swift=host
+uci set dhcp.swift.mac='74:4c:a1:50:86:4f'
+uci set dhcp.swift.ip='192.168.1.60'
+uci set dhcp.swift.name='swift'
 
 # --- Static DNS record for the NAS (static IP .245, no DHCP lease to auto-name) ---
 # makes 'nas' / 'nas.lan' resolve. Add similar for any other static-IP host.
