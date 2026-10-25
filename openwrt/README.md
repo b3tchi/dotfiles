@@ -63,7 +63,7 @@ OpenWrt 25.12 uses `apk`, not `opkg`.
 - DNS over DoH (Cloudflare + Quad9) via https-dns-proxy; names resolve (`nas.lan`, etc.).
 - `nas` static-host record -> `192.168.1.245` (NAS has a static IP, no lease to auto-name).
 - `swift` DHCP reservation (Acer Swift laptop) -> fixed `192.168.1.60`, resolves `swift.lan`.
-- nix-fleet reservations: `revo` -> `.2`, `elitedesk` -> `.99` (pi -> `.6`, MAC TBD).
+- nix-fleet reservations: `revo` -> `.2`, `elitedesk` -> `.99` `pi3b` -> `.6`.
   Required: the NAS NFS exports are IP-restricted, so these hosts must keep their
   fixed IPs or the NFS config-pull fails `access denied`. See `setup-base.sh`.
 - WireGuard-in `wg0` `10.22.0.1/24` :51820; peer `motorola-razr` (`10.22.0.2/32`),
@@ -81,7 +81,8 @@ DuckDNS = subdomain + token) and switch the client Endpoint to the hostname.
 
 The spare RT-N18U (Broadcom BCM4708, `bcm53xx/generic`, profile `asus_rt-n18u`)
 runs OpenWrt **25.12.6** as a wired-only switch: `sw-n18u` at `192.168.1.3`,
-uplink `lan1` -> AX53U LAN, all 5 ports bridged. No Wi-Fi (OpenWrt has no driver
+all 5 ports bridged. Ports: `wan` = uplink -> AX53U LAN, `lan1` = revo,
+`lan2` = pi3b, `lan3`/`lan4` free. No Wi-Fi (OpenWrt has no driver
 for its radio). Config: `setup-switch-n18u.sh`.
 
 Image: `openwrt-25.12.6-bcm53xx-generic-asus_rt-n18u-squashfs.trx` (starts `HDR0`).

@@ -28,7 +28,7 @@ not nvram — the FreshTomato `setup-core.sh` does NOT apply to the AX53U.
 | old ASUS | edge | `192.168.1.1` | `b3net` 2.4 + `b3net-5g` 5 GHz, DHCP for LAN |
 | revo | NixOS host | `192.168.1.2` | nix-fleet box |
 | RT-AX53U | new, boxed | — | MediaTek MT7621, to become the OpenWrt edge |
-| RT-N18U | switch | `192.168.1.3` | OpenWrt 25.12.6, wired only, uplink `lan1` -> AX53U |
+| RT-N18U | switch | `192.168.1.3` | OpenWrt 25.12.6, wired only; wan uplink, lan1 revo, lan2 pi3b |
 | RT-AC66U B1 | stock, untouched | — | now a SPARE |
 | laptop | — | `192.168.1.60` (wifi) | USB-ethernet bench link |
 

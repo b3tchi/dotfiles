@@ -46,9 +46,12 @@ uci set dhcp.elitedesk=host
 uci set dhcp.elitedesk.mac='fc:3f:db:0d:4e:c3'
 uci set dhcp.elitedesk.ip='192.168.1.99'
 uci set dhcp.elitedesk.name='elitedesk'
-# pi -> 192.168.1.6 (NAS export allows .6). MAC unknown — fill when pi is up:
-#   uci set dhcp.pi=host; uci set dhcp.pi.mac='<pi-mac>'; \
-#   uci set dhcp.pi.ip='192.168.1.6'; uci set dhcp.pi.name='pi'
+# pi (Raspberry Pi 3B) -> 192.168.1.6 (NAS export allows .6); name pi3b.
+uci -q delete dhcp.pi || true
+uci set dhcp.pi=host
+uci set dhcp.pi.mac='b8:27:eb:18:b8:de'
+uci set dhcp.pi.ip='192.168.1.6'
+uci set dhcp.pi.name='pi3b'
 
 # --- Static DNS record for the NAS (static IP .245, no DHCP lease to auto-name) ---
 # makes 'nas' / 'nas.lan' resolve. Add similar for any other static-IP host.
