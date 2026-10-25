@@ -2,8 +2,9 @@
 
 Replace the old ASUS edge router with an **ASUS RT-AX53U running OpenWrt** as the
 sole edge + Wi-Fi (dual-band, Wi-Fi 6). Keep the existing `192.168.1.0/24` subnet
-so nothing with a hardcoded IP breaks. The Broadcom boxes (RT-AC66U B1, RT-N18U)
-and the old router become shelved spares / rollback.
+so nothing with a hardcoded IP breaks. The RT-AC66U B1 and the old
+router become shelved spares / rollback; the RT-N18U is reused as an OpenWrt
+wired switch.
 
 > Earlier revisions staged a FreshTomato edge (N18U interim -> B1). The AX53U
 > purchase supersedes that: it's a better radio (Wi-Fi 6) and MediaTek, so it
@@ -27,7 +28,7 @@ not nvram — the FreshTomato `setup-core.sh` does NOT apply to the AX53U.
 | old ASUS | edge | `192.168.1.1` | `b3net` 2.4 + `b3net-5g` 5 GHz, DHCP for LAN |
 | revo | NixOS host | `192.168.1.2` | nix-fleet box |
 | RT-AX53U | new, boxed | — | MediaTek MT7621, to become the OpenWrt edge |
-| RT-N18U | bench | `192.168.2.1` | FreshTomato 2026.4, configured — now a SPARE |
+| RT-N18U | switch | `192.168.1.3` | OpenWrt 25.12.6, wired only, uplink `lan1` -> AX53U |
 | RT-AC66U B1 | stock, untouched | — | now a SPARE |
 | laptop | — | `192.168.1.60` (wifi) | USB-ethernet bench link |
 
@@ -38,7 +39,8 @@ Public IP `78.44.49.38` — routable (not CGNAT), so WireGuard-in is viable.
 | Device | Role | LAN IP | Wi-Fi | DHCP |
 |---|---|---|---|---|
 | **AX53U** | edge (OpenWrt) | `192.168.1.1` | `b3net` 2.4 + `b3net-5g` 5 GHz | server: dynamic `.100-.200`, statics `.2-.50` |
-| old ASUS / B1 / N18U | shelved spares | — | — | — |
+| **N18U** `sw-n18u` | wired switch (OpenWrt) | `192.168.1.3` | off (no driver) | off |
+| old ASUS / B1 | shelved spares | — | — | — |
 
 Edge does WAN + DHCP + DNS (DoT) + WireGuard-in + both Wi-Fi bands. `.1.2` stays
 revo.
@@ -83,16 +85,8 @@ OpenWrt version carefully, bootloop reports exist).
 
 Power off the AX53U; reconnect the old ASUS (ISP -> WAN, devices -> LAN); power
 on — old edge back in ~2 min, config untouched. Keep the old router (and the
-FreshTomato N18U) on the shelf as backup edges until the AX53U has run clean for
+B1) on the shelf as backup edges until the AX53U has run clean for
 a few days.
-
-### Optional: N18U as a stop-gap edge
-
-Only if you must retire the old router *before* the AX53U is ready (e.g. need the
-bench or the box gone): the N18U is already FreshTomato-configured and can take
-the edge for a window — but it's **2.4 GHz only** (no `b3net-5g` until the AX53U
-lands). Set its LAN `.1.1`, DHCP on, WAN type, Wi-Fi `b3net` 2.4 WPA2, then swap.
-Not needed if the old router can stay live until AX53U cutover.
 
 ## Open items
 

@@ -7,8 +7,8 @@ Config for the two ASUS routers running FreshTomato 2026.4 (K26ARM).
 | Edge — DHCP + DNS + WireGuard-in | RT-AC66U B1 | `VPN-64K` (dual-core) | `192.168.2.1` |
 | AP (2.4 GHz) | RT-N18U | `VPN-64K-NOSMP` (single-core) | `192.168.2.1`* |
 
-\* During staged cutover the N18U runs as a temporary edge at `192.168.2.1`;
-once the B1 takes over it is demoted to a bridged AP (DHCP off).
+\* Superseded (2026-10): the N18U now runs OpenWrt as a wired switch — see
+`../openwrt/README.md` "RT-N18U switch". N18U notes below are history.
 
 Stock ASUS firmware is EOL on both; Asuswrt-Merlin dropped the AC66U B1
 (whole AC68U family). FreshTomato is the maintained option. OpenWrt is out —

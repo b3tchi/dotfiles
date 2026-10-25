@@ -45,6 +45,7 @@ not apply here.
 
 - `setup-base.sh` — LAN, DHCP (`.100-.200`), hostname, timezone, Wi-Fi country.
   Runs with base packages only (no WAN). **Done on the bench.**
+- `setup-switch-n18u.sh` — RT-N18U as a dumb wired switch (see below).
 - `setup-edge.sh` — `apk add` WireGuard + DNS-over-HTTPS, then configure
   WireGuard-in (`wg0`, `10.22.0.1/24`, port 51820, split tunnel) and DoH. Needs
   internet, so **run after cutover**.
@@ -75,3 +76,30 @@ OpenWrt 25.12 uses `apk`, not `opkg`.
 stable, so the WireGuard endpoint uses the raw IP. If the IP ever changes you lose
 remote access until home — enable DDNS then (LuCI -> Services -> Dynamic DNS;
 DuckDNS = subdomain + token) and switch the client Endpoint to the hostname.
+
+## RT-N18U switch
+
+The spare RT-N18U (Broadcom BCM4708, `bcm53xx/generic`, profile `asus_rt-n18u`)
+runs OpenWrt **25.12.6** as a wired-only switch: `sw-n18u` at `192.168.1.3`,
+uplink `lan1` -> AX53U LAN, all 5 ports bridged. No Wi-Fi (OpenWrt has no driver
+for its radio). Config: `setup-switch-n18u.sh`.
+
+Image: `openwrt-25.12.6-bcm53xx-generic-asus_rt-n18u-squashfs.trx` (starts `HDR0`).
+
+Flash from FreshTomato over SSH (what was used):
+
+    ssh root@192.168.2.1 'cat > /tmp/owrt.trx' < ...-squashfs.trx
+    ssh root@192.168.2.1 'md5sum /tmp/owrt.trx'        # compare to local
+    ssh root@192.168.2.1 'mtd-write2 /tmp/owrt.trx linux'   # "CRC OK"
+    ssh root@192.168.2.1 reboot
+
+It boots at `192.168.1.1` — clashes with the edge. On the bench link, pin that
+IP to the USB NIC and source from the laptop's `.1.x` address (OpenWrt has no
+route back to a non-`.1.x` source):
+
+    sudo ip route add 192.168.1.1/32 dev <usb-iface>
+    ssh -b 192.168.1.60 root@192.168.1.1 ...
+    sudo ip route del 192.168.1.1/32 dev <usb-iface>   # after it moves to .3
+
+While pinned, the laptop's DNS (`192.168.1.1`) hits the N18U and breaks — keep
+the window short. Afterwards `ssh-keygen -R 192.168.1.1` (N18U key lands there).
