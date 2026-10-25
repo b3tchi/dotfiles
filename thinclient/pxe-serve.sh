@@ -36,7 +36,7 @@ prompt 0
 timeout 0
 label auto
   kernel debian-installer/i386/linux
-  append initrd=debian-installer/i386/initrd.gz auto=true priority=critical url=http://$ip:8000/preseed.cfg hostname=mini311 domain= locale=en_US.UTF-8 keymap=us vga=788 --- quiet
+  append initrd=debian-installer/i386/initrd.gz auto=true priority=critical interface=auto hw-detect/load_firmware=false url=http://$ip:8000/preseed.cfg hostname=mini311 domain= locale=en_US.UTF-8 keymap=us vga=788 --- quiet
 EOF
   mkdir -p "$(dirname "$conf")"
   printf 'enable-tftp\ntftp-root=%s\ndhcp-boot=pxelinux.0\n' "$root" > "$conf"
