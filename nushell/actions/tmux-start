@@ -132,15 +132,15 @@ def main [
         # Create new session with new window
         tmux new-session -d -t $session -s $new_session ...$cwd_args
 
-        # Until our client attaches, the new session is unattached while its
+        # Until a client attaches, the new session is unattached while its
         # group has attached sessions — a tmux-cleanup hook firing in that gap
         # (e.g. session-window-changed from the new-window below) kills it and
         # attach fails with "can't find session". Mark it pending: tmux-cleanup
         # spares the session and its current window, and tmux.conf's
-        # client-attached hook clears the mark once we attach.
-        if $mode == "attach" {
-            tmux set-option -t $new_session "@wm-restore-pending" (date now | format date '%s')
-        }
+        # client-attached / client-session-changed hooks clear the mark once a
+        # client arrives. Start mode too: callers attach later (wm-launch-terminal
+        # via TMUX_TARGET once the terminal is up) or switch-client.
+        tmux set-option -t $new_session "@wm-restore-pending" (date now | format date '%s')
 
         # No -d: the new window must be the session's current window so the
         # pending mark covers it too
