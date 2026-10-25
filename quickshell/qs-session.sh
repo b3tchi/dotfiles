@@ -58,8 +58,10 @@ QS_DPY_RE="$(printf %s "$QS_DPY_BASE" | sed 's/[].*^$[\\]/\\&/g')"
 
 # True if pid belongs to this session (environ carries our display). The
 # trailing (\.[0-9]+)? tolerates the Qt-added screen suffix in either direction.
+# tr, not `grep -z`: busybox grep (the phone) has no -z.
 qs_same_session() {
-    grep -zqsE "^$QS_DPY_VAR=$QS_DPY_RE(\.[0-9]+)?\$" "/proc/$1/environ" 2>/dev/null
+    tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null |
+        grep -qsE "^$QS_DPY_VAR=$QS_DPY_RE(\.[0-9]+)?\$"
 }
 
 # Kill only this session's processes. Args are passed to pgrep
