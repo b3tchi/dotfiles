@@ -7,8 +7,10 @@ xset s off -dpms                 # never blank: the remote session is the screen
 
 while :; do
   # FreeRDP 2 syntax (Debian 12). /cert-tofu: trust xrdp's self-signed cert
-  # on first connect. Wallpaper/themes off + RFX keep the Atom decode cheap.
-  xfreerdp /v:"$RDP_HOST":"$RDP_PORT" /f /network:lan /rfx \
+  # on first connect. /f = full native panel (1366x768, too small to spare
+  # pixels); /bpp:32 + RFX (4:4:4, no H.264 chroma washout) = full colour.
+  # Wallpaper/themes off keep the Atom decode cheap.
+  xfreerdp /v:"$RDP_HOST":"$RDP_PORT" /f /bpp:32 /network:lan /rfx \
     -wallpaper -themes +clipboard +auto-reconnect /cert-tofu
   sleep 3                        # server down / logged out: retry
 done
