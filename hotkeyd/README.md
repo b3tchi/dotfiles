@@ -78,7 +78,18 @@ four things in order:
    daemon's arguments and `$KWI3SOCK` / `HOTKEYD_WIN32_DRYRUN` taken from
    `<desktop>.args`.
 4. **Waits for `--health`.** It exits 0 once the new pid serves, or 1 if it
-   does not within 10 s, printing the last verdict.
+   does not, printing the last verdict, which names the check still failing.
+
+All four steps share one 12 s budget, counted from the start of the run, so
+`recover` always answers before the host's 15 s timeout. Each step gets what
+is left of the budget, up to its own bound: the stop request up to 1 s, each
+of the two waits up to 2 s, and each health poll up to 3 s. The last health
+poll is cut to whatever remains. A poll cut short can time out on the control
+socket while the daemon is still checking kwi3, so if its verdict differs
+from the last full-length poll's, `recover` prints both. The worst case is a
+daemon that ignores the stop and a new one that never serves. That run uses
+1 s + 2 s + 2 s for the stop and about 7 s of health polls, and exits 1 at
+12 s.
 
 With `HOTKEYD_WIN32_DRYRUN=1`, `recover` sends no key-up and only says which
 keys it would release. A daemon it starts in that mode stays dry.

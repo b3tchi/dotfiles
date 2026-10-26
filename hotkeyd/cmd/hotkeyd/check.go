@@ -59,7 +59,8 @@ func usageText() string {
         socket's stop, then by the pid in its lock after 2s, never by
         name -- start a new one detached with the old one's arguments,
         and exit 0 once --health says it serves, 1 if it does not
-        within 10s. HOTKEYD_WIN32_DRYRUN=1 sends no key-up
+        -- all of it within 12s, worst case (the host waits 15s).
+        HOTKEYD_WIN32_DRYRUN=1 sends no key-up
 
   hotkeyd check --ownership [--display DISPLAY]
         report per-display chord ownership (i3 / daemon / neither /
