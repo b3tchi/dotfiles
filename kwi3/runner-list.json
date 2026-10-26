@@ -1,0 +1,9 @@
+[
+  {"name": "Windows Terminal", "cmd": "wt.exe", "args": ["-w", "new"]},
+  {"name": "WSL", "cmd": "wt.exe", "args": ["-w", "new", "wsl.exe", "--cd", "~"]},
+  {"name": "WezTerm", "cmd": "~\\scoop\\apps\\wezterm\\current\\wezterm-gui.exe"},
+  {"name": "Firefox", "cmd": "~\\scoop\\apps\\firefox\\current\\firefox.exe"},
+  {"name": "Edge", "cmd": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"},
+  {"name": "Teams", "cmd": "ms-teams.exe"},
+  {"name": "Notepad", "cmd": "notepad.exe"}
+]
