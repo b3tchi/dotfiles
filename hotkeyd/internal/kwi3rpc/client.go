@@ -97,7 +97,9 @@ func WithOnConnect(fn func()) Option {
 // parallel.
 type Client struct {
 	addr string
-	dial func(network, address string) (net.Conn, error)
+	// dial is the per-OS dialer (dial_other.go: AF_UNIX; dial_windows.go:
+	// a \\.\pipe\ name is a named pipe, anything else AF_UNIX).
+	dial func(path string) (net.Conn, error)
 	log  func(string)
 	// timeout bounds one Call; 0 means none (WithCallTimeout).
 	timeout time.Duration
@@ -112,12 +114,13 @@ type Client struct {
 }
 
 // New constructs a Client for kwi3's rpc socket at addr (a unix socket
-// path - the same $KWI3SOCK value the daemon reads). It does not dial yet;
-// the first Call does.
+// path - the same $KWI3SOCK value the daemon reads - or, on Windows, the
+// Win32 host's named pipe \\.\pipe\kwi3-<user>-<desktop>). It does not
+// dial yet; the first Call does.
 func New(addr string, opts ...Option) *Client {
 	c := &Client{
 		addr: addr,
-		dial: net.Dial,
+		dial: dial,
 		log:  func(string) {},
 	}
 	for _, opt := range opts {
@@ -148,7 +151,7 @@ func (c *Client) ensureConnectedLocked() error {
 	if c.conn != nil {
 		return nil
 	}
-	conn, err := c.dial("unix", c.addr)
+	conn, err := c.dial(c.addr)
 	if err != nil {
 		if !c.down {
 			c.down = true
