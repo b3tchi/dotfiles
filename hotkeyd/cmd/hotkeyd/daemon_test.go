@@ -1126,7 +1126,7 @@ func TestRun_RealOSSignal_SIGTERM_StopsViaProcessSelfSignal(t *testing.T) {
 	go func() { done <- h.dae.Run(sig) }()
 
 	time.Sleep(20 * time.Millisecond)
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+	if err := selfSignal(t, syscall.SIGTERM); err != nil {
 		t.Fatalf("self-signal: %v", err)
 	}
 
@@ -1962,7 +1962,7 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 		t.Fatal("chord did not reach i3 (or i3 did not spawn the marker) -- press-to-i3-dispatch pipeline is broken")
 	}
 
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+	if err := selfSignal(t, syscall.SIGTERM); err != nil {
 		t.Fatalf("self-signal SIGTERM: %v", err)
 	}
 	select {
