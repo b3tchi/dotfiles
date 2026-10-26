@@ -107,3 +107,24 @@ func (l *Lock) Release() {
 	unlockFileEx(syscall.Handle(l.file.Fd()))
 	_ = l.file.Close()
 }
+
+// LockHeld reports whether some process holds the lock at path right now.
+// It asks the way a second daemon would - a non-blocking LockFileEx on the
+// lock byte - and lets go at once if it got it. `hotkeyd recover` asks
+// before it ends the pid the file names (sp012 Task 7): a pid in a file
+// nobody holds is a dead daemon's, and the pid may since be another
+// program's. Any answer other than "refused, held" is false, so a doubt
+// never ends a process.
+func LockHeld(path string) bool {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := syscall.Handle(f.Fd())
+	if err := lockFileEx(h); err != nil {
+		return err == errorLockViolation || err == errorIOPending
+	}
+	unlockFileEx(h)
+	return false
+}

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# install-win32.sh - build hotkeyd for Windows from WSL and install it where
+# the kwi3 Win32 host runs it (sp012 Task 7, kwi3-hoex.7):
+#
+#   %LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe
+#
+#   hotkeyd/install-win32.sh
+#
+# The build is GOOS=windows -tags win32 (the Windows chord table,
+# host_win32.go) with -ldflags -H=windowsgui (no console window: the host
+# starts it, and `hotkeyd recover` restarts it, detached). The built binary
+# validates its own compiled table (--check) before anything is copied.
+#
+# STALE IMAGE RULE (the kwi3 Win32 rig's, kwi3-xkzt). Windows will not let
+# a running image be replaced, and a half-done replace is worse than none.
+# So before copying, the script asks Windows (Get-CimInstance Win32_Process,
+# matched on the FULL ExecutablePath, never the name) for any process
+# running from the install path, and REFUSES - exit 2, every such pid and
+# command line named, nothing copied - while one is. It never ends a
+# process. Stop the daemon first: `hotkeyd recover` restarts it from the new
+# image afterwards. A query that fails refuses too: an install it cannot
+# check is not done.
+#
+# %LOCALAPPDATA% is read from Windows through cmd.exe, so an override passed
+# in through WSLENV (LOCALAPPDATA=C:\some\dir WSLENV=LOCALAPPDATA) installs
+# there instead of the real profile.
+#
+# After an install, `"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" --health`
+# says whether this desktop's daemon serves (exit 0), or which check fails:
+# the lock's pid, the control socket, the active layer's chords, kwi3rpc.
+#
+# Exit: 0 installed; 1 the build or --check failed; 2 refused (an image
+# running, the process query failed) or a setup error (no go, not WSL).
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+die() { echo "install-win32.sh: $*" >&2; exit 2; }
+
+command -v go >/dev/null || die "no go on PATH"
+command -v wslpath >/dev/null || die "not WSL (no wslpath)"
+CMD=/mnt/c/Windows/System32/cmd.exe
+PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+[ -x "$CMD" ] || die "no Windows interop ($CMD)"
+[ -x "$PS" ] || die "no powershell.exe ($PS)"
+
+lad_win="$(env -C /mnt/c "$CMD" /d /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r')"
+case "$lad_win" in
+    ""|%LOCALAPPDATA%) die "cannot read %LOCALAPPDATA% from Windows" ;;
+esac
+dest_win="$lad_win\\hotkeyd\\bin\\hotkeyd.exe"
+dest="$(wslpath -u "$dest_win")" || die "cannot map $dest_win into WSL"
+
+stage="$(mktemp -d)" || die "cannot create a staging directory"
+trap 'rm -rf "$stage"' EXIT
+built="$stage/hotkeyd.exe"
+
+echo "install-win32.sh: building hotkeyd.exe (GOOS=windows -tags win32 -H=windowsgui)"
+if ! GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go -C "$HERE" build -trimpath \
+        -tags win32 -ldflags '-H=windowsgui' -o "$built" ./cmd/hotkeyd; then
+    echo "install-win32.sh: build failed" >&2
+    exit 1
+fi
+
+# --check runs the built image itself (validates the compiled table; no
+# chord, no socket, no daemon). Run from the Windows side of the staging
+# copy: a Windows image is never run from the \\wsl.localhost share.
+win_tmp="$(env -C /mnt/c "$CMD" /d /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')"
+[ -n "$win_tmp" ] || die "cannot read %TEMP% from Windows"
+check_dir="$(wslpath -u "$win_tmp")/hotkeyd-install-$$"
+mkdir -p "$check_dir" || die "cannot create $check_dir"
+cp "$built" "$check_dir/hotkeyd.exe" || die "cannot stage the --check copy"
+check_out="$(env -C "$check_dir" "$check_dir/hotkeyd.exe" --check 2>&1)"
+check_rc=$?
+rm -rf "$check_dir"
+if [ "$check_rc" -ne 0 ]; then
+    printf '%s\n' "$check_out" >&2
+    echo "install-win32.sh: the built hotkeyd.exe refused its own table (--check exit $check_rc); nothing installed" >&2
+    exit 1
+fi
+printf '%s\n' "$check_out"
+
+# The stale-image rule: who runs from the install path right now?
+script='$ErrorActionPreference = "Stop"
+$want = $env:HOTKEYD_INSTALL_DEST
+Get-CimInstance Win32_Process |
+  Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $want) } |
+  ForEach-Object { "P`t{0}`t{1}" -f $_.ProcessId, $_.CommandLine }
+"hotkeyd-install: end"'
+enc="$(printf '%s' "$script" | iconv -f utf-8 -t utf-16le | base64 -w0)" || die "cannot encode the process query"
+out="$(env -C /mnt/c HOTKEYD_INSTALL_DEST="$dest_win" WSLENV="HOTKEYD_INSTALL_DEST${WSLENV:+:$WSLENV}" \
+        timeout 60 "$PS" -NoProfile -NonInteractive -EncodedCommand "$enc" 2>&1 | tr -d '\r')"
+if ! printf '%s\n' "$out" | grep -qx 'hotkeyd-install: end'; then
+    printf '%s\n' "$out" >&2
+    echo "install-win32.sh: REFUSED - cannot ask Windows which processes run $dest_win; nothing installed" >&2
+    exit 2
+fi
+running="$(printf '%s\n' "$out" | grep '^P	' || true)"
+if [ -n "$running" ]; then
+    echo "install-win32.sh: REFUSED - $dest_win is running; nothing installed:" >&2
+    printf '%s\n' "$running" | while IFS=$'\t' read -r _ pid cmdline; do
+        echo "  pid $pid: $cmdline" >&2
+    done
+    echo "install-win32.sh: stop it first (nothing is ended here), then install, then \`hotkeyd recover\` starts the new image" >&2
+    exit 2
+fi
+
+mkdir -p "$(dirname "$dest")" || die "cannot create $(dirname "$dest_win")"
+cp "$built" "$dest.new" || die "cannot write $dest_win.new"
+mv -f "$dest.new" "$dest" || { rm -f "$dest.new"; die "cannot replace $dest_win"; }
+echo "install-win32.sh: installed $dest_win"
+echo "install-win32.sh: check it with: \"$dest_win\" --health"

@@ -79,8 +79,17 @@ const controlWriteTimeout = 500 * time.Millisecond
 // Anything else in the object is ignored — a forward-compatible client may
 // send fields this build predates, and refusing them would make the socket
 // harder to extend than the compiled table it fronts.
+//
+// sp012 Task 7 (kwi3-hoex.7) adds two more requests, each one line with its
+// own key: {"status":true} - answered by the run loop itself, so an answer
+// is evidence the loop is turning - with the daemon's pid, its active
+// layer, its grab counts and whether its kwi3rpc address answers; and
+// {"stop":true}, which `hotkeyd recover` sends before it falls back to
+// ending the daemon by pid. A request names exactly one of the three.
 type controlRequest struct {
-	SetLayer *string `json:"set_layer"`
+	SetLayer *string `json:"set_layer,omitempty"`
+	Status   *bool   `json:"status,omitempty"`
+	Stop     *bool   `json:"stop,omitempty"`
 }
 
 // controlReply is the wire reply: {"ok":true} or {"ok":false,"error":"..."}.
@@ -88,18 +97,49 @@ type controlRequest struct {
 // ([[us019]] AC4: refused BY NAME, never silently ignored) — see
 // validateControlLayer and layer's ErrNoSuchLayer/ErrNotExternalLayer/
 // ErrLayerActive, all of which wrap the name.
+//
+// A status reply also carries the fields below; every other reply leaves
+// them out, so a set-layer reply is byte-identical to what it always was.
 type controlReply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+
+	// PID is the daemon's own pid, so --health can tell its answer from a
+	// pid the lock file names but some other process now owns.
+	PID int `json:"pid,omitempty"`
+	// Layer is the engine's active layer.
+	Layer string `json:"layer,omitempty"`
+	// Wanted/Active/Missing are the key source's grab report for that
+	// layer, read by the run loop at the moment it answered (not the
+	// sidecar file, which a failed write could leave stale).
+	Wanted  int      `json:"wanted,omitempty"`
+	Active  int      `json:"active,omitempty"`
+	Missing []string `json:"missing,omitempty"`
+	// Kwi3 is "up" when the daemon's kwi3rpc address answered a request
+	// just now, the error that address gave otherwise, and empty when the
+	// daemon has no kwi3rpc address at all.
+	Kwi3 string `json:"kwi3,omitempty"`
 }
+
+// Control request kinds (controlCmd.kind).
+const (
+	controlSetLayer = ""
+	controlStatus   = "status"
+	controlStop     = "stop"
+)
 
 // controlCmd is one accepted request crossing into Run's select. reply is
 // buffered (capacity 1) so the run loop's send NEVER blocks, even if the
 // requesting client has vanished in the meantime — the run loop must not be
 // able to wait on a socket peer under any circumstance.
+//
+// kind is controlSetLayer, controlStatus or controlStop. A status request
+// gets its answer in status (buffered too) before reply is sent.
 type controlCmd struct {
-	layer string
-	reply chan error
+	kind   string
+	layer  string
+	reply  chan error
+	status chan controlReply
 }
 
 // ErrControlUnavailable means the control socket could not be bound because
@@ -134,6 +174,11 @@ type ControlConfig struct {
 	Log          func(string)
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+	// Kwi3Probe, if non-nil, is asked on the connection's own goroutine
+	// (never the run loop's) whether the daemon's kwi3rpc address answers;
+	// its result is a status reply's Kwi3 field. nil: the daemon has no
+	// kwi3rpc address, and Kwi3 stays empty.
+	Kwi3Probe func() error
 }
 
 // ControlListener owns the control socket: an accept loop, one goroutine per
@@ -146,6 +191,7 @@ type ControlListener struct {
 	log          func(string)
 	readTimeout  time.Duration
 	writeTimeout time.Duration
+	kwi3Probe    func() error
 
 	cmds chan controlCmd
 
@@ -193,6 +239,7 @@ func NewControlListener(cfg ControlConfig) (*ControlListener, error) {
 		ln:           ln,
 		log:          cfg.Log,
 		readTimeout:  cfg.ReadTimeout,
+		kwi3Probe:    cfg.Kwi3Probe,
 		writeTimeout: cfg.WriteTimeout,
 		cmds:         make(chan controlCmd),
 		done:         make(chan struct{}),
@@ -239,13 +286,15 @@ func (l *ControlListener) handleConn(conn *net.UnixConn) {
 	defer l.wg.Done()
 	defer conn.Close()
 
-	name, err := l.readRequest(conn)
+	cmd, err := l.readRequest(conn)
 	if err != nil {
 		l.reply(conn, err)
 		return
 	}
-
-	cmd := controlCmd{layer: name, reply: make(chan error, 1)}
+	cmd.reply = make(chan error, 1)
+	if cmd.kind == controlStatus {
+		cmd.status = make(chan controlReply, 1)
+	}
 	select {
 	case l.cmds <- cmd:
 	case <-l.done:
@@ -261,15 +310,41 @@ func (l *ControlListener) handleConn(conn *net.UnixConn) {
 	// reply if one landed in the same instant.
 	select {
 	case applyErr := <-cmd.reply:
-		l.reply(conn, applyErr)
+		l.answer(conn, cmd, applyErr)
 	case <-l.done:
 		select {
 		case applyErr := <-cmd.reply:
-			l.reply(conn, applyErr)
+			l.answer(conn, cmd, applyErr)
 		default:
 			l.reply(conn, errControlShuttingDown)
 		}
 	}
+}
+
+// answer replies to an applied request: a status request with the run
+// loop's answer plus the kwi3rpc probe, asked here on the connection's
+// goroutine so a hung kwi3 host can never stall the run loop.
+func (l *ControlListener) answer(conn *net.UnixConn, cmd controlCmd, applyErr error) {
+	if cmd.kind != controlStatus || applyErr != nil {
+		l.reply(conn, applyErr)
+		return
+	}
+	var rep controlReply
+	select {
+	case rep = <-cmd.status:
+	default:
+		l.reply(conn, errors.New("control: the run loop answered status with nothing"))
+		return
+	}
+	rep.OK = true
+	if l.kwi3Probe != nil {
+		if err := l.kwi3Probe(); err != nil {
+			rep.Kwi3 = err.Error()
+		} else {
+			rep.Kwi3 = "up"
+		}
+	}
+	l.writeReply(conn, rep)
 }
 
 // readRequest reads ONE length-bounded line under a read deadline and
@@ -277,9 +352,9 @@ func (l *ControlListener) handleConn(conn *net.UnixConn) {
 // read: without it a client streaming bytes with no newline would grow
 // bufio's buffer until the deadline, which is a memory bound of
 // "bandwidth x timeout" rather than a constant.
-func (l *ControlListener) readRequest(conn *net.UnixConn) (string, error) {
+func (l *ControlListener) readRequest(conn *net.UnixConn) (controlCmd, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(l.readTimeout)); err != nil {
-		return "", fmt.Errorf("control: cannot set a read deadline: %w", err)
+		return controlCmd{}, fmt.Errorf("control: cannot set a read deadline: %w", err)
 	}
 
 	r := bufio.NewReader(io.LimitReader(conn, maxControlRequestBytes+1))
@@ -287,32 +362,50 @@ func (l *ControlListener) readRequest(conn *net.UnixConn) (string, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrDeadlineExceeded):
-			return "", fmt.Errorf("control: read timed out after %s waiting for a request line", l.readTimeout)
+			return controlCmd{}, fmt.Errorf("control: read timed out after %s waiting for a request line", l.readTimeout)
 		case errors.Is(err, io.EOF):
 			// A client that wrote its request and closed without a
 			// trailing newline is served, not punished — but only if the
 			// bytes it did send are within the bound (checked next).
 		default:
-			return "", fmt.Errorf("control: read failed: %w", err)
+			return controlCmd{}, fmt.Errorf("control: read failed: %w", err)
 		}
 	}
 	if len(line) > maxControlRequestBytes {
-		return "", fmt.Errorf("control: request too large (limit %d bytes)", maxControlRequestBytes)
+		return controlCmd{}, fmt.Errorf("control: request too large (limit %d bytes)", maxControlRequestBytes)
 	}
 
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return "", errors.New(`control: empty request; want one line of {"set_layer":"<name>"}`)
+		return controlCmd{}, errors.New(`control: empty request; want one line of {"set_layer":"<name>"}`)
 	}
 
 	var req controlRequest
 	if err := json.Unmarshal([]byte(line), &req); err != nil {
-		return "", fmt.Errorf("control: malformed request: %w", err)
+		return controlCmd{}, fmt.Errorf("control: malformed request: %w", err)
 	}
-	if req.SetLayer == nil {
-		return "", errors.New(`control: request has no "set_layer" field`)
+	n := 0
+	cmd := controlCmd{}
+	if req.SetLayer != nil {
+		n++
+		cmd.layer = *req.SetLayer
 	}
-	return *req.SetLayer, nil
+	if req.Status != nil && *req.Status {
+		n++
+		cmd.kind = controlStatus
+	}
+	if req.Stop != nil && *req.Stop {
+		n++
+		cmd.kind = controlStop
+	}
+	switch n {
+	case 0:
+		return controlCmd{}, errors.New(`control: request has no "set_layer" field (nor "status":true or "stop":true)`)
+	case 1:
+		return cmd, nil
+	default:
+		return controlCmd{}, errors.New(`control: request names more than one of "set_layer", "status" and "stop"`)
+	}
 }
 
 // reply writes the single reply line. Failures to write are logged, never
@@ -324,6 +417,11 @@ func (l *ControlListener) reply(conn *net.UnixConn, applyErr error) {
 		rep.Error = applyErr.Error()
 		l.log(fmt.Sprintf("control: refused: %s", applyErr))
 	}
+	l.writeReply(conn, rep)
+}
+
+// writeReply writes rep as the connection's one reply line.
+func (l *ControlListener) writeReply(conn *net.UnixConn, rep controlReply) {
 	data, _ := json.Marshal(rep) // fixed, always-encodable struct
 	data = append(data, '\n')
 
@@ -385,4 +483,34 @@ func validateControlLayer(layers map[string]bind.Layer, name string) error {
 		return fmt.Errorf("%w: %q", layer.ErrNotExternalLayer, name)
 	}
 	return nil
+}
+
+// controlCall sends req to the control socket at path and reads its one
+// reply line, all within timeout. The client side of every request but
+// set-layer (setlayer.go keeps its own, older exit-code contract).
+func controlCall(path string, req controlRequest, timeout time.Duration) (controlReply, error) {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return controlReply{}, err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return controlReply{}, fmt.Errorf("cannot set a deadline: %w", err)
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return controlReply{}, fmt.Errorf("cannot encode the request: %w", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return controlReply{}, fmt.Errorf("request write failed: %w", err)
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil && line == "" {
+		return controlReply{}, fmt.Errorf("no reply: %w", err)
+	}
+	var rep controlReply
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &rep); err != nil {
+		return controlReply{}, fmt.Errorf("malformed reply %q: %w", strings.TrimSpace(line), err)
+	}
+	return rep, nil
 }

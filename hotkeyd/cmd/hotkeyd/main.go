@@ -434,7 +434,13 @@ func buildPublisher(display string, log func(string)) (layer.Publisher, *layer.S
 // caller can distinguish "no listener" without the typed-nil trap — see the
 // guard at its call site in run().
 func buildControl(display string, log func(string)) *ControlListener {
-	ctl, err := NewControlListener(ControlConfig{Path: proc.ControlPath(display), Log: log})
+	return buildControlProbe(display, log, nil)
+}
+
+// buildControlProbe is buildControl with a kwi3rpc probe for status
+// requests (ControlConfig.Kwi3Probe; sp012 Task 7, the Windows --health).
+func buildControlProbe(display string, log func(string), kwi3Probe func() error) *ControlListener {
+	ctl, err := NewControlListener(ControlConfig{Path: proc.ControlPath(display), Log: log, Kwi3Probe: kwi3Probe})
 	if err != nil {
 		log(fmt.Sprintf("control socket unavailable, continuing without set-layer: %s", err))
 		return nil
