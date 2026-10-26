@@ -4,6 +4,17 @@
 #
 #   %LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe
 #
+# and copies the kwi3 runner's program list from this checkout,
+# kwi3/runner-list.json, to where kwi3-run.exe reads it (sp012 Task 13,
+# kwi3-hoex.13):
+#
+#   %APPDATA%\kwi3\runner-list.json
+#
+# A copy, not a link: an edit to the list takes a re-run of this script. The
+# list is copied first, before the build, and does not wait on the stale-image
+# rule below (kwi3-run.exe reads the file, it does not run from it). A
+# checkout without the list is refused before anything is touched.
+#
 #   hotkeyd/install-win32.sh
 #
 # The build is GOOS=windows -tags win32 (the Windows chord table,
@@ -21,16 +32,17 @@
 # image afterwards. A query that fails refuses too: an install it cannot
 # check is not done.
 #
-# %LOCALAPPDATA% is read from Windows through cmd.exe, so an override passed
-# in through WSLENV (LOCALAPPDATA=C:\some\dir WSLENV=LOCALAPPDATA) installs
-# there instead of the real profile.
+# %LOCALAPPDATA% and %APPDATA% are read from Windows through cmd.exe, so an
+# override passed in through WSLENV (LOCALAPPDATA=C:\a APPDATA=C:\b
+# WSLENV=LOCALAPPDATA:APPDATA) installs there instead of the real profile.
 #
 # After an install, `"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" --health`
 # says whether this desktop's daemon serves (exit 0), or which check fails:
 # the lock's pid, the control socket, the active layer's chords, kwi3rpc.
 #
 # Exit: 0 installed; 1 the build or --check failed; 2 refused (an image
-# running, the process query failed) or a setup error (no go, not WSL).
+# running, the process query failed, no kwi3/runner-list.json in this
+# checkout) or a setup error (no go, not WSL).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +62,20 @@ case "$lad_win" in
 esac
 dest_win="$lad_win\\hotkeyd\\bin\\hotkeyd.exe"
 dest="$(wslpath -u "$dest_win")" || die "cannot map $dest_win into WSL"
+
+# The runner list, from this checkout (hotkeyd/../kwi3/runner-list.json).
+list_src="$(dirname "$HERE")/kwi3/runner-list.json"
+[ -f "$list_src" ] || die "REFUSED - no runner list at $list_src; nothing installed"
+ad_win="$(env -C /mnt/c "$CMD" /d /c 'echo %APPDATA%' 2>/dev/null | tr -d '\r')"
+case "$ad_win" in
+    ""|%APPDATA%) die "cannot read %APPDATA% from Windows" ;;
+esac
+list_win="$ad_win\\kwi3\\runner-list.json"
+list_dest="$(wslpath -u "$list_win")" || die "cannot map $list_win into WSL"
+mkdir -p "$(dirname "$list_dest")" || die "cannot create $(dirname "$list_win")"
+cp "$list_src" "$list_dest.new" || die "cannot write $list_win.new"
+mv -f "$list_dest.new" "$list_dest" || { rm -f "$list_dest.new"; die "cannot replace $list_win"; }
+echo "install-win32.sh: copied $list_src to $list_win"
 
 stage="$(mktemp -d)" || die "cannot create a staging directory"
 trap 'rm -rf "$stage"' EXIT
@@ -75,7 +101,7 @@ check_rc=$?
 rm -rf "$check_dir"
 if [ "$check_rc" -ne 0 ]; then
     printf '%s\n' "$check_out" >&2
-    echo "install-win32.sh: the built hotkeyd.exe refused its own table (--check exit $check_rc); nothing installed" >&2
+    echo "install-win32.sh: the built hotkeyd.exe refused its own table (--check exit $check_rc); hotkeyd.exe not installed" >&2
     exit 1
 fi
 printf '%s\n' "$check_out"
@@ -92,12 +118,12 @@ out="$(env -C /mnt/c HOTKEYD_INSTALL_DEST="$dest_win" WSLENV="HOTKEYD_INSTALL_DE
         timeout 60 "$PS" -NoProfile -NonInteractive -EncodedCommand "$enc" 2>&1 | tr -d '\r')"
 if ! printf '%s\n' "$out" | grep -qx 'hotkeyd-install: end'; then
     printf '%s\n' "$out" >&2
-    echo "install-win32.sh: REFUSED - cannot ask Windows which processes run $dest_win; nothing installed" >&2
+    echo "install-win32.sh: REFUSED - cannot ask Windows which processes run $dest_win; hotkeyd.exe not installed" >&2
     exit 2
 fi
 running="$(printf '%s\n' "$out" | grep '^P	' || true)"
 if [ -n "$running" ]; then
-    echo "install-win32.sh: REFUSED - $dest_win is running; nothing installed:" >&2
+    echo "install-win32.sh: REFUSED - $dest_win is running; hotkeyd.exe not installed:" >&2
     printf '%s\n' "$running" | while IFS=$'\t' read -r _ pid cmdline; do
         echo "  pid $pid: $cmdline" >&2
     done
