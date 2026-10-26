@@ -60,7 +60,7 @@ func main() {
 func run(argv []string) int {
 	fs := flag.NewFlagSet("hotkeyd", flag.ContinueOnError)
 	displayFlag := fs.String("display", "", "X display (default: $DISPLAY)")
-	inputFlag := fs.String("input", "x11", "key source: x11 (XI2 grabs) or kwin (kwi3keys plugin)")
+	inputFlag := fs.String("input", defaultInput, "key source: x11 (XI2 grabs), kwin (kwi3keys plugin) or win32 (RegisterHotKey, a Windows build only)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -68,8 +68,10 @@ func run(argv []string) int {
 	case "x11":
 	case "kwin":
 		return runKwin(kwin.SocketPath())
+	case "win32":
+		return runWin32()
 	default:
-		daemonLog(fmt.Sprintf("unknown --input %q (x11 or kwin)", *inputFlag))
+		daemonLog(fmt.Sprintf("unknown --input %q (x11, kwin or win32)", *inputFlag))
 		return 2
 	}
 

@@ -62,12 +62,13 @@ const (
 // positional arg) wins, then $DISPLAY, then ":0" -- matching hotkeyd.py's
 // `display or os.environ.get("DISPLAY", ":0")` used throughout hotkeyd.py's
 // health/lock/socket path helpers.
+//
+// On Windows the last two tiers are the desktop this process runs on
+// (defaultDisplay, win32run.go): there is no X display, and the daemon's
+// per-instance files are keyed on the desktop (sp012 Task 4).
 func resolveDisplay(display string) string {
 	if display == "" {
-		display = os.Getenv("DISPLAY")
-	}
-	if display == "" {
-		display = ":0"
+		display = defaultDisplay()
 	}
 	return display
 }

@@ -15,10 +15,21 @@
 #                              the Windows build does not read, and its
 #                              atomic-rename test fails on Windows
 #                              (kwi3-f9i4, which lifts this skip)
-#   ./cmd/hotkeyd:_Windows_    the control socket against a running daemon
+#   ./cmd/hotkeyd:_Windows_    the control socket against a running daemon,
+#                              and `--input win32` assembled: a WM_HOTKEY
+#                              posted to the daemon's window dispatches
+#                              (DryRun - nothing is registered)
 #   ./internal/win32           the key translator, cross-checked against
 #                              VkKeyScanEx/MapVirtualKeyEx on the US layout
-#                              (00000409) the session already has loaded
+#                              (00000409) the session already has loaded;
+#                              the RegisterHotKey thread, which registers
+#                              ONLY Ctrl+Alt+Shift+F22/F23 (registrations
+#                              are window-station wide, kwi3-hoex.8)
+#
+# GOFLAGS=-tags=win32 builds the binaries with the Windows table.
+# TestWin32Run_Windows_E2E_HostFocusesWorkspace2 needs a running
+# i3kwin-win32 on a rig desktop, named by HOTKEYD_E2E_PIPE (and the binary
+# started ON that desktop); without it, it skips.
 #
 # Containment. Every test binary runs with %LOCALAPPDATA% and %USERPROFILE%
 # pointed into the scratch directory (passed through WSLENV), so nothing a
