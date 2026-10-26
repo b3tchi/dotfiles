@@ -2,11 +2,7 @@
 
 package main
 
-import (
-	"fmt"
-
-	"hotkeyd/internal/bind"
-)
+import "hotkeyd/internal/bind"
 
 // hostOverrides for the phone (`go build -tags phone`): the headless KWin
 // session reached over RDP. It has no dotfiles, nushell or st, so a chord
@@ -18,12 +14,10 @@ func hostOverrides() map[string][]bind.Action {
 		// KWin has no restart in place; reloading the script is its way.
 		"$mod+Shift+c": runAction("$HOME/.local/bin/i3reload"),
 	}
-	// ws-switch.nu is nushell; kwi3's workspace.focus/workspace.move take
-	// the same 1-based position directly.
-	for n := 1; n <= 8; n++ {
-		over[fmt.Sprintf("$mod+%d", n)] = cmdAction(fmt.Sprintf("workspace %d", n))
-		over[fmt.Sprintf("$mod+Ctrl+%d", n)] = cmdAction(fmt.Sprintf("move container to workspace %d", n))
-		over[fmt.Sprintf("$mod+Shift+%d", n)] = cmdAction(fmt.Sprintf("move container to workspace %d; workspace %d", n, n))
-	}
+	// ws-switch.nu is nushell; kwi3 takes the position directly.
+	kwi3WorkspaceOverrides(over)
 	return over
 }
+
+// overlayCmd is unchanged on the phone: the shared table's quickshell path.
+func overlayCmd() string { return qsOverlayScript }

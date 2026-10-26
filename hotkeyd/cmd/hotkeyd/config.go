@@ -58,14 +58,19 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// shared constants — verbatim from binds.py's WS_SWITCH / NAV_STEP /
-// QS_OVERLAY and the quickshell script paths named inline in its table.
+// shared constants — verbatim from binds.py's WS_SWITCH / NAV_STEP and the
+// quickshell script paths named inline in its table. binds.py's QS_OVERLAY
+// is overlayCmd(), defined per host (host_*.go): the launcher and the
+// switcher are qs-overlay.sh on Linux and kwi3-run.exe on Windows.
 // ---------------------------------------------------------------------------
 
 const (
-	wsSwitch  = "~/.local/bin/ws-switch.nu"
-	navStep   = "5 px or 5 ppt"
-	qsOverlay = "~/.dotfiles/quickshell/qs-overlay.sh"
+	wsSwitch = "~/.local/bin/ws-switch.nu"
+	navStep  = "5 px or 5 ppt"
+
+	// qsOverlayScript is the Linux overlay, overlayCmd() on every host that
+	// has quickshell.
+	qsOverlayScript = "~/.dotfiles/quickshell/qs-overlay.sh"
 
 	qsScreenshot = "~/.dotfiles/quickshell/qs-screenshot.sh"
 	qsNotif      = "~/.dotfiles/quickshell/qs-notif.sh"
@@ -189,6 +194,17 @@ func workspaceBinds() []bind.Bind {
 	return out
 }
 
+// kwi3WorkspaceOverrides points the workspace group at kwi3 itself, for a
+// host with no nushell ws-switch.nu: kwi3's workspace.focus/workspace.move
+// take the same 1-based position directly (switch, move, move-and-follow).
+func kwi3WorkspaceOverrides(over map[string][]bind.Action) {
+	for n := 1; n <= 8; n++ {
+		over[fmt.Sprintf("$mod+%d", n)] = cmdAction(fmt.Sprintf("workspace %d", n))
+		over[fmt.Sprintf("$mod+Ctrl+%d", n)] = cmdAction(fmt.Sprintf("move container to workspace %d", n))
+		over[fmt.Sprintf("$mod+Shift+%d", n)] = cmdAction(fmt.Sprintf("move container to workspace %d; workspace %d", n, n))
+	}
+}
+
 // directionalBinds is binds.py's _directional_binds(): the global
 // $mod+hjkl/arrows focus group and its $mod+Shift move counterpart, built
 // from the SAME dirs/arrows tables the nav layer uses.
@@ -212,130 +228,212 @@ func directionalBinds() []bind.Bind {
 // mode, and the hold-modifier alt-tab switcher.
 // ---------------------------------------------------------------------------
 
-var Layers = map[string]bind.Layer{
-	// was i3 `mode "nav"` (dotfiles-5u6m). Bare keys focus, held Ctrl moves,
-	// held Alt resizes.
-	"nav": {
-		Binds: navBinds("focus"),
-		Mods: map[string]bind.Mod{
-			"move":   {Modifier: "Ctrl", Binds: navBinds("move")},
-			"resize": {Modifier: "Mod1", Binds: navBinds("resize")},
+var Layers = buildLayers()
+
+// buildLayers is the shared layer table less every layer this machine's
+// overrides orphaned: a layer that a removed chord entered and that no chord
+// left in the table (Binds, Kwi3OnlyBinds after overrides, or another
+// layer's binds) enters any more - $mod+0's `system` layer on Windows. A
+// layer no chord ever entered (the External screenshot layers, raised by
+// `set-layer`) is never dropped by this.
+func buildLayers() map[string]bind.Layer {
+	before := append(append([]bind.Bind{}, buildSharedBinds()...), Kwi3OnlyBinds...)
+	shared, kwi3 := splitHostOverrides(hostOverrides(), Kwi3OnlyBinds)
+	after := append(applyHostOverrides(buildSharedBinds(), shared), applyHostOverrides(Kwi3OnlyBinds, kwi3)...)
+	return pruneOrphanedLayers(sharedLayers(overlayCmd()), before, after)
+}
+
+// pruneOrphanedLayers returns a copy of layers without each layer entered by
+// a bind of before but by no bind of after nor of any layer still kept.
+// Dropping a layer can orphan one only it entered, so it runs to a fixpoint.
+func pruneOrphanedLayers(layers map[string]bind.Layer, before, after []bind.Bind) map[string]bind.Layer {
+	out := make(map[string]bind.Layer, len(layers))
+	for name, l := range layers {
+		out[name] = l
+	}
+	wasEntered := map[string]bool{}
+	for name := range entersOf(before) {
+		wasEntered[name] = true
+	}
+	for name, l := range layers {
+		for entered := range entersOf(layerBinds(l)) {
+			if entered != name {
+				wasEntered[entered] = true
+			}
+		}
+	}
+	for {
+		still := entersOf(after)
+		for name, l := range out {
+			for entered := range entersOf(layerBinds(l)) {
+				if entered != name {
+					still[entered] = true
+				}
+			}
+		}
+		dropped := false
+		for name := range out {
+			if wasEntered[name] && !still[name] {
+				delete(out, name)
+				dropped = true
+			}
+		}
+		if !dropped {
+			return out
+		}
+	}
+}
+
+// layerBinds is every bind a layer declares, its Mods' included.
+func layerBinds(l bind.Layer) []bind.Bind {
+	out := append([]bind.Bind{}, l.Binds...)
+	for _, m := range l.Mods {
+		out = append(out, m.Binds...)
+	}
+	return out
+}
+
+// entersOf is the set of layers binds enter.
+func entersOf(binds []bind.Bind) map[string]bool {
+	out := map[string]bool{}
+	for _, b := range binds {
+		for _, a := range b.Actions {
+			if e, ok := a.(bind.EnterLayer); ok {
+				out[e.Layer] = true
+			}
+		}
+	}
+	return out
+}
+
+// sharedLayers is the layer table every machine starts from, its switcher
+// driving the overlay program overlay (overlayCmd() on this host).
+func sharedLayers(overlay string) map[string]bind.Layer {
+	return map[string]bind.Layer{
+		// was i3 `mode "nav"` (dotfiles-5u6m). Bare keys focus, held Ctrl moves,
+		// held Alt resizes.
+		"nav": {
+			Binds: navBinds("focus"),
+			Mods: map[string]bind.Mod{
+				"move":   {Modifier: "Ctrl", Binds: navBinds("move")},
+				"resize": {Modifier: "Mod1", Binds: navBinds("resize")},
+			},
+			ExitKeys: []string{"q", "Escape", "Return"},
 		},
-		ExitKeys: []string{"q", "Escape", "Return"},
-	},
 
-	// was i3 `mode "resize"` (dotfiles-hwds.48). Entered by $mod+r,
-	// persistent, left with q / Escape / Return.
-	"resize": {
-		Binds:    resizeLayerBinds(),
-		ExitKeys: []string{"q", "Escape", "Return"},
-	},
-
-	// was i3 `mode "$mode_system"` (dotfiles-hwds.38). Entered by $mod+0;
-	// one key, one action, back to default (ONE-SHOT).
-	"system": {
-		Binds: []bind.Bind{
-			{Chord: "l", Actions: runAction("i3exit lock")},
-			{Chord: "e", Actions: runAction("i3exit logout")},
-			{Chord: "u", Actions: runAction("i3exit switch_user")},
-			{Chord: "s", Actions: runAction("i3exit suspend")},
-			{Chord: "h", Actions: runAction("i3exit hibernate")},
-			{Chord: "r", Actions: runAction("i3exit reboot")},
-			{Chord: "p", Actions: runAction("i3exit shutdown")},
+		// was i3 `mode "resize"` (dotfiles-hwds.48). Entered by $mod+r,
+		// persistent, left with q / Escape / Return.
+		"resize": {
+			Binds:    resizeLayerBinds(),
+			ExitKeys: []string{"q", "Escape", "Return"},
 		},
-		ExitKeys: []string{"q", "Escape", "Return"},
-		OneShot:  true,
-	},
 
-	// was quickshell/qs-keymon.py + four `nop` grabs in i3 (dotfiles-hwds.40).
-	// Alt-tab switcher: a HOLD layer ($mod), Tab/w cycle, Escape/Return
-	// cancel/confirm and leave, space hands off to the overlay for search,
-	// q is the exit_keys floor.
-	"switcher": {
-		Binds: []bind.Bind{
-			{Chord: "Tab", Actions: runAction(qsOverlay + " switcher")},
-			{Chord: "w", Actions: runAction(qsOverlay + " switcher")},
-			{Chord: "ISO_Left_Tab", Actions: runAction(qsOverlay + " switcher-prev")},
-			{Chord: "space", Actions: []bind.Action{
-				bind.Run{Cmd: qsOverlay + " switcher-search"}, bind.ExitLayer{}}},
-			{Chord: "Escape", Actions: []bind.Action{
-				bind.Run{Cmd: qsOverlay + " switcher-cancel"}, bind.ExitLayer{}}},
-			{Chord: "Return", Actions: []bind.Action{
-				bind.Run{Cmd: qsOverlay + " switcher-confirm"}, bind.ExitLayer{}}},
+		// was i3 `mode "$mode_system"` (dotfiles-hwds.38). Entered by $mod+0;
+		// one key, one action, back to default (ONE-SHOT).
+		"system": {
+			Binds: []bind.Bind{
+				{Chord: "l", Actions: runAction("i3exit lock")},
+				{Chord: "e", Actions: runAction("i3exit logout")},
+				{Chord: "u", Actions: runAction("i3exit switch_user")},
+				{Chord: "s", Actions: runAction("i3exit suspend")},
+				{Chord: "h", Actions: runAction("i3exit hibernate")},
+				{Chord: "r", Actions: runAction("i3exit reboot")},
+				{Chord: "p", Actions: runAction("i3exit shutdown")},
+			},
+			ExitKeys: []string{"q", "Escape", "Return"},
+			OneShot:  true,
 		},
-		Hold:          "$mod",
-		OnHoldRelease: runAction(qsOverlay + " switcher-confirm"),
-		ExitKeys:      []string{"q"},
-		// dispatched on every INVOLUNTARY exit (dotfiles-hwds.51), so a
-		// stranded overlay never sits on screen holding the keyboard.
-		OnExit: runAction(qsOverlay + " switcher-cancel"),
-	},
 
-	// was i3 `mode "screenshot"` (sp024, bd dotfiles-0tv1.2) — the AIMING
-	// phase of the screenshot gesture, and the SECOND External layer.
-	//
-	// quickshell/qs-screenshot.sh raises this before it starts the selector,
-	// so Bar.qml paints its hint strip (`w` = whole screen, Esc = cancel) and
-	// qs-focus-border.py reddens the ring around the focused window — "this
-	// is what `w` would capture". Cleared by the launcher's single
-	// unconditional `set-layer default` on every exit path, which covers this
-	// layer and "screenshot-drag" alike (whichever is up when the capture
-	// ends).
-	//
-	// It travelled as a real i3 mode until sp024, for the same reason the
-	// drag phase did: i3's mode-change IPC was the only channel already wired
-	// to every consumer. The daemon's layer feed is that channel now, and
-	// Bar.qml:333 already prefers ANY non-default daemon layer over i3Mode,
-	// so the i3 `mode "screenshot" {}` block is DELETED in the same commit
-	// this declaration arrives — never left beside it (a signal in two
-	// channels is the double-fire class ft011 exists to kill).
-	//
-	// Its Escape/q bindsyms went with the block, and that is safe rather than
-	// merely tidy: i3 now stays in `default` for the whole capture, so there
-	// is no stuck MODE for Escape to unstick — the dotfiles-ux1 failure class
-	// dissolves rather than needing a replacement. A stranded layer (launcher
-	// SIGKILLed mid-aiming) costs a stuck hint strip and a red ring and
-	// NOTHING ELSE, because an External layer holds zero grabs; `hotkeyd.sh
-	// restart` clears it. While the selector is alive its own seat grab owns
-	// the keys in-process, which is why the keyboard is never at stake here.
-	//
-	// KNOWN LIMITATION, accepted at sp024: with the daemon absent (panic
-	// linked, sway session, hotkeyd dead) the launcher's `set-layer` fails
-	// under `|| true` and NOTHING paints — no strip, no ring. The capture
-	// still works. Pixels, never keys.
-	"screenshot": {External: true},
+		// was quickshell/qs-keymon.py + four `nop` grabs in i3 (dotfiles-hwds.40).
+		// Alt-tab switcher: a HOLD layer ($mod), Tab/w cycle, Escape/Return
+		// cancel/confirm and leave, space hands off to the overlay for search,
+		// q is the exit_keys floor.
+		"switcher": {
+			Binds: []bind.Bind{
+				{Chord: "Tab", Actions: runAction(overlay + " switcher")},
+				{Chord: "w", Actions: runAction(overlay + " switcher")},
+				{Chord: "ISO_Left_Tab", Actions: runAction(overlay + " switcher-prev")},
+				{Chord: "space", Actions: []bind.Action{
+					bind.Run{Cmd: overlay + " switcher-search"}, bind.ExitLayer{}}},
+				{Chord: "Escape", Actions: []bind.Action{
+					bind.Run{Cmd: overlay + " switcher-cancel"}, bind.ExitLayer{}}},
+				{Chord: "Return", Actions: []bind.Action{
+					bind.Run{Cmd: overlay + " switcher-confirm"}, bind.ExitLayer{}}},
+			},
+			Hold:          "$mod",
+			OnHoldRelease: runAction(overlay + " switcher-confirm"),
+			ExitKeys:      []string{"q"},
+			// dispatched on every INVOLUNTARY exit (dotfiles-hwds.51), so a
+			// stranded overlay never sits on screen holding the keyboard.
+			OnExit: runAction(overlay + " switcher-cancel"),
+		},
 
-	// was i3 `mode "screenshot-drag"` (sp023, bd dotfiles-1m4t.5) — the
-	// FIFTH layer shape, and the only one no chord can reach.
-	//
-	// quickshell/qs-region.py raises this the instant the user starts
-	// drawing a region, so quickshell/qs-focus-border.py (a SEPARATE
-	// process, with no access to the overlay's in-memory drag state) can
-	// drop the red "this is what `w` would capture" highlight that goes
-	// stale the moment an arbitrary region is being drawn. It used to
-	// travel as a real i3 mode over `i3-msg mode screenshot-drag`, because
-	// i3's mode-change IPC event was the only channel already wired to
-	// both processes; the daemon's own layer feed is that channel now, so
-	// the i3 mode block is deleted rather than kept beside this (a signal
-	// in two channels is the double-fire class ft011 exists to kill).
-	//
-	// DECLARES NOTHING BUT THE FLAG, and that is the design, not brevity
-	// (sp023 plan decision 1; rule R28 refuses any behavioral field here
-	// by name). It holds zero grabs and does not shadow the global table
-	// while active: during a drag the overlay owns a seat grab over all
-	// input anyway, so daemon grabs would be inert — and a STRANDED
-	// external layer (both the overlay and its launcher dying without
-	// clearing) must therefore cost pixels, never keys (us019 AC5). There is
-	// no keyboard escape to name any more and none is needed: sp024 deleted
-	// the `mode "screenshot"` block that used to be one, i3 stays in
-	// `default` through the whole gesture, and a stranded layer leaves the
-	// full global bind table reachable. `hotkeyd.sh restart` clears the
-	// pixels.
-	//
-	// Entered and left ONLY by `hotkeyd set-layer <name>` / `set-layer
-	// default` — never by a keystroke, which is why the R20 "a layer with
-	// no ExitKeys can never be left" rule exempts this shape.
-	"screenshot-drag": {External: true},
+		// was i3 `mode "screenshot"` (sp024, bd dotfiles-0tv1.2) — the AIMING
+		// phase of the screenshot gesture, and the SECOND External layer.
+		//
+		// quickshell/qs-screenshot.sh raises this before it starts the selector,
+		// so Bar.qml paints its hint strip (`w` = whole screen, Esc = cancel) and
+		// qs-focus-border.py reddens the ring around the focused window — "this
+		// is what `w` would capture". Cleared by the launcher's single
+		// unconditional `set-layer default` on every exit path, which covers this
+		// layer and "screenshot-drag" alike (whichever is up when the capture
+		// ends).
+		//
+		// It travelled as a real i3 mode until sp024, for the same reason the
+		// drag phase did: i3's mode-change IPC was the only channel already wired
+		// to every consumer. The daemon's layer feed is that channel now, and
+		// Bar.qml:333 already prefers ANY non-default daemon layer over i3Mode,
+		// so the i3 `mode "screenshot" {}` block is DELETED in the same commit
+		// this declaration arrives — never left beside it (a signal in two
+		// channels is the double-fire class ft011 exists to kill).
+		//
+		// Its Escape/q bindsyms went with the block, and that is safe rather than
+		// merely tidy: i3 now stays in `default` for the whole capture, so there
+		// is no stuck MODE for Escape to unstick — the dotfiles-ux1 failure class
+		// dissolves rather than needing a replacement. A stranded layer (launcher
+		// SIGKILLed mid-aiming) costs a stuck hint strip and a red ring and
+		// NOTHING ELSE, because an External layer holds zero grabs; `hotkeyd.sh
+		// restart` clears it. While the selector is alive its own seat grab owns
+		// the keys in-process, which is why the keyboard is never at stake here.
+		//
+		// KNOWN LIMITATION, accepted at sp024: with the daemon absent (panic
+		// linked, sway session, hotkeyd dead) the launcher's `set-layer` fails
+		// under `|| true` and NOTHING paints — no strip, no ring. The capture
+		// still works. Pixels, never keys.
+		"screenshot": {External: true},
+
+		// was i3 `mode "screenshot-drag"` (sp023, bd dotfiles-1m4t.5) — the
+		// FIFTH layer shape, and the only one no chord can reach.
+		//
+		// quickshell/qs-region.py raises this the instant the user starts
+		// drawing a region, so quickshell/qs-focus-border.py (a SEPARATE
+		// process, with no access to the overlay's in-memory drag state) can
+		// drop the red "this is what `w` would capture" highlight that goes
+		// stale the moment an arbitrary region is being drawn. It used to
+		// travel as a real i3 mode over `i3-msg mode screenshot-drag`, because
+		// i3's mode-change IPC event was the only channel already wired to
+		// both processes; the daemon's own layer feed is that channel now, so
+		// the i3 mode block is deleted rather than kept beside this (a signal
+		// in two channels is the double-fire class ft011 exists to kill).
+		//
+		// DECLARES NOTHING BUT THE FLAG, and that is the design, not brevity
+		// (sp023 plan decision 1; rule R28 refuses any behavioral field here
+		// by name). It holds zero grabs and does not shadow the global table
+		// while active: during a drag the overlay owns a seat grab over all
+		// input anyway, so daemon grabs would be inert — and a STRANDED
+		// external layer (both the overlay and its launcher dying without
+		// clearing) must therefore cost pixels, never keys (us019 AC5). There is
+		// no keyboard escape to name any more and none is needed: sp024 deleted
+		// the `mode "screenshot"` block that used to be one, i3 stays in
+		// `default` through the whole gesture, and a stranded layer leaves the
+		// full global bind table reachable. `hotkeyd.sh restart` clears the
+		// pixels.
+		//
+		// Entered and left ONLY by `hotkeyd set-layer <name>` / `set-layer
+		// default` — never by a keystroke, which is why the R20 "a layer with
+		// no ExitKeys can never be left" rule exempts this shape.
+		"screenshot-drag": {External: true},
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -352,8 +450,13 @@ func buildBinds() []bind.Bind {
 	return applyHostOverrides(buildSharedBinds(), shared)
 }
 
-// buildSharedBinds is the table every machine starts from.
-func buildSharedBinds() []bind.Bind {
+// buildSharedBinds is the table every machine starts from, with this host's
+// overlay program.
+func buildSharedBinds() []bind.Bind { return sharedBinds(overlayCmd()) }
+
+// sharedBinds is the shared table with overlay as the launcher/switcher
+// program; the golden dump pins it with the Linux overlay on every tag.
+func sharedBinds(overlay string) []bind.Bind {
 	out := []bind.Bind{
 		// SCOPED TO THE T6 CUTOVER (dotfiles-hwds.16): only the nav entry
 		// chord, because nav is the group T6 migrates.
@@ -365,8 +468,8 @@ func buildSharedBinds() []bind.Bind {
 	// itself rather than delegating to config.common.
 	out = append(out,
 		bind.Bind{Chord: "$mod+Return", Actions: runAction("~/.local/bin/wm-launch-terminal st")},
-		bind.Bind{Chord: "$mod+d", Actions: runAction(qsOverlay + " launcher")},
-		bind.Bind{Chord: "$mod+p", Actions: runAction(qsOverlay + " projects")},
+		bind.Bind{Chord: "$mod+d", Actions: runAction(overlay + " launcher")},
+		bind.Bind{Chord: "$mod+p", Actions: runAction(overlay + " projects")},
 	)
 
 	// ---- THE WORKSPACE GROUP (dotfiles-hwds.34) ---------------------------
@@ -431,7 +534,7 @@ func buildSharedBinds() []bind.Bind {
 	out = append(out, bind.Bind{
 		Chord: "$mod+Tab",
 		Actions: []bind.Action{
-			bind.Run{Cmd: qsOverlay + " switcher"},
+			bind.Run{Cmd: overlay + " switcher"},
 			bind.EnterLayer{Layer: "switcher"},
 		},
 	})
@@ -485,9 +588,9 @@ func splitHostOverrides(over map[string][]bind.Action, kwi3Only []bind.Bind) (sh
 
 // applyHostOverrides lays this machine's overrides (host_*.go, picked by
 // build tag) over the shared table: a chord already in it keeps its place
-// and takes the override's actions, a nil override drops the chord, and a
-// chord the table lacks is appended, in sorted order so the build is
-// reproducible. The shared table stays the one source for every chord a
+// and takes the override's actions, an empty override (nil or no actions)
+// drops the chord, and a chord the table lacks is appended, in sorted order
+// so the build is reproducible. The shared table stays the one source for every chord a
 // machine does not name.
 func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind.Bind {
 	if len(over) == 0 {
@@ -502,7 +605,7 @@ func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind
 			continue
 		}
 		seen[b.Chord] = true
-		if acts == nil {
+		if len(acts) == 0 {
 			continue
 		}
 		b.Actions = acts
@@ -510,7 +613,7 @@ func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind
 	}
 	extra := make([]string, 0, len(over))
 	for chord, acts := range over {
-		if !seen[chord] && acts != nil {
+		if !seen[chord] && len(acts) != 0 {
 			extra = append(extra, chord)
 		}
 	}

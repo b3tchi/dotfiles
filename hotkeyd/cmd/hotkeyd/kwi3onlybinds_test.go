@@ -58,6 +58,9 @@ func TestEffectiveBinds_NoKwi3Sock_IsBaseBindsUnchanged(t *testing.T) {
 // set), effectiveBinds must return every chord in Binds PLUS exactly
 // Kwi3OnlyBinds appended -- the actual fix for kwi3-55l.1's reported bug.
 func TestEffectiveBinds_Kwi3Sock_AddsKillAndNothingElse(t *testing.T) {
+	if win32Table {
+		t.Skip("Windows removes $mod+Shift+c from Kwi3OnlyBinds (sp012 Task 6) - host_win32_test.go pins its kwi3 tail")
+	}
 	got := effectiveBinds("/run/user/1000/kwi3.rpc.sock")
 	if len(got) != len(Binds)+len(Kwi3OnlyBinds) {
 		t.Fatalf("effectiveBinds(sock) has %d binds, want len(Binds)+len(Kwi3OnlyBinds) = %d",

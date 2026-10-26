@@ -279,13 +279,13 @@ func layerRepr(l bind.Layer) dumpLayer {
 func goldenDumpFromGoTable() dumpTable {
 	// The golden dump is the SHARED table; a host's overrides are pinned by
 	// its own host_<tag>_test.go.
-	shared := buildSharedBinds()
+	shared := sharedBinds(qsOverlayScript)
 	binds := make([]dumpBind, len(shared))
 	for i, b := range shared {
 		binds[i] = bindRepr(b)
 	}
 	layers := map[string]dumpLayer{}
-	for name, l := range Layers {
+	for name, l := range sharedLayers(qsOverlayScript) {
 		if l.External {
 			continue
 		}
@@ -686,6 +686,9 @@ var daemonOwnedChordCount = map[string]int{
 // row. (reportOwnership's behaviour against a populated i3 config, including
 // the BOTH-collision exit code, is ownership_test.go's own subject.)
 func TestOwnershipRowCount_UnmovedByTheExternalLayer(t *testing.T) {
+	if win32Table {
+		t.Skip("the frozen count is the X11 table's; Windows removes chords (sp012 Task 6) and has no i3 to own any - host_win32_test.go pins its table")
+	}
 	var buf bytes.Buffer
 	if code := reportOwnership(&buf, "", Binds); code != 0 {
 		t.Fatalf("reportOwnership over an empty i3 config = %d, want 0 (nothing to "+
