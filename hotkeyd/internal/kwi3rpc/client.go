@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"hotkeyd/internal/dialbound"
 )
 
 // RPCError is a JSON-RPC 2.0 error object kwi3 sent back for one Call -
@@ -60,7 +63,8 @@ func WithLog(fn func(string)) Option {
 	return func(c *Client) { c.log = fn }
 }
 
-// WithCallTimeout bounds each Call (write and reply together) to d; zero,
+// WithCallTimeout bounds each Call (a dial it has to make, the write and
+// the reply together - the dial included since kwi3-hoex.22) to d; zero,
 // the default, waits as long as kwi3 takes, which is what chord dispatch
 // has always done. A Call that times out drops the connection like any
 // other read failure - the late reply must never pair with a later request
@@ -98,8 +102,11 @@ func WithOnConnect(fn func()) Option {
 type Client struct {
 	addr string
 	// dial is the per-OS dialer (dial_other.go: AF_UNIX; dial_windows.go:
-	// a \\.\pipe\ name is a named pipe, anything else AF_UNIX).
-	dial func(path string) (net.Conn, error)
+	// a \\.\pipe\ name is a named pipe, anything else AF_UNIX). timeout
+	// is what is left of the Call's bound (0: none); ensureConnectedLocked
+	// holds the dial to it with dialbound.Bound whatever dial itself does
+	// with it (kwi3-hoex.22).
+	dial func(path string, timeout time.Duration) (net.Conn, error)
 	log  func(string)
 	// timeout bounds one Call; 0 means none (WithCallTimeout).
 	timeout time.Duration
@@ -147,11 +154,20 @@ func (c *Client) closeLocked() error {
 	return err
 }
 
-func (c *Client) ensureConnectedLocked() error {
+// ensureConnectedLocked dials if there is no connection. A non-zero
+// deadline (the Call's, WithCallTimeout) bounds the dial: kwi3-hoex.22,
+// the status request's kwi3 probe used to wait out a connect with no limit.
+func (c *Client) ensureConnectedLocked(deadline time.Time) error {
 	if c.conn != nil {
 		return nil
 	}
-	conn, err := c.dial(c.addr)
+	var bound time.Duration
+	if !deadline.IsZero() {
+		if bound = time.Until(deadline); bound <= 0 {
+			return fmt.Errorf("kwi3rpc: dial %s: %w: no time left: %w", c.addr, ErrUnreachable, os.ErrDeadlineExceeded)
+		}
+	}
+	conn, err := dialbound.Bound(bound, func() (net.Conn, error) { return c.dial(c.addr, bound) })
 	if err != nil {
 		if !c.down {
 			c.down = true
@@ -196,14 +212,14 @@ func (c *Client) ensureConnectedLocked() error {
 // This must never be reached for a READ failure - see Call, which treats
 // read failures as terminal (no retry), because kwi3 may already have run
 // the command before the connection died.
-func (c *Client) writeLocked(line []byte) error {
+func (c *Client) writeLocked(line []byte, deadline time.Time) error {
 	if _, err := c.conn.Write(line); err != nil {
 		c.closeLocked()
-		if dialErr := c.ensureConnectedLocked(); dialErr != nil {
+		if dialErr := c.ensureConnectedLocked(deadline); dialErr != nil {
 			return dialErr
 		}
-		if c.timeout > 0 {
-			c.conn.SetDeadline(time.Now().Add(c.timeout))
+		if !deadline.IsZero() {
+			c.conn.SetDeadline(deadline)
 		}
 		if _, err2 := c.conn.Write(line); err2 != nil {
 			c.closeLocked()
@@ -232,7 +248,12 @@ func (c *Client) Call(method string, params interface{}) (json.RawMessage, error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.ensureConnectedLocked(); err != nil {
+	// One deadline for the whole Call, the dial included (kwi3-hoex.22).
+	var deadline time.Time
+	if c.timeout > 0 {
+		deadline = time.Now().Add(c.timeout)
+	}
+	if err := c.ensureConnectedLocked(deadline); err != nil {
 		return nil, err
 	}
 
@@ -244,12 +265,13 @@ func (c *Client) Call(method string, params interface{}) (json.RawMessage, error
 	}
 	line = append(line, '\n')
 
-	if c.timeout > 0 {
+	if !deadline.IsZero() {
 		// Set on whichever connection is current; writeLocked's one redial
-		// sets its own below, so a retried write is bounded too.
-		c.conn.SetDeadline(time.Now().Add(c.timeout))
+		// sets the same deadline on its own, so a retried write is bounded
+		// too.
+		c.conn.SetDeadline(deadline)
 	}
-	if err := c.writeLocked(line); err != nil {
+	if err := c.writeLocked(line, deadline); err != nil {
 		return nil, err
 	}
 

@@ -42,10 +42,13 @@ func isPipePath(path string) bool {
 
 // dial connects to kwi3's rpc endpoint. A \\.\pipe\ name is opened as a
 // named pipe; anything else is a filesystem path and is dialled as AF_UNIX,
-// exactly as on Linux (Windows 10+ has AF_UNIX stream sockets).
-func dial(path string) (net.Conn, error) {
+// exactly as on Linux (Windows 10+ has AF_UNIX stream sockets). Go ignores
+// timeout for a Windows AF_UNIX connect (it is a plain blocking connect(),
+// not ConnectEx) and dialPipe has its own pipeBusyWait; the Client's
+// dialbound.Bound is what holds either to the Call's bound (kwi3-hoex.22).
+func dial(path string, timeout time.Duration) (net.Conn, error) {
 	if !isPipePath(path) {
-		return net.Dial("unix", path)
+		return net.DialTimeout("unix", path, timeout)
 	}
 	return dialPipe(path)
 }

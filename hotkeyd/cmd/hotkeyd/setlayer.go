@@ -61,7 +61,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -149,8 +148,8 @@ func setLayer(layers map[string]bind.Layer, name, display string, timeout time.D
 
 // dialSetLayer performs the ENTIRE socket exchange: one dial, one write of
 // the request line, one read of the reply line, all under a single
-// deadline set immediately after the dial succeeds (adr0014 -- one
-// attempt, no retry, no hang). Returns (true, "", nil) on {"ok":true};
+// deadline taken before the dial, which the connect is held to as well
+// (kwi3-hoex.22; adr0014 -- one attempt, no retry, no hang). Returns (true, "", nil) on {"ok":true};
 // (false, daemon's error text, nil) when the daemon answered but refused;
 // and (false, "", err) for every other failure -- connect, write, read
 // timeout, an early peer close, or a reply that fails to parse as JSON --
@@ -162,13 +161,14 @@ func setLayer(layers map[string]bind.Layer, name, display string, timeout time.D
 // (same package) rather than redeclaring the JSON shape here -- one
 // struct pair, one source of truth for the wire format on both sides.
 func dialSetLayer(path, name string, timeout time.Duration) (ok bool, daemonMsg string, err error) {
-	conn, err := net.Dial("unix", path)
+	deadline := time.Now().Add(timeout)
+	conn, err := dialControl(path, timeout) // the connect bounded too (kwi3-hoex.22)
 	if err != nil {
 		return false, "", err
 	}
 	defer conn.Close()
 
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if err := conn.SetDeadline(deadline); err != nil {
 		return false, "", fmt.Errorf("cannot set a deadline: %w", err)
 	}
 
