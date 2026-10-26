@@ -16,6 +16,9 @@
 #                              atomic-rename test fails on Windows
 #                              (kwi3-f9i4, which lifts this skip)
 #   ./cmd/hotkeyd:_Windows_    the control socket against a running daemon
+#   ./internal/win32           the key translator, cross-checked against
+#                              VkKeyScanEx/MapVirtualKeyEx on the US layout
+#                              (00000409) the session already has loaded
 #
 # Containment. Every test binary runs with %LOCALAPPDATA% and %USERPROFILE%
 # pointed into the scratch directory (passed through WSLENV), so nothing a
@@ -37,7 +40,7 @@ command -v wslpath >/dev/null || die "not WSL (no wslpath)"
 [ -x /mnt/c/Windows/System32/cmd.exe ] || die "no Windows interop (/mnt/c/Windows/System32/cmd.exe)"
 
 if [ $# -eq 0 ]; then
-    set -- "./internal/proc::^Test(WriteGrabReport|ReadGrabReport|CurrentGrabReport|AtomicWriteFile)" ./cmd/hotkeyd:_Windows_
+    set -- "./internal/proc::^Test(WriteGrabReport|ReadGrabReport|CurrentGrabReport|AtomicWriteFile)" ./cmd/hotkeyd:_Windows_ ./internal/win32
 fi
 
 wintemp="$(env -C /mnt/c /mnt/c/Windows/System32/cmd.exe /d /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')"
