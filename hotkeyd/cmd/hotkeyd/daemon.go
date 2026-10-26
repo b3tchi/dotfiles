@@ -866,7 +866,29 @@ func (d *Daemon) handleKeyEvent(raw []byte) {
 //
 // The reply send cannot block: cmd.reply is buffered by construction, and
 // the run loop must never wait on a socket peer.
-func (d *Daemon) handleControl(cmd controlCmd) {
+//
+// sp012 Task 7 (kwi3-hoex.7): a status request is answered here, from the
+// engine and the key source as they stand, and a stop request is answered
+// and then reported to Run (stop == true), which leaves the loop and shuts
+// down exactly as on SIGTERM.
+func (d *Daemon) handleControl(cmd controlCmd) (stop bool) {
+	switch cmd.kind {
+	case controlStatus:
+		wanted, active, missing := d.grabs.GrabReport()
+		cmd.status <- controlReply{
+			PID:     os.Getpid(),
+			Layer:   d.engine.State().Layer,
+			Wanted:  wanted,
+			Active:  active,
+			Missing: missing,
+		}
+		cmd.reply <- nil
+		return false
+	case controlStop:
+		d.log("control: stop requested, shutting down")
+		cmd.reply <- nil
+		return true
+	}
 	err := validateControlLayer(d.layers, cmd.layer)
 	if err == nil {
 		err = d.engine.SetExternalLayer(cmd.layer)
@@ -875,6 +897,7 @@ func (d *Daemon) handleControl(cmd controlCmd) {
 		d.log(fmt.Sprintf("control: set-layer %q refused: %s", cmd.layer, err))
 	}
 	cmd.reply <- err
+	return false
 }
 
 // shutdown is run_daemon's `finally`: hand the layer's overlay back BEFORE
@@ -977,7 +1000,9 @@ runLoop:
 			d.handleKwinEvent(ev)
 		case cmd, ok := <-d.control:
 			if ok {
-				d.handleControl(cmd)
+				if d.handleControl(cmd) {
+					break runLoop
+				}
 			} else {
 				// The control listener shut down (or was never bound and
 				// something closed the channel). A closed channel is

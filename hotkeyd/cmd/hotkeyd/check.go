@@ -47,6 +47,19 @@ func usageText() string {
         report whether this display's daemon is SERVING (not merely
         alive) -- see docs/notes/adr0017.md for the exit codes (0, 6,
         7, 8, 9, 10), each naming the probe that failed
+        On Windows (DISPLAY is a desktop name, default this one): 0
+        serving; 6 when the lock's pid is not running, the control
+        socket does not answer, or kwi3rpc is down; 9 when a chord of
+        the active layer is not granted -- each naming that check
+
+  hotkeyd recover [--display DESKTOP]
+        Windows only, the panic chord's recovery (sp012): release every
+        modifier Windows reports held (one SendInput key-up each, and
+        nothing else), stop this desktop's daemon -- its control
+        socket's stop, then by the pid in its lock after 2s, never by
+        name -- start a new one detached with the old one's arguments,
+        and exit 0 once --health says it serves, 1 if it does not
+        within 10s. HOTKEYD_WIN32_DRYRUN=1 sends no key-up
 
   hotkeyd check --ownership [--display DISPLAY]
         report per-display chord ownership (i3 / daemon / neither /
@@ -98,6 +111,8 @@ func Dispatch(argv []string) int {
 			return runCheckSubcommand(argv[1:])
 		case "set-layer":
 			return runSetLayerCmd(argv[1:])
+		case "recover":
+			return runRecoverCmd(argv[1:])
 		}
 	}
 

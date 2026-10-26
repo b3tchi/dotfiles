@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -58,15 +59,35 @@ func spawn(command string) (*exec.Cmd, error) {
 	for i := range argv {
 		argv[i] = ExpandHome(argv[i])
 	}
+	cmd, err := StartDetached(argv, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	go func() { _ = cmd.Wait() }()
+	return cmd, nil
+}
+
+// StartDetached starts argv[0] with argv[1:] the way Run starts a program -
+// DetachFlags, %USERPROFILE% as the working directory, no handle inherited,
+// out of the daemon's job when the job allows it - with env as its
+// environment (nil: this process's) and its stdout and stderr to logTo
+// (nil: none). The caller owns the returned *exec.Cmd and must Wait it.
+// `hotkeyd recover` starts the new daemon through it (sp012 Task 7).
+func StartDetached(argv []string, env []string, logTo *os.File) (*exec.Cmd, error) {
 	build := func(flags uint32) *exec.Cmd {
 		c := exec.Command(argv[0], argv[1:]...)
 		c.Dir = HomeDir()
-		c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, NoInheritHandles: true}
+		c.Env = env
+		if logTo != nil {
+			c.Stdout = logTo
+			c.Stderr = logTo
+		}
+		c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, NoInheritHandles: logTo == nil}
 		return c
 	}
 
 	cmd := build(DetachFlags)
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil && errors.Is(err, errorAccessDenied) {
 		// A job without JOB_OBJECT_LIMIT_BREAKAWAY_OK refuses the
 		// breakaway flag with ACCESS_DENIED. Try once without it; only a
@@ -87,7 +108,6 @@ func spawn(command string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w (error %d)", argv[0], err, errorCode(err))
 	}
-	go func() { _ = cmd.Wait() }()
 	return cmd, nil
 }
 

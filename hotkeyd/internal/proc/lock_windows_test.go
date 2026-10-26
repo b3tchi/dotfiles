@@ -110,3 +110,41 @@ func TestLock_StaleLockFromKilledHolderTakenOverSaidOnce(t *testing.T) {
 		t.Fatalf("re-taking our own lock said %q", said[1:])
 	}
 }
+
+// LockHeld (sp012 Task 7, what `hotkeyd recover` asks before it ends the
+// pid a lock names): true while another process holds the lock, false once
+// that holder is dead or when there is no lock file, and asking never
+// takes the lock away from anybody.
+func TestLockHeld_TrueOnlyWhileAHolderLives(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LOCALAPPDATA", base)
+	path := LockPath("kwi3t-held")
+	if LockHeld(path) {
+		t.Fatal("LockHeld with no lock file = true")
+	}
+	ready := filepath.Join(base, "ready")
+	holder := startHelper(t, "locker", "LOCKER_PATH="+path, "LOCKER_READY="+ready)
+	waitFile(t, ready, 15*time.Second)
+	if !LockHeld(path) {
+		t.Fatal("LockHeld while the locker holds it = false")
+	}
+	if !LockHeld(path) {
+		t.Fatal("asking twice changed the answer")
+	}
+	if err := holder.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = holder.Wait()
+	if LockHeld(path) {
+		t.Fatal("LockHeld after the holder was killed = true")
+	}
+	// Asking left it free: a daemon can still take it.
+	l, err := AcquireLock(path)
+	if err != nil {
+		t.Fatalf("AcquireLock after LockHeld: %v", err)
+	}
+	defer l.Release()
+	if !LockHeld(path) {
+		t.Fatal("LockHeld while this process holds it = false")
+	}
+}

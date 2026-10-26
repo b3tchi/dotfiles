@@ -108,10 +108,9 @@ func defaultHealthProbes() healthProbes {
 	}
 }
 
-// runHealth is --health's production entry point.
-func runHealth(display string) (int, string) {
-	return health(display, defaultHealthProbes())
-}
+// runHealth, --health's production entry point, is per OS: health() over
+// defaultHealthProbes on X11 (recover_other.go), healthWin32 on Windows
+// (recover_windows.go).
 
 // health answers "is this display's daemon SERVING?" against p. Every
 // branch below is one row of adr0017's evidence table, checked in the
@@ -319,4 +318,96 @@ func grabAttempt(disp string) (stillGrabbed bool, ok bool) {
 	default:
 		return false, false
 	}
+}
+
+// -- the Windows verdict (sp012 Task 7, kwi3-hoex.7) -------------------------
+//
+// A Windows daemon has no display to reach and no keyboard grab another
+// client could hold, so adr0017's middle rows do not exist there. What
+// --health asks instead, in this order, each check named when it fails:
+//
+//  1. the lock's pid is alive (the lock file names a pid, and a process
+//     with that pid is running);
+//  2. the control socket answers a status request - answered by the run
+//     loop itself, so an answer is the heartbeat - and the answer comes
+//     from that same pid;
+//  3. every chord of the active layer is granted (the run loop's own grab
+//     report, read at the moment it answered);
+//  4. the kwi3rpc connection is up: the daemon's kwi3 address answered a
+//     request just now.
+//
+// 1, 2 and 4 failing is NOT SERVING (6): with no answer from kwi3 every
+// chord is dropped. 3 is DEGRADED (9): alive, and these binds are dead.
+
+// win32HealthProbes is healthWin32's I/O seam set.
+type win32HealthProbes struct {
+	lockPID  func(path string) (int, bool)
+	pidAlive func(pid int) bool
+	status   func(controlPath string) (controlReply, error)
+}
+
+// healthWin32 answers "is this desktop's daemon SERVING?" against p.
+func healthWin32(display string, p win32HealthProbes) (int, string) {
+	disp := resolveDisplay(display)
+	lockPath := proc.LockPath(disp)
+
+	pid, ok := p.lockPID(lockPath)
+	if !ok {
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: lock: no daemon has run here (no pid in %s)", disp, lockPath)
+	}
+	if !p.pidAlive(pid) {
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: lock: pid %d named in %s is not running", disp, pid, lockPath)
+	}
+
+	ctlPath := proc.ControlPath(disp)
+	st, err := p.status(ctlPath)
+	if err != nil {
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: control: pid %d is running but its control socket %s does not answer — %s",
+			disp, pid, ctlPath, err)
+	}
+	if !st.OK {
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: control: the status request was refused — %s", disp, st.Error)
+	}
+	if st.PID != pid {
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: control: the socket %s is answered by pid %d, not by pid %d the lock names",
+			disp, ctlPath, st.PID, pid)
+	}
+
+	if len(st.Missing) > 0 || st.Active < st.Wanted {
+		n := len(st.Missing)
+		shown := st.Missing
+		suffix := ""
+		if n > 6 {
+			shown = st.Missing[:6]
+			suffix = "…"
+		}
+		return HealthDegraded, fmt.Sprintf(
+			"hotkeyd: %s — DEGRADED: chords: %d of %d chords of layer %q granted; missing: %s%s",
+			disp, st.Active, st.Wanted, st.Layer, strings.Join(shown, ", "), suffix)
+	}
+
+	switch st.Kwi3 {
+	case "up":
+	case "":
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: kwi3rpc: pid %d has no kwi3 address, so every chord is dropped", disp, pid)
+	default:
+		return HealthNotServing, fmt.Sprintf(
+			"hotkeyd: %s — NOT SERVING: kwi3rpc: the connection is down — %s", disp, st.Kwi3)
+	}
+
+	return HealthOK, fmt.Sprintf(
+		"hotkeyd: %s — serving (pid %d, control answers, %d of %d chords of layer %q granted, kwi3rpc up)",
+		disp, pid, st.Active, st.Wanted, st.Layer)
+}
+
+// controlStatusAt asks the control socket at path for the daemon's status.
+func controlStatusAt(path string, timeout time.Duration) (controlReply, error) {
+	t := true
+	return controlCall(path, controlRequest{Status: &t}, timeout)
 }

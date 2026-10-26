@@ -84,7 +84,13 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 	pub, pubCloser := buildPublisher(cfg.Display, log)
 	enginePub, modeRep := enginePublisher(pub, cfg.Kwi3Sock, log)
 	engine := layer.NewEngine(cfg.Binds, cfg.Layers, layer.Config{Publisher: enginePub, Mod: win32Mod})
-	ctl := buildControl(cfg.Display, log)
+	// A status request asks whether the kwi3 address answers (--health's
+	// kwi3rpc check, sp012 Task 7).
+	var probe func() error
+	if cfg.Kwi3Sock != "" {
+		probe = kwi3ProbeFor(cfg.Kwi3Sock)
+	}
+	ctl := buildControlProbe(cfg.Display, log, probe)
 	lock := cfg.Lock
 	if lock == nil {
 		lock = noLock{}
@@ -155,6 +161,10 @@ func runWin32() int {
 	if err != nil {
 		daemonLog(err.Error())
 		return exitAlreadyRunning
+	}
+	// What `hotkeyd recover` restarts this daemon with (sp012 Task 7).
+	if err := writeArgsRecord(display, os.Args[1:], os.Getenv); err != nil {
+		daemonLog(fmt.Sprintf("cannot record this daemon's arguments for recover: %s", err))
 	}
 	dry := strings.TrimSpace(os.Getenv(win32DryRunEnv)) == "1"
 	if dry {

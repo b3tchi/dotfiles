@@ -16,6 +16,8 @@
 #                              atomic-rename test fails on Windows
 #                              (kwi3-f9i4, which lifts this skip)
 #   ./cmd/hotkeyd:_Windows_    the control socket against a running daemon,
+#                              --health with each check failing in turn and
+#                              `recover` against a dry-run daemon process,
 #                              and `--input win32` assembled: a WM_HOTKEY
 #                              posted to the daemon's window dispatches
 #                              (DryRun - nothing is registered)
