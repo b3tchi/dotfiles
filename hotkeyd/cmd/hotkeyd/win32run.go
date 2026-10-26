@@ -30,7 +30,16 @@ const defaultInput = "win32"
 // WM_HOTKEY posted to its window reaches it. Registrations are shared by
 // every desktop of the window station, so a test or rig run of hotkeyd on
 // a CreateDesktop desktop would otherwise take Jan's live chords.
+//
+// It also installs NO low-level hook (sp012 Task 5): a WH_KEYBOARD_LL hook
+// is session-wide, so one from a test would see - and could swallow -
+// Jan's own keys.
 const win32DryRunEnv = "HOTKEYD_WIN32_DRYRUN"
+
+// win32DebugEnv, set to 1, logs every LLKHF_INJECTED event the low-level
+// hook queues (they are handled like physical ones until sp012 Task 14
+// measures what RDP delivers).
+const win32DebugEnv = "HOTKEYD_WIN32_DEBUG"
 
 // defaultDisplay is the Windows answer to resolveDisplay's last tier: the
 // desktop this process runs on, as the per-instance file names spell it.
@@ -57,8 +66,47 @@ type win32Config struct {
 	Binds    []bind.Bind
 	Layers   map[string]bind.Layer
 	Source   win32.Options
-	Lock     lockBeater // nil: none (a test)
-	Log      func(string)
+	// Hook configures the low-level hook, started only when the table
+	// has a hold layer or a release-only chord (tableNeedsHook). DryRun
+	// here or in Source installs none.
+	Hook  win32.HookOptions
+	Lock  lockBeater // nil: none (a test)
+	Log   func(string)
+	Debug func(string) // nil: no debug output
+}
+
+// startHook starts the low-level hook when the table needs one; nil, nil
+// when it does not. A hook that cannot be installed is logged and nil:
+// the daemon still serves every chord RegisterHotKey can.
+func startHook(cfg win32Config, log func(string)) (*win32.Hook, *win32.HookThread) {
+	if !tableNeedsHook(cfg.Binds, cfg.Layers) {
+		return nil, nil
+	}
+	opts := cfg.Hook
+	dry := opts.DryRun || cfg.Source.DryRun
+	// A dry run installs nothing - unless a test hands in its own
+	// Install, which is no hook at all (the real installer refuses in a
+	// test binary anyway).
+	opts.DryRun = dry && opts.Install == nil
+	if dry && opts.KeyDown == nil {
+		// Nothing is hooked, so the real keyboard means nothing here.
+		opts.KeyDown = func(uint16) bool { return false }
+	}
+	if opts.Log == nil {
+		opts.Log = log
+	}
+	hook := win32.NewHook(0)
+	ht, err := win32.StartHook(hook, opts)
+	if err != nil {
+		log("low-level hook not installed, the switcher and release chords are refused: " + err.Error())
+		return nil, nil
+	}
+	if opts.DryRun {
+		log("low-level hook: DRY RUN, none installed (the table's hold layer / release chords are accepted, never delivered)")
+	} else {
+		log("low-level hook installed (WH_KEYBOARD_LL) for the hold layers and release chords; Alt+Tab over RDP needs keyboardhook:i:1 in the .rdp")
+	}
+	return hook, ht
 }
 
 // startWin32 starts the hotkey thread and builds the daemon over it, with
@@ -81,6 +129,25 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 		return v, ok
 	}, releaseOnlyChords(cfg.Binds, cfg.Layers, win32Mod), log)
 
+	var (
+		hookEvents <-chan win32.HookEvent
+		stats      hookStats
+		newMod     = win32ModQuery(win32.KeyDown)
+	)
+	hook, ht := startHook(cfg, log)
+	if tableNeedsHook(cfg.Binds, cfg.Layers) {
+		if hook != nil {
+			hk.UseHook(hook, hookChords(cfg.Binds, cfg.Layers, win32Mod))
+			hookEvents, stats = hook.Events(), hook
+			// The hook reports every modifier transition in order with
+			// the keys, so the hold poll reads the stream (kwinModQuery),
+			// not GetAsyncKeyState.
+			newMod = nil
+		} else {
+			hk.UseHook(nil, hookChords(cfg.Binds, cfg.Layers, win32Mod))
+		}
+	}
+
 	pub, pubCloser := buildPublisher(cfg.Display, log)
 	enginePub, modeRep := enginePublisher(pub, cfg.Kwi3Sock, log)
 	engine := layer.NewEngine(cfg.Binds, cfg.Layers, layer.Config{Publisher: enginePub, Mod: win32Mod})
@@ -97,13 +164,16 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 	}
 
 	dcfg := DaemonConfig{
-		KeyEvents:   win32KeyEvents(src.Events()),
+		KeyEvents:   win32Merge(src.Events(), hookEvents, stats, log, cfg.Debug),
 		Grabs:       win32Grabs{hk},
 		Engine:      engine,
 		Lock:        lock,
-		NewModQuery: win32ModQuery(win32.KeyDown),
+		NewModQuery: newMod,
 		XConn: closerFunc(func() {
 			hk.ReleaseAll()
+			if ht != nil {
+				ht.Close()
+			}
 			src.Close()
 			if modeRep != nil {
 				modeRep.Close()
@@ -170,6 +240,10 @@ func runWin32() int {
 	if dry {
 		daemonLog(fmt.Sprintf("%s=1: registering NO chord; only a WM_HOTKEY posted to the window is served", win32DryRunEnv))
 	}
+	var debug func(string)
+	if strings.TrimSpace(os.Getenv(win32DebugEnv)) == "1" {
+		debug = daemonLog
+	}
 	activeBinds := effectiveBinds(kwi3Sock)
 	dae, src, err := startWin32(win32Config{
 		Display:  display,
@@ -179,6 +253,7 @@ func runWin32() int {
 		Source:   win32.Options{DryRun: dry},
 		Lock:     lock,
 		Log:      daemonLog,
+		Debug:    debug,
 	})
 	if err != nil {
 		daemonLog(err.Error())

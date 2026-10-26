@@ -44,11 +44,10 @@ const asHotkeydEnv = "HOTKEYD_TEST_AS_HOTKEYD"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(asHotkeydEnv) == "1" {
-		// smallTable, not the compiled one: test-win32.sh builds without
-		// -tags win32, and that table has release-only chords
-		// RegisterHotKey cannot serve (sp012 Task 5's hook does), so
-		// --health on it reads DEGRADED. These tests are about recover,
-		// not the table.
+		// smallTable, not the compiled one: these tests are about
+		// recover, not the table, and the compiled table would spawn its
+		// overlay from the restarted daemon. (Its hook-served chords count
+		// as granted: TestHealth_Windows_HookTable, sp012 Task 5.)
 		Binds, Layers = smallTable, map[string]bind.Layer{}
 		os.Exit(Dispatch(os.Args[1:]))
 	}

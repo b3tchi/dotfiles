@@ -92,6 +92,16 @@ var bindModBits = map[bind.Modifier]uint32{
 // WM_HOTKEY reports the press alone. Task 5's low-level hook serves it.
 const ReasonOnRelease = "fires on release, which RegisterHotKey cannot report (the low-level hook, sp012 Task 5)"
 
+// ReasonNoHook is why a chord the hook would serve is not served: the
+// hook is not installed (SetWindowsHookEx refused it).
+const ReasonNoHook = "needs the low-level hook, which is not installed"
+
+// HookSink is where the manager hands the chords the low-level hook owns
+// (*Hook implements it).
+type HookSink interface {
+	SetOwned(map[Chord]bool)
+}
+
 // ReasonReserved is why the panic chord is never registered (adr0003: it
 // is the host's own key).
 const ReasonReserved = "reserved: the panic/recover chord belongs to the host, never hotkeyd"
@@ -112,6 +122,10 @@ type Hotkeys struct {
 	releaseOnly func(string) bool
 	log         func(string)
 
+	hook    HookSink
+	viaHook func(string) bool
+	hooked  map[string]registration
+
 	nextID   int32
 	wanted   []string
 	active   map[string]registration
@@ -130,7 +144,29 @@ func NewHotkeys(reg Registrar, mod string, keysym func(string) (uint32, bool), r
 		log = func(string) {}
 	}
 	return &Hotkeys{reg: reg, mod: mod, keysym: keysym, releaseOnly: releaseOnly, log: log,
-		nextID: 1, active: map[string]registration{}, refused: map[string]string{}, reported: map[string]bool{}}
+		nextID: 1, active: map[string]registration{}, hooked: map[string]registration{}, refused: map[string]string{}, reported: map[string]bool{}}
+}
+
+// UseHook routes every chord viaHook answers true for to the low-level
+// hook instead of RegisterHotKey (sp012 Task 5): a hold layer's chords and
+// its entry chord, and chords bound only on release. sink nil means the
+// hook could not be installed: those chords are then refused with
+// ReasonNoHook. Call before the first SyncBinds.
+func (h *Hotkeys) UseHook(sink HookSink, viaHook func(string) bool) {
+	h.hook = sink
+	h.viaHook = viaHook
+	if h.hook == nil {
+		h.hook = noHook{}
+	}
+}
+
+type noHook struct{}
+
+func (noHook) SetOwned(map[Chord]bool) {}
+
+// hooking reports whether chord goes to the hook rather than RegisterHotKey.
+func (h *Hotkeys) hooking(chord string) bool {
+	return h.viaHook != nil && h.viaHook(chord)
 }
 
 // resolve turns a chord into the VK and MOD_* set to register, or the
@@ -143,7 +179,7 @@ func (h *Hotkeys) resolve(chord string) (registration, string) {
 	if err != nil {
 		return registration{}, err.Error()
 	}
-	if h.releaseOnly(chord) {
+	if h.releaseOnly(chord) && !h.hooking(chord) {
 		return registration{}, ReasonOnRelease
 	}
 	ks, ok := h.keysym(name)
@@ -217,6 +253,63 @@ func (h *Hotkeys) SyncBinds(chords []string) bool {
 		vk   uint16
 		mods uint32
 	}
+
+	// The hook's share first: a chord the hook serves, and any other chord
+	// on the same key (the hook sees the key before RegisterHotKey would,
+	// so a registration of it could never fire), is never registered.
+	hooked := map[string]registration{}
+	hookCombos := map[combo]bool{}
+	if h.viaHook != nil {
+		for _, ch := range wanted {
+			if !h.hooking(ch) {
+				continue
+			}
+			r, why := h.resolve(ch)
+			if why != "" {
+				h.refuse(ch, why)
+				continue
+			}
+			hooked[ch] = r
+			hookCombos[combo{r.vk, r.mods}] = true
+		}
+		for _, ch := range wanted {
+			if _, ok := hooked[ch]; ok || h.hooking(ch) {
+				continue
+			}
+			if r, why := h.resolve(ch); why == "" && hookCombos[combo{r.vk, r.mods}] {
+				hooked[ch] = r
+			}
+		}
+		for ch, r := range h.active {
+			if _, ok := hooked[ch]; ok {
+				if err := h.reg.Unregister(r.id); err != nil {
+					h.log(fmt.Sprintf("UnregisterHotKey %s: %s", ch, ErrorName(err)))
+				}
+				delete(h.active, ch)
+				changed = true
+			}
+		}
+		if _, none := h.hook.(noHook); none {
+			for ch := range hooked {
+				h.refuse(ch, ReasonNoHook)
+			}
+			hooked = map[string]registration{}
+		} else {
+			for ch := range hooked {
+				delete(h.refused, ch)
+			}
+		}
+		if !sameKeys(hooked, h.hooked) {
+			changed = true
+		}
+		h.hooked = hooked
+		owned := make(map[Chord]bool, len(hooked))
+		for _, r := range hooked {
+			owned[r.chord] = true
+		}
+		h.hook.SetOwned(owned)
+	}
+
 	held := map[combo]string{}
 	for _, ch := range wanted {
 		if r, ok := h.active[ch]; ok {
@@ -226,6 +319,9 @@ func (h *Hotkeys) SyncBinds(chords []string) bool {
 	for _, ch := range wanted {
 		if _, ok := h.active[ch]; ok {
 			continue
+		}
+		if _, ok := hooked[ch]; ok || (h.viaHook != nil && h.hooking(ch)) {
+			continue // the hook's, served or refused above
 		}
 		r, why := h.resolve(ch)
 		if why != "" {
@@ -259,6 +355,18 @@ func (h *Hotkeys) refuse(chord, why string) {
 	}
 }
 
+func sameKeys(a, b map[string]registration) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // ReleaseAll unregisters everything, for shutdown. (Windows frees a
 // thread's registrations when it exits anyway; this makes the order
 // explicit.)
@@ -267,15 +375,31 @@ func (h *Hotkeys) ReleaseAll() {
 		_ = h.reg.Unregister(r.id)
 		delete(h.active, ch)
 	}
+	if h.viaHook != nil {
+		h.hooked = map[string]registration{}
+		h.hook.SetOwned(nil)
+	}
 }
 
 // OnMappingNotify is a no-op: the US layout is fixed (keymap.go).
 func (h *Hotkeys) OnMappingNotify() bool { return false }
 
-// Active is a copy of the registered chords.
+// Active is a copy of the chords served: registered, or owned by the hook.
 func (h *Hotkeys) Active() map[string]Chord {
-	out := make(map[string]Chord, len(h.active))
+	out := make(map[string]Chord, len(h.active)+len(h.hooked))
 	for k, r := range h.active {
+		out[k] = r.chord
+	}
+	for k, r := range h.hooked {
+		out[k] = r.chord
+	}
+	return out
+}
+
+// Hooked is a copy of the chords the low-level hook owns.
+func (h *Hotkeys) Hooked() map[string]Chord {
+	out := make(map[string]Chord, len(h.hooked))
+	for k, r := range h.hooked {
 		out[k] = r.chord
 	}
 	return out
@@ -298,8 +422,14 @@ func (h *Hotkeys) Refused() map[string]string {
 // ERROR_HOTKEY_ALREADY_REGISTERED (1409)"), so the report itself says which
 // chords were refused and with what Windows error.
 func (h *Hotkeys) GrabReport() (wanted, active int, missing []string) {
+	served := 0
 	for _, ch := range h.wanted {
 		if _, ok := h.active[ch]; ok {
+			served++
+			continue
+		}
+		if _, ok := h.hooked[ch]; ok {
+			served++
 			continue
 		}
 		why := h.refused[ch]
@@ -309,7 +439,7 @@ func (h *Hotkeys) GrabReport() (wanted, active int, missing []string) {
 		missing = append(missing, ch+": "+why)
 	}
 	sort.Strings(missing)
-	return len(h.wanted), len(h.active), missing
+	return len(h.wanted), served, missing
 }
 
 // ErrorName names a Win32 error the way the grab report prints it.

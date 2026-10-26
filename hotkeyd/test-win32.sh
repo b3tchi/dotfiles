@@ -27,6 +27,12 @@
 #                              the RegisterHotKey thread, which registers
 #                              ONLY Ctrl+Alt+Shift+F22/F23 (registrations
 #                              are window-station wide, kwi3-hoex.8)
+#                              and the low-level hook's thread and procedure
+#                              (sp012 Task 5), the procedure called directly
+#                              and SetWindowsHookEx replaced by a recorder:
+#                              NO real WH_KEYBOARD_LL hook is ever installed
+#                              (it would see Jan's keys); the real installer
+#                              refuses inside a test binary
 #
 # GOFLAGS=-tags=win32 builds the binaries with the Windows table.
 # TestWin32Run_Windows_E2E_HostFocusesWorkspace2 needs a running
