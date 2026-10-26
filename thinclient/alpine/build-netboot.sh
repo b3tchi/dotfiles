@@ -34,7 +34,7 @@ chmod 700 "$ovl/root" "$ovl/root/.ssh"; chmod 600 "$ovl/root/.ssh/authorized_key
 # With an apkovl present, init creates no default runlevels: list them all.
 rl() { mkdir -p "$ovl/etc/runlevels/$1"; shift_=$1; shift
        for s; do ln -sf "/etc/init.d/$s" "$ovl/etc/runlevels/$shift_/$s"; done; }
-rl sysinit devfs dmesg mdev hwdrivers
+rl sysinit devfs dmesg mdev hwdrivers modloop
 rl boot modules hostname sysctl bootmisc syslog hwclock
 rl default networking sshd
 rl shutdown mount-ro killprocs savecache

@@ -11,12 +11,15 @@ select t in "${targets[@]}"; do
   [ -n "$t" ] && break
 done
 
-# FreeRDP 2 syntax (Debian 12). /cert-tofu: trust a self-signed cert on
-# first connect. /f = full native panel (1366x768), /bpp:32 = full colour.
+# FreeRDP 3 (Alpine: xfreerdp3) or 2 (Debian 12: xfreerdp); only the
+# trust-on-first-use flag for the self-signed cert differs between them.
+# /f = full native panel (1366x768), /bpp:32 = full colour.
 # Codec is per target: /rfx for xrdp (4:4:4, no H.264 chroma washout);
 # KRDP needs /gfx (H.264), which is the heavier decode on the Atom.
+if command -v xfreerdp3 >/dev/null; then rdp=xfreerdp3 tofu=/cert:tofu
+else rdp=xfreerdp tofu=/cert-tofu; fi
 read -r hostport extra <<<"$t"
 # shellcheck disable=SC2086  # extra = per-target args, split on purpose
-xfreerdp /v:"$hostport" /f /bpp:32 /network:lan $extra \
-  -wallpaper -themes +clipboard +auto-reconnect /cert-tofu
+$rdp /v:"$hostport" /f /bpp:32 /network:lan $extra \
+  -wallpaper -themes +clipboard +auto-reconnect $tofu
 echo "session ended ($?)"; sleep 2
