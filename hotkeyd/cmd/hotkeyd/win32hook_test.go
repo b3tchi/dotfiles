@@ -16,6 +16,7 @@ import (
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/layer"
+	"hotkeyd/internal/proc"
 	"hotkeyd/internal/win32"
 )
 
@@ -350,4 +351,50 @@ func TestWin32Hook_StaleModAtStartNoStuckLayer(t *testing.T) {
 	if len(runs.got()) != 0 {
 		t.Errorf("ran %q", runs.got())
 	}
+}
+
+// Chords the hook serves count as GRANTED in the grab report - the report
+// `hotkeyd --health` reads (sp012 Task 7): with the hook up, none of them
+// is ever "missing", in the default layer or the switcher. Under the
+// Windows table (-tags win32) nothing at all is missing in either layer.
+func TestWin32Hook_HookChordsCountAsGranted(t *testing.T) {
+	runs := &runRecorder{}
+	r := newHookRig(t, 0, runs)
+	via := hookChords(Binds, Layers, win32Mod)
+	check := func(where string, above int) int {
+		t.Helper()
+		// The published report (the daemon goroutine owns the manager;
+		// the file is what it wrote after its last resync).
+		var wanted, active int
+		var missing []string
+		waitFor(t, where+": report settles", func() bool {
+			rep, ok := proc.ReadGrabReport("kwi3t-test")
+			if !ok {
+				return false
+			}
+			wanted, active, missing = rep.Wanted, rep.Active, rep.Missing
+			for _, m := range missing {
+				if via(strings.SplitN(m, ": ", 2)[0]) {
+					return false
+				}
+			}
+			return wanted > above // the layer's chords are in
+		})
+		hooked := r.hook.Owned()
+		if len(hooked) == 0 {
+			t.Fatalf("%s: the hook serves nothing", where)
+		}
+		if overlayCmd() == "kwi3-run.exe" && (len(missing) != 0 || active != wanted) {
+			t.Errorf("%s (Windows table): %d of %d granted, missing %q", where, active, wanted, missing)
+		}
+		t.Logf("%s: %d of %d granted, %d by the hook, missing %q", where, active, wanted, len(hooked), missing)
+		return wanted
+	}
+	base := check("default layer", 0)
+	r.hook.Decide(kdown(win32.VK_LMENU))
+	r.hook.Decide(kdown(win32.VK_TAB))
+	waitFor(t, "switcher layer", func() bool { return r.layer() == "switcher" })
+	check("switcher layer", base)
+	r.hook.Decide(kup(win32.VK_TAB))
+	r.hook.Decide(kup(win32.VK_LMENU))
 }
