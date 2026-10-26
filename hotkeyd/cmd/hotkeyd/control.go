@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"hotkeyd/internal/bind"
+	"hotkeyd/internal/dialbound"
 	"hotkeyd/internal/layer"
 )
 
@@ -485,16 +486,34 @@ func validateControlLayer(layers map[string]bind.Layer, name string) error {
 	return nil
 }
 
+// controlConnect makes the control client's connect; it is the one part of
+// a control exchange a test cannot make hang with a real socket (a full
+// backlog answers at once on both OSes), so a test replaces it. The bound
+// on it is NOT in here - it is dialControl's dialbound.Bound around it.
+var controlConnect = func(path string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("unix", path, timeout)
+}
+
+// dialControl connects to the control socket at path within timeout,
+// whatever the connect does (kwi3-hoex.22: recover's 12 s budget and
+// --health's 3 s used to exclude the connect).
+func dialControl(path string, timeout time.Duration) (net.Conn, error) {
+	connect := controlConnect // read here, not on Bound's goroutine, which may outlive the call
+	return dialbound.Bound(timeout, func() (net.Conn, error) { return connect(path, timeout) })
+}
+
 // controlCall sends req to the control socket at path and reads its one
-// reply line, all within timeout. The client side of every request but
-// set-layer (setlayer.go keeps its own, older exit-code contract).
+// reply line, all within timeout - the connect included (kwi3-hoex.22).
+// The client side of every request but set-layer (setlayer.go keeps its
+// own, older exit-code contract).
 func controlCall(path string, req controlRequest, timeout time.Duration) (controlReply, error) {
-	conn, err := net.Dial("unix", path)
+	deadline := time.Now().Add(timeout)
+	conn, err := dialControl(path, timeout)
 	if err != nil {
 		return controlReply{}, err
 	}
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if err := conn.SetDeadline(deadline); err != nil {
 		return controlReply{}, fmt.Errorf("cannot set a deadline: %w", err)
 	}
 	data, err := json.Marshal(req)
