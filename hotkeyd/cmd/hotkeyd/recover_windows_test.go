@@ -42,13 +42,30 @@ import (
 // starts the same binary again.
 const asHotkeydEnv = "HOTKEYD_TEST_AS_HOTKEYD"
 
+// compiledTableEnv, set to 1 beside asHotkeydEnv, keeps the COMPILED table
+// (the -tags win32 one under GOFLAGS=-tags=win32) instead of smallTable.
+const compiledTableEnv = "HOTKEYD_TEST_COMPILED_TABLE"
+
+// sendInputStubMark is what the stubbed key-up prints: a test that finds it
+// in recover's output caught a key-up that a dry run should never reach.
+const sendInputStubMark = "TEST: SendInput stub called"
+
 func TestMain(m *testing.M) {
 	if os.Getenv(asHotkeydEnv) == "1" {
-		// smallTable, not the compiled one: these tests are about
-		// recover, not the table, and the compiled table would spawn its
-		// overlay from the restarted daemon. (Its hook-served chords count
-		// as granted: TestHealth_Windows_HookTable, sp012 Task 5.)
-		Binds, Layers = smallTable, map[string]bind.Layer{}
+		// Never real input from a test binary, dry run or not.
+		recoverKeyUp = func(vk uint16) error {
+			fmt.Fprintf(os.Stderr, "%s for vk 0x%02x\n", sendInputStubMark, vk)
+			return errors.New("SendInput is stubbed in a test binary")
+		}
+		// smallTable, not the compiled one, unless a test asks for it:
+		// most of these tests are about recover, not the table, and the
+		// compiled table would spawn its overlay from the restarted
+		// daemon. (Its hook-served chords count as granted:
+		// TestHealth_Windows_HookTable, sp012 Task 5, and recover on it
+		// is TestRecover_Windows_CompiledTableAndHook_ExitsZero.)
+		if os.Getenv(compiledTableEnv) != "1" {
+			Binds, Layers = smallTable, map[string]bind.Layer{}
+		}
 		os.Exit(Dispatch(os.Args[1:]))
 	}
 	os.Exit(m.Run())
@@ -338,7 +355,7 @@ func stopOwnDaemon(t *testing.T) {
 		return
 	}
 	defer p.Close()
-	_ = stopViaControl(proc.ControlPath(desk))
+	_ = stopViaControl(proc.ControlPath(desk), recoverControlTimeout)
 	if !p.Wait(5 * time.Second) {
 		t.Errorf("cleanup: the test's daemon pid %d ignored stop; ending it by its handle", pid)
 		_ = p.Terminate()
@@ -426,6 +443,65 @@ func TestRecover_Windows_DaemonUp_RecoverChangesPidAndHealthIsGreen(t *testing.T
 	}
 }
 
+// recover against a daemon on the COMPILED table (the -tags win32 one under
+// GOFLAGS=-tags=win32) with its low-level hook: exit 0 inside the 12 s
+// budget, the new pid serving. Dry run throughout - no chord registered, no
+// hook installed (startHook installs none on a dry run), SendInput stubbed
+// (TestMain) - with PATH emptied so the table's overlay (kwi3-run.exe under
+// -tags win32) can never start, a private %LOCALAPPDATA% and a stand-in
+// kwi3 pipe.
+func TestRecover_Windows_CompiledTableAndHook_ExitsZero(t *testing.T) {
+	privateLocalAppData(t)
+	pipe := testPipeName()
+	serveKwi3Pipe(t, pipe)
+	t.Cleanup(func() { stopOwnDaemon(t) })
+	t.Logf("compiled table: %d binds, needs the hook: %v", len(effectiveBinds(pipe)), tableNeedsHook(effectiveBinds(pipe), Layers))
+	if !tableNeedsHook(effectiveBinds(pipe), Layers) {
+		t.Log("this build's table needs no hook (run with GOFLAGS=-tags=win32 for the Windows table)")
+	}
+	env := setEnv(append(hotkeydEnv(pipe), compiledTableEnv+"=1"), "PATH", t.TempDir())
+
+	old := exec.Command(selfExe(t), "--input", "win32")
+	old.Env = env
+	if err := old.Start(); err != nil {
+		t.Fatalf("start hotkeyd: %v", err)
+	}
+	oldDone := make(chan error, 1)
+	go func() { oldDone <- old.Wait() }()
+	t.Logf("before: %s", waitHealthy(t, 10*time.Second))
+
+	cmd := exec.Command(selfExe(t), "recover")
+	cmd.Env = env
+	start := time.Now()
+	outB, err := cmd.CombinedOutput()
+	took := time.Since(start)
+	out := string(outB)
+	t.Logf("recover (%s) err %v:\n%s", took.Round(time.Millisecond), err, out)
+	if err != nil {
+		t.Fatalf("recover = %v, want exit 0", err)
+	}
+	if took > recoverBudget {
+		t.Fatalf("recover took %s, want within the %s budget", took, recoverBudget)
+	}
+	if strings.Contains(out, sendInputStubMark) {
+		t.Fatalf("a dry-run recover reached SendInput:\n%s", out)
+	}
+	select {
+	case <-oldDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the old daemon is still running after recover")
+	}
+	lp := proc.LockPath(resolveDisplay(""))
+	newPID, _ := proc.LockPID(lp)
+	if newPID == old.Process.Pid || newPID == 0 {
+		t.Fatalf("lock pid %d after recover, want a new pid (old %d)", newPID, old.Process.Pid)
+	}
+	code, msg := runHealth("")
+	if code != HealthOK || !strings.Contains(msg, fmt.Sprintf("pid %d", newPID)) {
+		t.Fatalf("--health after recover = %d %q, want serving from pid %d", code, msg, newPID)
+	}
+}
+
 func TestRecover_Windows_MissingPipe_ExitsOneNamingKwi3rpc(t *testing.T) {
 	privateLocalAppData(t)
 	pipe := testPipeName() // nobody serves it
@@ -456,11 +532,13 @@ func TestRecover_Windows_MissingPipe_ExitsOneNamingKwi3rpc(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("recover = %d, want 1", code)
 	}
-	if !strings.Contains(out, "not serving within 10s") || !strings.Contains(out, "kwi3rpc") {
+	if !strings.Contains(out, "not serving within the 12s budget") || !strings.Contains(out, "kwi3rpc") {
 		t.Fatalf("recover output does not name kwi3rpc:\n%s", out)
 	}
-	if took < 10*time.Second || took > 20*time.Second {
-		t.Fatalf("recover took %s, want just over 10s", took)
+	// The whole run is bounded by recoverBudget (12 s, kwi3-hoex.21), and
+	// the host waits 15 s: recover must answer before the host gives up.
+	if took < 11*time.Second || took > 14*time.Second {
+		t.Fatalf("recover took %s, want just under 12s plus process start, never near the host's 15s", took)
 	}
 }
 

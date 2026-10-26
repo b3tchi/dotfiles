@@ -80,6 +80,12 @@ func sendKeyUp(vk uint16) error {
 	return nil
 }
 
+// recoverKeyUp is what runRecoverCmd releases a held modifier with: the
+// real sendKeyUp. A var only so a test binary run AS hotkeyd can put a stub
+// in its place (recover_windows_test.go's TestMain) - a test never sends
+// real input, even if a dry run were ever lost.
+var recoverKeyUp = sendKeyUp
+
 // pidAlive: a process with this pid exists and has not exited.
 func pidAlive(pid int) bool {
 	h, _, _ := procOpenProcess.Call(processQueryLimitedInformation, 0, uintptr(pid))
@@ -173,9 +179,9 @@ func startDaemon(display string, rec argsRecord) (recoverChild, error) {
 }
 
 // stopViaControl sends {"stop":true}.
-func stopViaControl(path string) error {
+func stopViaControl(path string, timeout time.Duration) error {
 	t := true
-	rep, err := controlCall(path, controlRequest{Stop: &t}, recoverControlTimeout)
+	rep, err := controlCall(path, controlRequest{Stop: &t}, timeout)
 	if err != nil {
 		return err
 	}
@@ -186,19 +192,25 @@ func stopViaControl(path string) error {
 }
 
 // win32Probes is --health's real I/O on Windows.
-func win32Probes() win32HealthProbes {
+func win32Probes(timeout time.Duration) win32HealthProbes {
 	return win32HealthProbes{
 		lockPID:  proc.LockPID,
 		pidAlive: pidAlive,
 		status: func(path string) (controlReply, error) {
-			return controlStatusAt(path, kwi3ProbeTimeout+recoverControlTimeout)
+			return controlStatusAt(path, timeout)
 		},
 	}
 }
 
 // runHealth is --health's production entry point on Windows.
 func runHealth(display string) (int, string) {
-	return healthWin32(display, win32Probes())
+	return healthWin32(display, win32Probes(healthPollTimeout))
+}
+
+// recoverHealth is one --health verdict for recover, its status request
+// bounded by what is left of recover's budget.
+func recoverHealth(display string, timeout time.Duration) (int, string) {
+	return healthWin32(display, win32Probes(timeout))
 }
 
 // runRecoverCmd is `hotkeyd recover [--display DESKTOP]`.
@@ -217,7 +229,7 @@ func runRecoverCmd(argv []string) int {
 		display:  *display,
 		dryRun:   dry,
 		keyDown:  win32.KeyDown,
-		keyUp:    sendKeyUp,
+		keyUp:    recoverKeyUp,
 		lockPID:  proc.LockPID,
 		lockHeld: proc.LockHeld,
 		openProc: openWinProc,
@@ -226,7 +238,7 @@ func runRecoverCmd(argv []string) int {
 		start: func(rec argsRecord) (recoverChild, error) {
 			return startDaemon(resolveDisplay(*display), rec)
 		},
-		health: runHealth,
+		health: recoverHealth,
 		now:    time.Now,
 		sleep:  time.Sleep,
 		log:    daemonLog,

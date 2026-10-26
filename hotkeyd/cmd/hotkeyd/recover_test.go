@@ -232,11 +232,19 @@ type fakeProc struct {
 	terminated  bool
 	waits       []time.Duration
 	closed      bool
+	// stuck: even TerminateProcess does not end it, and every Wait
+	// takes all of its d on the rig's clock.
+	stuck   bool
+	advance func(time.Duration)
 }
 
 func (p *fakeProc) Wait(d time.Duration) bool {
 	p.waits = append(p.waits, d)
-	return (p.exitsOnStop && p.stopped) || p.terminated
+	exited := !p.stuck && ((p.exitsOnStop && p.stopped) || p.terminated)
+	if !exited && p.advance != nil {
+		p.advance(d)
+	}
+	return exited
 }
 func (p *fakeProc) Terminate() error { p.terminated = true; return nil }
 func (p *fakeProc) Close()           { p.closed = true }
@@ -267,6 +275,11 @@ type recoverRig struct {
 	logger   *fakeLogger
 	out      strings.Builder
 	readArgs *argsRecord
+	// slow: every control request (stop, health's status) takes all of
+	// its timeout on the rig's clock - a daemon that never answers.
+	slow           bool
+	stopTimeouts   []time.Duration
+	healthTimeouts []time.Duration
 }
 
 func newRecoverRig() *recoverRig {
@@ -277,6 +290,7 @@ func newRecoverRig() *recoverRig {
 		clock:  time.Unix(1000, 0),
 		logger: &fakeLogger{},
 	}
+	r.proc.advance = r.elapse
 	r.health = func() (int, string) { return HealthOK, "hotkeyd: d — serving" }
 	return r
 }
@@ -295,7 +309,11 @@ func (r *recoverRig) deps() recoverDeps {
 			r.opened = append(r.opened, pid)
 			return r.proc, nil
 		},
-		stop: func(string) error {
+		stop: func(_ string, timeout time.Duration) error {
+			r.stopTimeouts = append(r.stopTimeouts, timeout)
+			if r.slow {
+				r.clock = r.clock.Add(timeout)
+			}
 			r.stops++
 			r.proc.stopped = true
 			return nil
@@ -312,13 +330,21 @@ func (r *recoverRig) deps() recoverDeps {
 			r.lockPID, r.named, r.held2 = r.child.pid, true, true
 			return r.child, nil
 		},
-		health: func(string) (int, string) { return r.health() },
-		now:    func() time.Time { return r.clock },
-		sleep:  func(d time.Duration) { r.clock = r.clock.Add(d) },
-		log:    r.logger.log,
-		out:    &r.out,
+		health: func(_ string, timeout time.Duration) (int, string) {
+			r.healthTimeouts = append(r.healthTimeouts, timeout)
+			if r.slow {
+				r.clock = r.clock.Add(timeout)
+			}
+			return r.health()
+		},
+		now:   func() time.Time { return r.clock },
+		sleep: func(d time.Duration) { r.clock = r.clock.Add(d) },
+		log:   r.logger.log,
+		out:   &r.out,
 	}
 }
+
+func (r *recoverRig) elapse(d time.Duration) { r.clock = r.clock.Add(d) }
 
 func (r *recoverRig) runningDaemon(pid int) {
 	r.lockPID, r.named, r.held2 = pid, true, true
@@ -454,7 +480,7 @@ func TestRecover_StaleLockPidNeverTouched(t *testing.T) {
 	}
 }
 
-func TestRecover_NotServingWithinTenSeconds_ExitsOneNamingTheCheck(t *testing.T) {
+func TestRecover_NotServingWithinTheBudget_ExitsOneNamingTheCheck(t *testing.T) {
 	r := newRecoverRig()
 	r.runningDaemon(100)
 	start := r.clock
@@ -464,11 +490,98 @@ func TestRecover_NotServingWithinTenSeconds_ExitsOneNamingTheCheck(t *testing.T)
 	if code := recoverRun(r.deps()); code != 1 {
 		t.Fatalf("recover = %d, want 1", code)
 	}
-	if !strings.Contains(r.out.String(), "kwi3rpc") || !strings.Contains(r.out.String(), "10s") {
-		t.Fatalf("out %q, want the last verdict naming kwi3rpc and the 10s bound", r.out.String())
+	if !strings.Contains(r.out.String(), "kwi3rpc") || !strings.Contains(r.out.String(), "12s") {
+		t.Fatalf("out %q, want the last verdict naming kwi3rpc and the 12s budget", r.out.String())
 	}
-	if el := r.clock.Sub(start); el < 10*time.Second || el > 10*time.Second+recoverPoll {
-		t.Fatalf("gave up after %v, want 10s", el)
+	if el := r.clock.Sub(start); el < 12*time.Second-recoverPoll || el > 12*time.Second {
+		t.Fatalf("gave up after %v, want the 12s budget", el)
+	}
+}
+
+// kwi3-hoex.21: the host gives recover 15 s (I3KWIN_RECOVER_TIMEOUT_MS);
+// recover answers inside 12 s whatever goes wrong. The worst case: every
+// control request takes its whole timeout, the old daemon ignores the stop,
+// and the new one never serves - the stop phase, the terminate and every
+// health poll are charged against ONE budget, and the last poll's timeout
+// is cut to what is left of it.
+func TestRecover_StuckDaemonWorstCase_AnswersWithinTwelveSeconds(t *testing.T) {
+	r := newRecoverRig()
+	r.runningDaemon(100)
+	r.slow = true
+	r.proc.exitsOnStop = false
+	r.proc.stuck = true // TerminateProcess does not end it in time either
+	r.health = func() (int, string) {
+		return HealthNotServing, "hotkeyd: d — NOT SERVING: kwi3rpc: the connection is down — dial: file not found"
+	}
+	start := r.clock
+	if code := recoverRun(r.deps()); code != 1 {
+		t.Fatalf("recover = %d, want 1; out %q", code, r.out.String())
+	}
+	if el := r.clock.Sub(start); el > 12*time.Second {
+		t.Fatalf("recover took %v on the rig's clock, want <= 12s; out %q", el, r.out.String())
+	}
+	if !strings.Contains(r.out.String(), "pid 100") {
+		t.Fatalf("out %q, want the stuck pid named", r.out.String())
+	}
+}
+
+// The same budget with a daemon that IS ended by pid, then a new one that
+// never serves: recover exits 1 naming the check still failing, inside 12 s,
+// and no health poll was allowed past the budget's end.
+func TestRecover_TerminatedThenNeverServing_ExitsOneNamingTheCheckWithinTwelveSeconds(t *testing.T) {
+	r := newRecoverRig()
+	r.runningDaemon(100)
+	r.slow = true
+	r.proc.exitsOnStop = false
+	r.health = func() (int, string) {
+		return HealthNotServing, "hotkeyd: d — NOT SERVING: kwi3rpc: the connection is down — dial: file not found"
+	}
+	start := r.clock
+	if code := recoverRun(r.deps()); code != 1 {
+		t.Fatalf("recover = %d, want 1; out %q", code, r.out.String())
+	}
+	el := r.clock.Sub(start)
+	if el > 12*time.Second {
+		t.Fatalf("recover took %v on the rig's clock, want <= 12s", el)
+	}
+	if el < 12*time.Second-recoverPoll {
+		t.Fatalf("recover gave up after %v, want the whole 12s budget used", el)
+	}
+	if !r.proc.terminated {
+		t.Fatal("the daemon that ignored the stop was not ended by pid")
+	}
+	out := r.out.String()
+	if !strings.Contains(out, "kwi3rpc") || !strings.Contains(out, "12s") {
+		t.Fatalf("out %q, want the last verdict naming kwi3rpc and the 12s budget", out)
+	}
+	if n := len(r.healthTimeouts); n == 0 {
+		t.Fatal("no health poll at all")
+	}
+	if last := r.healthTimeouts[len(r.healthTimeouts)-1]; last >= healthPollTimeout {
+		t.Fatalf("the last health poll was given %v, want it cut to the budget left (< %v)", last, healthPollTimeout)
+	}
+}
+
+// A poll the budget cut short can time out on the control socket while the
+// daemon is still asking kwi3; the full-length poll before it, which named
+// kwi3rpc, is said beside it so the failing check is still named.
+func TestRecover_CutShortPoll_StillNamesTheFullPollsCheck(t *testing.T) {
+	r := newRecoverRig()
+	r.runningDaemon(100)
+	r.slow = true
+	r.proc.exitsOnStop = false
+	r.health = func() (int, string) {
+		if last := r.healthTimeouts[len(r.healthTimeouts)-1]; last < healthPollTimeout {
+			return HealthNotServing, "hotkeyd: d — NOT SERVING: control: pid 7777 is running but its control socket does not answer — i/o timeout"
+		}
+		return HealthNotServing, "hotkeyd: d — NOT SERVING: kwi3rpc: the connection is down — dial: file not found"
+	}
+	if code := recoverRun(r.deps()); code != 1 {
+		t.Fatalf("recover = %d, want 1", code)
+	}
+	out := r.out.String()
+	if !strings.Contains(out, "control:") || !strings.Contains(out, "kwi3rpc:") || !strings.Contains(out, "cut short") {
+		t.Fatalf("out %q, want the cut-short control verdict AND the full poll's kwi3rpc verdict", out)
 	}
 }
 

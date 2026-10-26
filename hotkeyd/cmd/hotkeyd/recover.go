@@ -17,8 +17,15 @@ package main
 //     logged. No daemon: nothing to stop.
 //  3. start a new one, detached, with the old one's arguments (the record
 //     runWin32 writes beside its lock, <desktop>.args).
-//  4. exit 0 once --health says it serves, 1 if it does not within 10 s -
-//     the last verdict printed, naming the first check that failed.
+//  4. exit 0 once --health says it serves, 1 if it does not - the last
+//     verdict printed, naming the first check that failed.
+//
+// The whole run shares ONE deadline, recoverBudget from its start
+// (kwi3-hoex.21): the stop request, both waits and every health poll get
+// what is left of it, each at most its own bound, so a stuck daemon and a
+// new one that never serves still answer inside 12 s - before the host's
+// 15 s I3KWIN_RECOVER_TIMEOUT_MS, so the host hears recover's own verdict
+// rather than timing it out.
 //
 // Pure over recoverDeps: recover_test.go drives every branch with fakes on
 // Linux; recover_windows.go wires the real ones.
@@ -38,13 +45,17 @@ import (
 )
 
 const (
-	recoverStopWait  = 2 * time.Second
-	recoverServeWait = 10 * time.Second
-	recoverPoll      = 250 * time.Millisecond
+	// recoverBudget bounds the whole of `hotkeyd recover`, worst case.
+	recoverBudget   = 12 * time.Second
+	recoverStopWait = 2 * time.Second
+	recoverPoll     = 250 * time.Millisecond
 	// recoverControlTimeout bounds one stop or status request.
 	recoverControlTimeout = time.Second
 	// kwi3ProbeTimeout bounds a status request's kwi3rpc round trip.
 	kwi3ProbeTimeout = 2 * time.Second
+	// healthPollTimeout bounds one --health status request: the daemon's
+	// own kwi3rpc probe plus the control round trip.
+	healthPollTimeout = kwi3ProbeTimeout + recoverControlTimeout
 )
 
 // recoverModifiers is every sided modifier VK recover asks about, in the
@@ -201,14 +212,39 @@ type recoverDeps struct {
 	lockPID  func(path string) (int, bool)
 	lockHeld func(path string) bool
 	openProc func(pid int) (recoverProc, error)
-	stop     func(controlPath string) error
+	// stop sends {"stop":true}, the request bounded by timeout.
+	stop     func(controlPath string, timeout time.Duration) error
 	readArgs func(display string) (argsRecord, bool)
 	start    func(rec argsRecord) (recoverChild, error)
-	health   func(display string) (int, string)
-	now      func() time.Time
-	sleep    func(time.Duration)
-	log      func(string)
-	out      io.Writer
+	// health is one --health verdict, its status request bounded by
+	// timeout.
+	health func(display string, timeout time.Duration) (int, string)
+	now    func() time.Time
+	sleep  func(time.Duration)
+	log    func(string)
+	out    io.Writer
+}
+
+// recoverDeadline is the one deadline a recover run shares.
+type recoverDeadline struct {
+	at  time.Time
+	now func() time.Time
+}
+
+// left is what remains of the budget, never negative.
+func (b recoverDeadline) left() time.Duration {
+	if l := b.at.Sub(b.now()); l > 0 {
+		return l
+	}
+	return 0
+}
+
+// clamp is bound, cut to what remains of the budget.
+func (b recoverDeadline) clamp(bound time.Duration) time.Duration {
+	if l := b.left(); l < bound {
+		return l
+	}
+	return bound
 }
 
 // releaseModifiers is step 1: one key-up for each sided modifier held,
@@ -239,13 +275,14 @@ func releaseModifiers(d recoverDeps) int {
 // recoverRun is `hotkeyd recover`: the exit code, 0 serving, 1 not.
 func recoverRun(d recoverDeps) int {
 	disp := resolveDisplay(d.display)
+	budget := recoverDeadline{at: d.now().Add(recoverBudget), now: d.now}
 	releaseModifiers(d)
 
 	lockPath := proc.LockPath(disp)
 	oldPID, named := d.lockPID(lockPath)
 	switch {
 	case named && d.lockHeld(lockPath):
-		if code, ok := stopDaemon(d, disp, oldPID); !ok {
+		if code, ok := stopDaemon(d, budget, disp, oldPID); !ok {
 			return code
 		}
 	case named:
@@ -266,50 +303,68 @@ func recoverRun(d recoverDeps) int {
 	}
 	d.log(fmt.Sprintf("recover: started pid %d with arguments %q", child.PID(), rec.Args))
 
-	deadline := d.now().Add(recoverServeWait)
+	// verdict is the last health verdict; full is the last one whose poll
+	// had its whole healthPollTimeout. A poll cut short by the budget can
+	// time out on the control socket while the daemon is still asking
+	// kwi3 - "control:" then names the wrong check, so the full poll's
+	// verdict is said beside it.
+	verdict, full := "no health poll fit in the budget", ""
+	fail := func(why string) int {
+		if full != "" && full != verdict {
+			why += " (the last poll was cut short by the budget; the one before it, with its full time: " + full + ")"
+		}
+		fmt.Fprintf(d.out, "hotkeyd recover: %s — %s\n", disp, why)
+		return 1
+	}
 	for {
-		code, msg := d.health(disp)
+		timeout := budget.clamp(healthPollTimeout)
+		if timeout <= 0 {
+			return fail(fmt.Sprintf("not serving within the %s budget: %s", recoverBudget, verdict))
+		}
+		code, msg := d.health(disp, timeout)
 		if code == HealthOK {
 			if pid, _ := d.lockPID(lockPath); pid == child.PID() {
 				fmt.Fprintln(d.out, msg)
 				return 0
 			}
 		}
+		if timeout == healthPollTimeout {
+			full = msg
+		}
+		verdict = msg
 		if exit, done := child.Exited(); done {
-			fmt.Fprintf(d.out, "hotkeyd recover: %s — the new daemon (pid %d) exited with code %d; last verdict: %s\n",
-				disp, child.PID(), exit, msg)
-			return 1
+			return fail(fmt.Sprintf("the new daemon (pid %d) exited with code %d; last verdict: %s", child.PID(), exit, verdict))
 		}
-		if !d.now().Before(deadline) {
-			fmt.Fprintf(d.out, "hotkeyd recover: %s — not serving within %s: %s\n", disp, recoverServeWait, msg)
-			return 1
+		if budget.left() <= 0 {
+			return fail(fmt.Sprintf("not serving within the %s budget: %s", recoverBudget, verdict))
 		}
-		d.sleep(recoverPoll)
+		d.sleep(budget.clamp(recoverPoll))
 	}
 }
 
 // stopDaemon is step 2. ok=false means recover must exit with code.
-func stopDaemon(d recoverDeps, disp string, pid int) (code int, ok bool) {
+func stopDaemon(d recoverDeps, budget recoverDeadline, disp string, pid int) (code int, ok bool) {
 	p, err := d.openProc(pid)
 	if err != nil {
 		fmt.Fprintf(d.out, "hotkeyd recover: %s — the lock is held by pid %d, which cannot be opened: %s\n", disp, pid, err)
 		return 1, false
 	}
 	defer p.Close()
-	if err := d.stop(proc.ControlPath(disp)); err != nil {
+	if err := d.stop(proc.ControlPath(disp), budget.clamp(recoverControlTimeout)); err != nil {
 		d.log(fmt.Sprintf("recover: pid %d: the control socket's stop failed: %s", pid, err))
 	}
-	if p.Wait(recoverStopWait) {
+	wait := budget.clamp(recoverStopWait)
+	if p.Wait(wait) {
 		d.log(fmt.Sprintf("recover: pid %d stopped on the control socket's stop", pid))
 		return 0, true
 	}
 	d.log(fmt.Sprintf("recover: pid %d did not exit within %s of the stop; ending it BY PID (TerminateProcess on pid %d, never by name)",
-		pid, recoverStopWait, pid))
+		pid, wait, pid))
 	if err := p.Terminate(); err != nil {
 		fmt.Fprintf(d.out, "hotkeyd recover: %s — TerminateProcess on pid %d failed: %s\n", disp, pid, err)
 		return 1, false
 	}
-	if !p.Wait(recoverStopWait) {
+	if !p.Wait(budget.clamp(recoverStopWait)) {
 		fmt.Fprintf(d.out, "hotkeyd recover: %s — pid %d is still running after TerminateProcess\n", disp, pid)
 		return 1, false
 	}
