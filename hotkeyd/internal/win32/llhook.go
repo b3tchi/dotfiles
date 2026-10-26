@@ -21,6 +21,15 @@ package win32
 //     SWALLOWED (the callback returns 1), and so is that key's release;
 //   - everything else passes (CallNextHookEx).
 //
+// The decision is STICKY per key, from its first press to its release: a
+// key's auto-repeat presses and its release get the answer its first
+// press got, whatever the modifiers or the owned set did since. Deciding
+// each repeat afresh can split a key (Tab swallowed down, passed repeat,
+// swallowed up - or Return passed down, then Alt pressed and the repeat
+// read as Alt+Return): the application sees a press with no release, and
+// the key is stuck. A swallowed repeat is queued only while its chord is
+// still owned.
+//
 // The callback only queues: a full queue drops the event and counts it
 // (Overflow) - it never waits for the daemon, so a busy or wedged engine
 // can never make Windows time the hook out (LowLevelHooksTimeout).
@@ -78,10 +87,19 @@ type Hook struct {
 	// mu guards the per-key state below. Decide takes it uncontended on
 	// every event; the only other taker is Resync (a hook reinstall, at
 	// most once per probe interval), for microseconds.
-	mu        sync.Mutex
-	modDown   [256]bool // which modifier VKs (sided) are down
-	swallowed [256]bool // which keys had their press swallowed
+	mu      sync.Mutex
+	modDown [256]bool     // which modifier VKs (sided) are down
+	keys    [256]keyState // each other key, from its first press to its release
 }
+
+// keyState is a key's sticky decision.
+type keyState uint8
+
+const (
+	keyUp        keyState = iota
+	keyPassed             // down, its first press passed
+	keySwallowed          // down, its first press swallowed
+)
 
 // NewHook builds a hook decision with a queue of buffer events (default
 // 64). It owns nothing until SetOwned.
@@ -175,21 +193,31 @@ func (h *Hook) Decide(in KeyInput) bool {
 
 	mods := h.mods.Load()
 	ks, known := ToKeysym(in.VK)
+	slot := &h.keys[in.VK&0xff]
 	if in.Up {
-		if h.swallowed[in.VK&0xff] {
-			h.swallowed[in.VK&0xff] = false
+		was := *slot
+		*slot = keyUp
+		if was == keySwallowed {
 			h.enqueue(HookEvent{Kind: "release", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
 			return true // its press was ours, so is its release
 		}
 		return false
 	}
-	if !known || IsRecoverChord(ks, mods) {
+	owned := known && !IsRecoverChord(ks, mods) && (*h.owned.Load())[Chord{Keysym: ks, Mods: mods}]
+	switch *slot {
+	case keyPassed: // an auto-repeat of a key that went to the application
+		return false
+	case keySwallowed: // an auto-repeat of ours: swallowed whatever happens
+		if owned {
+			h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
+		}
+		return true
+	}
+	if !owned {
+		*slot = keyPassed
 		return false
 	}
-	if !(*h.owned.Load())[Chord{Keysym: ks, Mods: mods}] {
-		return false
-	}
-	h.swallowed[in.VK&0xff] = true
+	*slot = keySwallowed
 	h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
 	return true
 }
@@ -203,7 +231,7 @@ func (h *Hook) Resync(down func(vk uint16) bool) {
 	defer h.mu.Unlock()
 	for i := range h.modDown {
 		h.modDown[i] = false
-		h.swallowed[i] = false
+		h.keys[i] = keyUp
 	}
 	for _, mb := range modifierBits {
 		if down(mb.vk) {

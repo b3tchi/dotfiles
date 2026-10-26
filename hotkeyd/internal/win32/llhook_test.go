@@ -5,6 +5,7 @@ package win32
 // file - Decide is the callback's body, called directly.
 
 import (
+	"math/rand"
 	"sort"
 	"testing"
 	"time"
@@ -258,5 +259,138 @@ func TestHook_ReleaseFollowsPress(t *testing.T) {
 	h.SetOwned(switcherOwned)
 	if h.Decide(up(VK_TAB)) {
 		t.Error("release of a press that passed was swallowed")
+	}
+}
+
+// answers feeds seq and returns, per step, what Decide answered.
+func answers(h *Hook, seq []KeyInput) []bool {
+	out := make([]bool, len(seq))
+	for i, in := range seq {
+		out[i] = h.Decide(in)
+	}
+	return out
+}
+
+// (a) of rejection #1: Tab swallowed as $mod+Tab, $mod released (the layer
+// ends, the owned set shrinks to the entry chord), Tab auto-repeats with no
+// modifier: the repeat and the release stay swallowed - the application
+// never saw this Tab go down, so it must not see it come up either, and it
+// must not see a repeat with no press. The repeat is not queued: bare Tab
+// is not owned any more.
+func TestHook_SwallowedKeyStaysSwallowedThroughRepeats(t *testing.T) {
+	h := NewHook(32)
+	h.SetOwned(switcherOwned)
+	got := answers(h, []KeyInput{down(VK_LMENU), down(VK_TAB)})
+	drain(h)
+	h.SetOwned(map[Chord]bool{{Keysym: ksTab, Mods: ModAlt}: true}) // the default layer's set
+	got = append(got, answers(h, []KeyInput{up(VK_LMENU), down(VK_TAB), down(VK_TAB), up(VK_TAB)})...)
+	want := []bool{false, true, false, true, true, true}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("answers %v, want %v", got, want)
+		}
+	}
+	for _, ev := range drain(h) {
+		if ev.Kind == "press" {
+			t.Errorf("a repeat of a no-longer-owned chord was queued: %+v", ev)
+		}
+	}
+}
+
+// (b): Tab pressed bare (passed), then $mod pressed, Tab auto-repeats as
+// Mod1+Tab: still passed, nothing queued (no switcher entry from a
+// repeat), and the release passes.
+func TestHook_PassedKeyStaysPassedThroughRepeats(t *testing.T) {
+	h := NewHook(32)
+	h.SetOwned(switcherOwned)
+	got := answers(h, []KeyInput{down(VK_TAB), down(VK_LMENU), down(VK_TAB), down(VK_TAB), up(VK_TAB), up(VK_LMENU)})
+	for i, sw := range got {
+		if sw {
+			t.Fatalf("step %d swallowed: %v", i, got)
+		}
+	}
+	for _, ev := range drain(h) {
+		if ev.Kind != "mods" {
+			t.Errorf("queued %+v", ev)
+		}
+	}
+	// A fresh press after the release is decided anew.
+	h.Decide(down(VK_LMENU))
+	if !h.Decide(down(VK_TAB)) {
+		t.Error("a fresh $mod+Tab after the release passed")
+	}
+}
+
+// Return held, then $mod pressed: Alt+Return is owned in every layer (a
+// global on the same key as the switcher's Return), but the held Return's
+// repeats go on passing - no terminal spawned from a repeat, no stuck
+// Return.
+func TestHook_HeldReturnThenAltIsNotAltReturn(t *testing.T) {
+	h := NewHook(32)
+	owned := map[Chord]bool{{Keysym: 0xff0d, Mods: ModAlt}: true}
+	h.SetOwned(owned)
+	got := answers(h, []KeyInput{down(VK_RETURN), down(VK_RETURN), down(VK_LMENU), down(VK_RETURN), down(VK_RETURN), up(VK_RETURN), up(VK_LMENU)})
+	for i, sw := range got {
+		if sw {
+			t.Fatalf("step %d swallowed: %v", i, got)
+		}
+	}
+	for _, ev := range drain(h) {
+		if ev.Kind == "press" {
+			t.Errorf("queued %+v: a repeat read as Alt+Return", ev)
+		}
+	}
+}
+
+// Property: over random press/repeat/release sequences of a few keys, with
+// modifiers going up and down and the owned set changing in between (layer
+// changes), every answer a key gets from its first press to its release is
+// the first press's answer, and the recover chord's r is never swallowed.
+func TestHook_PropertyPressAndReleaseAgree(t *testing.T) {
+	keys := []uint16{VK_TAB, VK_RETURN, 'W', 'R', VK_ESCAPE}
+	mods := []uint16{VK_LMENU, VK_RMENU, VK_LSHIFT, VK_LCONTROL}
+	sets := []map[Chord]bool{
+		switcherOwned,
+		{{Keysym: ksTab, Mods: ModAlt}: true, {Keysym: 0xff0d, Mods: ModAlt}: true},
+		{{Keysym: ksTab, Mods: 0}: true, {Keysym: 'w', Mods: 0}: true, {Keysym: 0xff1b, Mods: ModAlt}: true,
+			{Keysym: 'r', Mods: ModAlt | ModShift}: true},
+		nil,
+	}
+	rng := rand.New(rand.NewSource(5))
+	h := NewHook(1 << 16)
+	isDown := map[uint16]bool{}
+	first := map[uint16]bool{}
+	for step := 0; step < 20000; step++ {
+		switch r := rng.Intn(10); {
+		case r == 0:
+			h.SetOwned(sets[rng.Intn(len(sets))])
+		case r <= 3:
+			vk := mods[rng.Intn(len(mods))]
+			h.Decide(KeyInput{VK: vk, Up: rng.Intn(2) == 0})
+		default:
+			vk := keys[rng.Intn(len(keys))]
+			up := isDown[vk] && rng.Intn(3) == 0
+			sw := h.Decide(KeyInput{VK: vk, Up: up})
+			if vk == 'R' && sw {
+				recoverHeld := h.Mods()&ModShift != 0 && h.Mods()&(ModAlt|ModSuper) != 0
+				if recoverHeld && !isDown[vk] {
+					t.Fatalf("step %d: the recover chord's r was swallowed", step)
+				}
+			}
+			switch {
+			case up:
+				if sw != first[vk] {
+					t.Fatalf("step %d: vk %#x released %v, its press %v", step, vk, sw, first[vk])
+				}
+				isDown[vk] = false
+			case isDown[vk]:
+				if sw != first[vk] {
+					t.Fatalf("step %d: vk %#x repeat %v, its press %v", step, vk, sw, first[vk])
+				}
+			default:
+				isDown[vk], first[vk] = true, sw
+			}
+		}
+		drain(h)
 	}
 }
