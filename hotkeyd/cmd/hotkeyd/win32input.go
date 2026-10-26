@@ -54,14 +54,126 @@ func (g win32Grabs) Active() map[string]GrabbedChord {
 // key-event stream: one press per WM_HOTKEY (RegisterHotKey reports no
 // release). The returned channel closes when in does.
 func win32KeyEvents(in <-chan win32.Event) <-chan kwin.Event {
-	out := make(chan kwin.Event, cap(in))
+	return win32Merge(in, nil, nil, nil, nil)
+}
+
+// hookStats is what win32Merge reads of the low-level hook beside its
+// events: the overflow counter, logged when it rises.
+type hookStats interface{ Overflow() uint64 }
+
+// win32Merge is the daemon's key-event stream from both Windows sources:
+// WM_HOTKEY presses (in) and, when the table needs it, the low-level
+// hook's presses, releases and modifier changes (hook; nil: none). The
+// stream closes when in does - the hotkey thread is the daemon's life.
+// log and debug may be nil. log gets a line whenever the hook's queue has dropped
+// events since the last one; debug (HOTKEYD_WIN32_DEBUG=1) gets every
+// LLKHF_INJECTED event (handled like a physical one until sp012 Task 14
+// measures what RDP delivers).
+func win32Merge(in <-chan win32.Event, hook <-chan win32.HookEvent, stats hookStats, log, debug func(string)) <-chan kwin.Event {
+	out := make(chan kwin.Event, cap(in)+cap(hook))
 	go func() {
 		defer close(out)
-		for ev := range in {
-			out <- win32KeyEvent(ev)
+		var dropped uint64
+		for {
+			select {
+			case ev, ok := <-in:
+				if !ok {
+					return
+				}
+				out <- win32KeyEvent(ev)
+			case ev := <-hook:
+				if ev.Injected && debug != nil {
+					debug(fmt.Sprintf("low-level hook: injected %s vk=%#x keysym=%#x mods=%#x", ev.Kind, ev.VK, ev.Keysym, ev.Mods))
+				}
+				out <- win32HookEvent(ev)
+			}
+			if stats != nil && log != nil {
+				if n := stats.Overflow(); n > dropped {
+					log(fmt.Sprintf("low-level hook: %d key event(s) dropped, the queue was full (%d in all)", n-dropped, n))
+					dropped = n
+				}
+			}
 		}
 	}()
 	return out
+}
+
+func win32HookEvent(ev win32.HookEvent) kwin.Event {
+	return kwin.Event{Kind: ev.Kind, Keysym: ev.Keysym, Mods: ev.Mods, Device: win32Device}
+}
+
+// tableNeedsHook reports whether the table has anything RegisterHotKey
+// cannot serve - a hold layer, or a chord bound on release - and so needs
+// the low-level hook. Without either, hotkeyd installs no hook at all.
+func tableNeedsHook(binds []bind.Bind, layers map[string]bind.Layer) bool {
+	for _, b := range binds {
+		if b.OnRelease {
+			return true
+		}
+	}
+	for _, l := range layers {
+		if l.Hold != "" {
+			return true
+		}
+		for _, b := range l.Binds {
+			if b.OnRelease {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hookChords is the set of chords the low-level hook serves instead of
+// RegisterHotKey (sp012 Task 5): every chord a hold layer grabs while it is
+// up (layerChords: its keys bare and under the held modifier, its exit
+// keys), every chord that enters a hold layer (the $mod+Tab press must come
+// in the same ordered stream as the $mod release that ends the layer), and
+// every release-only chord. Matched by normalized identity, so "$mod+Tab"
+// and "Mod1+Tab" are one chord - which also makes a global chord on the
+// key of a hold-layer chord ($mod+Return, the switcher's Return under the
+// held $mod) the hook's in every layer: one owner per key, and no
+// unregister/register churn on every Alt+Tab.
+func hookChords(binds []bind.Bind, layers map[string]bind.Layer, mod string) func(string) bool {
+	set := map[bind.ChordKey]bool{}
+	add := func(chord string) {
+		if k, err := bind.NormalizeChord(chord, mod); err == nil {
+			set[k] = true
+		}
+	}
+	entersHold := func(b bind.Bind) bool {
+		for _, a := range b.Actions {
+			if e, ok := a.(bind.EnterLayer); ok && layers[e.Layer].Hold != "" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, b := range binds {
+		if entersHold(b) {
+			add(b.Chord)
+		}
+	}
+	for _, l := range layers {
+		for _, b := range l.Binds {
+			if entersHold(b) {
+				add(b.Chord)
+			}
+		}
+		if l.Hold != "" {
+			for _, c := range layerChords(l, mod) {
+				add(c)
+			}
+		}
+	}
+	release := releaseOnlyChords(binds, layers, mod)
+	return func(chord string) bool {
+		if release(chord) {
+			return true
+		}
+		k, err := bind.NormalizeChord(chord, mod)
+		return err == nil && set[k]
+	}
 }
 
 func win32KeyEvent(ev win32.Event) kwin.Event {
