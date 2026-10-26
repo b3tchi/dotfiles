@@ -969,7 +969,7 @@ runLoop:
 			d.handleXEvent(ev)
 		case ev, ok := <-d.keyEvents:
 			if !ok {
-				d.log("kwi3keys event stream closed, exiting")
+				d.log("key event stream closed (kwi3keys or the win32 hotkey thread), exiting")
 				code = exitXConnLost
 				break runLoop
 			}
