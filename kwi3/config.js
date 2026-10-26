@@ -107,6 +107,18 @@ if (kwi3.host === 'win32') {
         font: 'IosevkaTerm Nerd Font 16',
         workspaceLayout: 'tabbed'
     });
+
+    // The runner (kwi3-run.exe's launcher and switcher window, titled
+    // exactly `kwi3-run`; sp012 Task 13, kwi3-hoex.13) is the Windows
+    // counterpart of the qs-launcher rule further down: floated, no kwi3
+    // chrome (it draws its own), centred on the tile grid and focused.
+    // Inside this branch, so neither X11 nor KWin ever sees it.
+    kwi3.onWindowAdded({ title: /^kwi3-run$/ }, w => {
+        w.float();
+        w.noFrame();
+        w.moveTo(kwi3.grid.center(w));
+        w.focus();
+    });
 }
 
 // =====================================================================
