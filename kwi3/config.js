@@ -97,6 +97,18 @@ kwi3.set({
     // which never set kwi3_focus_frame either).
 });
 
+// Windows (i3kwin-win32): the same settings with two overrides. Windows has
+// IosevkaTerm Nerd Font (scoop nerd-fonts/IosevkaTerm-NF), which Qt names
+// "IosevkaTerm Nerd Font" - there is no plain "Iosevka" - and Jan wants new
+// windows tabbed there. %APPDATA%\kwi3\config.js only includes this file.
+// kwi3.host is undefined on a kwi3 older than kwi3-gv63, so this is skipped.
+if (kwi3.host === 'win32') {
+    kwi3.set({
+        font: 'IosevkaTerm Nerd Font 16',
+        workspaceLayout: 'tabbed'
+    });
+}
+
 // =====================================================================
 // kwi3-234.14: Quickshell runner rules land here (onWindowAdded for
 // qs-launcher / qs-projects / qs-switcher). kwi3-55l.2 widened the same
