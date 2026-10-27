@@ -28,8 +28,10 @@ without the list is refused before anything is touched.
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
 been copied by then. It never ends a process. Stop the daemon first with
-`hotkeyd.exe stop` (below), then install, then run `hotkeyd recover` to
-start the new image with the old daemon's arguments. A
+`hotkeyd.exe stop` (below), then install, then start the new image with
+kwi3's `session.sh start --allow-default-desktop` (job-free; the host
+already serving is only reported), or with `hotkeyd recover`, which reuses
+the old daemon's arguments but, run from WSL, lands in WSL's job. A
 `LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
 installs under those directories instead of the real profile.
 
@@ -38,8 +40,8 @@ Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 - `<desktop>.lock`: pid and heartbeat.
 - `<desktop>.sock`: the control socket.
 - `<desktop>.args`: the daemon's arguments, for `recover`.
-- `<desktop>.log`: the stderr of a daemon `recover` started (the previous
-  one is kept as `.log.1`).
+- `<desktop>.log`: the stderr of a daemon `recover` or kwi3's
+  `session.sh` started (the previous one is kept as `.log.1`).
 
 ### `stop`
 
@@ -113,17 +115,23 @@ Windows build. What it does, from the code:
   keeps it out of every registration and the hook passes it, so the host's
   own `RegisterHotKey` gets it.
 
-**Start it after the host.** The kwi3 host `i3kwin-win32` starts first. Once
-it has printed `i3kwin-win32: rpc socket on \\.\pipe\kwi3-<user>-<desktop>`,
-start hotkeyd on the same desktop. kwi3's `AGENTS.md` (Windows host) has the
-exact commands. Its startup lines say how many chords were registered
+**Start it after the host, with kwi3's `session.sh`.** The kwi3 host
+`i3kwin-win32` starts first, and hotkeyd once the host's pipe
+(`\\.\pipe\kwi3-<user>-<desktop>`) answers. kwi3's
+`i3kwin/adapters/win32/session.sh start --allow-default-desktop` does both
+in that order (kwi3-hoex.29; kwi3's `AGENTS.md`, Windows host, has the
+details): it creates each through `Win32_Process.Create`, so neither -
+nor any program a chord starts - is in WSL's kill-on-close job, and
+hotkeyd's stderr goes to `<desktop>.log` here. With the host already up it
+starts only hotkeyd. Its startup lines say how many chords were registered
 (`<n> of <m> chords registered via RegisterHotKey on desktop <name>
 ($mod=Mod1) ...`) and whether the hook went in.
 
-Started from WSL, hotkeyd lands in WSL's one kill-on-close job, together
-with the host and every program a chord starts. `wsl --shutdown` or the WSL
-VM stopping kills all of them. Closing the terminal does not (kwi3-hoex.29;
-kwi3's `AGENTS.md` has the recovery).
+Started from WSL directly (`cmd.exe /c ...hotkeyd.exe --input win32`),
+hotkeyd lands in WSL's one kill-on-close job, together with the host and
+every program a chord starts, and `wsl --shutdown` or the WSL VM stopping
+kills all of them; closing the terminal does not. `hotkeyd recover` run
+from WSL starts its new daemon in that job too.
 
 Two environment variables are for tests and rigs only:
 
