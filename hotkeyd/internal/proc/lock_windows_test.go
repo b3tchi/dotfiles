@@ -148,3 +148,40 @@ func TestLockHeld_TrueOnlyWhileAHolderLives(t *testing.T) {
 		t.Fatal("LockHeld while this process holds it = false")
 	}
 }
+
+// kwi3-hoex.30: a holder that RELEASES its lock (a daemon's clean
+// shutdown) leaves the file naming no pid, so the next start has nobody to
+// take over from and says nothing.
+func TestLock_CleanReleaseLeavesNoPidAndTheNextStartSaysNothing(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LOCALAPPDATA", base)
+	path := LockPath("kwi3t-clean")
+	ready := filepath.Join(base, "ready")
+	holder := startHelper(t, "locker", "LOCKER_PATH="+path, "LOCKER_READY="+ready, "LOCKER_RELEASE=1")
+	waitFile(t, ready, 15*time.Second)
+	if err := holder.Wait(); err != nil {
+		t.Fatalf("locker: %v", err)
+	}
+	if pid, ok := LockPID(path); ok {
+		t.Fatalf("a released lock still names pid %d", pid)
+	}
+	if LockHeld(path) {
+		t.Fatal("LockHeld after the holder released = true")
+	}
+
+	var said []string
+	old := Log
+	Log = func(m string) { said = append(said, m) }
+	t.Cleanup(func() { Log = old })
+	l, err := AcquireLock(path)
+	if err != nil {
+		t.Fatalf("AcquireLock after a clean release: %v", err)
+	}
+	defer l.Release()
+	if len(said) != 0 {
+		t.Fatalf("the start after a clean release said %q, want nothing", said)
+	}
+	if pid, _ := LockPID(path); pid != os.Getpid() {
+		t.Fatalf("lock names pid %d, want %d", pid, os.Getpid())
+	}
+}

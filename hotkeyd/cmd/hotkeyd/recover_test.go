@@ -236,6 +236,20 @@ type fakeProc struct {
 	// takes all of its d on the rig's clock.
 	stuck   bool
 	advance func(time.Duration)
+	// image is what Image answers ("" = C:\\hk\\hotkeyd.exe); imageErr
+	// makes it fail.
+	image    string
+	imageErr error
+}
+
+func (p *fakeProc) Image() (string, error) {
+	if p.imageErr != nil {
+		return "", p.imageErr
+	}
+	if p.image == "" {
+		return `C:\hk\hotkeyd.exe`, nil
+	}
+	return p.image, nil
 }
 
 func (p *fakeProc) Wait(d time.Duration) bool {

@@ -27,6 +27,7 @@ var (
 	procMapVirtualKeyW     = modUser32Recover.NewProc("MapVirtualKeyW")
 	procOpenProcess        = modKernel32Recover.NewProc("OpenProcess")
 	procGetExitCodeProcess = modKernel32Recover.NewProc("GetExitCodeProcess")
+	procQueryFullImageName = modKernel32Recover.NewProc("QueryFullProcessImageNameW")
 )
 
 const (
@@ -119,7 +120,27 @@ func (p winProc) Wait(d time.Duration) bool {
 }
 
 func (p winProc) Terminate() error { return syscall.TerminateProcess(p.h, 1) }
-func (p winProc) Close()           { _ = syscall.CloseHandle(p.h) }
+
+// Image is the full path of the program the handle's process runs.
+func (p winProc) Image() (string, error) {
+	buf := make([]uint16, 1024)
+	n := uint32(len(buf))
+	r, _, err := procQueryFullImageName.Call(uintptr(p.h), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&n)))
+	if r == 0 {
+		return "", fmt.Errorf("QueryFullProcessImageName: %w", err)
+	}
+	return syscall.UTF16ToString(buf[:n]), nil
+}
+
+// selfImage is this executable's path, "" if it cannot be named.
+func selfImage() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
+}
+func (p winProc) Close() { _ = syscall.CloseHandle(p.h) }
 
 // startedChild is the new daemon; its Wait runs in the background so
 // recover can tell an early exit from a slow start.
@@ -226,15 +247,16 @@ func runRecoverCmd(argv []string) int {
 	}
 	dry := strings.TrimSpace(os.Getenv(win32DryRunEnvName)) == "1"
 	return recoverRun(recoverDeps{
-		display:  *display,
-		dryRun:   dry,
-		keyDown:  win32.KeyDown,
-		keyUp:    recoverKeyUp,
-		lockPID:  proc.LockPID,
-		lockHeld: proc.LockHeld,
-		openProc: openWinProc,
-		stop:     stopViaControl,
-		readArgs: readArgsRecord,
+		display:   *display,
+		dryRun:    dry,
+		keyDown:   win32.KeyDown,
+		keyUp:     recoverKeyUp,
+		lockPID:   proc.LockPID,
+		lockHeld:  proc.LockHeld,
+		openProc:  openWinProc,
+		selfImage: selfImage(),
+		stop:      stopViaControl,
+		readArgs:  readArgsRecord,
 		start: func(rec argsRecord) (recoverChild, error) {
 			return startDaemon(resolveDisplay(*display), rec)
 		},
@@ -243,5 +265,32 @@ func runRecoverCmd(argv []string) int {
 		sleep:  time.Sleep,
 		log:    daemonLog,
 		out:    os.Stdout,
+	})
+}
+
+// runStopCmd is `hotkeyd stop [--display DESKTOP]` (kwi3-hoex.30).
+func runStopCmd(argv []string) int {
+	fs := flag.NewFlagSet("hotkeyd stop", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usageText()) }
+	display := fs.String("display", "", "desktop (default: the one this process runs on)")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "hotkeyd stop: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	return stopRun(stopDeps{
+		display:   *display,
+		lockPID:   proc.LockPID,
+		lockHeld:  proc.LockHeld,
+		openProc:  openWinProc,
+		stop:      stopViaControl,
+		selfImage: selfImage(),
+		log:       daemonLog,
+		out:       os.Stdout,
 	})
 }

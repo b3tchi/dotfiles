@@ -206,6 +206,11 @@ func lockerMain() int {
 		return 1
 	}
 	_ = writeFileAtomic(ready, []byte(strconv.Itoa(os.Getpid())))
+	if os.Getenv("LOCKER_RELEASE") != "" {
+		// A clean shutdown: release at once and exit (kwi3-hoex.30).
+		l.Release()
+		return 0
+	}
 	time.Sleep(helperLife)
 	l.Release()
 	return 0

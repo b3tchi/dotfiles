@@ -39,6 +39,13 @@ func usageText() string {
         kwi3keys-$WAYLAND_DISPLAY.sock) instead of an X display; needs
         $KWI3SOCK
 
+  hotkeyd [--input win32]
+        Windows (the default input there): register the chords with
+        RegisterHotKey (a low-level hook for the hold layers and
+        release chords) on this desktop and send each to kwi3 over
+        $KWI3SOCK, else the host's own pipe; HOTKEYD_WIN32_DRYRUN=1
+        registers nothing
+
   hotkeyd --check
         validate the compiled bind table and exit; no grabs, no X
         connection, no i3 -- runs with no $DISPLAY set (us020 AC2)
@@ -61,6 +68,15 @@ func usageText() string {
         and exit 0 once --health says it serves, 1 if it does not
         -- all of it within 12s, worst case (the host waits 15s).
         HOTKEYD_WIN32_DRYRUN=1 sends no key-up
+
+  hotkeyd stop [--display DESKTOP]
+        Windows only: stop this desktop's daemon -- its control
+        socket's stop (a clean shutdown: chords unregistered, hook
+        removed, lock released), then, if it has not exited within 5s,
+        TerminateProcess on the pid its lock names, only when that pid
+        runs hotkeyd.exe; never by name. Exit 0 when it stopped or none
+        was running ("not running"), 1 when it could not be stopped
+        (named why), 2 on a usage error
 
   hotkeyd check --ownership [--display DISPLAY]
         report per-display chord ownership (i3 / daemon / neither /
@@ -114,6 +130,8 @@ func Dispatch(argv []string) int {
 			return runSetLayerCmd(argv[1:])
 		case "recover":
 			return runRecoverCmd(argv[1:])
+		case "stop":
+			return runStopCmd(argv[1:])
 		}
 	}
 
@@ -122,7 +140,7 @@ func Dispatch(argv []string) int {
 	check := fs.Bool("check", false, "validate the compiled bind table headless and exit")
 	health := fs.Bool("health", false, "report whether this display's daemon is SERVING")
 	display := fs.String("display", "", "X display (default: $DISPLAY)")
-	fs.String("input", "x11", "key source: x11 or kwin (handled by the daemon start path)")
+	fs.String("input", defaultInput, "key source: x11, kwin or win32 (handled by the daemon start path)")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

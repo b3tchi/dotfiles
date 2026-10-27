@@ -13,8 +13,10 @@ package main
 //     lock is really held: a {"stop":true} on its control socket, then up
 //     to 2 s for the process to exit; one that has not is ended BY PID
 //     (TerminateProcess on a handle opened before the stop, so the pid
-//     cannot have been reused in between), never by name, and that is
-//     logged. No daemon: nothing to stop.
+//     cannot have been reused in between), never by name, and only when
+//     that handle's image is hotkeyd.exe or this binary (kwi3-hoex.30 -
+//     `hotkeyd stop`'s daemonEnder, stop.go, shared); that is logged. No
+//     daemon: nothing to stop.
 //  3. start a new one, detached, with the old one's arguments (the record
 //     runWin32 writes beside its lock, <desktop>.args).
 //  4. exit 0 once --health says it serves, 1 if it does not - the last
@@ -191,6 +193,9 @@ type recoverProc interface {
 	Wait(d time.Duration) bool
 	// Terminate ends the process this handle was opened on.
 	Terminate() error
+	// Image is the full path of the program this process runs
+	// (QueryFullProcessImageName on the handle).
+	Image() (string, error)
 	Close()
 }
 
@@ -212,6 +217,11 @@ type recoverDeps struct {
 	lockPID  func(path string) (int, bool)
 	lockHeld func(path string) bool
 	openProc func(pid int) (recoverProc, error)
+	// selfImage is this executable's path: a daemon running the very
+	// binary that runs recover may be ended by pid even when it is not
+	// named hotkeyd.exe (a test binary run as hotkeyd). "" accepts only
+	// hotkeyd.exe.
+	selfImage string
 	// stop sends {"stop":true}, the request bounded by timeout.
 	stop     func(controlPath string, timeout time.Duration) error
 	readArgs func(display string) (argsRecord, bool)
@@ -350,24 +360,10 @@ func stopDaemon(d recoverDeps, budget recoverDeadline, disp string, pid int) (co
 		return 1, false
 	}
 	defer p.Close()
-	if err := d.stop(proc.ControlPath(disp), budget.clamp(recoverControlTimeout)); err != nil {
-		d.log(fmt.Sprintf("recover: pid %d: the control socket's stop failed: %s", pid, err))
-	}
-	wait := budget.clamp(recoverStopWait)
-	if p.Wait(wait) {
-		d.log(fmt.Sprintf("recover: pid %d stopped on the control socket's stop", pid))
-		return 0, true
-	}
-	d.log(fmt.Sprintf("recover: pid %d did not exit within %s of the stop; ending it BY PID (TerminateProcess on pid %d, never by name)",
-		pid, wait, pid))
-	if err := p.Terminate(); err != nil {
-		fmt.Fprintf(d.out, "hotkeyd recover: %s — TerminateProcess on pid %d failed: %s\n", disp, pid, err)
+	e := daemonEnder{name: "recover", stop: d.stop, selfImage: d.selfImage, log: d.log}
+	if _, err := e.end(p, pid, proc.ControlPath(disp), recoverStopWait, budget.clamp); err != nil {
+		fmt.Fprintf(d.out, "hotkeyd recover: %s — %s\n", disp, err)
 		return 1, false
 	}
-	if !p.Wait(budget.clamp(recoverStopWait)) {
-		fmt.Fprintf(d.out, "hotkeyd recover: %s — pid %d is still running after TerminateProcess\n", disp, pid)
-		return 1, false
-	}
-	d.log(fmt.Sprintf("recover: pid %d ended by pid", pid))
 	return 0, true
 }
