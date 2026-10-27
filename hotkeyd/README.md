@@ -19,11 +19,18 @@ Windows chord table, no console window), runs the built image's own
 `--check`, and copies it to `%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe`, the
 path the host runs.
 
-It **refuses** (exit 2, nothing copied) while any process runs from that
-path, and names each pid and command line. It never ends a process. Stop the
-daemon first, install, then run `hotkeyd recover` to start the new image. A
-`LOCALAPPDATA=<dir> WSLENV=LOCALAPPDATA` prefix installs under `<dir>`
-instead.
+It also copies the runner's program list, `kwi3/runner-list.json` in this
+checkout, to `%APPDATA%\kwi3\runner-list.json`, where `kwi3-run.exe` reads
+it. The list is copied first, before the build and before the check below,
+so an edit to it takes a re-run of the script and nothing more. A checkout
+without the list is refused before anything is touched.
+
+It **refuses** (exit 2, the daemon not copied) while any process runs from
+that path, and names each pid and command line. The runner list has already
+been copied by then. It never ends a process. Stop the daemon first, install,
+then run `hotkeyd recover` to start the new image. A
+`LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
+installs under those directories instead of the real profile.
 
 Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 
@@ -32,6 +39,29 @@ Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 - `<desktop>.args`: the daemon's arguments, for `recover`.
 - `<desktop>.log`: the stderr of a daemon `recover` started (the previous
   one is kept as `.log.1`).
+
+### The runner: which `kwi3-run.exe`
+
+`$mod+d` and the `$mod+Tab` switcher run `kwi3-run.exe <verb>`. kwi3's
+`i3kwin/runner/win32/deploy.sh` puts each deploy in a new
+`%LOCALAPPDATA%\kwi3\run\v<N>` and names it in
+`%LOCALAPPDATA%\kwi3\run\current.txt`; nothing puts it on PATH. So a Run
+whose program is the bare word `kwi3-run.exe` starts
+`<the directory current.txt names>\kwi3-run.exe`. current.txt is read again
+for every start, so the next chord after a deploy uses the new version and
+hotkeyd needs no restart. (A runner that is already running keeps its own
+version until `kwi3-run.exe quit`: a later start only hands it the verb.)
+
+The first line of current.txt counts. It is an absolute directory, as
+deploy.sh writes it, or a name relative to `%LOCALAPPDATA%\kwi3\run`. A BOM,
+blanks, the CR and a trailing backslash are ignored.
+
+With no deployed copy (no `%LOCALAPPDATA%`, no current.txt, an empty one, or
+one naming a directory or exe that is missing), `kwi3-run.exe` is looked up
+on PATH as any other program. The log says which copy was used, or why it
+fell back to PATH, once, and again only when that changes. When PATH has
+none either, the chord's log line names both places:
+`kwi3-run.exe not found: no deployed copy (<why>), and not on PATH: ...`.
 
 ### `--health`
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -51,6 +52,15 @@ const compiledTableEnv = "HOTKEYD_TEST_COMPILED_TABLE"
 const sendInputStubMark = "TEST: SendInput stub called"
 
 func TestMain(m *testing.M) {
+	if dir := os.Getenv(asKwi3RunEnv); dir != "" {
+		// A copy of this binary deployed as kwi3-run.exe
+		// (TestKwi3Run_Windows_Deployed): say which
+		// image ran with which verb, and exit.
+		exe, _ := os.Executable()
+		_ = os.WriteFile(filepath.Join(dir, "kwi3-run-ran.txt"),
+			[]byte(exe+"\n"+strings.Join(os.Args[1:], " ")), 0o644)
+		os.Exit(0)
+	}
 	if os.Getenv(asHotkeydEnv) == "1" {
 		// Never real input from a test binary, dry run or not.
 		recoverKeyUp = func(vk uint16) error {

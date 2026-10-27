@@ -73,6 +73,10 @@ type win32Config struct {
 	Lock  lockBeater // nil: none (a test)
 	Log   func(string)
 	Debug func(string) // nil: no debug output
+	// Run starts a bind.Run's command; nil is proc.Run behind
+	// kwi3RunStarter, which starts the DEPLOYED kwi3-run.exe
+	// (%LOCALAPPDATA%\kwi3\run\current.txt) before trying PATH.
+	Run func(string) error
 }
 
 // startHook starts the low-level hook when the table needs one; nil, nil
@@ -163,7 +167,18 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 		lock = noLock{}
 	}
 
+	run := cfg.Run
+	if run == nil {
+		run = (&kwi3RunStarter{
+			start:  proc.Run,
+			getenv: os.Getenv,
+			fs:     runFS{ReadFile: os.ReadFile, Stat: os.Stat},
+			log:    log,
+		}).Run
+	}
+
 	dcfg := DaemonConfig{
+		Run:         run,
 		KeyEvents:   win32Merge(src.Events(), hookEvents, stats, log, cfg.Debug),
 		Grabs:       win32Grabs{hk},
 		Engine:      engine,
