@@ -27,8 +27,16 @@ without the list is refused before anything is touched.
 
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
-been copied by then. It never ends a process. Stop the daemon first, install,
-then run `hotkeyd recover` to start the new image. A
+been copied by then. It never ends a process. Stop the daemon first, then
+install, then run `hotkeyd recover` to start the new image with the old
+daemon's arguments.
+
+There is no `stop` subcommand yet (kwi3-hoex.30). Stop the daemon by its
+pid, never by name, with `taskkill /F /PID <pid>`. The pid is the one this
+script names, or the one `--health` prints (`serving (pid <n>, ...`).
+`/F` is needed because hotkeyd's windows are message-only, so a polite
+`taskkill` has nothing to close. Windows frees the chords and the hook with
+the process, and the next start takes the stale lock over and says so. A
 `LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
 installs under those directories instead of the real profile.
 
@@ -88,6 +96,11 @@ start hotkeyd on the same desktop. kwi3's `AGENTS.md` (Windows host) has the
 exact commands. Its startup lines say how many chords were registered
 (`<n> of <m> chords registered via RegisterHotKey on desktop <name>
 ($mod=Mod1) ...`) and whether the hook went in.
+
+Started from WSL, hotkeyd lands in WSL's one kill-on-close job, together
+with the host and every program a chord starts. `wsl --shutdown` or the WSL
+VM stopping kills all of them. Closing the terminal does not (kwi3-hoex.29;
+kwi3's `AGENTS.md` has the recovery).
 
 Two environment variables are for tests and rigs only:
 
