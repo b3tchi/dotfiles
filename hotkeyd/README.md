@@ -27,8 +27,16 @@ without the list is refused before anything is touched.
 
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
-been copied by then. It never ends a process. Stop the daemon first, install,
-then run `hotkeyd recover` to start the new image. A
+been copied by then. It never ends a process. Stop the daemon first, then
+install, then run `hotkeyd recover` to start the new image with the old
+daemon's arguments.
+
+There is no `stop` subcommand yet (kwi3-hoex.30). Stop the daemon by its
+pid, never by name, with `taskkill /F /PID <pid>`. The pid is the one this
+script names, or the one `--health` prints (`serving (pid <n>, ...`).
+`/F` is needed because hotkeyd's windows are message-only, so a polite
+`taskkill` has nothing to close. Windows frees the chords and the hook with
+the process, and the next start takes the stale lock over and says so. A
 `LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
 installs under those directories instead of the real profile.
 
@@ -39,6 +47,84 @@ Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 - `<desktop>.args`: the daemon's arguments, for `recover`.
 - `<desktop>.log`: the stderr of a daemon `recover` started (the previous
   one is kept as `.log.1`).
+
+### `--input win32`
+
+```
+"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" --input win32
+```
+
+The Windows key source (sp012). `win32` is also the default input of a
+Windows build. What it does, from the code:
+
+- **`$mod` is Alt** (Mod1). Windows keys become X11 keysyms and modifier
+  bits in `internal/win32`, so everything after that is the X11 code path:
+  layers, hold layers, `mode.set`.
+- **Plain chords are `RegisterHotKey`** (`MOD_NOREPEAT`) on one thread with
+  its own message-only window. A layer change re-registers only what
+  differs. The grab report names each refused chord with Windows' error.
+  1409 means another program holds it, and registrations are shared by
+  every desktop of the window station.
+- **A `WH_KEYBOARD_LL` hook is installed only because of the `$mod+Tab`
+  switcher**, which needs key releases. Its callback only queues. It
+  swallows the keys the active layer owns, decides each key once from its
+  press to its release, and never swallows the recover chord. Alt+Tab over
+  RDP reaches it only with `keyboardhook:i:1` in the `.rdp`.
+- **The table** is `config.go` built with `-tags win32`, and
+  `cmd/hotkeyd/host_win32.go` changes what differs on Windows:
+  - `$mod+Return` runs `wt.exe -w new`.
+  - `$mod+d` and the `switcher` layer run `kwi3-run.exe <verb>` (see
+    below).
+  - `$mod+1..8` (`Ctrl`/`Shift` to move) go straight to workspace RPC.
+  - `$mod+s`/`$mod+b` split with no notification.
+  - The Linux-only chords are removed: screenshots, `$mod+n`, `$mod+v`,
+    `$mod+0`, `$mod+Shift+c`, `$mod+p`, `$mod+9`, `$mod+Ctrl+m` and
+    `$mod+Shift+e`.
+
+  `install-win32.sh` passes the tag. An untagged Windows build carries the
+  Linux table.
+- **kwi3** is `$KWI3SOCK`. Unset, it is the host's own pipe,
+  `\\.\pipe\kwi3-<%USERNAME%>-<desktop>`. The log says so, and the pipe
+  must match the host's `rpc socket on ...` line.
+- **The recover chord `$mod+Shift+r` is the host's.** `bind.ReservedChords`
+  keeps it out of every registration and the hook passes it, so the host's
+  own `RegisterHotKey` gets it.
+
+**Start it after the host.** The kwi3 host `i3kwin-win32` starts first. Once
+it has printed `i3kwin-win32: rpc socket on \\.\pipe\kwi3-<user>-<desktop>`,
+start hotkeyd on the same desktop. kwi3's `AGENTS.md` (Windows host) has the
+exact commands. Its startup lines say how many chords were registered
+(`<n> of <m> chords registered via RegisterHotKey on desktop <name>
+($mod=Mod1) ...`) and whether the hook went in.
+
+Started from WSL, hotkeyd lands in WSL's one kill-on-close job, together
+with the host and every program a chord starts. `wsl --shutdown` or the WSL
+VM stopping kills all of them. Closing the terminal does not (kwi3-hoex.29;
+kwi3's `AGENTS.md` has the recovery).
+
+Two environment variables are for tests and rigs only:
+
+- `HOTKEYD_WIN32_DRYRUN=1` registers no chord and installs no hook. Only a
+  `WM_HOTKEY` posted to its window is served.
+- `HOTKEYD_WIN32_DEBUG=1` logs every `LLKHF_INJECTED` key the hook queues.
+
+**What is proven, and what is not.** The translator, the table, the hook's
+decisions, dispatch and `recover` are covered by the Go tests (below). A
+`WM_HOTKEY` posted to a dry-run daemon on a kwi3 rig desktop made the host
+focus workspace 2 (`TestWin32Run_Windows_E2E_HostFocusesWorkspace2`).
+That proves dispatch, not that a key reaches it. Windows delivers hotkeys
+and the hook only on the input desktop. So key delivery over RDP is still
+**attended-only**, pending kwi3-hoex.14 and kwi3-hoex.17. That covers:
+
+- the chords and the switcher on real keys;
+- whether the Alt release opens an application's menu bar;
+- `LLKHF_INJECTED`;
+- the Dvorak/US layout. Jan's session has both loaded, and the translator
+  assumes US.
+
+Windows Terminal for `$mod+Return` is not installed yet (kwi3-hoex.16). Jan
+saw it work live on 2026-10-27: `Alt+d` opened the launcher on his session.
+That was not yet the kwi3-hoex.17 acceptance.
 
 ### The runner: which `kwi3-run.exe`
 
@@ -89,7 +175,8 @@ Exit codes: 0 when it serves, 6 when check 1, 2 or 4 fails, and 9 when check
 "%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" recover [--display <desktop>]
 ```
 
-The host runs `recover` from its panic chord and waits 15 s for it. A
+The host runs `recover` from its recover chord (`$mod+Shift+r`, the host's
+own `RegisterHotKey`) and waits 15 s for it. A
 non-zero exit makes the host give every window back and exit. `recover` does
 four things in order:
 
@@ -128,4 +215,10 @@ keys it would release. A daemon it starts in that mode stays dry.
 
 `hotkeyd/test-win32.sh` runs the Windows test binaries with `%LOCALAPPDATA%`
 redirected into a scratch directory. Every daemon and every `recover` in
-those tests runs dry, against a pipe the test serves itself.
+those tests runs dry, against a pipe the test serves itself. With no
+arguments it runs the default set. `GOFLAGS=-tags=win32` builds the
+binaries with the Windows table. The script's header lists what each
+package covers. No test registers a chord anyone types: the
+`RegisterHotKey` test uses only Ctrl+Alt+Shift+F22/F23. No test installs a
+real `WH_KEYBOARD_LL` hook either, and the real installer refuses inside a
+test binary.
