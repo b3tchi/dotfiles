@@ -13,3 +13,10 @@ func runRecoverCmd(argv []string) int {
 	daemonLog("recover is only available in a Windows build; on X11 use hotkeyd-panic.sh recover")
 	return 2
 }
+
+// runStopCmd refuses: `hotkeyd stop` is the Windows daemon's (kwi3-hoex.30).
+// On X11 and KWin the daemon is a session child; end it there.
+func runStopCmd(argv []string) int {
+	daemonLog("stop is only available in a Windows build")
+	return 2
+}

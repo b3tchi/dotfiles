@@ -27,16 +27,9 @@ without the list is refused before anything is touched.
 
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
-been copied by then. It never ends a process. Stop the daemon first, then
-install, then run `hotkeyd recover` to start the new image with the old
-daemon's arguments.
-
-There is no `stop` subcommand yet (kwi3-hoex.30). Stop the daemon by its
-pid, never by name, with `taskkill /F /PID <pid>`. The pid is the one this
-script names, or the one `--health` prints (`serving (pid <n>, ...`).
-`/F` is needed because hotkeyd's windows are message-only, so a polite
-`taskkill` has nothing to close. Windows frees the chords and the hook with
-the process, and the next start takes the stale lock over and says so. A
+been copied by then. It never ends a process. Stop the daemon first with
+`hotkeyd.exe stop` (below), then install, then run `hotkeyd recover` to
+start the new image with the old daemon's arguments. A
 `LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
 installs under those directories instead of the real profile.
 
@@ -47,6 +40,36 @@ Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 - `<desktop>.args`: the daemon's arguments, for `recover`.
 - `<desktop>.log`: the stderr of a daemon `recover` started (the previous
   one is kept as `.log.1`).
+
+### `stop`
+
+```
+"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" stop [--display DESKTOP]
+```
+
+Stops this desktop's daemon (kwi3-hoex.30); `--display` names another
+desktop's. It sends `{"stop":true}` on the control socket, and the daemon
+shuts down as on SIGTERM: every chord unregistered, the low-level hook
+removed, the control and state sockets closed, the lock released and its
+file emptied, so the next start has no stale pid to take over. If the daemon
+has not exited 5 s later, or its control socket does not answer, `stop` ends
+it **by pid**: `TerminateProcess` on a handle opened on the lock's pid
+before the request, and only when that process runs `hotkeyd.exe` (or the
+very binary running `stop`). A pid running anything else is refused and
+left alone. Nothing is ever ended by name. No key-up is sent: the hook
+passes every modifier, so a stopped daemon strands none.
+
+Exit codes: 0 when the daemon stopped, and 0 with `not running` when none
+holds the lock (the state asked for already holds, so a script can run
+`stop` unconditionally); 1 when it could not be stopped, saying why (the
+pid cannot be opened, is not hotkeyd, or survives `TerminateProcess`); 2 on
+a usage error.
+
+`taskkill /F /PID <pid>` stays the fallback when `stop` itself cannot run.
+Plain `taskkill /PID` reports SUCCESS and leaves the daemon running
+(measured, kwi3-hoex.18): its windows are message-only, so a polite
+`taskkill` has nothing to close. After `/F` the next start takes the stale
+lock over and says so.
 
 ### `--input win32`
 
@@ -189,8 +212,9 @@ four things in order:
    while that lock is actually held. It sends `{"stop":true}` on the control
    socket and waits 2 s. If the daemon is still running, `recover` ends it
    **by pid**, never by name: `TerminateProcess` on a handle opened before
-   the stop. That is logged. With no daemon running there is nothing to
-   stop.
+   the stop, and only when that process runs `hotkeyd.exe` (the same rule
+   and code as `stop`). That is logged. With no daemon running there is
+   nothing to stop.
 3. **Starts a new daemon** from this executable, detached, with the old
    daemon's arguments and `$KWI3SOCK` / `HOTKEYD_WIN32_DRYRUN` taken from
    `<desktop>.args`.

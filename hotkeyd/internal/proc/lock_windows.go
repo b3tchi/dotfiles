@@ -102,8 +102,13 @@ func newLock(path string, now func() time.Time) (*Lock, error) {
 	return l, nil
 }
 
-// Release unlocks and closes the lock file.
+// Release empties the lock file, then unlocks and closes it. Emptied while
+// still held, so nobody else is writing it: a daemon that shut down
+// cleanly leaves no pid behind, and the next start has nothing to "take
+// over" from (kwi3-hoex.30). A daemon that is killed still leaves its pid,
+// and the next start still says so.
 func (l *Lock) Release() {
+	_ = l.file.Truncate(0)
 	unlockFileEx(syscall.Handle(l.file.Fd()))
 	_ = l.file.Close()
 }

@@ -61,6 +61,11 @@ func TestMain(m *testing.M) {
 			[]byte(exe+"\n"+strings.Join(os.Args[1:], " ")), 0o644)
 		os.Exit(0)
 	}
+	if ready := os.Getenv(asLockHolderEnv); ready != "" {
+		// A "daemon" that holds this desktop's lock and has no control
+		// socket (stop_windows_test.go): only an end by pid stops it.
+		os.Exit(holdLock(ready))
+	}
 	if os.Getenv(asHotkeydEnv) == "1" {
 		// Never real input from a test binary, dry run or not.
 		recoverKeyUp = func(vk uint16) error {

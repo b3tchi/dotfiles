@@ -28,8 +28,9 @@
 # matched on the FULL ExecutablePath, never the name) for any process
 # running from the install path, and REFUSES - exit 2, every such pid and
 # command line named, nothing copied - while one is. It never ends a
-# process. Stop the daemon first: `hotkeyd recover` restarts it from the new
-# image afterwards. A query that fails refuses too: an install it cannot
+# process. Stop the daemon first - `hotkeyd.exe stop [--display DESKTOP]`
+# (kwi3-hoex.30) - and `hotkeyd.exe recover` starts it from the new image
+# afterwards, with the old one's arguments. A query that fails refuses too: an install it cannot
 # check is not done.
 #
 # %LOCALAPPDATA% and %APPDATA% are read from Windows through cmd.exe, so an
@@ -127,7 +128,7 @@ if [ -n "$running" ]; then
     printf '%s\n' "$running" | while IFS=$'\t' read -r _ pid cmdline; do
         echo "  pid $pid: $cmdline" >&2
     done
-    echo "install-win32.sh: stop it first (nothing is ended here), then install, then \`hotkeyd recover\` starts the new image" >&2
+    echo "install-win32.sh: nothing is ended here. Stop it first with \"$dest_win\" stop (add --display <desktop> for a daemon on another desktop), re-run this, then \"$dest_win\" recover starts the new image with the old one's arguments" >&2
     exit 2
 fi
 
