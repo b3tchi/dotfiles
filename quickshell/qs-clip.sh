@@ -317,13 +317,28 @@ session_key_of() { # <pid>
   # a zombie quickshell (environ gone) and any instance belonging to another
   # user both hit it. Both are non-candidates either way, so the only
   # question is whether they scream on the way out.
-  [ -r "/proc/$1/environ" ] || return 1
-  _e="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)" || return 1
-  _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
-  [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
-  _v="$(printf '%s\n' "$_e" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
-  [ -n "$_v" ] && { printf 'WAYLAND_DISPLAY=%s\n' "$_v"; return 0; }
-  return 1
+  if [ -r "/proc/$1/environ" ]; then
+    _e="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)" || return 1
+    _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
+    [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
+    _v="$(printf '%s\n' "$_e" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
+    [ -n "$_v" ] && { printf 'WAYLAND_DISPLAY=%s\n' "$_v"; return 0; }
+    return 1
+  fi
+  # A non-dumpable quickshell (one started under the phone screen's
+  # kwin_wayland, which hands its children an ambient capability) has an
+  # environ nobody can read, its own user included. quickshell itself still
+  # reports the display connection: "wayland/<name>" or "x11/<display>".
+  _v="$(quickshell list --all 2>/dev/null | awk -v pid="$1" '
+    /^Instance /                  { m = 0 }
+    $1 == "Process" && $3 == pid  { m = 1 }
+    m && /Display connection:/    { sub(/.*Display connection: /, ""); print; exit }
+  ')"
+  case "$_v" in
+    wayland/?*) printf 'WAYLAND_DISPLAY=%s\n' "${_v#wayland/}" ;;
+    ?*/?*)      printf 'DISPLAY=%s\n' "${_v#*/}" ;;
+    *)          return 1 ;;
+  esac
 }
 
 # "<pid> <session-key>" for every quickshell instance that answers `cliphistory`.
