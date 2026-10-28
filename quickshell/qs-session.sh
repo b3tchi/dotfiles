@@ -59,9 +59,23 @@ QS_DPY_RE="$(printf %s "$QS_DPY_BASE" | sed 's/[].*^$[\\]/\\&/g')"
 # True if pid belongs to this session (environ carries our display). The
 # trailing (\.[0-9]+)? tolerates the Qt-added screen suffix in either direction.
 # tr, not `grep -z`: busybox grep (the phone) has no -z.
+#
+# A process holding an ambient capability is non-dumpable, so its environ
+# reads "Permission denied" even to its own user - every quickshell started
+# under the phone screen's kwin_wayland (CAP_WAKE_ALARM ambient) is one. For
+# those, ask quickshell itself: `quickshell list --all` names each instance's
+# display connection ("wayland/kwi3-phone", "x11/:10.0").
 qs_same_session() {
-    tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null |
-        grep -qsE "^$QS_DPY_VAR=$QS_DPY_RE(\.[0-9]+)?\$"
+    if { tr '\0' '\n' <"/proc/$1/environ"; } >/dev/null 2>&1; then
+        { tr '\0' '\n' <"/proc/$1/environ"; } 2>/dev/null |
+            grep -qsE "^$QS_DPY_VAR=$QS_DPY_RE(\.[0-9]+)?\$"
+        return
+    fi
+    quickshell list --all 2>/dev/null | awk -v pid="$1" '
+        /^Instance /                 { mine = 0 }
+        $1 == "Process" && $3 == pid { mine = 1 }
+        mine && /Display connection:/ { sub(/.*Display connection: [^\/]*\//, ""); print; exit }
+    ' | grep -qsE "^$QS_DPY_RE(\.[0-9]+)?\$"
 }
 
 # Kill only this session's processes. Args are passed to pgrep
