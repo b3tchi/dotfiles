@@ -104,3 +104,21 @@ route back to a non-`.1.x` source):
 
 While pinned, the laptop's DNS (`192.168.1.1`) hits the N18U and breaks — keep
 the window short. Afterwards `ssh-keygen -R 192.168.1.1` (N18U key lands there).
+
+### USB + adb host (optional)
+
+The N18U doubles as a USB/adb host on the LAN (dual USB; USB host + Northstar
+PHY are built into the bcm53xx image). A **sysupgrade wipes these packages** —
+re-add them after any flash:
+
+    ssh root@192.168.1.3
+    apk update
+    apk add kmod-usb-ohci kmod-usb2 kmod-usb3 \
+            kmod-phy-bcm-ns-usb2 kmod-phy-bcm-ns-usb3 kmod-usb-bcma \
+            kmod-usb-net-rndis kmod-usb-net-cdc-ncm adb
+    reboot      # USB PHY binds on reboot
+
+(The `kmod-usb-*`/PHY names are already in the image, so apk only pulls `adb` +
+the usb-net class drivers — harmless to list them all.) Then plug an Android in
+(USB debugging ON, tap "Allow" on the RSA prompt) and `adb devices` → `adb shell`.
+No routing role — tether-as-WAN is pointless on a dumb switch; adb only.
