@@ -69,18 +69,53 @@ func TestWindows_PostedHotkeyIsTranslated(t *testing.T) {
 	t.Logf("window %#x on thread %d (FindWindowEx(HWND_MESSAGE) found %#x)", s.Window(), s.ThreadID(), found)
 
 	postHotkey(t, s.Window(), 7, MOD_ALT, '2')
-	if ev := nextEvent(t, s); ev != (Event{VK: '2', Keysym: '2', Mods: ModAlt}) {
+	if ev := key(nextEvent(t, s)); ev != (Event{VK: '2', Keysym: '2', Mods: ModAlt, ID: 7}) {
 		t.Errorf("Alt+2 read %+v", ev)
 	}
 	postHotkey(t, s.Window(), 8, MOD_ALT|MOD_SHIFT, VK_RETURN)
-	if ev := nextEvent(t, s); ev != (Event{VK: VK_RETURN, Keysym: 0xff0d, Mods: ModAlt | ModShift}) {
+	if ev := key(nextEvent(t, s)); ev != (Event{VK: VK_RETURN, Keysym: 0xff0d, Mods: ModAlt | ModShift, ID: 8}) {
 		t.Errorf("Alt+Shift+Return read %+v", ev)
 	}
 	// A key the translator has no keysym for is dropped, not sent.
 	postHotkey(t, s.Window(), 9, MOD_ALT, 0xFF)
 	postHotkey(t, s.Window(), 10, MOD_WIN, 'Q')
-	if ev := nextEvent(t, s); ev != (Event{VK: 'Q', Keysym: 'q', Mods: ModSuper}) {
+	if ev := key(nextEvent(t, s)); ev != (Event{VK: 'Q', Keysym: 'q', Mods: ModSuper, ID: 10}) {
 		t.Errorf("after an unknown VK, Win+Q read %+v", ev)
+	}
+}
+
+// key is ev without the message time, which the test cannot predict. With
+// no Options.Trace, Async must read 0: nothing was asked of the keyboard.
+func key(ev Event) Event {
+	ev.MsgTime = 0
+	return ev
+}
+
+// HOTKEYD_TRACE (kwi3-hoex.35): with Options.Trace, each WM_HOTKEY carries
+// the modifier keys read down as it was taken (KeyDown, here a chosen
+// answer: Alt and right Shift down), its registration id and a message
+// time; without it, KeyDown is never called.
+func TestWindows_TraceReadsAsyncModifiers(t *testing.T) {
+	asked := 0
+	s := startSource(t, Options{DryRun: true, Trace: true, KeyDown: func(vk uint16) bool {
+		asked++
+		return vk == VK_LMENU || vk == VK_RSHIFT
+	}})
+	postHotkey(t, s.Window(), 21, MOD_ALT|MOD_SHIFT, VK_LEFT)
+	ev := nextEvent(t, s)
+	if ev.ID != 21 || ev.VK != VK_LEFT || ev.Mods != ModAlt|ModShift || ev.Async != ModAlt|ModShift || ev.MsgTime == 0 {
+		t.Fatalf("traced Alt+Shift+Left read %+v", ev)
+	}
+	if asked == 0 {
+		t.Fatal("KeyDown was never asked")
+	}
+	t.Logf("trace: %s", ev.TraceString())
+
+	asked = 0
+	quiet := startSource(t, Options{DryRun: true, KeyDown: func(uint16) bool { asked++; return true }})
+	postHotkey(t, quiet.Window(), 22, MOD_ALT, VK_LEFT)
+	if ev := nextEvent(t, quiet); ev.Async != 0 || asked != 0 {
+		t.Fatalf("untraced: Async %#x, KeyDown asked %d times", ev.Async, asked)
 	}
 }
 

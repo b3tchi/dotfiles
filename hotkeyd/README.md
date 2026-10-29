@@ -139,6 +139,29 @@ Two environment variables are for tests and rigs only:
   `WM_HOTKEY` posted to its window is served.
 - `HOTKEYD_WIN32_DEBUG=1` logs every `LLKHF_INJECTED` key the hook queues.
 
+One is for diagnosis on a real session (kwi3-hoex.35):
+
+- `HOTKEYD_TRACE=1` writes a `trace HH:MM:SS.mmm` line to the log
+  (`%LOCALAPPDATA%\hotkeyd\<desktop>.log`) for every `WM_HOTKEY` taken -
+  registration id, key, the chord's modifiers, the message time and the
+  modifier keys `GetAsyncKeyState` reads down at that moment
+  (`async=`) - for every low-level hook decision - key, down or up,
+  swallowed or passed and why, injected, the modifiers the hook tracked -
+  and for what the daemon made of each key (the chord, the layer, the
+  actions). Off by default: nothing extra is read or written.
+
+  ```
+  hotkeyd: trace 14:05:06.789 WM_HOTKEY id=3 vk=0x25 keysym=0xff51 mods=Shift+Alt msgtime=420750625 async=Shift+Alt
+  hotkeyd: trace 14:05:06.789 key press Left mods=0x9 norelease=true layer=default -> 1 action(s) [move left]
+  hotkeyd: trace 14:05:06.912 hook vk=0x25 up passed (release of a passed press) injected=false mods=Shift+Alt
+  ```
+
+A `WM_HOTKEY` is a press with no release (`norelease=true`): every one is
+a keystroke of its own. Until kwi3-hoex.35 the engine read a second
+`WM_HOTKEY` of the same key within a second of the last as auto-repeat and
+dropped it, so `Alt+Shift+Left` pressed twice with the modifiers held moved
+the window once. `MOD_NOREPEAT` already keeps auto-repeat from Windows.
+
 **What is proven, and what is not.** The translator, the table, the hook's
 decisions, dispatch and `recover` are covered by the Go tests (below). A
 `WM_HOTKEY` posted to a dry-run daemon on a kwi3 rig desktop made the host

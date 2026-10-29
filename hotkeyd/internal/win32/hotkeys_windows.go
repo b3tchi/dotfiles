@@ -94,6 +94,12 @@ type Options struct {
 	// Buffer is the Events channel's size (default 64). A WM_HOTKEY
 	// arriving with the channel full is dropped and counted (Dropped).
 	Buffer int
+	// Trace reads GetAsyncKeyState's modifier keys as each WM_HOTKEY is
+	// taken (Event.Async), for HOTKEYD_TRACE (kwi3-hoex.35).
+	Trace bool
+	// KeyDown reads a key for Trace (default: GetAsyncKeyState); a test
+	// answers with a chosen state.
+	KeyDown func(vk uint16) bool
 }
 
 // Source is the running hotkey thread. It implements Registrar.
@@ -266,6 +272,15 @@ func (s *Source) loop(ready chan<- error) {
 			switch m.message {
 			case WM_HOTKEY:
 				if ev, ok := Translate(m.lParam); ok {
+					ev.ID = int32(m.wParam)
+					ev.MsgTime = m.time
+					if s.opts.Trace {
+						down := s.opts.KeyDown
+						if down == nil {
+							down = KeyDown
+						}
+						ev.Async = ModBits(down)
+					}
 					select {
 					case s.events <- ev:
 					default:

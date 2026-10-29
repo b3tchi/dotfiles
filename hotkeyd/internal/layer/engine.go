@@ -276,6 +276,12 @@ type Event struct {
 	DeviceID *int
 	Keycode  *int
 	RawState *uint32
+	// NoRelease marks a press whose source never reports the key's
+	// release - RegisterHotKey's WM_HOTKEY (kwi3-hoex.35). Such a press is
+	// a keystroke of its own: it is never read as auto-repeat and never
+	// recorded as down, since no release would ever take it off again
+	// (Windows' MOD_NOREPEAT already keeps auto-repeat from reaching us).
+	NoRelease bool
 }
 
 // State is the layer engine's published shape: which layer is active, and
@@ -838,6 +844,8 @@ func (e *Engine) Handle(ev Event) []bind.Action {
 		if wasDown {
 			actions, matched = e.match(ev, true)
 		}
+	} else if ev.NoRelease {
+		actions, matched = e.match(ev, false)
 	} else {
 		if e.isRepeat(ev.Key, now) {
 			// Publish before returning: expiry above may have changed the

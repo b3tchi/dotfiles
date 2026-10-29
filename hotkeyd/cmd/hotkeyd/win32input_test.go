@@ -87,6 +87,14 @@ type win32Rig struct {
 
 func newWin32Rig(t *testing.T) *win32Rig {
 	t.Helper()
+	return newWin32RigWith(t, func(string) {}, nil)
+}
+
+// newWin32RigWith is newWin32Rig with the daemon's log and HOTKEYD_TRACE's
+// sink (nil: no trace) handed in, and the WM_HOTKEY stream traced through
+// win32Merge exactly as startWin32 wires it.
+func newWin32RigWith(t *testing.T, log, trace func(string)) *win32Rig {
+	t.Helper()
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	reg := newRecRegistrar()
 	hk := win32.NewHotkeys(reg, win32Mod, func(n string) (uint32, bool) {
@@ -100,8 +108,14 @@ func newWin32Rig(t *testing.T) *win32Rig {
 	engine := layer.NewEngine(Binds, Layers, layer.Config{Mod: win32Mod, Publisher: pub})
 	in := make(chan win32.Event, 8)
 	k := &fakeKwi3{}
+	var tr *win32Trace
+	if trace != nil {
+		tr = &win32Trace{log: trace}
+	}
+	keyEvents := win32Merge(in, nil, nil, log, nil, tr)
 	dae := NewDaemon(DaemonConfig{
-		KeyEvents:   win32KeyEvents(in),
+		KeyEvents:   keyEvents,
+		Trace:       trace,
 		Grabs:       win32Grabs{hk},
 		Engine:      engine,
 		Lock:        &fakeLock{},
@@ -109,7 +123,7 @@ func newWin32Rig(t *testing.T) *win32Rig {
 		NewModQuery: win32ModQuery(func(uint16) bool { return false }),
 		Run:         func(string) error { return nil },
 		Binds:       Binds, Layers: Layers, Mod: win32Mod, Display: "kwi3t-test",
-		Log:      func(string) {},
+		Log:      log,
 		IdleTick: 10 * time.Second, HoldTick: 10 * time.Second,
 	})
 	dae.resyncGrabs()
@@ -158,6 +172,112 @@ func TestWin32CommandDispatch(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n := len(r.k.sent()); n != 1 {
 		t.Fatalf("an unregistered key dispatched: %v", r.k.sent())
+	}
+}
+
+// kwi3-hoex.35 (Jan, live, 2026-10-29): holding Alt+Shift and pressing
+// Left twice moved the window once. RegisterHotKey reports a press and
+// never a release, so the engine, which reads "same key down again with
+// no release seen" as auto-repeat (isRepeat, X11's), swallowed every
+// further WM_HOTKEY of that key within KeyWedgeMS of the last one. With
+// MOD_NOREPEAT Windows sends no WM_HOTKEY for auto-repeat at all, so each
+// one is a real keystroke and must dispatch.
+func TestWin32HotkeyRepeatedWhileModsHeld(t *testing.T) {
+	r := newWin32Rig(t)
+	for i := 0; i < 3; i++ {
+		r.hotkey(t, win32.MOD_ALT|win32.MOD_SHIFT, win32.VK_LEFT)
+	}
+	waitFor(t, "three dispatches", func() bool { return len(r.k.sent()) == 3 })
+	for i, got := range r.k.sent() {
+		if got != "move left" {
+			t.Errorf("dispatch %d = %q, want move left", i, got)
+		}
+	}
+}
+
+// HOTKEYD_TRACE (kwi3-hoex.35). Off, the daemon writes no trace line for a
+// WM_HOTKEY; on, each one gets the WM_HOTKEY line (id, key, modifiers,
+// message time, async modifiers) and the daemon's line (the chord it
+// resolved, the layer, the actions), and a key with no chord behind it
+// says so.
+func TestWin32Trace(t *testing.T) {
+	quiet := &logRecorder{}
+	r := newWin32RigWith(t, quiet.log, nil)
+	r.in <- win32.Event{VK: win32.VK_LEFT, Keysym: 0xff51, Mods: win32.ModAlt | win32.ModShift, ID: 3, MsgTime: 100}
+	waitFor(t, "dispatch", func() bool { return len(r.k.sent()) == 1 })
+	for _, l := range quiet.all() {
+		if strings.Contains(l, "trace") || strings.Contains(l, "WM_HOTKEY") {
+			t.Fatalf("trace off, yet the log has %q", l)
+		}
+	}
+
+	logs, traces := &logRecorder{}, &logRecorder{}
+	r = newWin32RigWith(t, logs.log, traceLog(traces.log, func() time.Time {
+		return time.Date(2026, 10, 29, 14, 5, 6, 789e6, time.UTC)
+	}))
+	// One event at a time: the WM_HOTKEY line and the daemon's line come
+	// from two goroutines, so only each pair's order is fixed.
+	steps := []struct {
+		ev   win32.Event
+		want [2]string
+	}{
+		{win32.Event{VK: win32.VK_LEFT, Keysym: 0xff51, Mods: win32.ModAlt | win32.ModShift, ID: 3, MsgTime: 100, Async: win32.ModAlt | win32.ModShift},
+			[2]string{"trace 14:05:06.789 WM_HOTKEY id=3 vk=0x25 keysym=0xff51 mods=Shift+Alt msgtime=100 async=Shift+Alt",
+				"trace 14:05:06.789 key press Left mods=0x9 norelease=true layer=default -> 1 action(s) [move left]"}},
+		{win32.Event{VK: win32.VK_LEFT, Keysym: 0xff51, Mods: win32.ModAlt | win32.ModShift, ID: 3, MsgTime: 180, Async: win32.ModAlt},
+			[2]string{"trace 14:05:06.789 WM_HOTKEY id=3 vk=0x25 keysym=0xff51 mods=Shift+Alt msgtime=180 async=Alt",
+				"trace 14:05:06.789 key press Left mods=0x9 norelease=true layer=default -> 1 action(s) [move left]"}},
+		{win32.Event{VK: win32.VK_F1 + 21, Keysym: 0xffd3, Mods: win32.ModAlt, ID: 99, MsgTime: 200},
+			[2]string{"trace 14:05:06.789 WM_HOTKEY id=99 vk=0x85 keysym=0xffd3 mods=Alt msgtime=200 async=none",
+				"trace 14:05:06.789 key press keysym=0xffd3 mods=0x8: no active chord, ignored"}},
+	}
+	for i, st := range steps {
+		r.in <- st.ev
+		n := 2 * (i + 1)
+		waitFor(t, "two trace lines", func() bool { return len(traces.all()) >= n })
+		got := traces.all()[n-2 : n]
+		if got[0] != st.want[0] || got[1] != st.want[1] {
+			t.Errorf("step %d:\n got %s\n     %s\nwant %s\n     %s", i, got[0], got[1], st.want[0], st.want[1])
+		}
+	}
+	if len(r.k.sent()) != 2 {
+		t.Errorf("dispatched %v, want move left twice", r.k.sent())
+	}
+	for _, l := range logs.all() {
+		if strings.Contains(l, "trace") {
+			t.Errorf("a trace line went to the daemon log, not the trace sink: %q", l)
+		}
+	}
+}
+
+// HOTKEYD_TRACE's gate: unset, empty, 0 or anything but 1 is no trace and
+// no line; 1 (spaces trimmed) says so once on the log and returns the sink.
+func TestWin32TraceFromEnv(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 10, 29, 1, 2, 3, 4e6, time.UTC) }
+	for _, v := range []string{"", "0", "true", "yes", "11"} {
+		var lines []string
+		if tr := traceFromEnv(func(k string) string {
+			if k == win32TraceEnv {
+				return v
+			}
+			return ""
+		}, func(s string) { lines = append(lines, s) }, now); tr != nil || len(lines) != 0 {
+			t.Errorf("HOTKEYD_TRACE=%q: trace %v, lines %q - want none", v, tr != nil, lines)
+		}
+	}
+	var lines []string
+	tr := traceFromEnv(func(k string) string {
+		if k == "HOTKEYD_TRACE" {
+			return " 1 "
+		}
+		return ""
+	}, func(s string) { lines = append(lines, s) }, now)
+	if tr == nil || len(lines) != 1 || !strings.HasPrefix(lines[0], "HOTKEYD_TRACE=1: tracing") {
+		t.Fatalf("HOTKEYD_TRACE=1: trace %v, lines %q", tr != nil, lines)
+	}
+	tr("x")
+	if lines[1] != "trace 01:02:03.004 x" {
+		t.Fatalf("trace line %q", lines[1])
 	}
 }
 

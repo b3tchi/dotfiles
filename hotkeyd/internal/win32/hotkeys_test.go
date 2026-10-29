@@ -234,3 +234,24 @@ func TestX11ModsInvertsHotkeyMods(t *testing.T) {
 		}
 	}
 }
+
+// HOTKEYD_TRACE's spelling of a WM_HOTKEY (kwi3-hoex.35).
+func TestEvent_TraceString(t *testing.T) {
+	for bits, want := range map[uint32]string{
+		0: "none", ModAlt: "Alt", ModShift | ModAlt: "Shift+Alt",
+		ModShift | ModCtrl | ModAlt | ModSuper: "Shift+Ctrl+Alt+Win",
+	} {
+		if got := ModNames(bits); got != want {
+			t.Errorf("ModNames(%#x) = %q, want %q", bits, got, want)
+		}
+	}
+	ev, ok := Translate(uintptr(MOD_ALT|MOD_SHIFT) | uintptr(VK_LEFT)<<16)
+	if !ok {
+		t.Fatal("Translate(Alt+Shift+Left) failed")
+	}
+	ev.ID, ev.MsgTime, ev.Async = 12, 4242, ModShift
+	want := "WM_HOTKEY id=12 vk=0x25 keysym=0xff51 mods=Shift+Alt msgtime=4242 async=Shift"
+	if got := ev.TraceString(); got != want {
+		t.Fatalf("TraceString:\n got %s\nwant %s", got, want)
+	}
+}

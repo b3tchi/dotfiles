@@ -57,6 +57,10 @@ type Event struct {
 	Keysym uint32
 	Mods   uint32
 	Device string
+	// NoRelease marks a press whose source never reports its release
+	// (the win32 key source's WM_HOTKEY): see layer.Event.NoRelease. The
+	// KWin plugin's events never set it.
+	NoRelease bool
 }
 
 type wireChord struct {

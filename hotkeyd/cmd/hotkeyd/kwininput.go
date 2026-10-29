@@ -153,9 +153,15 @@ func (d *Daemon) handleKwinKey(ev kwin.Event) {
 	mods := ev.Mods & kwinModMask
 	key, ok := kwinChordKey(d.grabs.Wanted(), d.grabs.Active(), d.mod, ev.Keysym, mods)
 	if !ok {
+		if d.trace != nil {
+			d.trace(fmt.Sprintf("key %s keysym=%#x mods=%#x: no active chord, ignored", ev.Kind, ev.Keysym, mods))
+		}
 		return // not one of ours
 	}
 	if deviceIgnored(ev.Device) {
+		if d.trace != nil {
+			d.trace(fmt.Sprintf("key %s %s: device %q ignored", ev.Kind, key, ev.Device))
+		}
 		return
 	}
 	kind := layer.Press
@@ -165,12 +171,17 @@ func (d *Daemon) handleKwinKey(ev kwin.Event) {
 	rawState := mods
 	before := d.engine.State().Layer
 	actions := d.engine.Handle(layer.Event{
-		Kind:     kind,
-		Key:      key,
-		Mods:     kwinModsSet(mods),
-		Device:   ev.Device,
-		RawState: &rawState,
+		Kind:      kind,
+		Key:       key,
+		Mods:      kwinModsSet(mods),
+		Device:    ev.Device,
+		RawState:  &rawState,
+		NoRelease: ev.NoRelease,
 	})
+	if d.trace != nil {
+		d.trace(fmt.Sprintf("key %s %s mods=%#x norelease=%t layer=%s -> %d action(s) %v",
+			ev.Kind, key, mods, ev.NoRelease, before, len(actions), actions))
+	}
 	d.dispatchAll(actions)
 	if d.engine.State().Layer != before {
 		d.resyncGrabs()
