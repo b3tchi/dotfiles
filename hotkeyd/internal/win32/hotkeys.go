@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"syscall"
 
 	"hotkeyd/internal/bind"
@@ -50,6 +51,38 @@ type Event struct {
 	VK     uint16
 	Keysym uint32
 	Mods   uint32 // X11 bits
+
+	// For HOTKEYD_TRACE (kwi3-hoex.35), filled by the hotkey thread: the
+	// registration id (wParam), the message's time (GetMessageTime, ms
+	// since boot), and - only with Options.Trace - the modifier keys
+	// GetAsyncKeyState reported down as the message was taken (X11 bits).
+	ID      int32
+	MsgTime uint32
+	Async   uint32
+}
+
+// TraceString is the trace line's body for a WM_HOTKEY.
+func (e Event) TraceString() string {
+	return fmt.Sprintf("WM_HOTKEY id=%d vk=%#x keysym=%#x mods=%s msgtime=%d async=%s",
+		e.ID, e.VK, e.Keysym, ModNames(e.Mods), e.MsgTime, ModNames(e.Async))
+}
+
+// ModNames spells X11 modifier bits for a trace line, Windows' names in a
+// fixed order: "Shift+Ctrl+Alt+Win", "none" for 0.
+func ModNames(bits uint32) string {
+	var parts []string
+	for _, m := range []struct {
+		bit  uint32
+		name string
+	}{{ModShift, "Shift"}, {ModCtrl, "Ctrl"}, {ModAlt, "Alt"}, {ModSuper, "Win"}} {
+		if bits&m.bit != 0 {
+			parts = append(parts, m.name)
+		}
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, "+")
 }
 
 // Translate turns a WM_HOTKEY's lParam (low word the MOD_* set, high word

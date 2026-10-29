@@ -13,6 +13,8 @@ package main
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/kwin"
@@ -54,7 +56,43 @@ func (g win32Grabs) Active() map[string]GrabbedChord {
 // key-event stream: one press per WM_HOTKEY (RegisterHotKey reports no
 // release). The returned channel closes when in does.
 func win32KeyEvents(in <-chan win32.Event) <-chan kwin.Event {
-	return win32Merge(in, nil, nil, nil, nil)
+	return win32Merge(in, nil, nil, nil, nil, nil)
+}
+
+// win32TraceEnv, set to 1, turns on the per-event trace (kwi3-hoex.35):
+// every WM_HOTKEY taken (registration id, key, modifiers, message time and
+// the modifier keys GetAsyncKeyState reads down at that moment), every
+// low-level hook decision (key, direction, swallowed or passed and why,
+// injected, the tracked modifiers) and what the daemon made of each key
+// event (chord, layer, actions). Off by default: nothing is read and no
+// line is written.
+const win32TraceEnv = "HOTKEYD_TRACE"
+
+// win32Trace is the trace's two inputs win32Merge reads: the line sink and
+// the hook's decision records (nil: no hook, or not traced).
+type win32Trace struct {
+	log  func(string)
+	hook <-chan win32.HookTrace
+}
+
+// traceFromEnv is HOTKEYD_TRACE's gate: with it set to 1, the trace sink
+// (traceLog over log), after one line on log saying the trace is on;
+// otherwise nil and nothing is logged.
+func traceFromEnv(getenv func(string) string, log func(string), now func() time.Time) func(string) {
+	if strings.TrimSpace(getenv(win32TraceEnv)) != "1" {
+		return nil
+	}
+	log(fmt.Sprintf("%s=1: tracing every WM_HOTKEY, low-level hook decision and key event", win32TraceEnv))
+	return traceLog(log, now)
+}
+
+// traceLog prefixes each trace line with "trace" and the wall-clock time
+// to the millisecond, so a trace can be read against the host's and
+// against what Jan pressed.
+func traceLog(log func(string), now func() time.Time) func(string) {
+	return func(s string) {
+		log("trace " + now().Format("15:04:05.000") + " " + s)
+	}
 }
 
 // hookStats is what win32Merge reads of the low-level hook beside its
@@ -69,16 +107,26 @@ type hookStats interface{ Overflow() uint64 }
 // events since the last one; debug (HOTKEYD_WIN32_DEBUG=1) gets every
 // LLKHF_INJECTED event (handled like a physical one until sp012 Task 14
 // measures what RDP delivers).
-func win32Merge(in <-chan win32.Event, hook <-chan win32.HookEvent, stats hookStats, log, debug func(string)) <-chan kwin.Event {
+func win32Merge(in <-chan win32.Event, hook <-chan win32.HookEvent, stats hookStats, log, debug func(string), trace *win32Trace) <-chan kwin.Event {
 	out := make(chan kwin.Event, cap(in)+cap(hook))
+	var hookTrace <-chan win32.HookTrace
+	if trace != nil {
+		hookTrace = trace.hook
+	}
 	go func() {
 		defer close(out)
 		var dropped uint64
 		for {
 			select {
+			case t := <-hookTrace:
+				trace.log(t.String())
+				continue
 			case ev, ok := <-in:
 				if !ok {
 					return
+				}
+				if trace != nil {
+					trace.log(ev.TraceString())
 				}
 				out <- win32KeyEvent(ev)
 			case ev := <-hook:
@@ -177,7 +225,11 @@ func hookChords(binds []bind.Bind, layers map[string]bind.Layer, mod string) fun
 }
 
 func win32KeyEvent(ev win32.Event) kwin.Event {
-	return kwin.Event{Kind: "press", Keysym: ev.Keysym, Mods: ev.Mods, Device: win32Device}
+	// NoRelease: RegisterHotKey reports the press alone, and the engine
+	// would otherwise read the next WM_HOTKEY of the same key within
+	// KeyWedgeMS as auto-repeat and swallow it - Alt+Shift+Left twice with
+	// the modifiers held moved the window once (kwi3-hoex.35).
+	return kwin.Event{Kind: "press", Keysym: ev.Keysym, Mods: ev.Mods, Device: win32Device, NoRelease: true}
 }
 
 // releaseOnlyChords is the set of chords every one of whose binds - in the

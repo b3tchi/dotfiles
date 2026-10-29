@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/kwi3rpc"
@@ -73,6 +74,9 @@ type win32Config struct {
 	Lock  lockBeater // nil: none (a test)
 	Log   func(string)
 	Debug func(string) // nil: no debug output
+	// Trace gets HOTKEYD_TRACE's lines, already prefixed (traceLog); nil:
+	// no trace, and nothing extra is read.
+	Trace func(string)
 	// Run starts a bind.Run's command; nil is proc.Run behind
 	// kwi3RunStarter, which starts the DEPLOYED kwi3-run.exe
 	// (%LOCALAPPDATA%\kwi3\run\current.txt) before trying PATH.
@@ -124,6 +128,9 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 	if err := validateTable(cfg.Binds, cfg.Layers, win32Mod); err != nil {
 		return nil, nil, err
 	}
+	if cfg.Trace != nil {
+		cfg.Source.Trace = true
+	}
 	src, err := win32.Start(cfg.Source)
 	if err != nil {
 		return nil, nil, err
@@ -139,6 +146,13 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 		newMod     = win32ModQuery(win32.KeyDown)
 	)
 	hook, ht := startHook(cfg, log)
+	var trace *win32Trace
+	if cfg.Trace != nil {
+		trace = &win32Trace{log: cfg.Trace}
+		if hook != nil {
+			trace.hook = hook.EnableTrace(0)
+		}
+	}
 	if tableNeedsHook(cfg.Binds, cfg.Layers) {
 		if hook != nil {
 			hk.UseHook(hook, hookChords(cfg.Binds, cfg.Layers, win32Mod))
@@ -179,7 +193,8 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 
 	dcfg := DaemonConfig{
 		Run:         run,
-		KeyEvents:   win32Merge(src.Events(), hookEvents, stats, log, cfg.Debug),
+		KeyEvents:   win32Merge(src.Events(), hookEvents, stats, log, cfg.Debug, trace),
+		Trace:       cfg.Trace,
 		Grabs:       win32Grabs{hk},
 		Engine:      engine,
 		Lock:        lock,
@@ -259,6 +274,7 @@ func runWin32() int {
 	if strings.TrimSpace(os.Getenv(win32DebugEnv)) == "1" {
 		debug = daemonLog
 	}
+	trace := traceFromEnv(os.Getenv, daemonLog, time.Now)
 	activeBinds := effectiveBinds(kwi3Sock)
 	dae, src, err := startWin32(win32Config{
 		Display:  display,
@@ -269,6 +285,7 @@ func runWin32() int {
 		Lock:     lock,
 		Log:      daemonLog,
 		Debug:    debug,
+		Trace:    trace,
 	})
 	if err != nil {
 		daemonLog(err.Error())

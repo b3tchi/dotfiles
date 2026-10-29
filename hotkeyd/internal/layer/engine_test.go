@@ -296,6 +296,23 @@ func TestPressBindFiresOncePerPressWithNoRepeatWhileHeld(t *testing.T) {
 	actionsEqual(t, e.Handle(press("h")), cmd("focus left"))
 }
 
+// kwi3-hoex.35: a NoRelease press (RegisterHotKey's WM_HOTKEY, which
+// reports no release) is a keystroke of its own every time - never read as
+// auto-repeat - and leaves nothing down, so a later ordinary press of the
+// same key is not a repeat either.
+func TestNoReleasePressFiresEveryTime(t *testing.T) {
+	e, _, _ := defaultEngine()
+	e.Handle(press("o", "Mod4"))
+	var fired []bind.Action
+	for i := 0; i < 3; i++ {
+		ev := press("h")
+		ev.NoRelease = true
+		fired = append(fired, e.Handle(ev)...)
+	}
+	actionsEqual(t, fired, cmd("focus left"), cmd("focus left"), cmd("focus left"))
+	actionsEqual(t, e.Handle(press("h")), cmd("focus left"))
+}
+
 func TestOnReleaseBindFiresOnReleaseAndNotOnPress(t *testing.T) {
 	binds := []bind.Bind{{Chord: "Mod4+Shift+d", Actions: []bind.Action{bind.Command("nop confirm")}, OnRelease: true}}
 	e, _, _ := buildEngine(engineOpts{binds: binds, layers: map[string]bind.Layer{}})

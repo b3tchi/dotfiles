@@ -35,6 +35,7 @@ package win32
 // can never make Windows time the hook out (LowLevelHooksTimeout).
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -83,6 +84,12 @@ type Hook struct {
 	mods     atomic.Uint32
 	overflow atomic.Uint64
 	events   chan HookEvent
+
+	// trace, when set (EnableTrace), gets one HookTrace per key event the
+	// callback decides - never blocking: a full channel drops it and
+	// counts it (TraceDropped).
+	trace        atomic.Pointer[chan HookTrace]
+	traceDropped atomic.Uint64
 
 	// mu guards the per-key state below. Decide takes it uncontended on
 	// every event; the only other taker is Resync (a hook reinstall, at
@@ -172,6 +179,60 @@ func (h *Hook) trackedBits() uint32 {
 	return m
 }
 
+// HookTrace is one decision of the callback, for HOTKEYD_TRACE
+// (kwi3-hoex.35): the key, its direction, whether it was swallowed and
+// why, the injected flag and the modifiers the hook tracked AFTER the
+// event. A modifier's auto-repeat is not traced; its transitions are.
+type HookTrace struct {
+	VK        uint16
+	Up        bool
+	Swallowed bool
+	Why       string
+	Injected  bool
+	Mods      uint32
+}
+
+// String is the trace line's body.
+func (t HookTrace) String() string {
+	dir, verdict := "down", "passed"
+	if t.Up {
+		dir = "up"
+	}
+	if t.Swallowed {
+		verdict = "swallowed"
+	}
+	return fmt.Sprintf("hook vk=%#x %s %s (%s) injected=%t mods=%s",
+		t.VK, dir, verdict, t.Why, t.Injected, ModNames(t.Mods))
+}
+
+// EnableTrace makes the callback report every decision on a channel of
+// buffer entries (default 256) and returns it. It may be called while the
+// hook runs (the callback reads it atomically); the channel is never
+// closed.
+func (h *Hook) EnableTrace(buffer int) <-chan HookTrace {
+	if buffer <= 0 {
+		buffer = 256
+	}
+	ch := make(chan HookTrace, buffer)
+	h.trace.Store(&ch)
+	return ch
+}
+
+// TraceDropped is how many trace records found the channel full.
+func (h *Hook) TraceDropped() uint64 { return h.traceDropped.Load() }
+
+func (h *Hook) traced(in KeyInput, swallow bool, why string) bool {
+	if p := h.trace.Load(); p != nil {
+		select {
+		case *p <- HookTrace{VK: in.VK, Up: in.Up, Swallowed: swallow, Why: why,
+			Injected: in.Injected(), Mods: h.mods.Load()}:
+		default:
+			h.traceDropped.Add(1)
+		}
+	}
+	return swallow
+}
+
 // Decide is the callback's whole job: true swallows the event (the
 // callback returns 1), false passes it on (CallNextHookEx). It never
 // blocks: the queue is written with a non-blocking send.
@@ -187,6 +248,7 @@ func (h *Hook) Decide(in KeyInput) bool {
 			m := h.trackedBits()
 			h.mods.Store(m)
 			h.enqueue(HookEvent{Kind: "mods", VK: in.VK, Mods: m, Injected: inj})
+			h.traced(in, false, "modifier")
 		}
 		return false // a modifier is never ours to swallow
 	}
@@ -199,27 +261,31 @@ func (h *Hook) Decide(in KeyInput) bool {
 		*slot = keyUp
 		if was == keySwallowed {
 			h.enqueue(HookEvent{Kind: "release", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
-			return true // its press was ours, so is its release
+			return h.traced(in, true, "release of a swallowed press") // its press was ours, so is its release
 		}
-		return false
+		return h.traced(in, false, "release of a passed press")
 	}
 	owned := known && !IsRecoverChord(ks, mods) && (*h.owned.Load())[Chord{Keysym: ks, Mods: mods}]
 	switch *slot {
 	case keyPassed: // an auto-repeat of a key that went to the application
-		return false
+		return h.traced(in, false, "repeat of a passed press")
 	case keySwallowed: // an auto-repeat of ours: swallowed whatever happens
 		if owned {
 			h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
 		}
-		return true
+		return h.traced(in, true, "repeat of a swallowed press")
 	}
 	if !owned {
 		*slot = keyPassed
-		return false
+		why := "not owned"
+		if known && IsRecoverChord(ks, mods) {
+			why = "the recover chord"
+		}
+		return h.traced(in, false, why)
 	}
 	*slot = keySwallowed
 	h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
-	return true
+	return h.traced(in, true, "owned")
 }
 
 // Resync sets the tracked modifier state from the keyboard's (down reads

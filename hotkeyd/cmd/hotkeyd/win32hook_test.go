@@ -92,7 +92,7 @@ func newHookRig(t *testing.T, buffer int, runs *runRecorder) *hookRig {
 	in := make(chan win32.Event, 8)
 	logs := &logRecorder{}
 	dae := NewDaemon(DaemonConfig{
-		KeyEvents: win32Merge(in, hook.Events(), hook, logs.log, nil),
+		KeyEvents: win32Merge(in, hook.Events(), hook, logs.log, nil, nil),
 		Grabs:     win32Grabs{hk},
 		Engine:    engine,
 		Lock:      &fakeLock{},

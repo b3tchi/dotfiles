@@ -394,3 +394,81 @@ func TestHook_PropertyPressAndReleaseAgree(t *testing.T) {
 		drain(h)
 	}
 }
+
+// HOTKEYD_TRACE (kwi3-hoex.35): with no EnableTrace the hook records
+// nothing; with it, every non-modifier key event gets one record saying
+// what the callback answered and why, and each modifier TRANSITION one
+// (its auto-repeat none), with the modifiers tracked after the event.
+func TestHook_TraceRecordsEachDecision(t *testing.T) {
+	quiet := NewHook(16)
+	quiet.SetOwned(switcherOwned)
+	quiet.Decide(down(VK_LMENU))
+	quiet.Decide(down(VK_TAB))
+	if quiet.trace.Load() != nil || quiet.TraceDropped() != 0 {
+		t.Fatal("a hook with no EnableTrace has a trace")
+	}
+
+	h := NewHook(16)
+	h.SetOwned(switcherOwned)
+	tr := h.EnableTrace(32)
+	seq := []KeyInput{
+		down(VK_LMENU), down(VK_LMENU), // Alt, then its auto-repeat
+		down(VK_LSHIFT),
+		down(VK_LEFT), up(VK_LEFT), // Alt+Shift+Left: not the hook's
+		up(VK_LSHIFT),
+		down(VK_TAB), down(VK_TAB), up(VK_TAB), // $mod+Tab: owned, repeat, release
+		{VK: 'R', Flags: LLKHF_INJECTED}, // Alt+r, injected, not owned
+		up('R'),
+		up(VK_LMENU),
+	}
+	for _, in := range seq {
+		h.Decide(in)
+	}
+	want := []string{
+		"hook vk=0xa4 down passed (modifier) injected=false mods=Alt",
+		"hook vk=0xa0 down passed (modifier) injected=false mods=Shift+Alt",
+		"hook vk=0x25 down passed (not owned) injected=false mods=Shift+Alt",
+		"hook vk=0x25 up passed (release of a passed press) injected=false mods=Shift+Alt",
+		"hook vk=0xa0 up passed (modifier) injected=false mods=Alt",
+		"hook vk=0x9 down swallowed (owned) injected=false mods=Alt",
+		"hook vk=0x9 down swallowed (repeat of a swallowed press) injected=false mods=Alt",
+		"hook vk=0x9 up swallowed (release of a swallowed press) injected=false mods=Alt",
+		"hook vk=0x52 down passed (not owned) injected=true mods=Alt",
+		"hook vk=0x52 up passed (release of a passed press) injected=false mods=Alt",
+		"hook vk=0xa4 up passed (modifier) injected=false mods=none",
+	}
+	var got []string
+drained:
+	for {
+		select {
+		case r := <-tr:
+			got = append(got, r.String())
+		default:
+			break drained
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d trace records, want %d:\n%s", len(got), len(want), joinLines(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record %d:\n got %s\nwant %s", i, got[i], want[i])
+		}
+	}
+	// A full channel drops and counts; the callback never waits.
+	small := NewHook(16)
+	small.EnableTrace(1)
+	small.Decide(down(VK_LEFT))
+	small.Decide(up(VK_LEFT))
+	if small.TraceDropped() != 1 {
+		t.Fatalf("TraceDropped = %d, want 1", small.TraceDropped())
+	}
+}
+
+func joinLines(s []string) string {
+	out := ""
+	for _, l := range s {
+		out += l + "\n"
+	}
+	return out
+}

@@ -264,3 +264,65 @@ type treeCon struct {
 	Focused bool      `json:"focused"`
 	Nodes   []treeCon `json:"nodes"`
 }
+
+// HOTKEYD_TRACE (kwi3-hoex.35) assembled on real Windows: startWin32 with
+// a trace sink, the real hotkey thread (DryRun) and two WM_HOTKEYs for
+// Alt+2 posted back to back - what a held Alt and two presses of 2 send.
+// Both dispatch (the auto-repeat guard used to swallow the second), and
+// each gets its WM_HOTKEY line, with the async modifiers read, and the
+// daemon's line.
+func TestWin32Run_Windows_TraceAndRepeatedHotkey(t *testing.T) {
+	modes := newModeServer(t, false)
+	traces := &logRecorder{}
+	dae, src, err := startWin32(win32Config{
+		Display:  fmt.Sprintf("hk-test-%d", os.Getpid()),
+		Kwi3Sock: modes.addr,
+		Binds:    smallTable,
+		Layers:   map[string]bind.Layer{},
+		Source:   win32.Options{DryRun: true},
+		Log:      func(s string) { t.Log(s) },
+		Trace:    traceLog(traces.log, time.Now),
+	})
+	if err != nil {
+		t.Fatalf("startWin32: %s", err)
+	}
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- dae.Run(sig) }()
+	t.Cleanup(func() {
+		sig <- os.Interrupt
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("daemon did not stop")
+		}
+	})
+	postAltDigit(t, src, '2')
+	postAltDigit(t, src, '2')
+	waitFor(t, "two workspace.focus", func() bool {
+		n := 0
+		for _, r := range modes.got() {
+			if strings.HasPrefix(r, "workspace.focus") {
+				n++
+			}
+		}
+		return n == 2
+	})
+	waitFor(t, "four trace lines", func() bool { return len(traces.all()) >= 4 })
+	hot, keys := 0, 0
+	for _, l := range traces.all() {
+		t.Log(l)
+		if !strings.HasPrefix(l, "trace ") {
+			t.Errorf("trace line without its prefix: %q", l)
+		}
+		if strings.Contains(l, " WM_HOTKEY id=1 vk=0x32 keysym=0x32 mods=Alt msgtime=") && strings.Contains(l, " async=") {
+			hot++
+		}
+		if strings.Contains(l, " key press 2 mods=0x8 norelease=true layer=default -> 1 action(s)") {
+			keys++
+		}
+	}
+	if hot != 2 || keys != 2 {
+		t.Fatalf("%d WM_HOTKEY and %d key lines, want 2 and 2", hot, keys)
+	}
+}

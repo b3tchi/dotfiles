@@ -465,6 +465,11 @@ type DaemonConfig struct {
 	// grabs.go's grabLog convention.
 	Log func(string)
 
+	// Trace, when set, gets one line per key event a key source hands the
+	// daemon (the chord it resolved to, the layer, the actions the engine
+	// answered with) - HOTKEYD_TRACE (kwi3-hoex.35). nil: no trace.
+	Trace func(string)
+
 	// IdleTick / HoldTick default to the package constants of the same
 	// shape; overridable only for tests (adr0016: production must not
 	// tune these by feel).
@@ -511,6 +516,7 @@ type Daemon struct {
 	mod     string
 	display string
 	log     func(string)
+	trace   func(string)
 
 	idleTick time.Duration
 	holdTick time.Duration
@@ -544,6 +550,7 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 		mod:       cfg.Mod,
 		display:   cfg.Display,
 		log:       cfg.Log,
+		trace:     cfg.Trace,
 		idleTick:  cfg.IdleTick,
 		holdTick:  cfg.HoldTick,
 	}
