@@ -150,6 +150,16 @@ One is for diagnosis on a real session (kwi3-hoex.35):
   and for what the daemon made of each key (the chord, the layer, the
   actions). Off by default: nothing extra is read or written.
 
+  **It is a key log while it is on.** Recorded, each with a millisecond
+  timestamp, in that persistent file: every chord, every key pressed while
+  Alt, Ctrl or Win is held (AltGr is Ctrl+Alt, so an AltGr character is
+  recorded too) with its repeats and release, and every modifier press and
+  release. A key typed bare or with Shift alone is not recorded, nor its
+  repeats or release (kwi3-hoex.36). Do not type passwords or other secrets
+  while it is on, and turn it off and delete the log afterwards - the next
+  session start keeps the old one as `<desktop>.log.1`, so delete that too.
+  The start line says the same.
+
   ```
   hotkeyd: trace 14:05:06.789 WM_HOTKEY id=3 vk=0x25 keysym=0xff51 mods=Shift+Alt msgtime=420750625 async=Shift+Alt
   hotkeyd: trace 14:05:06.789 key press Left mods=0x9 norelease=true layer=default -> 1 action(s) [move left]
