@@ -104,9 +104,16 @@ type keyState uint8
 
 const (
 	keyUp        keyState = iota
-	keyPassed             // down, its first press passed
+	keyPassed             // down, its first press passed (and traced, if on)
 	keySwallowed          // down, its first press swallowed
+	keyTyped              // down, its first press passed untraced: typing (traceable)
 )
+
+// traceable reports whether a key the hook passes may be traced with mods
+// held: only with Alt, Ctrl or Win down - a chord, never typing. Shift
+// alone is ordinary typing. HOTKEYD_TRACE writes to a persistent log, so
+// plain and Shift+ keys stay out of it (kwi3-hoex.36).
+func traceable(mods uint32) bool { return mods&(ModAlt|ModCtrl|ModSuper) != 0 }
 
 // NewHook builds a hook decision with a queue of buffer events (default
 // 64). It owns nothing until SetOwned.
@@ -182,7 +189,11 @@ func (h *Hook) trackedBits() uint32 {
 // HookTrace is one decision of the callback, for HOTKEYD_TRACE
 // (kwi3-hoex.35): the key, its direction, whether it was swallowed and
 // why, the injected flag and the modifiers the hook tracked AFTER the
-// event. A modifier's auto-repeat is not traced; its transitions are.
+// event. A modifier's auto-repeat is not traced; its transitions are. A
+// key the hook passes is traced only when its press came with Alt, Ctrl
+// or Win held (traceable), and then so are its repeats and release; one
+// pressed bare or with Shift alone - typing - is never traced, nor its
+// repeats or release (kwi3-hoex.36).
 type HookTrace struct {
 	VK        uint16
 	Up        bool
@@ -259,9 +270,16 @@ func (h *Hook) Decide(in KeyInput) bool {
 	if in.Up {
 		was := *slot
 		*slot = keyUp
-		if was == keySwallowed {
+		switch was {
+		case keySwallowed:
 			h.enqueue(HookEvent{Kind: "release", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
 			return h.traced(in, true, "release of a swallowed press") // its press was ours, so is its release
+		case keyTyped: // its press was typing: so is its release
+			return false
+		case keyUp: // a press the hook never saw (a Resync): traced as a press would be
+			if !traceable(mods) {
+				return false
+			}
 		}
 		return h.traced(in, false, "release of a passed press")
 	}
@@ -269,6 +287,8 @@ func (h *Hook) Decide(in KeyInput) bool {
 	switch *slot {
 	case keyPassed: // an auto-repeat of a key that went to the application
 		return h.traced(in, false, "repeat of a passed press")
+	case keyTyped: // an auto-repeat of typing: never traced
+		return false
 	case keySwallowed: // an auto-repeat of ours: swallowed whatever happens
 		if owned {
 			h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
@@ -276,11 +296,14 @@ func (h *Hook) Decide(in KeyInput) bool {
 		return h.traced(in, true, "repeat of a swallowed press")
 	}
 	if !owned {
-		*slot = keyPassed
 		why := "not owned"
 		if known && IsRecoverChord(ks, mods) {
 			why = "the recover chord"
+		} else if !traceable(mods) {
+			*slot = keyTyped
+			return false
 		}
+		*slot = keyPassed
 		return h.traced(in, false, why)
 	}
 	*slot = keySwallowed

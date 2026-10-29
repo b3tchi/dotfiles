@@ -275,6 +275,16 @@ func TestWin32TraceFromEnv(t *testing.T) {
 	if tr == nil || len(lines) != 1 || !strings.HasPrefix(lines[0], "HOTKEYD_TRACE=1: tracing") {
 		t.Fatalf("HOTKEYD_TRACE=1: trace %v, lines %q", tr != nil, lines)
 	}
+	// The start line says what is still recorded, where, and what to do
+	// (kwi3-hoex.36).
+	for _, must := range []string{`%LOCALAPPDATA%\hotkeyd\<desktop>.log`, "ms timestamps",
+		"every chord", "every key pressed while Alt, Ctrl or Win is held", "AltGr",
+		"bare or with Shift alone are not recorded", "Do not type passwords",
+		"delete this log and its .log.1", "rotates it to .log.1"} {
+		if !strings.Contains(lines[0], must) {
+			t.Errorf("start line lacks %q:\n%s", must, lines[0])
+		}
+	}
 	tr("x")
 	if lines[1] != "trace 01:02:03.004 x" {
 		t.Fatalf("trace line %q", lines[1])

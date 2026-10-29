@@ -396,9 +396,10 @@ func TestHook_PropertyPressAndReleaseAgree(t *testing.T) {
 }
 
 // HOTKEYD_TRACE (kwi3-hoex.35): with no EnableTrace the hook records
-// nothing; with it, every non-modifier key event gets one record saying
-// what the callback answered and why, and each modifier TRANSITION one
-// (its auto-repeat none), with the modifiers tracked after the event.
+// nothing; with it, every non-modifier key event of a chord (Alt held
+// here throughout; typing is TestHook_TraceOmitsTyping's) gets one record
+// saying what the callback answered and why, and each modifier TRANSITION
+// one (its auto-repeat none), with the modifiers tracked after the event.
 func TestHook_TraceRecordsEachDecision(t *testing.T) {
 	quiet := NewHook(16)
 	quiet.SetOwned(switcherOwned)
@@ -455,13 +456,15 @@ drained:
 			t.Errorf("record %d:\n got %s\nwant %s", i, got[i], want[i])
 		}
 	}
-	// A full channel drops and counts; the callback never waits.
+	// A full channel drops and counts; the callback never waits. (Alt is
+	// held: a bare key is typing and never traced, kwi3-hoex.36.)
 	small := NewHook(16)
 	small.EnableTrace(1)
+	small.Decide(down(VK_LMENU))
 	small.Decide(down(VK_LEFT))
 	small.Decide(up(VK_LEFT))
-	if small.TraceDropped() != 1 {
-		t.Fatalf("TraceDropped = %d, want 1", small.TraceDropped())
+	if small.TraceDropped() != 2 {
+		t.Fatalf("TraceDropped = %d, want 2", small.TraceDropped())
 	}
 }
 
@@ -471,4 +474,88 @@ func joinLines(s []string) string {
 		out += l + "\n"
 	}
 	return out
+}
+
+// kwi3-hoex.36: the trace goes to a persistent log, so a key the hook
+// passes is recorded only when Alt, Ctrl or Win is held - a chord, never
+// typing. Plain and Shift+ keys (with their repeats and releases, even if
+// a modifier goes down before the release) leave no record; Alt+Shift+Left
+// (the diagnosis kwi3-hoex.35 needs), Ctrl+c, Win+e and an owned key do.
+func TestHook_TraceOmitsTyping(t *testing.T) {
+	h := NewHook(64)
+	h.SetOwned(switcherOwned)
+	tr := h.EnableTrace(64)
+	seq := []KeyInput{
+		down('P'), down('P'), up('P'), // plain p, with a repeat
+		down(VK_LSHIFT),
+		down('A'), down('A'), up('A'), // Shift+a
+		down('2'), // Shift+2, released only after Alt is down
+		down(VK_LMENU),
+		up('2'),
+		down(VK_LEFT), up(VK_LEFT), // Alt+Shift+Left
+		up(VK_LSHIFT),
+		down(VK_TAB), up(VK_TAB), // $mod+Tab, owned
+		up(VK_LMENU),
+		down(VK_LCONTROL), down('C'), up('C'), up(VK_LCONTROL), // Ctrl+c
+		down(VK_LWIN), down('E'), up('E'), up(VK_LWIN), // Win+e
+		down('Z'), up('Z'), // plain z again
+	}
+	for _, in := range seq {
+		h.Decide(in)
+	}
+	want := []string{
+		"hook vk=0xa0 down passed (modifier) injected=false mods=Shift",
+		"hook vk=0xa4 down passed (modifier) injected=false mods=Shift+Alt",
+		"hook vk=0x25 down passed (not owned) injected=false mods=Shift+Alt",
+		"hook vk=0x25 up passed (release of a passed press) injected=false mods=Shift+Alt",
+		"hook vk=0xa0 up passed (modifier) injected=false mods=Alt",
+		"hook vk=0x9 down swallowed (owned) injected=false mods=Alt",
+		"hook vk=0x9 up swallowed (release of a swallowed press) injected=false mods=Alt",
+		"hook vk=0xa4 up passed (modifier) injected=false mods=none",
+		"hook vk=0xa2 down passed (modifier) injected=false mods=Ctrl",
+		"hook vk=0x43 down passed (not owned) injected=false mods=Ctrl",
+		"hook vk=0x43 up passed (release of a passed press) injected=false mods=Ctrl",
+		"hook vk=0xa2 up passed (modifier) injected=false mods=none",
+		"hook vk=0x5b down passed (modifier) injected=false mods=Win",
+		"hook vk=0x45 down passed (not owned) injected=false mods=Win",
+		"hook vk=0x45 up passed (release of a passed press) injected=false mods=Win",
+		"hook vk=0x5b up passed (modifier) injected=false mods=none",
+	}
+	var got []string
+drained:
+	for {
+		select {
+		case r := <-tr:
+			got = append(got, r.String())
+		default:
+			break drained
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d trace records, want %d:\n%s", len(got), len(want), joinLines(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record %d:\n got %s\nwant %s", i, got[i], want[i])
+		}
+	}
+
+	// A release whose press the hook never saw (a Resync forgot it) is
+	// traced only as its press would have been: bare, nothing; under Alt,
+	// one record.
+	h.Resync(func(uint16) bool { return false })
+	h.Decide(up('Q'))
+	h.Decide(down(VK_LMENU))
+	h.Decide(up('Q'))
+	got = got[:0]
+	for len(tr) > 0 {
+		got = append(got, (<-tr).String())
+	}
+	want = []string{
+		"hook vk=0xa4 down passed (modifier) injected=false mods=Alt",
+		"hook vk=0x51 up passed (release of a passed press) injected=false mods=Alt",
+	}
+	if joinLines(got) != joinLines(want) {
+		t.Errorf("after Resync:\n%swant\n%s", joinLines(got), joinLines(want))
+	}
 }

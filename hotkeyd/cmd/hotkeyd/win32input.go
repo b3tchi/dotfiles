@@ -62,11 +62,22 @@ func win32KeyEvents(in <-chan win32.Event) <-chan kwin.Event {
 // win32TraceEnv, set to 1, turns on the per-event trace (kwi3-hoex.35):
 // every WM_HOTKEY taken (registration id, key, modifiers, message time and
 // the modifier keys GetAsyncKeyState reads down at that moment), every
-// low-level hook decision (key, direction, swallowed or passed and why,
-// injected, the tracked modifiers) and what the daemon made of each key
-// event (chord, layer, actions). Off by default: nothing is read and no
-// line is written.
+// low-level hook decision on a chord (key, direction, swallowed or passed
+// and why, injected, the tracked modifiers) and what the daemon made of
+// each key event (chord, layer, actions). A key the hook passes is traced
+// only with Alt, Ctrl or Win held, never typing (kwi3-hoex.36). Off by
+// default: nothing is read and no line is written.
 const win32TraceEnv = "HOTKEYD_TRACE"
+
+// win32TraceWarning is the line the trace starts with, on the log it then
+// writes to: what it records, that the log persists, and what to do about
+// it (kwi3-hoex.36).
+const win32TraceWarning = win32TraceEnv + "=1: tracing to this log (session start: " +
+	`%LOCALAPPDATA%\hotkeyd\<desktop>.log), with ms timestamps, every WM_HOTKEY, every chord ` +
+	"and every key pressed while Alt, Ctrl or Win is held (AltGr is Ctrl+Alt), and every " +
+	"modifier press and release; keys typed bare or with Shift alone are not recorded. " +
+	"Do not type passwords or other secrets while it is on, " +
+	"and delete this log and its .log.1 afterwards (the next session start rotates it to .log.1)"
 
 // win32Trace is the trace's two inputs win32Merge reads: the line sink and
 // the hook's decision records (nil: no hook, or not traced).
@@ -82,7 +93,7 @@ func traceFromEnv(getenv func(string) string, log func(string), now func() time.
 	if strings.TrimSpace(getenv(win32TraceEnv)) != "1" {
 		return nil
 	}
-	log(fmt.Sprintf("%s=1: tracing every WM_HOTKEY, low-level hook decision and key event", win32TraceEnv))
+	log(win32TraceWarning)
 	return traceLog(log, now)
 }
 
