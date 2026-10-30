@@ -60,7 +60,8 @@ Singleton {
     readonly property int fontSize:    envInt("QS_BAR_FONT",   isSway ? 14 : 16)
 
     // --- widget density ---
-    // full: everything; compact: drop NET + HDD; minimal: also drop CPU + RAM.
+    // full: everything; compact: drop NET + HDD; minimal: also drop CPU + RAM
+    // (never with QS_BAR_SPLIT).
     // Auto-tiers by the bar's own screen width, so a narrow xrdp viewport or
     // a small monitor sheds the wide stats block while a desktop keeps it.
     readonly property string densityOverride: envStr("QS_BAR_DENSITY", "auto")
@@ -68,6 +69,8 @@ Singleton {
         if (densityOverride !== "auto") return densityOverride
         if (screenWidth >= 1400) return "full"
         if (screenWidth >= 1000) return "compact"
+        // split: the top bar holds only the stats, so CPU + RAM fit
+        if (barSplit) return "compact"
         return "minimal"
     }
 }

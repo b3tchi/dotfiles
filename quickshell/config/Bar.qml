@@ -977,7 +977,10 @@ PanelWindow {
         id: batProc
         running: !root.daemonMode
         command: ["sh", "-c",
-            "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null; cat /sys/class/power_supply/BAT0/status 2>/dev/null"]
+            // the first supply of type Battery: BAT0 on laptops,
+            // qcom-battmgr-bat on the phone
+            "for d in /sys/class/power_supply/*; do " +
+            "[ \"$(cat $d/type 2>/dev/null)\" = Battery ] && { cat $d/capacity $d/status; break; }; done"]
         stdout: SplitParser {
             property int lineNum: 0
             onRead: data => {
