@@ -1649,15 +1649,19 @@ PanelWindow {
             screen: root.screen
             visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
                      && rect !== null && thickness > 0
-            anchors { top: true; left: true }
+            // Split bar: the ring sits right above the bottom bar's tab row,
+            // placed from the screen's bottom edge (exclusive zone -1: the
+            // bottom bar's own zone must not push it up again).
+            anchors { top: !root.split; bottom: root.split; left: true }
             margins {
                 left: rect ? rect.x : 0
-                top: rect ? Math.max(0, rect.y - thickness) : 0
+                top: rect && !root.split ? Math.max(0, rect.y - thickness) : 0
+                bottom: root.split ? root.bottomRowH : 0
             }
             implicitWidth: rect ? Math.max(1, rect.w) : 1
             implicitHeight: Math.max(1, thickness)
             aboveWindows: true
-            exclusiveZone: 0
+            exclusiveZone: root.split ? -1 : 0
             focusable: false
             mask: Region {}
             color: "transparent"
