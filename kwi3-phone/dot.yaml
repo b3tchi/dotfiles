@@ -1,0 +1,83 @@
+# kwi3-phone — kwi3 on KWin for the phone (postmarketOS), installed ON the
+# phone (sp039): the phone's counterpart of `kwi3`, which builds the X11 host.
+# It runs the kwi3 repo's own installer, `i3kwin/install.sh --local`, which
+# builds and installs the i3kwin KWin script (with this repo's
+# kwi3/config.js bundled), the Kwi3.Rpc QML module and the kwi3keys plugin
+# (cmake, on the phone), hotkeyd's phone build (`-tags phone`, from this
+# dotfiles tree), krdp-launch.sh, kwi3-phone-session, kwi3-shot and the
+# helpers, all under ~/.local. It never restarts a session: install.sh prints
+# the `i3reload` / `systemctl --user restart krdp-kwin` it would take.
+#
+# SOURCE: the `kwin-host` branch of kwi3, not a release tag (Jan,
+# 2026-10-30) - nothing on kwin-host is tagged until it merges. The clone is
+# ~/.local/src/kwi3-kwin, apart from `kwi3`'s tag checkout in
+# ~/.local/src/kwi3. The phone has no GitHub account, so the clone is
+# normally FED FROM THE DEV BOX rather than fetched:
+#
+#   git -C <kwi3 kwin-host worktree> push phone:.local/src/kwi3-kwin kwin-host
+#
+# (the clone accepts a push into its checked-out branch,
+# receive.denyCurrentBranch=updateInstead, like ~/.dotfiles on the phone).
+# A fetch from $KWI3_REPO is still tried, and only fast-forwards. A clone
+# with local changes is refused by name, never reset.
+#
+# NEEDS on the phone: node (config.js syntax check, font family) and go
+# (hotkeyd), plus cmake and the KWin/Qt headers install.sh's own build
+# steps check for. Packages there need doas:
+#
+#   doas apk add nodejs go
+#
+# $KWI3_KWIN_BIN is passed through to install.sh unchanged (the kwin_wayland
+# the plugin is stamped against, when it is not the first on PATH).
+linux:
+  installs:
+    cmd: |
+      SRC="$HOME/.local/src/kwi3-kwin"
+      BRANCH=kwin-host
+      REPO="${KWI3_REPO:-https://github.com/b3tchi/kwi3}"
+      DOTS="$HOME/.dotfiles"
+
+      if [ ! -d "$SRC/.git" ]; then
+        mkdir -p "$SRC"
+        git -C "$SRC" init -q -b "$BRANCH"
+        git -C "$SRC" config receive.denyCurrentBranch updateInstead
+        echo "kwi3-phone: created $SRC (push $BRANCH into it from the dev box)"
+      fi
+      if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+        echo "kwi3-phone: $SRC has local changes -- refusing to touch it." >&2
+        exit 1
+      fi
+      cur=$(git -C "$SRC" symbolic-ref --short HEAD 2>/dev/null || true)
+      if [ "$cur" != "$BRANCH" ]; then
+        echo "kwi3-phone: $SRC is on '$cur', not $BRANCH -- refusing to switch it." >&2
+        exit 1
+      fi
+
+      if timeout 30 git -C "$SRC" fetch -q "$REPO" "$BRANCH" 2>/dev/null; then
+        if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
+          git -C "$SRC" reset -q --hard FETCH_HEAD
+        elif ! git -C "$SRC" merge -q --ff-only FETCH_HEAD 2>/dev/null; then
+          echo "kwi3-phone: WARNING -- $REPO $BRANCH does not fast-forward $SRC; building what is there." >&2
+        fi
+      else
+        echo "kwi3-phone: $REPO not reachable; building what was pushed to $SRC."
+      fi
+      if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
+        echo "kwi3-phone: $SRC has no commit yet. From the dev box:" >&2
+        echo "kwi3-phone:   git -C <kwi3 kwin-host worktree> push phone:.local/src/kwi3-kwin $BRANCH" >&2
+        exit 1
+      fi
+      echo "kwi3-phone: $BRANCH at $(git -C "$SRC" rev-parse --short HEAD)"
+
+      MISSING=""
+      command -v node >/dev/null 2>&1 || MISSING="$MISSING nodejs"
+      command -v go >/dev/null 2>&1 || MISSING="$MISSING go"
+      if [ -n "$MISSING" ]; then
+        echo "kwi3-phone: missing on this machine:$MISSING" >&2
+        echo "kwi3-phone: install them (doas apk add$MISSING) and re-run 'rotz install kwi3-phone'." >&2
+        exit 1
+      fi
+
+      sh "$SRC/i3kwin/install.sh" --local \
+        --config "$DOTS/kwi3/config.js" \
+        --hotkeyd-src "$DOTS" --hotkeyd-tags phone

@@ -3,12 +3,11 @@
 # it (sp039).
 # Usage: rotz install meta-phone-kwi3
 #
-# It installs the WHOLE phone session, window manager included. The KWin
-# host (i3kwin script, kwi3keys plugin, kwi3-phone-session) is installed by
-# the kwi3 repo's own `i3kwin/install.sh`; a phone dot that runs it
-# `--local` on the phone, the counterpart of `kwi3` for the X11 host, is
-# still to come (sp039) - until it lands, the KWin host is deployed from
-# the dev box with `i3kwin/install.sh phone`.
+# It installs the WHOLE phone session, window manager included: `kwi3-phone`
+# runs the kwi3 repo's own `i3kwin/install.sh --local` on the phone, from
+# the kwin-host branch, for the i3kwin script, the kwi3keys plugin,
+# hotkeyd's phone build and kwi3-phone-session - the counterpart of `kwi3`
+# for the X11 host. It needs nodejs and go on the phone (doas apk add).
 #
 # FLAT, like every meta: lists dots only, never another meta.
 #
@@ -17,22 +16,25 @@
 # windows; `foot` the terminal ($mod+Return); `sxmo` stays installed as the
 # fallback session tinydm returns to when the KWin session fails to start.
 #
-# KNOWN GAP (sp039): the install commands of these dots branch on Arch /
-# Manjaro only, and hotkeyd builds with a local Go toolchain the phone does
-# not have - on postmarketOS their links land and their package installs
-# do nothing yet.
+# KNOWN GAP (sp039): the install commands of fonts, foot and quickshell
+# branch on Arch / Manjaro only - on postmarketOS their links land and their
+# package installs do nothing yet. The hotkeyd that runs is kwi3-phone's
+# (install.sh, `-tags phone`); hotkeyd's own dot only builds the untagged
+# client binary in the tree.
 depends:
   - fonts
   - foot
   - hotkeyd
   - quickshell
   - sxmo
+  - kwi3-phone
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the
   # informational echo (same as meta-native-kwi3).
   depends:
     - sxmo
+    - kwi3-phone
   cmd: |
-    echo "meta-phone-kwi3: the KWin host is not installed by this meta yet;"
-    echo "meta-phone-kwi3: deploy it from the dev box: kwi3 i3kwin/install.sh phone."
+    echo "meta-phone-kwi3: kwi3 on KWin installed from ~/.local/src/kwi3-kwin;"
+    echo "meta-phone-kwi3: load it with ~/.local/bin/i3reload (a running session keeps the old one)."
