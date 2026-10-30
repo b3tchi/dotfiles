@@ -98,14 +98,78 @@ func hookCall(vk uint16, msg uintptr) uintptr {
 	return r
 }
 
-// A table with no hold layer and no release chord installs no hook. (Test
-// names stay short: the mode server's socket lives under t.TempDir(), and
+// A table with no hold layer and no release chord still installs ONE hook
+// (kwi3-hoex.43): it blocks Win+D, Windows' "show desktop", and says so
+// once at start. Through the procedure Windows would call: Win+D's press
+// and release are swallowed under either Win key, and nothing is
+// dispatched for them; Win itself, a plain d and Win+e pass. (Test names
+// stay short: the mode server's socket lives under t.TempDir(), and
 // AF_UNIX paths on Windows are capped at 108 bytes.)
-func TestWin32Hook_Windows_NoHook(t *testing.T) {
+func TestWin32Hook_Windows_NoHold(t *testing.T) {
 	rec := &installRecorder{}
-	startHookDaemon(t, newModeServer(t, false).addr, smallTable, map[string]bind.Layer{}, rec)
-	if n := rec.count(); n != 0 {
-		t.Fatalf("SetWindowsHookEx called %d time(s) for a table with no hold layer", n)
+	modes := newModeServer(t, false)
+	var mu sync.Mutex
+	var logged []string
+	dae, _, err := startWin32(win32Config{
+		Display:  "hk-hook-test",
+		Kwi3Sock: modes.addr,
+		Binds:    smallTable,
+		Layers:   map[string]bind.Layer{},
+		Source:   win32.Options{DryRun: true},
+		Hook:     rec.opts(),
+		Log: func(s string) {
+			mu.Lock()
+			defer mu.Unlock()
+			logged = append(logged, s)
+			t.Log(s)
+		},
+	})
+	if err != nil {
+		t.Fatalf("startWin32: %s", err)
+	}
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- dae.Run(sig) }()
+	t.Cleanup(func() {
+		sig <- os.Interrupt
+		<-done
+	})
+	if n := rec.count(); n != 1 {
+		t.Fatalf("SetWindowsHookEx called %d time(s) for a table with no hold layer, want 1 (Win+D)", n)
+	}
+	mu.Lock()
+	blocked := 0
+	for _, l := range logged {
+		if strings.HasPrefix(l, "Win+D (show desktop) blocked") {
+			blocked++
+		}
+	}
+	mu.Unlock()
+	if blocked != 1 {
+		t.Errorf("%d start line(s) saying Win+D is blocked, want 1", blocked)
+	}
+	before := len(modes.got())
+	for i, s := range []struct {
+		vk   uint16
+		msg  uintptr
+		want uintptr
+	}{
+		{'D', wmKeyDown, 0}, {'D', wmKeyUp, 0}, // plain d
+		{win32.VK_LWIN, wmKeyDown, 0},
+		{'D', wmKeyDown, 1}, {'D', wmKeyDown, 1}, {'D', wmKeyUp, 1}, // Win+D, a repeat
+		{'E', wmKeyDown, 0}, {'E', wmKeyUp, 0}, // Win+e
+		{win32.VK_LWIN, wmKeyUp, 0},
+		{win32.VK_RWIN, wmKeyDown, 0},
+		{'D', wmKeyDown, 1},
+		{win32.VK_RWIN, wmKeyUp, 0},
+		{'D', wmKeyUp, 1}, // released after Win: still blocked
+	} {
+		if got := hookCall(s.vk, s.msg); got != s.want {
+			t.Fatalf("step %d (vk %#x msg %#x): proc %d, want %d", i, s.vk, s.msg, got, s.want)
+		}
+	}
+	if got := modes.got(); len(got) != before {
+		t.Errorf("Win+D dispatched %v, want nothing", got[before:])
 	}
 }
 

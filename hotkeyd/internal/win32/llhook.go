@@ -17,6 +17,11 @@ package win32
 //   - the recover chord ($mod+Shift+r, under either $mod) ALWAYS passes,
 //     whatever is owned - it is the host's (adr0003), and the only way
 //     back from a daemon that is wedged or wrong;
+//   - Win+D (either Win key, no other modifier) - Windows' "show
+//     desktop" - is SWALLOWED, press, repeats and release, and nothing is
+//     queued: it does nothing at all while hotkeyd runs (kwi3-hoex.43).
+//     It minimised every window of Jan's kwi3 session, and kwi3 hides the
+//     taskbar, so nothing brought them back. No other chord is blocked;
 //   - a key press whose (keysym, modifiers) is owned is queued and
 //     SWALLOWED (the callback returns 1), and so is that key's release;
 //   - everything else passes (CallNextHookEx).
@@ -51,6 +56,12 @@ const (
 
 // The keysym of the recover chord's key, `r` (X11 XK_r).
 const keysymR uint32 = 0x72
+
+// The keysym of show desktop's key, `d` (X11 XK_d).
+const keysymD uint32 = 0x64
+
+// BlockedChords names what the hook blocks, for the daemon's start line.
+const BlockedChords = "Win+D (show desktop)"
 
 // KeyInput is one WH_KEYBOARD_LL callback's input: the KBDLLHOOKSTRUCT
 // fields the decision reads, and whether wParam was WM_KEYUP/WM_SYSKEYUP.
@@ -107,6 +118,7 @@ const (
 	keyPassed             // down, its first press passed (and traced, if on)
 	keySwallowed          // down, its first press swallowed
 	keyTyped              // down, its first press passed untraced: typing (traceable)
+	keyBlocked            // down, its first press was Win+D: swallowed, never queued
 )
 
 // traceable reports whether a key the hook passes may be traced with mods
@@ -163,6 +175,13 @@ func (h *Hook) Owned() map[Chord]bool {
 // Win held, whatever else is held too. The hook passes it unconditionally.
 func IsRecoverChord(keysym, mods uint32) bool {
 	return keysym == keysymR && mods&ModShift != 0 && mods&(ModAlt|ModSuper) != 0
+}
+
+// IsShowDesktop reports whether (keysym, mods) is Win+D, Windows' "show
+// desktop": d with Win held and no other modifier (Win+Shift+D, Ctrl+Win+D
+// and Win+Alt+D are other chords, not blocked). The hook swallows it.
+func IsShowDesktop(keysym, mods uint32) bool {
+	return keysym == keysymD && mods == ModSuper
 }
 
 func (h *Hook) enqueue(ev HookEvent) {
@@ -276,6 +295,8 @@ func (h *Hook) Decide(in KeyInput) bool {
 			return h.traced(in, true, "release of a swallowed press") // its press was ours, so is its release
 		case keyTyped: // its press was typing: so is its release
 			return false
+		case keyBlocked: // blocked down, blocked up - whatever came up first
+			return h.traced(in, true, "release of a blocked press")
 		case keyUp: // a press the hook never saw (a Resync): traced as a press would be
 			if !traceable(mods) {
 				return false
@@ -289,11 +310,17 @@ func (h *Hook) Decide(in KeyInput) bool {
 		return h.traced(in, false, "repeat of a passed press")
 	case keyTyped: // an auto-repeat of typing: never traced
 		return false
+	case keyBlocked: // an auto-repeat of Win+D: blocked, never queued
+		return h.traced(in, true, "repeat of a blocked press")
 	case keySwallowed: // an auto-repeat of ours: swallowed whatever happens
 		if owned {
 			h.enqueue(HookEvent{Kind: "press", VK: in.VK, Keysym: ks, Mods: mods, Injected: inj})
 		}
 		return h.traced(in, true, "repeat of a swallowed press")
+	}
+	if known && IsShowDesktop(ks, mods) { // before owned: nothing may serve it
+		*slot = keyBlocked
+		return h.traced(in, true, "blocked: Win+D, show desktop")
 	}
 	if !owned {
 		why := "not owned"

@@ -163,7 +163,8 @@ func win32HookEvent(ev win32.HookEvent) kwin.Event {
 
 // tableNeedsHook reports whether the table has anything RegisterHotKey
 // cannot serve - a hold layer, or a chord bound on release - and so needs
-// the low-level hook. Without either, hotkeyd installs no hook at all.
+// the low-level hook for a chord. Without either the hook serves no chord,
+// but it is installed all the same: it blocks Win+D (kwi3-hoex.43).
 func tableNeedsHook(binds []bind.Bind, layers map[string]bind.Layer) bool {
 	for _, b := range binds {
 		if b.OnRelease {

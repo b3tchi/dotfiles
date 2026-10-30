@@ -90,11 +90,22 @@ Windows build. What it does, from the code:
   differs. The grab report names each refused chord with Windows' error.
   1409 means another program holds it, and registrations are shared by
   every desktop of the window station.
-- **A `WH_KEYBOARD_LL` hook is installed only because of the `$mod+Tab`
-  switcher**, which needs key releases. Its callback only queues. It
-  swallows the keys the active layer owns, decides each key once from its
-  press to its release, and never swallows the recover chord. Alt+Tab over
-  RDP reaches it only with `keyboardhook:i:1` in the `.rdp`.
+- **A `WH_KEYBOARD_LL` hook is installed for the `$mod+Tab` switcher**,
+  which needs key releases, **and to block Win+D**. Its callback only
+  queues. It swallows the keys the active layer owns, decides each key
+  once from its press to its release, and never swallows the recover
+  chord. Alt+Tab over RDP reaches it only with `keyboardhook:i:1` in the
+  `.rdp`.
+- **Win+D does nothing while hotkeyd runs** (kwi3-hoex.43). It is
+  Windows' "show desktop": it minimised every window of the kwi3 session,
+  and kwi3 hides the taskbar, so nothing brought them back. The hook
+  swallows `d` pressed with either Win key and no other modifier - the
+  press, its repeats and its release - and hands the daemon nothing. The
+  start line says `Win+D (show desktop) blocked`; with no hook (a dry run,
+  or one Windows refused) the hook's line says it is not blocked. Nothing
+  else is blocked: a plain `d`, Win+Shift+D, Ctrl+Win+D, Win+M and every
+  other Win chord pass. `HOTKEYD_TRACE` records it as `swallowed
+  (blocked: Win+D, show desktop)`, never as a passed key.
 - **The table** is `config.go` built with `-tags win32`, and
   `cmd/hotkeyd/host_win32.go` changes what differs on Windows:
   - `$mod+Return` runs `wt.exe -w new`.
@@ -182,6 +193,9 @@ and the hook only on the input desktop. So key delivery over RDP is still
 
 - the chords and the switcher on real keys;
 - whether the Alt release opens an application's menu bar;
+- Win+D on real keys, and whether the Win release after a blocked `d`
+  opens the Start menu (Windows sees a bare Win tap; hotkeyd sends no
+  masking key, adr0021);
 - `LLKHF_INJECTED`;
 - the Dvorak/US layout. Jan's session has both loaded, and the translator
   assumes US.
