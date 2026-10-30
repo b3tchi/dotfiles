@@ -20,6 +20,8 @@ sections when status flips.
 
 ## spec
 
+- [[sp039|networked-clipboard-hub]]
+
 
 ## ready
 
