@@ -155,6 +155,7 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 | `meta-wsl-i3` | WSL (nested in Windows, i3 over xrdp — adr0004) | core + st, hotkeyd, quickshell + installs.depends: wsl, i3, xrdp |
 | `meta-wsl-kwi3` | WSL (nested in Windows, kwi3 over xrdp port 3392) | core + st, hotkeyd, quickshell, kwi3 + installs.depends: wsl, xrdp, kwi3 |
 | `meta-native-kwi3` | Personal Linux (native), kwi3 over xrdp port 3392 | same as meta-wsl-kwi3 minus wsl, docker + installs.depends: xrdp, kwi3 |
+| `meta-phone-kwi3` | Phone (postmarketOS), kwi3 on KWin on its own screen + KRdp (sp039) | fonts, foot, hotkeyd, quickshell, sxmo + installs.depends: sxmo; installs the whole session incl. the KWin host (its phone dot still to come) |
 | `meta-wsl-gnome` | WSL (nested in Windows, full GNOME over RDP — im005) | core (no quickshell) + installs.depends: wsl, gnome-rdp; installs the full `gnome` group + `gnome-shell-extension-forge` (i3-like tiling) |
 | `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, d2, ssh, opencode, pi, i3, hotkeyd, quickshell, st, xrdp |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |

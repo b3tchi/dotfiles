@@ -1,0 +1,38 @@
+# Meta-package: the phone (postmarketOS) with kwi3 on KWin on its own
+# screen, replacing SXMO on Sway, and the headless KWin/KRdp session beside
+# it (sp039).
+# Usage: rotz install meta-phone-kwi3
+#
+# It installs the WHOLE phone session, window manager included. The KWin
+# host (i3kwin script, kwi3keys plugin, kwi3-phone-session) is installed by
+# the kwi3 repo's own `i3kwin/install.sh`; a phone dot that runs it
+# `--local` on the phone, the counterpart of `kwi3` for the X11 host, is
+# still to come (sp039) - until it lands, the KWin host is deployed from
+# the dev box with `i3kwin/install.sh phone`.
+#
+# FLAT, like every meta: lists dots only, never another meta.
+#
+# `hotkeyd` is the keyboard daemon (`--input kwin`, the `phone` build);
+# `quickshell` the bar, launcher overlay and notification/clipboard
+# windows; `foot` the terminal ($mod+Return); `sxmo` stays installed as the
+# fallback session tinydm returns to when the KWin session fails to start.
+#
+# KNOWN GAP (sp039): the install commands of these dots branch on Arch /
+# Manjaro only, and hotkeyd builds with a local Go toolchain the phone does
+# not have - on postmarketOS their links land and their package installs
+# do nothing yet.
+depends:
+  - fonts
+  - foot
+  - hotkeyd
+  - quickshell
+  - sxmo
+
+installs:
+  # rotz needs a non-empty `cmd` beside `installs.depends`, hence the
+  # informational echo (same as meta-native-kwi3).
+  depends:
+    - sxmo
+  cmd: |
+    echo "meta-phone-kwi3: the KWin host is not installed by this meta yet;"
+    echo "meta-phone-kwi3: deploy it from the dev box: kwi3 i3kwin/install.sh phone."
