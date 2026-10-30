@@ -83,13 +83,12 @@ type win32Config struct {
 	Run func(string) error
 }
 
-// startHook starts the low-level hook when the table needs one; nil, nil
-// when it does not. A hook that cannot be installed is logged and nil:
-// the daemon still serves every chord RegisterHotKey can.
+// startHook starts the low-level hook. It always does, table or no: the
+// hook is also what blocks Win+D, Windows' "show desktop" (kwi3-hoex.43),
+// which minimised every window of a kwi3 session with no taskbar to bring
+// them back. A hook that cannot be installed is logged and nil: the
+// daemon still serves every chord RegisterHotKey can.
 func startHook(cfg win32Config, log func(string)) (*win32.Hook, *win32.HookThread) {
-	if !tableNeedsHook(cfg.Binds, cfg.Layers) {
-		return nil, nil
-	}
 	opts := cfg.Hook
 	dry := opts.DryRun || cfg.Source.DryRun
 	// A dry run installs nothing - unless a test hands in its own
@@ -106,13 +105,16 @@ func startHook(cfg win32Config, log func(string)) (*win32.Hook, *win32.HookThrea
 	hook := win32.NewHook(0)
 	ht, err := win32.StartHook(hook, opts)
 	if err != nil {
-		log("low-level hook not installed, the switcher and release chords are refused: " + err.Error())
+		log("low-level hook not installed, the switcher and release chords are refused and " +
+			win32.BlockedChords + " is NOT blocked: " + err.Error())
 		return nil, nil
 	}
 	if opts.DryRun {
-		log("low-level hook: DRY RUN, none installed (the table's hold layer / release chords are accepted, never delivered)")
+		log("low-level hook: DRY RUN, none installed (the table's hold layer / release chords are accepted, never delivered; " +
+			win32.BlockedChords + " is not blocked)")
 	} else {
 		log("low-level hook installed (WH_KEYBOARD_LL) for the hold layers and release chords; Alt+Tab over RDP needs keyboardhook:i:1 in the .rdp")
+		log(win32.BlockedChords + " blocked: the low-level hook swallows it while hotkeyd runs (kwi3 hides the taskbar, so nothing brings the minimised windows back)")
 	}
 	return hook, ht
 }
@@ -153,17 +155,16 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 			trace.hook = hook.EnableTrace(0)
 		}
 	}
-	if tableNeedsHook(cfg.Binds, cfg.Layers) {
-		if hook != nil {
-			hk.UseHook(hook, hookChords(cfg.Binds, cfg.Layers, win32Mod))
-			hookEvents, stats = hook.Events(), hook
-			// The hook reports every modifier transition in order with
-			// the keys, so the hold poll reads the stream (kwinModQuery),
-			// not GetAsyncKeyState.
-			newMod = nil
-		} else {
-			hk.UseHook(nil, hookChords(cfg.Binds, cfg.Layers, win32Mod))
-		}
+	switch {
+	case hook != nil:
+		hk.UseHook(hook, hookChords(cfg.Binds, cfg.Layers, win32Mod))
+		hookEvents, stats = hook.Events(), hook
+		// The hook reports every modifier transition in order with the
+		// keys, so the hold poll reads the stream (kwinModQuery), not
+		// GetAsyncKeyState.
+		newMod = nil
+	case tableNeedsHook(cfg.Binds, cfg.Layers):
+		hk.UseHook(nil, hookChords(cfg.Binds, cfg.Layers, win32Mod))
 	}
 
 	pub, pubCloser := buildPublisher(cfg.Display, log)

@@ -559,3 +559,107 @@ drained:
 		t.Errorf("after Resync:\n%swant\n%s", joinLines(got), joinLines(want))
 	}
 }
+
+// kwi3-hoex.43: Win+D - Windows' "show desktop", which minimised every
+// window of Jan's kwi3 session with no way back (kwi3 hides the taskbar) -
+// is swallowed, under either Win key: its press, its auto-repeats and its
+// release, whatever the owned set says and whichever key comes up first.
+// The Win key itself still passes, and nothing is queued for the daemon
+// but the modifier changes: a blocked key does nothing at all.
+func TestHook_WinDIsBlocked(t *testing.T) {
+	for _, win := range []uint16{VK_LWIN, VK_RWIN} {
+		for _, owned := range []map[Chord]bool{nil, switcherOwned, {{Keysym: 'd', Mods: ModSuper}: true}} {
+			h := NewHook(16)
+			h.SetOwned(owned)
+			steps := []struct {
+				in      KeyInput
+				swallow bool
+			}{
+				{down(win), false},
+				{down('D'), true},
+				{down('D'), true}, // auto-repeat
+				{up('D'), true},
+				{down('D'), true}, // Win+D again, Win still held
+				{up(win), false},  // Win up first...
+				{up('D'), true},   // ...and D's release still swallowed
+			}
+			for i, s := range steps {
+				if got := h.Decide(s.in); got != s.swallow {
+					t.Fatalf("win %#x owned %v step %d (%+v): swallow=%v, want %v", win, owned, i, s.in, got, s.swallow)
+				}
+			}
+			for _, ev := range drain(h) {
+				if ev.Kind != "mods" {
+					t.Errorf("win %#x owned %v: a blocked key queued %+v", win, owned, ev)
+				}
+			}
+		}
+	}
+}
+
+// Only Win+D, and only it: plain d, Shift+d, Alt+d, Ctrl+d, Win+e, Win+m,
+// and Win+D with another modifier held too (Win+Shift+D, Ctrl+Win+D,
+// Win+Alt+D) all pass - Jan has decided nothing about any other chord.
+func TestHook_OnlyWinDIsBlocked(t *testing.T) {
+	cases := []struct {
+		name string
+		mods []uint16
+		key  uint16
+	}{
+		{"d", nil, 'D'},
+		{"Shift+d", []uint16{VK_LSHIFT}, 'D'},
+		{"Alt+d", []uint16{VK_LMENU}, 'D'},
+		{"Ctrl+d", []uint16{VK_LCONTROL}, 'D'},
+		{"Win+e", []uint16{VK_LWIN}, 'E'},
+		{"Win+m", []uint16{VK_LWIN}, 'M'},
+		{"Win+Shift+m", []uint16{VK_LWIN, VK_LSHIFT}, 'M'},
+		{"Win+Shift+d", []uint16{VK_LWIN, VK_LSHIFT}, 'D'},
+		{"Ctrl+Win+d", []uint16{VK_LCONTROL, VK_RWIN}, 'D'},
+		{"Win+Alt+d", []uint16{VK_RWIN, VK_LMENU}, 'D'},
+	}
+	for _, c := range cases {
+		h := NewHook(16)
+		for _, m := range c.mods {
+			h.Decide(down(m))
+		}
+		if h.Decide(down(c.key)) || h.Decide(down(c.key)) || h.Decide(up(c.key)) {
+			t.Errorf("%s: swallowed, want passed", c.name)
+		}
+	}
+	// A d held down BEFORE Win keeps its first answer (sticky): passed.
+	h := NewHook(16)
+	h.Decide(down('D'))
+	h.Decide(down(VK_LWIN))
+	if h.Decide(up('D')) {
+		t.Error("the release of a d pressed before Win was swallowed")
+	}
+}
+
+// HOTKEYD_TRACE records a blocked Win+D as a blocked chord - swallowed,
+// with Win held - never as a passed key; a plain d around it (typing)
+// leaves no record at all.
+func TestHook_WinDTrace(t *testing.T) {
+	h := NewHook(16)
+	tr := h.EnableTrace(32)
+	for _, in := range []KeyInput{
+		down('D'), up('D'),
+		down(VK_LWIN), down('D'), down('D'), up('D'), up(VK_LWIN),
+		down('D'), up('D'),
+	} {
+		h.Decide(in)
+	}
+	var got []string
+	for len(tr) > 0 {
+		got = append(got, (<-tr).String())
+	}
+	want := []string{
+		"hook vk=0x5b down passed (modifier) injected=false mods=Win",
+		"hook vk=0x44 down swallowed (blocked: Win+D, show desktop) injected=false mods=Win",
+		"hook vk=0x44 down swallowed (repeat of a blocked press) injected=false mods=Win",
+		"hook vk=0x44 up swallowed (release of a blocked press) injected=false mods=Win",
+		"hook vk=0x5b up passed (modifier) injected=false mods=none",
+	}
+	if joinLines(got) != joinLines(want) {
+		t.Errorf("trace:\n%swant\n%s", joinLines(got), joinLines(want))
+	}
+}
