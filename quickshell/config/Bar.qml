@@ -204,7 +204,15 @@ PanelWindow {
     // one number kwi3 serves. -1 is PanelWindow's own "auto" (matches
     // implicitHeight), which is what every non-kwi3 session already got
     // before this property existed.
-    exclusiveZone: Kwi3Grid.active ? Kwi3Grid.reserve : -1
+    //
+    // Layer-shell (Wayland - kwi3 on KWin) counts the zone from the anchored
+    // edge AFTER the margin, so `reserve` there would reserve the margin
+    // twice (24 px for a 16 px reserve with an 8 px band); X11's strut is
+    // measured from the screen edge and takes `reserve` as it is.
+    exclusiveZone: Kwi3Grid.active
+        ? (Qt.platform.pluginName === "wayland"
+            ? Math.max(0, Kwi3Grid.reserve - margins.top) : Kwi3Grid.reserve)
+        : -1
 
     readonly property color barColor: "#000000"
     // Black surround: blends into the Razr's bezel/chin so the pill reads as
