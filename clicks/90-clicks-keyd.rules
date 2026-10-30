@@ -1,0 +1,6 @@
+# Clicks Creator Keyboard (352e:2306) — run keyd only while it is connected.
+# keyd intercepts the phone's hardware buttons (vol/power) via its virtual
+# keyboard and breaks their sxmo per-device bindings, so keyd must not run in
+# phone-only mode. See nothing-pmos docs/troubleshooting.md.
+ACTION=="add",    SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_VENDOR_ID}=="352e", ENV{ID_MODEL_ID}=="2306", RUN+="/usr/bin/systemctl --no-block start keyd.service"
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_VENDOR_ID}=="352e", ENV{ID_MODEL_ID}=="2306", RUN+="/usr/bin/systemctl --no-block stop keyd.service"

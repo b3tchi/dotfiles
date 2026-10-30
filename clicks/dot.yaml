@@ -1,18 +1,29 @@
+# clicks — key mapping for the Clicks Creator Keyboard case (USB 352e:2306)
+# on the phone (postmarketOS, systemd). Part of meta-nothing.
+#
+# - 90-clicks-keyboard.hwdb: Globe = Ctrl, Show/Hide = Alt (evdev keymap,
+#   no daemon needed)
+# - keyd-clicks.conf: Tab hold = nav layer (hjkl arrows, Space = Esc);
+#   keyd matches only the Clicks ([ids])
+# - 90-clicks-keyd.rules: keyd runs only while the Clicks is attached
+#   (started/stopped from udev; keyd.service stays disabled at boot)
+#
+# Keeping the keyboard alive across charger plugs (USB-C role reset) is not
+# here: that is the nothing-pmos repo's usb/ fix, installed by the
+# nothing-pmos dot.
 linux:
   installs:
     cmd: |
-      doas apk add keyd
-      doas cp ~/.dotfiles/clicks/50-usb-host-mode.start /etc/local.d/50-usb-host-mode.start
-      doas chmod +x /etc/local.d/50-usb-host-mode.start
-      doas cp ~/.dotfiles/clicks/clicks-keyboard.conf /etc/sway/config.d/clicks-keyboard.conf
-      doas cp ~/.dotfiles/clicks/clicks-reset /usr/local/bin/clicks-reset
-      doas chmod +x /usr/local/bin/clicks-reset
-      doas cp ~/.dotfiles/clicks/60-clicks.conf /etc/doas.d/60-clicks.conf
-      doas chmod 600 /etc/doas.d/60-clicks.conf
-      doas mkdir -p /etc/udev/hwdb.d
-      doas cp ~/.dotfiles/clicks/90-clicks-keyboard.hwdb /etc/udev/hwdb.d/90-clicks-keyboard.hwdb
+      D="$HOME/.dotfiles/clicks"
+      apk info -e keyd keyd-systemd >/dev/null 2>&1 || doas apk add keyd keyd-systemd
+      doas install -Dm644 "$D/90-clicks-keyboard.hwdb" /etc/udev/hwdb.d/90-clicks-keyboard.hwdb
+      doas install -Dm644 "$D/keyd-clicks.conf" /etc/keyd/clicks.conf
+      doas install -Dm644 "$D/90-clicks-keyd.rules" /etc/udev/rules.d/90-clicks-keyd.rules
+      doas systemctl disable keyd.service 2>/dev/null || true
       doas udevadm hwdb --update
-      doas mkdir -p /etc/keyd
-      doas cp ~/.dotfiles/clicks/keyd-clicks.conf /etc/keyd/clicks.conf
-      doas rc-update add keyd default
-      doas rc-service keyd restart
+      doas udevadm control --reload
+      # apply to an attached Clicks now: keymap, then keyd
+      doas udevadm trigger -s input -p ID_VENDOR_ID=352e
+      if lsusb 2>/dev/null | grep -q 352e:2306; then
+        doas systemctl restart keyd.service
+      fi

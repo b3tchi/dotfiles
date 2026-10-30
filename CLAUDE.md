@@ -160,6 +160,7 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 | `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, d2, ssh, opencode, pi, i3, hotkeyd, quickshell, st, xrdp |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
+| `meta-nothing` | Nothing Phone (1) on postmarketOS: device fixes | nothing-pmos (runs the nothing-pmos repo's install.sh from a clone pushed to the phone), clicks (Clicks keyboard hwdb + keyd) |
 
 Metas are FLAT: a meta lists dots only, never another meta.
 
