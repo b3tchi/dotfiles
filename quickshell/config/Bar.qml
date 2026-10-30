@@ -185,6 +185,13 @@ PanelWindow {
     // from the screen edge, so the tiles do not move; the bottom half is
     // simply what is left between the bar and kwi3's own top margin.
     readonly property bool isPhone: Session.isPhone
+    // QS_BAR_SPLIT (the phone): the left part - workspace tabs and the mode
+    // strip - lives in a second bar at the bottom of the screen (bottomBar
+    // below). Its tab row is one titlebar row; above it, like above the top
+    // bar, a band of edgeMargin px holds the focused tab's ring.
+    readonly property bool split: Session.barSplit
+    readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : Session.barHeight
+    readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
     margins {
         top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         left:  isPhone ? 40 : 0
@@ -570,6 +577,12 @@ PanelWindow {
         var screenY = (root.screen && root.screen.geometry) ? root.screen.geometry.y : 0
         var contentX = root.inset ? (root.insetSide + 10) : 0
         var marginsTop = root.isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
+        if (root.split) {
+            // The tabs' row is the bottom bar's last row; its band (the
+            // bottom bar's first edgeMargin px) holds the ring.
+            var screenH = (root.screen && root.screen.geometry) ? root.screen.geometry.height : 0
+            return { x: screenX + contentX, y: screenY + screenH - root.bottomRowH }
+        }
         return { x: screenX + contentX, y: screenY + marginsTop + root.insetTop }
     }
 
@@ -1095,6 +1108,7 @@ PanelWindow {
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
+        id: topContent
         anchors.fill: parent
         anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
         anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
@@ -1104,6 +1118,7 @@ PanelWindow {
         Row {
             id: leftSide
             objectName: "leftSide"
+            parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             visible: root.currentMode === "default"
             // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
             // starts where the tiles' own titlebars do.
@@ -1303,6 +1318,7 @@ PanelWindow {
             // to know exactly where this renders, the same way the tab
             // Repeater's own geometry feeds focusedTabScreenRect.
             id: mb
+            parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                       leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
             mode: root.inNavMode ? root.navLayerSticky : root.currentMode
@@ -1320,7 +1336,7 @@ PanelWindow {
             id: tickerArea
             objectName: "tickerArea"
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? root.cellW : 8; rightMargin: root.onGrid ? root.cellW : 4 }
+            anchors { left: root.split ? parent.left : leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? root.cellW : 8; rightMargin: root.onGrid ? root.cellW : 4 }
             clip: true
             height: parent.height
             z: -1
@@ -1573,6 +1589,27 @@ PanelWindow {
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
                 Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
+            }
+        }
+    }
+
+    // The bottom bar (QS_BAR_SPLIT). leftSide and mb reparent into its
+    // `content` when it exists. Its exclusive zone is its whole height, so
+    // windows tile above it.
+    Loader {
+        id: bottomBar
+        active: root.split
+        sourceComponent: PanelWindow {
+            property alias content: bottomContent
+            screen: root.screen
+            anchors { left: true; right: true; bottom: true }
+            implicitHeight: root.bottomBandH + root.bottomRowH
+            exclusiveZone: implicitHeight
+            color: root.barColor
+            Item {
+                id: bottomContent
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: root.bottomRowH
             }
         }
     }

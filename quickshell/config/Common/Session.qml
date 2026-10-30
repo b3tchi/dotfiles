@@ -19,6 +19,8 @@ import QtQuick
 //                         display per client, so the ratio tracks the client
 //   QS_BAR_HEIGHT=N       bar height override (default 24 sway / 27 i3)
 //   QS_BAR_FONT=N         font pixel size override (default 14 sway / 16 i3)
+//   QS_BAR_SPLIT=1        workspace tabs + mode strip in a second bar at the
+//                         bottom of the screen (the phone)
 //   QS_BAR_DENSITY=x      full | compact | minimal | auto (default auto:
 //                         picked from the screen width per monitor)
 Singleton {
@@ -28,6 +30,10 @@ Singleton {
     readonly property bool isRdp:   Quickshell.env("QS_RDP") === "1"
     readonly property bool isPhone: Quickshell.env("QS_PHONE") === "1"
     readonly property bool isSway:  Quickshell.env("SWAYSOCK") !== null
+    // QS_BAR_SPLIT=1: the bar's left part (workspace tabs, mode strip)
+    // moves to a second bar at the BOTTOM of the screen - the phone, where
+    // one row across 675 logical px holds both halves only cramped.
+    readonly property bool barSplit: Quickshell.env("QS_BAR_SPLIT") === "1"
 
     function envInt(name, fallback) {
         var v = parseInt(Quickshell.env(name) ?? "")
