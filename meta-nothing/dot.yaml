@@ -1,0 +1,24 @@
+# Meta-package: the Nothing Phone (1) "spacewar" on postmarketOS - every
+# device customization, Clicks keyboard case included.
+# Usage (on the phone): rotz install meta-nothing
+#
+# `nothing-pmos` runs the nothing-pmos repo's install.sh from
+# ~/.local/src/nothing-pmos (pushed from the dev box; see its dot.yaml):
+# usb/Clicks charger-plug recovery, suspend, gps, dtb, kernel modules,
+# sensors, bluetooth, UCM. `clicks` is the Clicks key mapping (hwdb + keyd).
+# The desktop session is meta-phone-kwi3, installed on its own.
+#
+# FLAT, like every meta: lists dots only, never another meta.
+depends:
+  - nothing-pmos
+  - clicks
+
+installs:
+  # rotz needs a non-empty `cmd` beside `installs.depends`, hence the
+  # informational echo (same as meta-native-kwi3).
+  depends:
+    - nothing-pmos
+    - clicks
+  cmd: |
+    echo "meta-nothing: device fixes and Clicks mapping installed;"
+    echo "meta-nothing: after 'sh ~/.local/src/nothing-pmos/install.sh --build', reboot."
