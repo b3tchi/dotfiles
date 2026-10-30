@@ -119,7 +119,9 @@ PanelWindow {
 
     // Per-session + per-screen widget density (Session.qml): gates the wide
     // stats block so a narrow xrdp viewport / small monitor stays uncluttered.
-    readonly property string density: Session.densityFor(screen ? screen.width : 1920)
+    // The bar's screen, by name: the machine file's "screens" key.
+    readonly property string screenName: screen ? screen.name : ""
+    readonly property string density: Session.densityFor(screenName, screen ? screen.width : 1920)
     readonly property bool showNet:  density === "full"
     readonly property bool netShown: !tickerActive && (netDown || (showNet && netVal !== ""))
     readonly property bool showDisk: density === "full"
@@ -157,18 +159,19 @@ PanelWindow {
     // the inset engages only while the viewport is phone-shaped (taller than
     // 2:1) — reactive to screen size, so an xrdp reconnect from a monitor
     // client flattens everything without a restart.
-    readonly property bool insetOn: Session.insetActive(
+    readonly property bool insetOn: Session.insetActive(screenName,
         screen ? screen.width : 1920, screen ? screen.height : 1080)
-    readonly property int insetSide:   insetOn ? Session.insetSide : 0
-    readonly property int insetTop:    insetOn ? Session.insetTop : 0
+    readonly property int insetSide:   insetOn ? Session.insetFor(screenName, "Side") : 0
+    readonly property int insetTop:    insetOn ? Session.insetFor(screenName, "Top") : 0
     readonly property bool inset: insetSide > 0 || insetTop > 0
 
     // sp004 Task 13 (kwi3-234.13; ft008 kwi3-grid-feed): under kwi3 the bar's
     // own height, band and exclusive zone come off Kwi3Grid instead of
     // Session's literals — Kwi3Grid.active stays false for every session
-    // this spec does not touch (no $KWI3SOCK), so Session.barHeight is still
+    // this spec does not touch (no $KWI3SOCK), so Session's height is still
     // exactly what renders there (AC3).
-    implicitHeight: (Kwi3Grid.active ? Kwi3Grid.rowHeight : Session.barHeight) + insetTop
+    readonly property int barHeight: Session.heightFor(screenName)
+    implicitHeight: (Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight) + insetTop
 
     // Phone (sxmo, sway/Wayland): floating pill at the top via real
     // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
@@ -185,12 +188,12 @@ PanelWindow {
     // from the screen edge, so the tiles do not move; the bottom half is
     // simply what is left between the bar and kwi3's own top margin.
     readonly property bool isPhone: Session.isPhone
-    // QS_BAR_SPLIT (the phone): the left part - workspace tabs and the mode
+    // QS_BAR_SPLIT / the machine file's "split" (the phone): the left part - workspace tabs and the mode
     // strip - lives in a second bar at the bottom of the screen (bottomBar
     // below). Its tab row is one titlebar row; above it, like above the top
     // bar, a band of edgeMargin px holds the focused tab's ring.
-    readonly property bool split: Session.barSplit
-    readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : Session.barHeight
+    readonly property bool split: Session.splitFor(screenName)
+    readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
     readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
     margins {
         top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
@@ -220,7 +223,7 @@ PanelWindow {
     color: inset ? "#000000" : barColor
 
     readonly property string fontFamily: Kwi3Grid.active ? Kwi3Grid.fontFamily : "Iosevka Nerd Font"
-    readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontSize
+    readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontFor(screenName)
     // kwi3-55l.18: was Text.NativeRendering. Jan (3392, real use): "the
     // bar's font looks slightly bigger than the other fonts (kwi3 window
     // titlebars, terminal)". Both sides already share font.family/

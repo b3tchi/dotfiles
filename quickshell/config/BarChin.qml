@@ -16,9 +16,10 @@ PanelWindow {
     // `modelData` + `screen` are set by the Variants delegate in shell.qml
     // (one instance per screen), matching Bar.qml.
 
-    readonly property bool insetOn: Session.insetActive(
+    readonly property string screenName: screen ? screen.name : ""
+    readonly property bool insetOn: Session.insetActive(screenName,
         screen ? screen.width : 1920, screen ? screen.height : 1080)
-    readonly property int chinHeight: insetOn ? Session.insetBottom : 0
+    readonly property int chinHeight: insetOn ? Session.insetFor(screenName, "Bottom") : 0
 
     visible: chinHeight > 0
     anchors {

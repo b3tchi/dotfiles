@@ -301,7 +301,7 @@ dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
 # SWAYSOCK set (bogus) so isSway is true and the KBL: pair renders; the stub
 # swaymsg keeps every wm probe inert. QS_BAR_DENSITY is read once at startup
-# (Session.densityOverride), so each density is its own quickshell process.
+# (Session.densityFor), so each density is its own quickshell process.
 start_bar() { # <density>
   UP=""
   setsid env DISPLAY="$DPY" PATH="$TMP/pbin" SWAYSOCK="$TMP/none.sock" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
