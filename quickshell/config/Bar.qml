@@ -166,9 +166,10 @@ PanelWindow {
     readonly property bool inset: insetSide > 0 || insetTop > 0
 
     // A cutout in the top half of the screen (the machine file's "panel":
-    // a front camera hole) is hidden in the top bar: the row moves down to
-    // sit level with the hole (topShift) and the bar reaches down past the
-    // hole's bottom (topBelow), black around it, so no tile is under it.
+    // a front camera hole) is hidden in the top bar: the row moves down
+    // until it ends level with the hole's bottom (topShift), black above
+    // it, so no tile is under the hole and the row keeps the desktop's
+    // spacing to the tiles below.
     readonly property var cutouts: Session.cutoutsFor(screenName, screen ? screen.width : 0)
     readonly property var topHole: {
         var sh = screen ? screen.height : 0
@@ -184,9 +185,7 @@ PanelWindow {
     }
     readonly property int topRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
     readonly property int topShift: topHole
-        ? Math.max(0, Math.round((topHole.y0 + topHole.y1 - topRowH) / 2) - margins.top - insetTop) : 0
-    readonly property int topBelow: topHole
-        ? Math.max(0, Math.ceil(topHole.y1) - (margins.top + insetTop + topShift + topRowH)) : 0
+        ? Math.max(0, Math.ceil(topHole.y1) - topRowH - margins.top - insetTop) : 0
 
     // sp004 Task 13 (kwi3-234.13; ft008 kwi3-grid-feed): under kwi3 the bar's
     // own height, band and exclusive zone come off Kwi3Grid instead of
@@ -194,7 +193,7 @@ PanelWindow {
     // this spec does not touch (no $KWI3SOCK), so Session's height is still
     // exactly what renders there (AC3).
     readonly property int barHeight: Session.heightFor(screenName)
-    implicitHeight: topRowH + insetTop + topShift + topBelow
+    implicitHeight: topRowH + insetTop + topShift
 
     // Phone (sxmo, sway/Wayland): floating pill at the top via real
     // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
@@ -218,6 +217,11 @@ PanelWindow {
     readonly property bool split: Session.splitFor(screenName)
     readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
     readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
+    // Tiles end above the rounded bottom corners: the bottom bar reaches up
+    // the corner's radius at least. Its row stays right under the tiles, as
+    // on the desktop, with black below it down to the screen's edge.
+    readonly property int bottomBarH: Math.max(bottomBandH + bottomRowH, corner)
+    readonly property int bottomBelow: bottomBarH - bottomBandH - bottomRowH
 
     // Rounded screen corners (the machine file's "corner": the radius in
     // logical px). A row whose outer edge is `d` px in from the screen's
@@ -231,7 +235,7 @@ PanelWindow {
         return onGrid ? Math.ceil(c / cellW - 0.001) * cellW : Math.ceil(c)
     }
     // The top bar's row starts margins.top + insetTop + topShift below the screen's
-    // top edge; the bottom bar's row ends on the bottom edge.
+    // top edge; the bottom bar's row ends bottomBelow above the bottom edge.
     readonly property int topClear: cornerClear(margins.top + insetTop + topShift)
     // A top-bar end that would run into the hole stops short of it.
     function holeClear(fromLeft) {
@@ -242,7 +246,7 @@ PanelWindow {
         c += onGrid ? cellW : 8
         return onGrid ? Math.ceil(c / cellW - 0.001) * cellW : Math.ceil(c)
     }
-    readonly property int bottomClear: cornerClear(0)
+    readonly property int bottomClear: cornerClear(bottomBelow)
     // The left part (tabs, mode strip) and the clock's right edge.
     readonly property int leftPad: Math.max(Kwi3Grid.active ? Kwi3Grid.contentLeft : 8,
                                             split ? bottomClear : Math.max(topClear, holeClear(true)))
@@ -267,7 +271,7 @@ PanelWindow {
     exclusiveZone: Kwi3Grid.active
         ? (Qt.platform.pluginName === "wayland"
             ? Math.max(0, Kwi3Grid.reserve - margins.top) : Kwi3Grid.reserve)
-          + topShift + topBelow
+          + topShift
         : -1
 
     readonly property color barColor: "#000000"
@@ -642,10 +646,10 @@ PanelWindow {
         var contentX = root.inset ? (root.insetSide + 10) : 0
         var marginsTop = root.isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         if (root.split) {
-            // The tabs' row is the bottom bar's last row; its band (the
+            // The tabs' row sits bottomBelow above the screen's bottom; its band (the
             // bottom bar's first edgeMargin px) holds the ring.
             var screenH = (root.screen && root.screen.geometry) ? root.screen.geometry.height : 0
-            return { x: screenX + contentX, y: screenY + screenH - root.bottomRowH }
+            return { x: screenX + contentX, y: screenY + screenH - root.bottomRowH - root.bottomBelow }
         }
         return { x: screenX + contentX, y: screenY + marginsTop + root.insetTop + root.topShift }
     }
@@ -1168,7 +1172,6 @@ PanelWindow {
         anchors.leftMargin: root.insetSide
         anchors.rightMargin: root.insetSide
         anchors.topMargin: root.insetTop + root.topShift
-        anchors.bottomMargin: root.topBelow
         // Pill look only when inset from the sides; otherwise a flat top bar.
         radius: root.insetSide > 0 ? 12 : 0
         color: root.barColor
@@ -1181,7 +1184,6 @@ PanelWindow {
         anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
         anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
         anchors.topMargin: root.insetTop + root.topShift
-        anchors.bottomMargin: root.topBelow
 
         // Left: workspaces + mode
         Row {
@@ -1673,14 +1675,13 @@ PanelWindow {
             property alias content: bottomContent
             screen: root.screen
             anchors { left: true; right: true; bottom: true }
-            // Tiles end above the rounded bottom corners: the bar reaches up
-            // the corner's radius at least, its row staying on the bottom edge.
-            implicitHeight: Math.max(root.bottomBandH + root.bottomRowH, root.corner)
+            implicitHeight: root.bottomBarH
             exclusiveZone: implicitHeight
             color: root.barColor
             Item {
                 id: bottomContent
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                anchors.bottomMargin: root.bottomBelow
                 height: root.bottomRowH
             }
         }
@@ -1728,7 +1729,7 @@ PanelWindow {
             margins {
                 left: rect ? rect.x : 0
                 top: rect && !root.split ? Math.max(0, rect.y - thickness) : 0
-                bottom: root.split ? root.bottomRowH : 0
+                bottom: root.split ? root.bottomRowH + root.bottomBelow : 0
             }
             implicitWidth: rect ? Math.max(1, rect.w) : 1
             implicitHeight: Math.max(1, thickness)
