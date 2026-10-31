@@ -6,16 +6,20 @@
 # ~/.local/src/nothing-pmos (pushed from the dev box; see its dot.yaml):
 # usb/Clicks charger-plug recovery, suspend, gps, dtb, kernel modules,
 # sensors, bluetooth, UCM. `clicks` is the Clicks key mapping (hwdb + keyd).
-# `nushell` + `tmux` are the Core UX shell layer, `gopass` the password
-# store (apk installs on Alpine).
+# The rest is Core UX: `distro` (yazi, lazygit, bat, rg, fd, fzf, bottom,
+# ... plus bashrc), `nushell` + `tmux` (shell layer), `nvim`, `lazygit`
+# config, `gopass` (password store) - apk installs on Alpine.
 # The desktop session is meta-phone-kwi3, installed on its own.
 #
 # FLAT, like every meta: lists dots only, never another meta.
 depends:
   - nothing-pmos
   - clicks
+  - distro
   - nushell
   - tmux
+  - nvim
+  - lazygit
   - gopass
 
 installs:

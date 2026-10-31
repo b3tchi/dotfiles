@@ -100,4 +100,9 @@ linux:
         curl -fsSL https://bun.sh/install | bash
         ln -sf ~/.bun/bin/bun ~/.local/bin/bun
       {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e yazi bottom git github-cli lazygit bat fd ripgrep fzf sd yq-go chafa zoxide >/dev/null 2>&1 ||
+          doas apk add yazi bottom git github-cli lazygit bat fd ripgrep fzf sd yq-go chafa zoxide
+      fi
       rotz link distro --force
