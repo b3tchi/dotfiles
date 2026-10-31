@@ -6,7 +6,8 @@
 # ~/.local/src/nothing-pmos (pushed from the dev box; see its dot.yaml):
 # usb/Clicks charger-plug recovery, suspend, gps, dtb, kernel modules,
 # sensors, bluetooth, UCM. `clicks` is the Clicks key mapping (hwdb + keyd).
-# `nushell` + `tmux` are the Core UX shell layer (apk installs on Alpine).
+# `nushell` + `tmux` are the Core UX shell layer, `gopass` the password
+# store (apk installs on Alpine).
 # The desktop session is meta-phone-kwi3, installed on its own.
 #
 # FLAT, like every meta: lists dots only, never another meta.
@@ -15,6 +16,7 @@ depends:
   - clicks
   - nushell
   - tmux
+  - gopass
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the
