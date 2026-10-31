@@ -76,6 +76,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0012|notification server is a user-bus singleton daemon, bars are read-only consumers]]
 - [[adr0013|persistent age-capped notification store]]
 - [[adr0014|reader loops fail fast and are rate-bounded when their runtime dir vanishes]]
+- [[adr0037|quickshell bar layout is per-machine data, a JSON file rotz links by hostname]]
+- [[adr0038|screen corners and cutouts are machine data from gmobile; the bars cover them, tiles stay rectangular]]
 
 ## AKM Reference
 
