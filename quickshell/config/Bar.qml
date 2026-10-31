@@ -195,6 +195,26 @@ PanelWindow {
     readonly property bool split: Session.splitFor(screenName)
     readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
     readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
+
+    // Rounded screen corners (the machine file's "corner": the radius in
+    // logical px). A row whose outer edge is `d` px in from the screen's
+    // top or bottom edge keeps its ends this far in from the sides, so
+    // nothing is drawn under the curve; whole cells on the grid.
+    readonly property int corner: Session.cornerFor(screenName)
+    function cornerClear(d) {
+        if (corner <= 0 || d >= corner) return 0
+        var dy = corner - d
+        var c = corner - Math.sqrt(corner * corner - dy * dy)
+        return onGrid ? Math.ceil(c / cellW - 0.001) * cellW : Math.ceil(c)
+    }
+    // The top bar's row starts margins.top + insetTop below the screen's
+    // top edge; the bottom bar's row ends on the bottom edge.
+    readonly property int topClear: cornerClear(margins.top + insetTop)
+    readonly property int bottomClear: cornerClear(0)
+    // The left part (tabs, mode strip) and the clock's right edge.
+    readonly property int leftPad: Math.max(Kwi3Grid.active ? Kwi3Grid.contentLeft : 8,
+                                            split ? bottomClear : topClear)
+    readonly property int rightPad: Math.max(onGrid ? cellW : 8, topClear)
     margins {
         top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         left:  isPhone ? 40 : 0
@@ -618,7 +638,7 @@ PanelWindow {
         // would not re-run when the tab layout changes under it.
         var origin = root._ringOrigin()
         return {
-            x: origin.x + Kwi3Grid.contentLeft + xOff,
+            x: origin.x + root.leftPad + xOff,
             y: origin.y,
             w: plan.cells[idx] * Kwi3Grid.moduleW
         }
@@ -1135,9 +1155,10 @@ PanelWindow {
             parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             visible: root.currentMode === "default"
             // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
-            // starts where the tiles' own titlebars do.
+            // starts where the tiles' own titlebars do, or clear of a
+            // rounded corner (leftPad).
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
+                      leftMargin: root.leftPad }
             spacing: 0
 
             Repeater {
@@ -1334,7 +1355,7 @@ PanelWindow {
             id: mb
             parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
+                      leftMargin: root.leftPad }
             mode: root.inNavMode ? root.navLayerSticky : root.currentMode
             fontSize: root.fontSize
         }
@@ -1564,7 +1585,7 @@ PanelWindow {
             id: clockDate
             objectName: "clockDate"
             anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1
-                      rightMargin: root.onGrid ? root.cellW : 8 }
+                      rightMargin: root.rightPad }
             spacing: 0
 
             Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }

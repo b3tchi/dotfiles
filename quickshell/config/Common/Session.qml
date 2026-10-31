@@ -27,6 +27,9 @@ import QtQuick
 //     "font": 16,                // QS_BAR_FONT   / bar is one titlebar row
 //     "insetTop": 0, "insetSide": 0, "insetBottom": 0,   // QS_BAR_INSET_*
 //     "insetAuto": false,        // QS_BAR_INSET_AUTO
+//     "corner": 60,              // QS_BAR_CORNER: rounded screen corners,
+//                                // radius in logical px; the bar's ends
+//                                // stay clear of them
 //     "screens": {               // per screen, by Quickshell's screen name
 //       "DSI-1": { "density": "compact" }
 //     }
@@ -47,6 +50,7 @@ import QtQuick
 //   QS_BAR_FONT=N         font pixel size override (default 14 sway / 16 i3)
 //   QS_BAR_SPLIT=1        workspace tabs + mode strip in a second bar at the
 //                         bottom of the screen (the phone)
+//   QS_BAR_CORNER=N       rounded screen corner radius, logical px (0: none)
 //   QS_BAR_DENSITY=x      full | compact | minimal | auto (default auto:
 //                         picked from the screen width per monitor)
 Singleton {
@@ -115,6 +119,7 @@ Singleton {
     function splitFor(screenName)  { return optBool(screenName, "QS_BAR_SPLIT", "split") }
     function heightFor(screenName) { return optInt(screenName, "QS_BAR_HEIGHT", "height", isSway ? 24 : 27) }
     function fontFor(screenName)   { return optInt(screenName, "QS_BAR_FONT", "font", isSway ? 14 : 16) }
+    function cornerFor(screenName) { return optInt(screenName, "QS_BAR_CORNER", "corner", 0) }
     function insetFor(screenName, side) {   // side: "Top" | "Side" | "Bottom"
         return optInt(screenName, "QS_BAR_INSET_" + side.toUpperCase(), "inset" + side, 0)
     }

@@ -1,5 +1,5 @@
 {
   "screens": {
-    "DSI-1": { "split": true }
+    "DSI-1": { "split": true, "corner": 70 }
   }
 }
