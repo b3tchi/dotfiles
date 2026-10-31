@@ -61,9 +61,23 @@ linux:
       {{/if}}
       # Alpine-based (postmarketOS / Nura on the Nothing Phone): runtime
       # check, os-release name drifts ("postmarketOS edge" -> "Nura edge").
+      # nu itself is the upstream static musl release in /usr/local/bin, not
+      # apk's nushell: Alpine lags far behind (0.104) and the config tracks
+      # current nushell. Bump NU_VER together with the other boxes.
       if command -v apk >/dev/null 2>&1; then
-        apk info -e nushell starship carapace >/dev/null 2>&1 ||
-          doas apk add nushell starship carapace
+        apk info -e starship carapace >/dev/null 2>&1 ||
+          doas apk add starship carapace
+        NU_VER=0.115.1
+        if [ "$(/usr/local/bin/nu --version 2>/dev/null)" != "$NU_VER" ]; then
+          NU_TMP=$(mktemp -d)
+          NU_PKG="nu-$NU_VER-$(uname -m)-unknown-linux-musl"
+          curl -fsSL "https://github.com/nushell/nushell/releases/download/$NU_VER/$NU_PKG.tar.gz" |
+            tar xz -C "$NU_TMP"
+          doas install -m755 "$NU_TMP/$NU_PKG/nu" /usr/local/bin/nu
+          rm -rf "$NU_TMP"
+        fi
+        # drop apk's old nushell so /usr/bin/nu cannot shadow or confuse
+        if apk info -e nushell >/dev/null 2>&1; then doas apk del nushell; fi
       fi
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm \
