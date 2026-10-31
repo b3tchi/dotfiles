@@ -24,6 +24,11 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install gopass age openssh
       {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e gopass age openssh >/dev/null 2>&1 ||
+          doas apk add gopass age openssh
+      fi
 
       # create gopass age passphrase file if missing
       # runtime WSL check (env.WSL_DISTRO_NAME unreliable: unset in
