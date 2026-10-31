@@ -27,6 +27,12 @@
 #
 #   doas apk add nodejs go
 #
+# FONTS: Iosevka (kwi3/config.js's titlebar and bar font) and Iosevka Nerd
+# Font (the bar's font off kwi3) go to ~/.local/share/fonts, Regular and
+# Bold only, each skipped when fontconfig already has the family. No apk:
+# that needs doas. The releases are pinned (IOSEVKA, NERD below); a failed
+# download is a warning, the kwi3 build goes on.
+#
 # $KWI3_KWIN_BIN is passed through to install.sh unchanged (the kwin_wayland
 # the plugin is stamped against, when it is not the first on PATH).
 linux:
@@ -68,6 +74,51 @@ linux:
         exit 1
       fi
       echo "kwi3-phone: $BRANCH at $(git -C "$SRC" rev-parse --short HEAD)"
+
+      IOSEVKA=34.9.1
+      NERD=3.5.1
+      FONT_DIR="$HOME/.local/share/fonts"
+      fonts_new=""
+      # $1 family, $2 url, $3 archive kind (zip|txz), $4.. files to keep
+      font_get() {
+        fam=$1 url=$2 kind=$3
+        shift 3
+        if fc-list : family | tr ',' '\n' | grep -qx "$fam"; then
+          return 0
+        fi
+        tmp=$(mktemp -d)
+        if ! curl -fsSL "$url" -o "$tmp/a"; then
+          echo "kwi3-phone: WARNING -- download of $fam failed ($url)" >&2
+          rm -rf "$tmp"
+          return 0
+        fi
+        mkdir -p "$FONT_DIR" "$tmp/x"
+        if [ "$kind" = zip ]; then
+          unzip -q -o "$tmp/a" -d "$tmp/x"
+        else
+          xz -dc "$tmp/a" | tar -x -C "$tmp/x"
+        fi
+        for f in "$@"; do
+          src=$(find "$tmp/x" -name "$f" | head -n 1)
+          if [ -n "$src" ]; then
+            mv "$src" "$FONT_DIR/$f"
+            fonts_new="$fonts_new $f"
+          else
+            echo "kwi3-phone: WARNING -- $f not in $url" >&2
+          fi
+        done
+        rm -rf "$tmp"
+      }
+      font_get Iosevka \
+        "https://github.com/be5invis/Iosevka/releases/download/v$IOSEVKA/PkgTTC-Iosevka-$IOSEVKA.zip" \
+        zip Iosevka-Regular.ttc Iosevka-Bold.ttc
+      font_get "Iosevka Nerd Font" \
+        "https://github.com/ryanoasis/nerd-fonts/releases/download/v$NERD/Iosevka.tar.xz" \
+        txz IosevkaNerdFont-Regular.ttf IosevkaNerdFont-Bold.ttf
+      if [ -n "$fonts_new" ]; then
+        fc-cache -f "$FONT_DIR"
+        echo "kwi3-phone: fonts installed:$fonts_new"
+      fi
 
       MISSING=""
       command -v node >/dev/null 2>&1 || MISSING="$MISSING nodejs"
