@@ -16,4 +16,9 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install -y tmux
       {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone); bash too:
+      # tmux.conf's default-shell is /bin/bash, Alpine ships only ash
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e tmux bash >/dev/null 2>&1 || doas apk add tmux bash
+      fi
       rotz link tmux --force
