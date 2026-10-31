@@ -23,4 +23,9 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install -y lazygit
       {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e lazygit >/dev/null 2>&1 ||
+          doas apk add lazygit
+      fi
       rotz link lazygit --force
