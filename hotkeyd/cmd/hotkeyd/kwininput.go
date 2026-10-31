@@ -127,7 +127,9 @@ func (d *Daemon) kwinModQuery() layer.ModifierDown {
 func (d *Daemon) handleKwinEvent(ev kwin.Event) {
 	switch ev.Kind {
 	case "mods":
+		prev := d.kwinMods
 		d.kwinMods = ev.Mods & kwinModMask
+		d.handleKwinMods(prev, d.kwinMods)
 		// A released hold modifier ends its layer now, exactly as the idle
 		// poll would on its next tick (adr0016) - just without the wait.
 		d.pollIdle()
@@ -146,6 +148,32 @@ func (d *Daemon) handleKwinEvent(ev kwin.Event) {
 		// Reconnected: the client already re-sent the set; a resync makes
 		// the grab report truthful again (Active() was empty while down).
 		d.resyncGrabs()
+	}
+}
+
+// handleKwinMods turns a change of the plugin's modifier mask into the
+// modifier key presses and releases the engine tracks holds from. The
+// plugin passes modifier keys through and reports only the mask, so
+// without this a layer's Mod sublayers (nav: held Ctrl moves, held Alt
+// resizes) never engage on a kwin session.
+func (d *Daemon) handleKwinMods(prev, now uint32) {
+	for _, m := range kwinModBits {
+		if (prev^now)&m.bit == 0 {
+			continue
+		}
+		kind := layer.Release
+		if now&m.bit != 0 {
+			kind = layer.Press
+		}
+		before := d.engine.State().Layer
+		d.dispatchAll(d.engine.Handle(layer.Event{
+			Kind: kind,
+			Key:  modKeysymNames[m.name][0],
+			Mods: kwinModsSet(now),
+		}))
+		if d.engine.State().Layer != before {
+			d.resyncGrabs()
+		}
 	}
 }
 

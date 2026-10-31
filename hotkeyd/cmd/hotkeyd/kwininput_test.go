@@ -130,6 +130,9 @@ const (
 	ksTab    = 0xff09
 	ksR      = 'r'
 	ksQ      = 'q'
+	ksO      = 'o'
+	modCtrl  = 4
+	modAlt   = 8
 	modSuper = 64
 )
 
@@ -325,6 +328,46 @@ func TestKwinHoldRelease(t *testing.T) {
 	}
 	if !confirmed {
 		t.Fatalf("on_hold_release did not run: %v", runs)
+	}
+}
+
+// The plugin reports modifier keys only as mask changes, never as presses:
+// those still have to engage a layer's Mod sublayers (nav: held Ctrl moves,
+// held Alt resizes) and their chords.
+func TestKwinModSublayer(t *testing.T) {
+	r := newKwinRig(t)
+	r.plugin.waitGrab(func(g grabSet) bool { return hasKey(g, ksO, modSuper) }, "default set has $mod+o")
+	r.modsEv(modSuper)
+	r.press(ksO, modSuper)
+	r.release(ksO, modSuper)
+	r.modsEv(0)
+	waitFor(t, "nav layer", func() bool {
+		l := r.states.layers()
+		return len(l) > 0 && l[len(l)-1] == "nav"
+	})
+	for _, c := range []struct {
+		mask uint32
+		mod  string
+		want string
+	}{{modCtrl, "move", "move left"}, {modAlt, "resize", "resize"}} {
+		r.modsEv(c.mask)
+		waitFor(t, c.mod+" sublayer", func() bool {
+			all := r.states.all()
+			return len(all) > 0 && all[len(all)-1] == layer.State{Layer: "nav", Mod: c.mod}
+		})
+		r.plugin.waitGrab(func(g grabSet) bool { return hasKey(g, ksH, c.mask) }, c.mod+"+h grabbed")
+		n := len(r.k.sent())
+		r.press(ksH, c.mask)
+		waitFor(t, c.mod+"+h dispatch", func() bool { return len(r.k.sent()) == n+1 })
+		if got := r.k.sent()[n]; !strings.HasPrefix(got, c.want) {
+			t.Fatalf("%s+h dispatched %q, want %s...", c.mod, got, c.want)
+		}
+		r.release(ksH, c.mask)
+		r.modsEv(0)
+		waitFor(t, "sublayer released", func() bool {
+			all := r.states.all()
+			return all[len(all)-1] == layer.State{Layer: "nav"}
+		})
 	}
 }
 
