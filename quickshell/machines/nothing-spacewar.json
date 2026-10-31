@@ -1,5 +1,21 @@
 {
   "screens": {
-    "DSI-1": { "split": true, "corner": 75 }
+    "DSI-1": {
+      "split": true,
+      "corner": 75,
+      "panel": {
+        "source": "gmobile data/devices/display-panels/nothing,spacewar.json",
+        "x-res": 1080,
+        "cutouts": [
+          {
+            "name": "camera",
+            "x": 83,
+            "y": 35,
+            "w": 65,
+            "h": 65
+          }
+        ]
+      }
+    }
   }
 }

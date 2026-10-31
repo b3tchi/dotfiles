@@ -30,6 +30,11 @@ import QtQuick
 //     "corner": 60,              // QS_BAR_CORNER: rounded screen corners,
 //                                // radius in logical px; the bar's ends
 //                                // stay clear of them
+//     "panel": {                 // the display's cutouts, in PHYSICAL px
+//       "x-res": 1080,           // as phosh's gmobile data gives them
+//       "cutouts": [ { "name": "camera", "x": 83, "y": 35, "w": 65, "h": 65 } ]
+//     },                         // (a camera hole at the top is hidden in
+//                                // the top bar)
 //     "screens": {               // per screen, by Quickshell's screen name
 //       "DSI-1": { "density": "compact" }
 //     }
@@ -120,6 +125,21 @@ Singleton {
     function heightFor(screenName) { return optInt(screenName, "QS_BAR_HEIGHT", "height", isSway ? 24 : 27) }
     function fontFor(screenName)   { return optInt(screenName, "QS_BAR_FONT", "font", isSway ? 14 : 16) }
     function cornerFor(screenName) { return optInt(screenName, "QS_BAR_CORNER", "corner", 0) }
+    // The panel's cutouts as logical rects {x, y, w, h}: the machine file's
+    // "panel" holds them in physical px with the panel's "x-res", so the
+    // scale is x-res over the screen's logical width.
+    function cutoutsFor(screenName, screenWidth) {
+        var p = machineOpt(screenName, "panel")
+        if (!p || !p.cutouts || !(p["x-res"] > 0) || !(screenWidth > 0)) return []
+        var k = screenWidth / p["x-res"]
+        var out = []
+        for (var i = 0; i < p.cutouts.length; i++) {
+            var c = p.cutouts[i]
+            if (!(c.w > 0) || !(c.h > 0)) continue
+            out.push({ x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k })
+        }
+        return out
+    }
     function insetFor(screenName, side) {   // side: "Top" | "Side" | "Bottom"
         return optInt(screenName, "QS_BAR_INSET_" + side.toUpperCase(), "inset" + side, 0)
     }
