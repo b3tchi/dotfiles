@@ -14,7 +14,7 @@ import "."
 // the key/label spacer) deliberately keep the DEFAULT font, NOT ModeBarTheme's
 // Iosevka — matching Bar.qml:599/601, because a space's advance width differs
 // by font (Iosevka nearly doubles it) and would widen the strip. Only the
-// coloured Texts (pill label, hint key, hint label) carry ModeBarTheme.font.
+// coloured Texts (pill label, hint key, hint label) carry fontFamily (kwi3's font, else ModeBarTheme.font).
 // The one omission is Bar.qml's transparent `z:-1` Rectangle behind each key —
 // a true no-op (fully transparent, no layout effect), dropped as dead cruft.
 Item {
@@ -36,6 +36,12 @@ Item {
     // of ft009's two-prop api_surface for hosts: they leave it at the default.
     property int cellW: Kwi3Grid.active ? Kwi3Grid.moduleW : 0
     readonly property bool onGrid: cellW > 0
+    // Under kwi3 the strip is set in kwi3's own font (config.js), like the
+    // tabs beside it: ModeBarTheme's Nerd Font is not on every machine (the
+    // phone has plain Iosevka) and a missing family falls back to a
+    // proportional sans. Not part of ft009's api_surface either.
+    property string fontFamily: Kwi3Grid.active && Kwi3Grid.fontFamily
+        ? Kwi3Grid.fontFamily : ModeBarTheme.font
 
     // "default" => nothing to announce. A mode on ModeBarTheme.silentModes =>
     // deliberately not announced (dotfiles-hwds.44): the switcher's own overlay
@@ -92,7 +98,7 @@ Item {
                 anchors.bottomMargin: 1
                 text: ModeBarTheme.displayName(root.mode)
                 color: ModeBarTheme.fg
-                font.family: ModeBarTheme.font
+                font.family: root.fontFamily
                 font.pixelSize: root.fontSize
                 font.bold: true
                 renderType: Text.NativeRendering
@@ -155,7 +161,7 @@ Item {
                     objectName: "hpre"
                     text: inl ? ktext.substring(0, hlAt) : ""
                     color: ModeBarTheme.fg
-                    font.family: ModeBarTheme.font
+                    font.family: root.fontFamily
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
@@ -164,7 +170,7 @@ Item {
                     objectName: "hk"
                     text: kkey
                     color: ModeBarTheme.highlight
-                    font.family: ModeBarTheme.font
+                    font.family: root.fontFamily
                     font.pixelSize: root.fontSize
                     font.bold: true
                     renderType: Text.NativeRendering
@@ -174,7 +180,7 @@ Item {
                     objectName: "hpost"
                     text: inl ? ktext.substring(hlAt + kkey.length) : ""
                     color: ModeBarTheme.fg
-                    font.family: ModeBarTheme.font
+                    font.family: root.fontFamily
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
@@ -193,7 +199,7 @@ Item {
                     objectName: "hl"
                     text: inl ? "" : ktext
                     color: ModeBarTheme.fg
-                    font.family: ModeBarTheme.font
+                    font.family: root.fontFamily
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
