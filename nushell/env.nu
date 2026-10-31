@@ -69,7 +69,8 @@ $env.ENV_CONVERSIONS = {
     }
 }
 
-$env.TEMP = $nu.temp-dir
+# `?` + default: $nu.temp-dir is newer than Alpine/pmOS nushell (0.104)
+$env.TEMP = ($nu.temp-dir? | default "/tmp")
 $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin') | uniq )
 #filter out native paths
 if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {

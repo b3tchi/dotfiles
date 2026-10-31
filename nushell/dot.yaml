@@ -59,6 +59,12 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install -y nushell starship carapace
       {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone): runtime
+      # check, os-release name drifts ("postmarketOS edge" -> "Nura edge").
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e nushell starship carapace >/dev/null 2>&1 ||
+          doas apk add nushell starship carapace
+      fi
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm \
         nushell starship
