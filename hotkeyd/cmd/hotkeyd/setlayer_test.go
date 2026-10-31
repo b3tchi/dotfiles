@@ -371,6 +371,31 @@ func TestSetLayer_DisplayWithScreenSuffix_SameSocketAsBare(t *testing.T) {
 	}
 }
 
+// TestSetLayer_KWinSession_DialsTheKWinInstance: with no X display and a
+// Wayland one, the daemon is `--input kwin`'s, keyed "kwin-<socket>" - the
+// phone's quickshell picker raising "screenshot" dialled hotkeyd-0-ctl.sock.
+func TestSetLayer_KWinSession_DialsTheKWinInstance(t *testing.T) {
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "kwi3-phone")
+	ln := newTestCtlListener(t, "kwin-kwi3-phone")
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		conn.Read(buf)
+		conn.Write([]byte(`{"ok":true}` + "\n"))
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := setLayer(externalOnly(), "screenshot-drag", "", setLayerTestTimeout, &stdout, &stderr)
+	if code != SetLayerOK {
+		t.Fatalf("setLayer in a KWin session = %d, want %d (SetLayerOK); stderr: %s", code, SetLayerOK, stderr.String())
+	}
+}
+
 // -- runSetLayerCmd: argv / $DISPLAY resolution --------------------------
 
 // TestRunSetLayerCmd_NoArgs_UsageExitTwo pins the flag-parse convention:

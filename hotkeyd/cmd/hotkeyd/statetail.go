@@ -47,13 +47,9 @@ func runStateTailCmd(argv []string) int {
 // runStateTailCmd so it is testable against a real net.Listen("unix", ...)
 // fixture with injected writers, no subprocess needed.
 func stateTail(display string, out, errOut io.Writer) int {
-	disp := display
-	if disp == "" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") != "" {
-		// A bar inside a KWin session has no X display: the daemon there
-		// publishes under kwinDisplay(), named after the same socket.
-		disp = kwinDisplay()
-	}
-	disp = resolveDisplay(disp)
+	// A bar inside a KWin session has no X display: the daemon there
+	// publishes under kwinDisplay(), named after the same socket.
+	disp := resolveDisplay(clientDisplay(display))
 	path := layer.SocketPath(disp)
 
 	conn, err := net.Dial("unix", path)

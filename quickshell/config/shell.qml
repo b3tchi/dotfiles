@@ -27,6 +27,14 @@ ShellRoot {
     // RDP single-instance: host the launcher/switcher/projects overlay here.
     Loader { active: isRdp; sourceComponent: Component { Overlay {} } }
 
+    // Region screenshot picker on a Wayland (KWin) session, where the X11
+    // one, qs-region.py, cannot run. Loaded by URL so an X11 session never
+    // parses its Quickshell.Wayland import. Idle until `regionshot` is called.
+    Loader {
+        active: Qt.platform.pluginName === "wayland"
+        source: "RegionShot.qml"
+    }
+
     // Clipboard-history picker (sp014). Hosted in the MAIN instance on every
     // session type — desktop and RDP alike — so `qs-clip.sh toggle` finds
     // exactly one picker per session and rapid reopening cannot orphan a

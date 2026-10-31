@@ -130,7 +130,8 @@ func setLayer(layers map[string]bind.Layer, name, display string, timeout time.D
 		return SetLayerRefused
 	}
 
-	disp := resolveDisplay(display)
+	// As state-tail: a KWin session's daemon is keyed on its Wayland socket.
+	disp := resolveDisplay(clientDisplay(display))
 	path := proc.ControlPath(disp)
 
 	ok, daemonMsg, err := dialSetLayer(path, name, timeout)

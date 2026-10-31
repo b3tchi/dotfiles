@@ -17,12 +17,13 @@ func hostOverrides() map[string][]bind.Action {
 		"$mod+Return": runAction("foot"),
 		// KWin has no restart in place; reloading the script is its way.
 		"$mod+Shift+c": runAction("$HOME/.local/bin/i3reload"),
-		// i3-scrot and the qs-region.py selector are X11-only, and KWin has
-		// no wlr-screencopy for grim: kwi3-shot asks KWin's ScreenShot2.
+		// i3-scrot is X11-only, and KWin has no wlr-screencopy for grim:
+		// kwi3-shot asks KWin's ScreenShot2. The region picker is the global
+		// table's qs-screenshot.sh, which hands a Wayland session to the
+		// quickshell picker (RegionShot.qml) instead of qs-region.py.
 		"Print":            runAction("$HOME/.local/bin/kwi3-shot"),
 		"$mod+Print":       runAction("$HOME/.local/bin/kwi3-shot -w"),
-		"$mod+Shift+Print": runAction("$HOME/.local/bin/kwi3-shot -s"),
-		"$mod+Shift+s":     runAction("$HOME/.local/bin/kwi3-shot -s"),
+		"$mod+Shift+Print": runAction(qsScreenshot),
 	}
 	// ws-switch.nu is nushell; kwi3's workspace.focus/workspace.move take
 	// the same 1-based position directly.

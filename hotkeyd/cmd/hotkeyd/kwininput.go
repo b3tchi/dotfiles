@@ -23,6 +23,16 @@ import (
 // gets a second daemon instead of exit 3 on the first one's lock.
 func kwinDisplay() string { return kwinDisplayFor(os.Getenv("WAYLAND_DISPLAY")) }
 
+// clientDisplay is the display a client subcommand (state-tail, set-layer)
+// talks to: the one named, else - inside a KWin session, which has no X
+// display - the daemon's kwinDisplay(), else "" for resolveDisplay's $DISPLAY.
+func clientDisplay(display string) string {
+	if display == "" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") != "" {
+		return kwinDisplay()
+	}
+	return display
+}
+
 func kwinDisplayFor(wayland string) string {
 	if wayland == "" {
 		wayland = "wayland-0"
