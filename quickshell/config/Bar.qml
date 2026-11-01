@@ -1727,24 +1727,26 @@ PanelWindow {
         }
         readonly property int valueW: Math.ceil(ctlValueFm.advanceWidth("inverted"))
         readonly property int gap: DialogTheme.textLeftMargin
+        // the space around the list, every side
+        readonly property int border: 2 * DialogTheme.textLeftMargin
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
         screen: root.screen
         visible: root.currentMode === "controls"
-        implicitWidth: labelW + gap + valueW + 2 * DialogTheme.textLeftMargin
-        implicitHeight: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + DialogTheme.pad
+        implicitWidth: labelW + gap + valueW + 2 * border
+        implicitHeight: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + 2 * border
         aboveWindows: true
         exclusiveZone: 0
         focusable: false
         mask: Region {}
         color: DialogTheme.bodyBg
         Column {
-            anchors { fill: parent; topMargin: DialogTheme.pad / 2 }
+            anchors { fill: parent; topMargin: controlsPanel.border }
             Repeater {
                 model: ModeBarTheme.controlRows
                 Row {
                     required property var modelData
-                    x: DialogTheme.textLeftMargin
+                    x: controlsPanel.border
                     height: DialogTheme.rowHeight
                     spacing: controlsPanel.gap
                     Text {
