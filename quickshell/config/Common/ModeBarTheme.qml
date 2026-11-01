@@ -81,6 +81,22 @@ Singleton {
             {text: "resizing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
+        // controls ($mod+c, kwi3): a letter steps up; held Alt is the
+        // synthetic "controls-reverse" face (Bar.qml), stepping down.
+        "controls": [
+            {text: "volume", key: "v"},
+            {text: "brightness", key: "b"},
+            {text: "rotation", key: "r"},
+            {text: "alt-to-reverse", key: "⎇"},
+            {text: "quit", key: "q"}
+        ],
+        "controls-reverse": [
+            {text: "volume-", key: "v"},
+            {text: "brightness-", key: "b"},
+            {text: "rotation-", key: "r"},
+            {text: "reversing", key: "⎇"},
+            {text: "quit", key: "q"}
+        ],
         "system": [
             {text: "lock", key: "l"},
             {text: "exit", key: "e"},
@@ -119,6 +135,8 @@ Singleton {
         if (mode === "nav") return "nav"
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic
+        if (mode === "controls") return "controls"
+        if (mode === "controls-reverse") return "controls-reverse" // synthetic
         // The system surface reaches this function under TWO names, and both
         // have to keep working:
         //   "system"  — the daemon's layer name, published on the state socket
@@ -156,6 +174,7 @@ Singleton {
     function displayName(mode) {
         if (mode === "nav-move") return "nav MOVE"
         if (mode === "nav-resize") return "nav RESIZE"
+        if (mode === "controls-reverse") return "controls REVERSE"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }

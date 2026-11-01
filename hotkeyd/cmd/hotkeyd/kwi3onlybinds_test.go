@@ -177,7 +177,8 @@ func TestKwi3OnlyBinds_OwnershipFlipsWithSession(t *testing.T) {
 }
 
 // TestKwi3OnlyBinds_Chords is a small named-table guard: exactly two chords
-// today, $mod+Shift+q -> kill and $mod+Shift+c -> kwi3-restart (kwi3-tusy.1).
+// today, $mod+Shift+q -> kill, $mod+Shift+c -> kwi3-restart (kwi3-tusy.1)
+// and $mod+c -> the controls layer.
 // A future addition to Kwi3OnlyBinds should
 // make this test fail by name (forcing a deliberate update) rather than
 // silently pass a bigger table.
@@ -187,7 +188,7 @@ func TestKwi3OnlyBinds_Chords(t *testing.T) {
 		got = append(got, b.Chord)
 	}
 	sort.Strings(got)
-	want := []string{"$mod+Shift+c", "$mod+Shift+q"}
+	want := []string{"$mod+Shift+c", "$mod+Shift+q", "$mod+c"}
 	if len(got) != len(want) {
 		t.Fatalf("Kwi3OnlyBinds chords = %v, want %v", got, want)
 	}

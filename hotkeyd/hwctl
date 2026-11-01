@@ -1,0 +1,54 @@
+#!/bin/sh
+# hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
+# layer ($mod+c on kwi3: a letter steps up, held Alt steps down).
+#
+#   volume      default sink, 5 %, 0..100
+#   brightness  every /sys/class/backlight device, 5 % of max, never off
+#               (needs the video group)
+#   rotation    the first enabled KWin output, + clockwise, - counter
+#               (kscreen-doctor; $WAYLAND_DISPLAY must be the session's)
+
+control=$1 dir=$2
+case "$dir" in
++ | -) ;;
+*)
+	echo "usage: hwctl volume|brightness|rotation +|-" >&2
+	exit 2
+	;;
+esac
+
+case "$control" in
+volume)
+	cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -n 1 | tr -d %)
+	new=$((cur $dir 5))
+	[ "$new" -gt 100 ] && new=100
+	[ "$new" -lt 0 ] && new=0
+	pactl set-sink-volume @DEFAULT_SINK@ "$new%"
+	;;
+brightness)
+	for d in /sys/class/backlight/*; do
+		[ -w "$d/brightness" ] || continue
+		max=$(cat "$d/max_brightness")
+		step=$((max / 20))
+		new=$(($(cat "$d/brightness") $dir step))
+		[ "$new" -gt "$max" ] && new=$max
+		[ "$new" -lt "$step" ] && new=$step
+		echo "$new" >"$d/brightness"
+	done
+	;;
+rotation)
+	# kscreen-doctor -j: rotation 1 none, 2 left, 4 inverted, 8 right
+	set -- $(kscreen-doctor -j | jq -r '[.outputs[] | select(.enabled)][0] | "\(.name) \(.rotation)"')
+	out=$1 rot=$2
+	if [ "$dir" = + ]; then
+		case "$rot" in 1) to=right ;; 8) to=inverted ;; 4) to=left ;; *) to=none ;; esac
+	else
+		case "$rot" in 1) to=left ;; 2) to=inverted ;; 4) to=right ;; *) to=none ;; esac
+	fi
+	kscreen-doctor "output.$out.rotation.$to" >/dev/null
+	;;
+*)
+	echo "usage: hwctl volume|brightness|rotation +|-" >&2
+	exit 2
+	;;
+esac

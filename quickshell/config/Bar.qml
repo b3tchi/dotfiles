@@ -1393,7 +1393,9 @@ PanelWindow {
             parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                       leftMargin: root.leftPad }
-            mode: root.inNavMode ? root.navLayerSticky : root.currentMode
+            mode: root.inNavMode ? root.navLayerSticky
+                : root.currentMode === "controls" && root.daemonMod === "reverse" ? "controls-reverse"
+                : root.currentMode
             fontSize: root.fontSize
         }
 

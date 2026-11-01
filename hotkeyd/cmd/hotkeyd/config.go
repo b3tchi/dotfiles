@@ -156,6 +156,18 @@ func navBinds(kind string) []bind.Bind {
 	return out
 }
 
+// controlsBinds is the controls layer's table: one hwctl step per letter,
+// dir "+" or "-".
+func controlsBinds(dir string) []bind.Bind {
+	var out []bind.Bind
+	for _, c := range []struct{ key, control string }{
+		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
+	} {
+		out = append(out, bind.Bind{Chord: c.key, Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir)})
+	}
+	return out
+}
+
 // resizeLayerBinds is binds.py's _resize_layer_binds(): the standalone
 // resize mode's table. NOT navBinds("resize") — see binds.py's comment on
 // why the coarse/fine (5px letters / 10px arrows) split is carried
@@ -245,6 +257,17 @@ var Layers = map[string]bind.Layer{
 		},
 		ExitKeys: []string{"q", "Escape", "Return"},
 		OneShot:  true,
+	},
+
+	// Phone controls (kwi3 only, entered by $mod+c): a letter steps one
+	// control up, held Alt steps it down; persistent like nav, left with
+	// q / Escape / Return. hwctl does the work.
+	"controls": {
+		Binds: controlsBinds("+"),
+		Mods: map[string]bind.Mod{
+			"reverse": {Modifier: "Mod1", Binds: controlsBinds("-")},
+		},
+		ExitKeys: []string{"q", "Escape", "Return"},
 	},
 
 	// was quickshell/qs-keymon.py + four `nop` grabs in i3 (dotfiles-hwds.40).
@@ -561,4 +584,7 @@ func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind
 var Kwi3OnlyBinds = []bind.Bind{
 	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
 	{Chord: "$mod+Shift+c", Actions: runAction("$HOME/.local/bin/kwi3-restart")},
+	// the controls layer (volume, brightness, rotation): a kwi3 session's
+	// own, as hwctl's rotation is KWin's kscreen-doctor
+	{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}},
 }
