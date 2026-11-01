@@ -41,7 +41,14 @@ kwi3.set({
     // THE MODULE: Jan's session font's real character cell in pixels,
     // measured — not the placeholder in examples/config.js. Every tiled
     // window, split and gap is a whole number of this cell.
-    module: [8, 21],
+    //
+    // On KWin (the phone; `workspace` is KWin's scripting global, absent
+    // from the X11 host) the row is 20: the phone screen runs at scale 1.5,
+    // where 8x20 is exactly 12x30 device pixels. A cell that is not a whole
+    // number of device pixels (8x21 at 1.6) makes foot round its own cell
+    // up and drift a fraction of a pixel per row off this grid; the
+    // phone's foot.ini pins line-height=20px to match.
+    module: typeof workspace !== 'undefined' ? [8, 20] : [8, 21],
 
     // The focus ring: thickness 2px, corner radius 4px, colour matching
     // qs-focus-border.py's BC (~/.dotfiles/quickshell/qs-focus-border.py:
