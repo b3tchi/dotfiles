@@ -1711,13 +1711,27 @@ PanelWindow {
 
     // The controls panel: while the controls layer is up, a list like the
     // $mod+Tab switcher's - one control per row, its key highlighted in the
-    // word, its current value on the right. Display only: hotkeyd owns the
-    // keys, so the surface takes no focus and no clicks.
+    // word, its current value beside it. Laid out as a river: the words
+    // right-aligned and the values left-aligned on either side of one
+    // gutter. Display only: hotkeyd owns the keys, so the surface takes no
+    // focus and no clicks.
     PanelWindow {
         id: controlsPanel
+        // column widths: the longest word, and the longest value a control
+        // can show ("inverted"), so the gutter does not move as values change
+        readonly property int labelW: {
+            var rows = ModeBarTheme.controlRows || [], w = 0
+            for (var i = 0; i < rows.length; i++)
+                w = Math.max(w, ctlLabelFm.advanceWidth(rows[i].text))
+            return Math.ceil(w)
+        }
+        readonly property int valueW: Math.ceil(ctlValueFm.advanceWidth("inverted"))
+        readonly property int gap: DialogTheme.textLeftMargin
+        FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
+        FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
         screen: root.screen
         visible: root.currentMode === "controls"
-        implicitWidth: Math.min(DialogTheme.width, (screen ? screen.width : DialogTheme.width) - 2 * DialogTheme.pad)
+        implicitWidth: labelW + gap + valueW + 2 * DialogTheme.textLeftMargin
         implicitHeight: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + DialogTheme.pad
         aboveWindows: true
         exclusiveZone: 0
@@ -1728,13 +1742,15 @@ PanelWindow {
             anchors { fill: parent; topMargin: DialogTheme.pad / 2 }
             Repeater {
                 model: ModeBarTheme.controlRows
-                Item {
+                Row {
                     required property var modelData
-                    width: parent.width
+                    x: DialogTheme.textLeftMargin
                     height: DialogTheme.rowHeight
+                    spacing: controlsPanel.gap
                     Text {
-                        anchors { verticalCenter: parent.verticalCenter; left: parent.left
-                                  leftMargin: DialogTheme.textLeftMargin }
+                        width: controlsPanel.labelW
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignRight
                         // the key is the highlighted letter of the word, as in the mode strip
                         text: {
                             var t = modelData.text, i = t.indexOf(modelData.key)
@@ -1748,10 +1764,11 @@ PanelWindow {
                         renderType: Text.NativeRendering
                     }
                     Text {
-                        anchors { verticalCenter: parent.verticalCenter; right: parent.right
-                                  rightMargin: DialogTheme.textLeftMargin }
+                        width: controlsPanel.valueW
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignLeft
                         text: modelData.value
-                        color: DialogTheme.accent
+                        color: DialogTheme.fg
                         font.family: DialogTheme.font
                         font.pixelSize: DialogTheme.fontSize
                         font.bold: true
