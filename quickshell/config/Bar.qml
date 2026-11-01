@@ -1713,9 +1713,12 @@ PanelWindow {
     // $mod+Tab switcher's - one control per row, its key highlighted in the
     // word, its current value beside it. Laid out as a river: the words
     // right-aligned and the values left-aligned on either side of one
-    // gutter. Display only: hotkeyd owns the keys, so the surface takes no
-    // focus and no clicks.
-    PanelWindow {
+    // gutter. Display only: hotkeyd owns the keys, so the window takes no
+    // focus. A plain top-level window titled qs-controls, like the
+    // switcher's qs-switcher: kwi3's config.js floats it and centres it on
+    // the tile grid, and on kwi3 its size is whole cells, so it sits on the
+    // grid like every other dialog.
+    Window {
         id: controlsPanel
         // column widths: the longest word, and the longest value a control
         // can show ("inverted"), so the gutter does not move as values change
@@ -1727,21 +1730,22 @@ PanelWindow {
         }
         readonly property int valueW: Math.ceil(ctlValueFm.advanceWidth("inverted"))
         readonly property int gap: DialogTheme.textLeftMargin
-        // the space around the list, every side
+        // the space around the list: two cells at the sides, one row above
+        // and below on kwi3
         readonly property int border: 2 * DialogTheme.textLeftMargin
+        readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
+        readonly property int contentW: labelW + gap + valueW + 2 * border
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
-        screen: root.screen
+        transientParent: null
         visible: root.currentMode === "controls"
-        implicitWidth: labelW + gap + valueW + 2 * border
-        implicitHeight: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + 2 * border
-        aboveWindows: true
-        exclusiveZone: 0
-        focusable: false
-        mask: Region {}
+        title: "qs-controls"
+        flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
+        width: Kwi3Grid.active ? Math.ceil(contentW / Kwi3Grid.moduleW) * Kwi3Grid.moduleW : contentW
+        height: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + 2 * borderV
         color: DialogTheme.bodyBg
         Column {
-            anchors { fill: parent; topMargin: controlsPanel.border }
+            anchors { fill: parent; topMargin: controlsPanel.borderV }
             Repeater {
                 model: ModeBarTheme.controlRows
                 Row {

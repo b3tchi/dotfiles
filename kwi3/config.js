@@ -128,6 +128,15 @@ kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher|clip|notif)$/ }, w 
     w.focus();
 });
 
+// The controls panel (quickshell Bar.qml, hotkeyd's controls layer): placed
+// like the runners, but never focused - it only shows values, hotkeyd owns
+// the keys, and focus must stay on the window the user was in.
+kwi3.onWindowAdded({ title: /^qs-controls$/ }, w => {
+    w.float();
+    w.noFrame();
+    w.moveTo(kwi3.grid.center(w));
+});
+
 // =====================================================================
 // kwi3-55l.9 (discovered auditing kwi3-55l.2): the rest of i3/config.common's
 // `for_window [...] floating enable` rules — i3/config.common:316-342, every
