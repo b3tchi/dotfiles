@@ -1048,10 +1048,14 @@ PanelWindow {
         id: ctlProc
         command: [Quickshell.env("HOME") + "/.local/bin/hwctl", "show"]
         stdout: SplitParser {
+            // one line of KEY=VALUE pairs
             onRead: data => {
-                var f = data.trim().split(" ")
-                if (f.length === 3)
-                    ModeBarTheme.controlValues = {volume: f[0], brightness: f[1], rotation: f[2]}
+                var v = {}, f = data.trim().split(" ")
+                for (var i = 0; i < f.length; i++) {
+                    var eq = f[i].indexOf("=")
+                    if (eq > 0) v[f[i].slice(0, eq)] = f[i].slice(eq + 1)
+                }
+                ModeBarTheme.controlValues = v
             }
         }
     }

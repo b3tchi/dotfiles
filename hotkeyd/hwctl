@@ -1,13 +1,34 @@
 #!/bin/sh
 # hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
 # layer ($mod+c on kwi3: a letter steps up, held Alt steps down).
-# hwctl show : "VOLUME% BRIGHTNESS% ROTATION" for the bar's controls hints.
+# hwctl show : one line of KEY=VALUE pairs, for the bar's controls panel.
 #
 #   volume      default sink, 5 %, 0..100
 #   brightness  every /sys/class/backlight device, 5 % of max, never off
 #               (needs the video group)
 #   rotation    the first enabled KWin output, + clockwise, - counter
 #               (kscreen-doctor; $WAYLAND_DISPLAY must be the session's)
+#
+# Toggles (+ and - both flip them):
+#   autorotate  ~/.config/spacewar/autorotate, which the phone's
+#               spacewar-autorotate watches (nothing-pmos controls/)
+#   wifi, bluetooth, nfc
+#               rfkill soft block (the seat's /dev/rfkill ACL)
+#   gps         qmi-gnss.socket, geoclue's NMEA source (a polkit rule in
+#               nothing-pmos controls/ allows start/stop); "in-use" while a
+#               client holds a GNSS session
+
+AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
+USAGE="usage: hwctl volume|brightness|rotation|autorotate|wifi|bluetooth|nfc|gps +|- | hwctl show"
+
+# rfkill TYPE -> on|off|-
+radio() {
+	case $(rfkill -rn -o SOFT,HARD list "$1" 2>/dev/null | head -n 1) in
+	"unblocked unblocked") echo on ;;
+	"") echo - ;;
+	*) echo off ;;
+	esac
+}
 
 control=$1 dir=$2
 if [ "$control" = show ]; then
@@ -20,13 +41,20 @@ if [ "$control" = show ]; then
 	done
 	rot=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0].rotation' 2>/dev/null)
 	case "$rot" in 1) rot=normal ;; 2) rot=left ;; 4) rot=inverted ;; 8) rot=right ;; *) rot=- ;; esac
-	echo "${vol:--} ${bri:--} $rot"
+	if [ -e "$AUTOROTATE" ]; then auto=on; else auto=off; fi
+	gps=off
+	if systemctl is-active -q qmi-gnss.socket 2>/dev/null; then
+		gps=on
+		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
+	fi
+	echo "volume=${vol:--} brightness=${bri:--} rotation=$rot autorotate=$auto" \
+		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps"
 	exit 0
 fi
 case "$dir" in
 + | -) ;;
 *)
-	echo "usage: hwctl volume|brightness|rotation +|- | hwctl show" >&2
+	echo "$USAGE" >&2
 	exit 2
 	;;
 esac
@@ -61,8 +89,25 @@ rotation)
 	fi
 	kscreen-doctor "output.$out.rotation.$to" >/dev/null
 	;;
+autorotate)
+	if [ -e "$AUTOROTATE" ]; then
+		rm -f "$AUTOROTATE"
+	else
+		mkdir -p "${AUTOROTATE%/*}" && : >"$AUTOROTATE"
+	fi
+	;;
+wifi) rfkill toggle wlan ;;
+bluetooth) rfkill toggle bluetooth ;;
+nfc) rfkill toggle nfc ;;
+gps)
+	if systemctl is-active -q qmi-gnss.socket; then
+		systemctl --no-ask-password stop qmi-gnss.socket
+	else
+		systemctl --no-ask-password start qmi-gnss.socket
+	fi
+	;;
 *)
-	echo "usage: hwctl volume|brightness|rotation +|- | hwctl show" >&2
+	echo "$USAGE" >&2
 	exit 2
 	;;
 esac

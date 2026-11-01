@@ -22,11 +22,16 @@ Singleton {
 
     // The controls panel's rows: the word, its key (hotkeyd's controls
     // layer) and the current value, set by Bar.qml from `hwctl show`.
-    property var controlValues: ({volume: "", brightness: "", rotation: ""})
+    property var controlValues: ({})
     readonly property var controlRows: [
-        {text: "volume", key: "v", value: controlValues.volume},
-        {text: "brightness", key: "b", value: controlValues.brightness},
-        {text: "rotation", key: "r", value: controlValues.rotation}
+        {text: "volume", key: "v", value: controlValues.volume || ""},
+        {text: "brightness", key: "b", value: controlValues.brightness || ""},
+        {text: "rotation", key: "r", value: controlValues.rotation || ""},
+        {text: "auto-rotate", key: "a", value: controlValues.autorotate || ""},
+        {text: "wifi", key: "w", value: controlValues.wifi || ""},
+        {text: "bluetooth", key: "t", value: controlValues.bluetooth || ""},
+        {text: "nfc", key: "n", value: controlValues.nfc || ""},
+        {text: "gps", key: "g", value: controlValues.gps || ""}
     ]
 
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.

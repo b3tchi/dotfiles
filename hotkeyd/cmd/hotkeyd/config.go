@@ -162,6 +162,9 @@ func controlsBinds(dir string) []bind.Bind {
 	var out []bind.Bind
 	for _, c := range []struct{ key, control string }{
 		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
+		// toggles: + and - both flip them
+		{"a", "autorotate"}, {"w", "wifi"}, {"t", "bluetooth"},
+		{"n", "nfc"}, {"g", "gps"},
 	} {
 		out = append(out, bind.Bind{Chord: c.key, Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir)})
 	}
@@ -260,8 +263,9 @@ var Layers = map[string]bind.Layer{
 	},
 
 	// Phone controls (kwi3 only, entered by $mod+c): a letter steps one
-	// control up, held Alt steps it down; persistent like nav, left with
-	// q / Escape / Return. hwctl does the work.
+	// control up, held Alt steps it down, or flips a toggle (auto-rotate,
+	// radios, GPS); persistent like nav, left with q / Escape / Return.
+	// hwctl does the work.
 	"controls": {
 		Binds: controlsBinds("+"),
 		Mods: map[string]bind.Mod{
@@ -584,7 +588,7 @@ func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind
 var Kwi3OnlyBinds = []bind.Bind{
 	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
 	{Chord: "$mod+Shift+c", Actions: runAction("$HOME/.local/bin/kwi3-restart")},
-	// the controls layer (volume, brightness, rotation): a kwi3 session's
+	// the controls layer (volume, brightness, rotation, radios, GPS): a kwi3 session's
 	// own, as hwctl's rotation is KWin's kscreen-doctor
 	{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}},
 }

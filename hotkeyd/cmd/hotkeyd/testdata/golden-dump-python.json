@@ -588,6 +588,46 @@
           "chord": "r",
           "device": "",
           "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl autorotate +"
+          ],
+          "chord": "a",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl wifi +"
+          ],
+          "chord": "w",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl bluetooth +"
+          ],
+          "chord": "t",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl nfc +"
+          ],
+          "chord": "n",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl gps +"
+          ],
+          "chord": "g",
+          "device": "",
+          "on_release": false
         }
       ],
       "exit_keys": [
@@ -620,6 +660,46 @@
                 "run:$HOME/.local/bin/hwctl rotation -"
               ],
               "chord": "r",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl autorotate -"
+              ],
+              "chord": "a",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl wifi -"
+              ],
+              "chord": "w",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl bluetooth -"
+              ],
+              "chord": "t",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl nfc -"
+              ],
+              "chord": "n",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl gps -"
+              ],
+              "chord": "g",
               "device": "",
               "on_release": false
             }
