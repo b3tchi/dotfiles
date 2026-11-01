@@ -1,6 +1,7 @@
 #!/bin/sh
 # hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
 # layer ($mod+c on kwi3: a letter steps up, held Alt steps down).
+# hwctl show : "VOLUME% BRIGHTNESS% ROTATION" for the bar's controls hints.
 #
 #   volume      default sink, 5 %, 0..100
 #   brightness  every /sys/class/backlight device, 5 % of max, never off
@@ -9,10 +10,23 @@
 #               (kscreen-doctor; $WAYLAND_DISPLAY must be the session's)
 
 control=$1 dir=$2
+if [ "$control" = show ]; then
+	vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]*%' | head -n 1)
+	bri=
+	for d in /sys/class/backlight/*; do
+		[ -r "$d/brightness" ] || continue
+		bri="$(($(cat "$d/brightness") * 100 / $(cat "$d/max_brightness")))%"
+		break
+	done
+	rot=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0].rotation' 2>/dev/null)
+	case "$rot" in 1) rot=normal ;; 2) rot=left ;; 4) rot=inverted ;; 8) rot=right ;; *) rot=- ;; esac
+	echo "${vol:--} ${bri:--} $rot"
+	exit 0
+fi
 case "$dir" in
 + | -) ;;
 *)
-	echo "usage: hwctl volume|brightness|rotation +|-" >&2
+	echo "usage: hwctl volume|brightness|rotation +|- | hwctl show" >&2
 	exit 2
 	;;
 esac
@@ -48,7 +62,7 @@ rotation)
 	kscreen-doctor "output.$out.rotation.$to" >/dev/null
 	;;
 *)
-	echo "usage: hwctl volume|brightness|rotation +|-" >&2
+	echo "usage: hwctl volume|brightness|rotation +|- | hwctl show" >&2
 	exit 2
 	;;
 esac

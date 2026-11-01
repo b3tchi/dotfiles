@@ -207,6 +207,15 @@ ShellRoot {
       ModeBarTheme.displayName("nav-resize")
     ]))
 
+    // ---- controls: each word carries its live value; pill says + / - ----
+    ModeBarTheme.controlValues = {volume: "50%", brightness: "40%", rotation: "right"}
+    emit("hints-controls", j(ModeBarTheme.hintsFor("controls")))
+    emit("hints-controls-reverse", j(ModeBarTheme.hintsFor("controls-reverse")))
+    emit("controls-display-names", JSON.stringify([
+      ModeBarTheme.displayName("controls"),
+      ModeBarTheme.displayName("controls-reverse")
+    ]))
+
     // ---- empty-string mode -> fallback row with empty label ----
     emit("empty-mode-fallback", j(ModeBarTheme.hintsFor("")))
 
@@ -311,6 +320,13 @@ assert_case "hints-nav-resize" \
 assert_case "nav-resolves" '["nav","nav-move","nav-resize"]'
 # the pill is the held-Shift tell: the two labels MUST NOT be equal.
 assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
+
+scenario "controls — live values in the words, + / - pill by held Alt"
+assert_case "hints-controls" \
+  '[{"text":"volume 50%","key":"v"},{"text":"brightness 40%","key":"b"},{"text":"rotation right","key":"r"},{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
+assert_case "hints-controls-reverse" \
+  '[{"text":"volume 50%","key":"v"},{"text":"brightness 40%","key":"b"},{"text":"rotation right","key":"r"},{"text":"quit","key":"q"}]'
+assert_case "controls-display-names" '["controls +","controls -"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,

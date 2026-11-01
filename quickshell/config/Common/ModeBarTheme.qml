@@ -20,6 +20,9 @@ Singleton {
     readonly property string muted: "#707880"       // reserved (bar-muted tone)
     readonly property string font: "Iosevka Nerd Font"
 
+    // Current values for the controls hints, set by Bar.qml (`hwctl show`).
+    property var controlValues: ({volume: "", brightness: "", rotation: ""})
+
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.
     //     `text` is the full hint word; `key` is the trigger. ModeBar renders
     //     the first occurrence of `key` inside `text` in `highlight` (i3's own
@@ -82,19 +85,20 @@ Singleton {
             {text: "quit", key: "q"}
         ],
         // controls ($mod+c, kwi3): a letter steps up; held Alt is the
-        // synthetic "controls-reverse" face (Bar.qml), stepping down.
+        // synthetic "controls-reverse" face (Bar.qml), stepping down. Each
+        // word carries its control's current value (controlValues, polled
+        // by Bar.qml while the layer is up); the pill says + or -.
         "controls": [
-            {text: "volume", key: "v"},
-            {text: "brightness", key: "b"},
-            {text: "rotation", key: "r"},
+            {text: "volume " + theme.controlValues.volume, key: "v"},
+            {text: "brightness " + theme.controlValues.brightness, key: "b"},
+            {text: "rotation " + theme.controlValues.rotation, key: "r"},
             {text: "alt-to-reverse", key: "⎇"},
             {text: "quit", key: "q"}
         ],
         "controls-reverse": [
-            {text: "volume-", key: "v"},
-            {text: "brightness-", key: "b"},
-            {text: "rotation-", key: "r"},
-            {text: "reversing", key: "⎇"},
+            {text: "volume " + theme.controlValues.volume, key: "v"},
+            {text: "brightness " + theme.controlValues.brightness, key: "b"},
+            {text: "rotation " + theme.controlValues.rotation, key: "r"},
             {text: "quit", key: "q"}
         ],
         "system": [
@@ -174,7 +178,8 @@ Singleton {
     function displayName(mode) {
         if (mode === "nav-move") return "nav MOVE"
         if (mode === "nav-resize") return "nav RESIZE"
-        if (mode === "controls-reverse") return "controls REVERSE"
+        if (mode === "controls") return "controls +"
+        if (mode === "controls-reverse") return "controls -"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }

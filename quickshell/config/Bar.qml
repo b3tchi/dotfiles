@@ -1041,6 +1041,25 @@ PanelWindow {
     Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
     Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
 
+    // The controls layer's live values (ModeBarTheme.controlValues): polled
+    // while the layer is up, so a step shows within half a second.
+    Process {
+        id: ctlProc
+        command: [Quickshell.env("HOME") + "/.local/bin/hwctl", "show"]
+        stdout: SplitParser {
+            onRead: data => {
+                var f = data.trim().split(" ")
+                if (f.length === 3)
+                    ModeBarTheme.controlValues = {volume: f[0], brightness: f[1], rotation: f[2]}
+            }
+        }
+    }
+    Timer {
+        interval: 500; repeat: true; triggeredOnStart: true
+        running: root.currentMode === "controls"
+        onTriggered: if (!ctlProc.running) ctlProc.running = true
+    }
+
     Process {
         id: batProc
         running: !root.daemonMode
