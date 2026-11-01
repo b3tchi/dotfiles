@@ -209,6 +209,7 @@ ShellRoot {
 
     // ---- controls: each word carries its live value; pill says + / - ----
     ModeBarTheme.controlValues = {volume: "50%", brightness: "40%", rotation: "right"}
+    emit("controls-rows", j(ModeBarTheme.controlRows))
     emit("hints-controls", j(ModeBarTheme.hintsFor("controls")))
     emit("hints-controls-reverse", j(ModeBarTheme.hintsFor("controls-reverse")))
     emit("controls-display-names", JSON.stringify([
@@ -321,11 +322,13 @@ assert_case "nav-resolves" '["nav","nav-move","nav-resize"]'
 # the pill is the held-Shift tell: the two labels MUST NOT be equal.
 assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
 
-scenario "controls — live values in the words, + / - pill by held Alt"
+scenario "controls — panel rows carry live values, strip keeps + / - pill"
+assert_case "controls-rows" \
+  '[{"text":"volume","key":"v","value":"50%"},{"text":"brightness","key":"b","value":"40%"},{"text":"rotation","key":"r","value":"right"}]'
 assert_case "hints-controls" \
-  '[{"text":"volume 50%","key":"v"},{"text":"brightness 40%","key":"b"},{"text":"rotation right","key":"r"},{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
+  '[{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
 assert_case "hints-controls-reverse" \
-  '[{"text":"volume 50%","key":"v"},{"text":"brightness 40%","key":"b"},{"text":"rotation right","key":"r"},{"text":"quit","key":"q"}]'
+  '[{"text":"reversing","key":"⎇"},{"text":"quit","key":"q"}]'
 assert_case "controls-display-names" '["controls +","controls -"]'
 
 # ============================================================================

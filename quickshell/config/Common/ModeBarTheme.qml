@@ -20,8 +20,14 @@ Singleton {
     readonly property string muted: "#707880"       // reserved (bar-muted tone)
     readonly property string font: "Iosevka Nerd Font"
 
-    // Current values for the controls hints, set by Bar.qml (`hwctl show`).
+    // The controls panel's rows: the word, its key (hotkeyd's controls
+    // layer) and the current value, set by Bar.qml from `hwctl show`.
     property var controlValues: ({volume: "", brightness: "", rotation: ""})
+    readonly property var controlRows: [
+        {text: "volume", key: "v", value: controlValues.volume},
+        {text: "brightness", key: "b", value: controlValues.brightness},
+        {text: "rotation", key: "r", value: controlValues.rotation}
+    ]
 
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.
     //     `text` is the full hint word; `key` is the trigger. ModeBar renders
@@ -84,21 +90,15 @@ Singleton {
             {text: "resizing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
-        // controls ($mod+c, kwi3): a letter steps up; held Alt is the
-        // synthetic "controls-reverse" face (Bar.qml), stepping down. Each
-        // word carries its control's current value (controlValues, polled
-        // by Bar.qml while the layer is up); the pill says + or -.
+        // controls ($mod+c, kwi3): the controls themselves are a list
+        // panel (controlRows, drawn by Bar.qml); the strip keeps only the
+        // pill (+ / -, by held Alt) and the layer's own keys.
         "controls": [
-            {text: "volume " + theme.controlValues.volume, key: "v"},
-            {text: "brightness " + theme.controlValues.brightness, key: "b"},
-            {text: "rotation " + theme.controlValues.rotation, key: "r"},
             {text: "alt-to-reverse", key: "⎇"},
             {text: "quit", key: "q"}
         ],
         "controls-reverse": [
-            {text: "volume " + theme.controlValues.volume, key: "v"},
-            {text: "brightness " + theme.controlValues.brightness, key: "b"},
-            {text: "rotation " + theme.controlValues.rotation, key: "r"},
+            {text: "reversing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
         "system": [

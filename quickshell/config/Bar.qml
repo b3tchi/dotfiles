@@ -1041,8 +1041,9 @@ PanelWindow {
     Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
     Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
 
-    // The controls layer's live values (ModeBarTheme.controlValues): polled
-    // while the layer is up, so a step shows within half a second.
+    // The controls layer's live values (ModeBarTheme.controlValues, shown
+    // by the controls panel below): polled while the layer is up, so a step
+    // shows within half a second.
     Process {
         id: ctlProc
         command: [Quickshell.env("HOME") + "/.local/bin/hwctl", "show"]
@@ -1704,6 +1705,59 @@ PanelWindow {
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                 anchors.bottomMargin: root.bottomBelow
                 height: root.bottomRowH
+            }
+        }
+    }
+
+    // The controls panel: while the controls layer is up, a list like the
+    // $mod+Tab switcher's - one control per row, its key highlighted in the
+    // word, its current value on the right. Display only: hotkeyd owns the
+    // keys, so the surface takes no focus and no clicks.
+    PanelWindow {
+        id: controlsPanel
+        screen: root.screen
+        visible: root.currentMode === "controls"
+        implicitWidth: Math.min(DialogTheme.width, (screen ? screen.width : DialogTheme.width) - 2 * DialogTheme.pad)
+        implicitHeight: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + DialogTheme.pad
+        aboveWindows: true
+        exclusiveZone: 0
+        focusable: false
+        mask: Region {}
+        color: DialogTheme.bodyBg
+        Column {
+            anchors { fill: parent; topMargin: DialogTheme.pad / 2 }
+            Repeater {
+                model: ModeBarTheme.controlRows
+                Item {
+                    required property var modelData
+                    width: parent.width
+                    height: DialogTheme.rowHeight
+                    Text {
+                        anchors { verticalCenter: parent.verticalCenter; left: parent.left
+                                  leftMargin: DialogTheme.textLeftMargin }
+                        // the key is the highlighted letter of the word, as in the mode strip
+                        text: {
+                            var t = modelData.text, i = t.indexOf(modelData.key)
+                            return i < 0 ? t : t.slice(0, i) + "<b><font color=\"" + ModeBarTheme.highlight
+                                + "\">" + modelData.key + "</font></b>" + t.slice(i + 1)
+                        }
+                        textFormat: Text.StyledText
+                        color: DialogTheme.fg
+                        font.family: DialogTheme.font
+                        font.pixelSize: DialogTheme.fontSize
+                        renderType: Text.NativeRendering
+                    }
+                    Text {
+                        anchors { verticalCenter: parent.verticalCenter; right: parent.right
+                                  rightMargin: DialogTheme.textLeftMargin }
+                        text: modelData.value
+                        color: DialogTheme.accent
+                        font.family: DialogTheme.font
+                        font.pixelSize: DialogTheme.fontSize
+                        font.bold: true
+                        renderType: Text.NativeRendering
+                    }
+                }
             }
         }
     }
