@@ -12,6 +12,10 @@ import (
 // session reached over RDP. It has no dotfiles, nushell or st, so a chord
 // that runs one of this machine's own programs is pointed at what the phone
 // does have. Chords that talk to kwi3 over $KWI3SOCK need nothing here.
+// kwinMod is $mod on a kwin session: Alt on the phone, as on the desktop
+// (the Clicks keyboard's Alt key is mapped to leftalt by the clicks dot).
+const kwinMod = "Mod1"
+
 func hostOverrides() map[string][]bind.Action {
 	over := map[string][]bind.Action{
 		"$mod+Return": runAction("foot"),

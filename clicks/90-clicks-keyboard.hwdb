@@ -1,3 +1,4 @@
 evdev:input:b0003v352Ep2306*
  KEYBOARD_KEY_c029d=leftctrl
  KEYBOARD_KEY_c01ae=leftalt
+ KEYBOARD_KEY_700e3=leftalt

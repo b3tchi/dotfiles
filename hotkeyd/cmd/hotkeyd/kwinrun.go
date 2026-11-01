@@ -7,7 +7,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"hotkeyd/internal/bind"
 	"hotkeyd/internal/kwi3rpc"
 	"hotkeyd/internal/kwin"
 	"hotkeyd/internal/layer"
@@ -30,7 +29,7 @@ func runKwin(grabPath string) int {
 		return 78
 	}
 	display := kwinDisplay()
-	mod := bind.DefaultMod
+	mod := kwinMod
 
 	lock, err := proc.AcquireLock(proc.LockPath(display))
 	if err != nil {

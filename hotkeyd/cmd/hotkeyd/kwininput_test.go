@@ -345,11 +345,14 @@ func TestKwinModSublayer(t *testing.T) {
 		l := r.states.layers()
 		return len(l) > 0 && l[len(l)-1] == "nav"
 	})
+	// resize is held Alt, held $mod on the phone build (host_phone.go)
+	maskOf := map[bind.Modifier]uint32{bind.Ctrl: modCtrl, bind.Mod1: modAlt, bind.Mod4: modSuper}
+	resize, _ := bind.CanonModifier(Layers["nav"].Mods["resize"].Modifier, "Mod4")
 	for _, c := range []struct {
 		mask uint32
 		mod  string
 		want string
-	}{{modCtrl, "move", "move left"}, {modAlt, "resize", "resize"}} {
+	}{{modCtrl, "move", "move left"}, {maskOf[resize], "resize", "resize"}} {
 		r.modsEv(c.mask)
 		waitFor(t, c.mod+" sublayer", func() bool {
 			all := r.states.all()
