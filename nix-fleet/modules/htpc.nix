@@ -30,6 +30,9 @@ let
     # sleep inhibitor (common.nix), so logind refuses until it finishes.
     "powermanagement.shutdowntime" = "30";
     "powermanagement.shutdownstate" = "3";
+    # Test: decode in software. With VAAPI every episode logged decoder resets
+    # and "OutputPicture - timeout waiting for buffer" before the hangs.
+    "videoplayer.usevaapi" = "false";
   };
   hiddenMenu = [ "TV" "Radio" "Games" "Pictures" "Fav" "Weather" "Music" "MusicVideo" ];
   userdata = "/home/kodi/.kodi/userdata";
@@ -128,6 +131,69 @@ let
     done
     echo "Kodi did not answer; scan stays pending"; exit 1
   '';
+
+  # Kodi 21.3 can hang mid-playback and then leak until the box thrashes to
+  # death (Oct 22 and Oct 31; same as LibreELEC forum thread 30435). These
+  # scripts notice the hang and restart Kodi long before that.
+  rpcLib = ''
+    pw=$(cat /var/lib/htpc/webserver-password)
+    rpc() {
+      ${pkgs.curl}/bin/curl -sf -m 10 -u "kodi:$pw" -H 'Content-Type: application/json' \
+        -d "$1" http://127.0.0.1:8080/jsonrpc
+    }
+    # Speed and time of the video player, or nothing when nothing plays.
+    playing() {
+      rpc '{"jsonrpc":"2.0","id":1,"method":"Player.GetActivePlayers"}' \
+        | ${pkgs.jq}/bin/jq -e '.result | map(select(.type == "video")) | length > 0' >/dev/null || return 1
+      rpc '{"jsonrpc":"2.0","id":1,"method":"Player.GetProperties","params":{"playerid":1,"properties":["speed","time"]}}' \
+        | ${pkgs.jq}/bin/jq -r '.result | "\(.speed) \(.time.hours):\(.time.minutes):\(.time.seconds).\(.time.milliseconds)"'
+    }
+    # kodi.bin lives in the kodi login session, not in kodi.service, so stopping
+    # the service alone could leave it running. End the session, then start fresh.
+    restart_kodi() {
+      echo "restarting Kodi: $1"
+      ${pkgs.systemd}/bin/systemctl stop kodi.service     # no Restart=always race
+      ${pkgs.systemd}/bin/loginctl terminate-user kodi || true
+      for _ in $(seq 15); do ${pkgs.procps}/bin/pgrep -u kodi -x kodi.bin >/dev/null || break; sleep 1; done
+      ${pkgs.systemd}/bin/loginctl kill-user kodi -s KILL 2>/dev/null || true
+      ${pkgs.systemd}/bin/systemctl start kodi.service
+    }
+  '';
+
+  # Every minute: Kodi must answer (GetInfoLabels waits for the GUI thread),
+  # and playback that isn't paused must move. Three misses in a row → restart.
+  watchdog = pkgs.writeShellScript "kodi-watchdog" ''
+    set -u
+    ${rpcLib}
+    ${pkgs.systemd}/bin/systemctl -q is-active kodi.service || exit 0
+    st=/run/kodi-watchdog; mkdir -p $st
+    fails=$(cat $st/fails 2>/dev/null || echo 0)
+    ok=1
+    rpc '{"jsonrpc":"2.0","id":1,"method":"XBMC.GetInfoLabels","params":{"labels":["System.Time"]}}' >/dev/null || ok=0
+    if [ $ok = 1 ] && p=$(playing); then
+      speed=''${p%% *}; pos=''${p#* }
+      [ "$speed" != 0 ] && [ "$pos" = "$(cat $st/pos 2>/dev/null)" ] && ok=0
+      echo "$pos" > $st/pos
+    else
+      rm -f $st/pos
+    fi
+    if [ $ok = 1 ]; then echo 0 > $st/fails; exit 0; fi
+    fails=$((fails + 1)); echo $fails > $st/fails
+    echo "Kodi check failed ($fails/3)"
+    [ $fails -ge 3 ] || exit 0
+    echo 0 > $st/fails; rm -f $st/pos
+    restart_kodi "no answer or playback stuck for 3 minutes"
+  '';
+
+  # A healthy idle box is asleep at 04:00 (30 min idle suspend), so this only
+  # catches a Kodi that stayed up all night. Skips while something plays.
+  nightly = pkgs.writeShellScript "kodi-nightly-restart" ''
+    set -u
+    ${rpcLib}
+    ${pkgs.systemd}/bin/systemctl -q is-active kodi.service || exit 0
+    if p=$(playing) && [ "''${p%% *}" != 0 ]; then echo "playing, skipped"; exit 0; fi
+    restart_kodi "nightly"
+  '';
 in {
   users.users.kodi = {
     isNormalUser = true;
@@ -162,7 +228,37 @@ in {
   # no ssh). PAMName moves kodi.bin into the user's session scope, so the cap
   # sits on the user slice, not kodi.service: over it the kernel kills Kodi
   # and the service restarts it.
-  systemd.slices."user-1000".sliceConfig = { MemoryMax = "5G"; MemorySwapMax = "512M"; };
+  # The cap alone didn't save the box on Oct 31: at the limit the kernel
+  # reclaims instead of killing, and the thrash took the whole system down.
+  # systemd-oomd kills the worst cgroup once the slice stalls on memory.
+  systemd.slices."user-1000".sliceConfig = {
+    MemoryMax = "5G"; MemorySwapMax = "512M";
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "50%";
+  };
+  systemd.oomd.enable = true;
+
+  systemd.services.kodi-watchdog = {
+    description = "Restart Kodi when it stops answering or playback is stuck";
+    serviceConfig = { Type = "oneshot"; ExecStart = watchdog; };
+  };
+  systemd.timers.kodi-watchdog = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "3min"; OnUnitActiveSec = "1min"; AccuracySec = "10s"; };
+  };
+  systemd.services.kodi-nightly-restart = {
+    description = "Restart Kodi if it was left running overnight";
+    serviceConfig = { Type = "oneshot"; ExecStart = nightly; };
+  };
+  systemd.timers.kodi-nightly-restart = {
+    wantedBy = [ "timers.target" ];
+    # Not Persistent: firing on wake-up would restart Kodi just as someone starts it.
+    timerConfig = { OnCalendar = "*-*-* 04:00:00"; };
+  };
+
+  # Last resort: if the whole system stops (PID 1 can't feed the watchdog),
+  # the SP5100 TCO chip reboots the box instead of leaving it dead for a day.
+  systemd.settings.Manager.RuntimeWatchdogSec = "2min";
   # tty1 belongs to Kodi: a getty there (e.g. started by an update) would push Kodi off.
   systemd.services."getty@tty1".enable = false;
   systemd.services."autovt@tty1".enable = false;
