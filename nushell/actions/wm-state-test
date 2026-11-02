@@ -405,7 +405,7 @@ if ($real_i3 | is-empty) or ($real_i3msg | is-empty) or ($xvfb | is-empty) or no
     for _ in 1..50 { if (^ss -xl | str contains $"@/tmp/.X11-unix/X($dnum) ") { $up = true; break }; sleep 100ms }
     let rsock = $"($tmp)/real-i3.sock"
     $"ipc-socket ($rsock)\nfont pango:monospace 8\n" | save -f $"($tmp)/real-i3.cfg"
-    let ipid = if $up { ^bash -c $"cd '($pwn_real)' || exit 1; env -i 'HOME=($home)' PATH=/usr/bin:/bin DISPLAY=:($dnum) '($real_i3)' -c '($tmp)/real-i3.cfg' > '($tmp)/real-i3.log' 2>&1 & echo $!" | str trim | into int } else { 0 }
+    let ipid = if $up { ^bash -c $"cd '($pwn_real)' || exit 1; env -i 'HOME=($home)' PATH=/usr/bin:/bin DISPLAY=:($dnum) '($real_i3)' --shmlog-size 0 -c '($tmp)/real-i3.cfg' > '($tmp)/real-i3.log' 2>&1 & echo $!" | str trim | into int } else { 0 }
     mut i3up = false
     if $ipid > 0 { for _ in 1..50 { if (do { ^$real_i3msg -s $rsock -t get_version } | complete | get exit_code) == 0 { $i3up = true; break }; sleep 100ms } }
     if (check "i3-exec-real-parser: a sandbox i3 came up on its own display and socket" $i3up $"display=:($dnum) xvfb=(open $"($tmp)/xvfb.log") i3=(if ($"($tmp)/real-i3.log" | path exists) { open $"($tmp)/real-i3.log" } else { "" })") { $passed += 1 } else { $failed += 1 }
