@@ -9,8 +9,7 @@ package main
 // deviation from this task's stated files_touched), so it needs its own
 // evidence, not just an inference from the fabricated-probe tests.
 //
-// Mirrors internal/x11/xvfb_integration_test.go's own safe-house pattern:
-// a PRIVATE display spun up by this test (never the ambient $DISPLAY --
+// Each live test runs on a PRIVATE display of its own (internal/xvfbtest) (never the ambient $DISPLAY --
 // see profile.md's ban on touching real hardware in a unit test), skipped
 // outright when Xvfb is not on PATH. Xvfb cannot be assumed present in
 // every CI sandbox, so these are t.Skip, not t.Fatal, on a missing binary
@@ -19,35 +18,22 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
+	"hotkeyd/internal/xvfbtest"
 )
 
-// requireXvfbBinary skips the test if Xvfb is not on PATH.
-func requireXvfbBinary(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("Xvfb"); err != nil {
-		t.Skipf("Xvfb not available on PATH: %s", err)
-	}
-}
-
-// pickPrivateXvfbDisplay returns a display number this test owns
-// exclusively -- a high, randomised number well outside any display a
-// real session on this machine would plausibly use (native :0, xrdp :10,
-// this repo's own Xvfb integration suites use 200-2200), so a concurrent
-// test run never collides with either a real session or another test's
-// Xvfb instance.
-func pickPrivateXvfbDisplay(t *testing.T) int {
+// pickDeadDisplay returns a display number nothing answers on, for the
+// dead-server case -- 6000-7999, outside the 200-2199 xvfbtest starts
+// servers on, so a concurrent run's Xvfb does not come up there.
+func pickDeadDisplay(t *testing.T) int {
 	t.Helper()
 	for attempt := 0; attempt < 50; attempt++ {
 		n := 6000 + rand.Intn(2000)
-		if !xTaken(n) {
+		if !xvfbtest.Answers(n) {
 			return n
 		}
 	}
@@ -55,45 +41,11 @@ func pickPrivateXvfbDisplay(t *testing.T) int {
 	return 0
 }
 
-// startPrivateXvfb launches a private, unauthenticated Xvfb on dispNum and
-// waits for its socket to appear, returning a cleanup func. Unauthenticated
-// (no -auth) is deliberate and safe here: this display is private to the
-// test (a random high number nothing else references) and torn down
-// immediately after, unlike a real session's :0/:10.
-func startPrivateXvfb(t *testing.T, dispNum int) (cleanup func()) {
-	t.Helper()
-	requireXvfbBinary(t)
-
-	sockPath := x11.SocketPath(dispNum)
-	// -noreset: without it Xvfb regenerates the moment its last client
-	// disconnects, and a probe's own open/close followed by the test's next
-	// x11.Open races that reset ("connection reset by peer", ~1 in 5 runs).
-	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24")
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting private Xvfb: %s", err)
-	}
-
-	if waitForXAccepting(dispNum, 5*time.Second) {
-		return func() {
-			stopXvfb(cmd, dispNum)
-			os.Remove(sockPath)
-		}
-	}
-	stopXvfb(cmd, dispNum)
-	t.Fatalf("private Xvfb did not create its socket in time: %s", stderr.String())
-	return nil
-}
-
 // TestProbeDisplay_Xvfb_LiveServerIsReachable proves probeDisplay's real
 // dial+auth+setup path (not the fabricated healthProbes.probeDisplay seam)
 // correctly reports a live, private Xvfb display as reachable.
 func TestProbeDisplay_Xvfb_LiveServerIsReachable(t *testing.T) {
-	n := pickPrivateXvfbDisplay(t)
-	cleanup := startPrivateXvfb(t, n)
-	defer cleanup()
-	disp := fmt.Sprintf(":%d", n)
+	disp := xvfbtest.Start(t).Display
 
 	why, unreachable := probeDisplay(disp)
 	if unreachable {
@@ -103,11 +55,10 @@ func TestProbeDisplay_Xvfb_LiveServerIsReachable(t *testing.T) {
 
 // TestProbeDisplay_DeadServer_ReportsUnreachable proves the real probe
 // correctly reports a display NOTHING is listening on as unreachable --
-// needs no Xvfb (no server at all is the point), so it is not gated on
-// requireXvfbBinary.
+// needs no Xvfb (no server at all is the point), so it never skips.
 func TestProbeDisplay_DeadServer_ReportsUnreachable(t *testing.T) {
 	// A display number this test does not start any server on.
-	n := pickPrivateXvfbDisplay(t)
+	n := pickDeadDisplay(t)
 	disp := fmt.Sprintf(":%d", n)
 
 	why, unreachable := probeDisplay(disp)
@@ -133,10 +84,7 @@ func TestProbeDisplay_DeadServer_ReportsUnreachable(t *testing.T) {
 // (grabbed comes back false against a keyboard this test is provably
 // holding).
 func TestProbeKeyboardGrab_Xvfb_FreeThenExternallyHeld(t *testing.T) {
-	n := pickPrivateXvfbDisplay(t)
-	cleanup := startPrivateXvfb(t, n)
-	defer cleanup()
-	disp := fmt.Sprintf(":%d", n)
+	disp := xvfbtest.Start(t).Display
 
 	why, grabbed := probeKeyboardGrab(disp)
 	if grabbed {
@@ -175,10 +123,7 @@ func TestProbeKeyboardGrab_Xvfb_FreeThenExternallyHeld(t *testing.T) {
 // lock file + real Xvfb, wired through defaultHealthProbes -- not a
 // fabricated healthProbes) reaching verdict 0.
 func TestRunHealth_Xvfb_OK_WithNoGrabHeld(t *testing.T) {
-	n := pickPrivateXvfbDisplay(t)
-	cleanup := startPrivateXvfb(t, n)
-	defer cleanup()
-	disp := fmt.Sprintf(":%d", n)
+	disp := xvfbtest.Start(t).Display
 
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
@@ -201,10 +146,7 @@ func TestRunHealth_Xvfb_OK_WithNoGrabHeld(t *testing.T) {
 // request), the single strongest piece of evidence that the
 // files_touched deviation actually does what it was added for.
 func TestRunHealth_Xvfb_KeyboardGrabbed(t *testing.T) {
-	n := pickPrivateXvfbDisplay(t)
-	cleanup := startPrivateXvfb(t, n)
-	defer cleanup()
-	disp := fmt.Sprintf(":%d", n)
+	disp := xvfbtest.Start(t).Display
 
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
@@ -227,20 +169,5 @@ func TestRunHealth_Xvfb_KeyboardGrabbed(t *testing.T) {
 	code, msg := runHealth(disp)
 	if code != HealthKeyboardGrabbed {
 		t.Fatalf("runHealth with an externally-held exclusive grab = %d, want %d (HealthKeyboardGrabbed): %s", code, HealthKeyboardGrabbed, msg)
-	}
-}
-
-// Same contract as internal/x11's TestStartXvfb_CleanupLeavesNoLock: the
-// rig stops its Xvfb so no /tmp/.X<n>-lock is stranded.
-func TestStartPrivateXvfb_CleanupLeavesNoLock(t *testing.T) {
-	dispNum := pickPrivateXvfbDisplay(t)
-	cleanup := startPrivateXvfb(t, dispNum)
-	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
-	if _, err := os.Stat(lock); err != nil {
-		t.Fatalf("Xvfb up but no lock at %s: %v", lock, err)
-	}
-	cleanup()
-	if _, err := os.Stat(lock); !os.IsNotExist(err) {
-		t.Fatalf("cleanup left %s behind (stat err: %v)", lock, err)
 	}
 }

@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand/v2"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -11,6 +9,7 @@ import (
 
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/x11"
+	"hotkeyd/internal/xvfbtest"
 )
 
 // ---------------------------------------------------------------------
@@ -618,9 +617,8 @@ func TestResolveMod_UsesAnyPropertyType(t *testing.T) {
 // ---------------------------------------------------------------------
 // Integration (Xvfb): real grab/regrab under an xmodmap remap, and $mod
 // resolution against a display with and without the i3wm.mod resource
-// line. Skips cleanly when Xvfb/xmodmap/xrdb/xdotool are absent. Uses an
-// unusual display-number range (6000-7999) since sibling tasks in this
-// epic also spin up Xvfb.
+// line. Skips cleanly when Xvfb/xmodmap/xrdb/xdotool are absent. Each test
+// runs on an Xvfb display of its own (internal/xvfbtest).
 // ---------------------------------------------------------------------
 
 func requireBinaryForIntegration(t *testing.T, name string) {
@@ -628,40 +626,6 @@ func requireBinaryForIntegration(t *testing.T, name string) {
 	if _, err := exec.LookPath(name); err != nil {
 		t.Skipf("%s not available on PATH: %v", name, err)
 	}
-}
-
-func pickFreeIntegrationDisplay(t *testing.T) int {
-	t.Helper()
-	for attempt := 0; attempt < 50; attempt++ {
-		n := 6000 + rand.IntN(2000)
-		if !xTaken(n) {
-			return n
-		}
-	}
-	t.Fatal("could not find a free display number")
-	return 0
-}
-
-func startIntegrationXvfb(t *testing.T, dispNum int) {
-	t.Helper()
-	requireBinaryForIntegration(t, "Xvfb")
-
-	sockPath := fmt.Sprintf("/tmp/.X11-unix/X%d", dispNum)
-	cmd := exec.Command("Xvfb", fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24") // -noreset: see startPrivateXvfb
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting Xvfb: %v", err)
-	}
-	t.Cleanup(func() {
-		stopXvfb(cmd, dispNum)
-		os.Remove(sockPath)
-	})
-
-	if waitForXAccepting(dispNum, 5*time.Second) {
-		return
-	}
-	t.Fatalf("Xvfb did not create its socket in time: %s", stderr.String())
 }
 
 // TestIntegration_GrabManager_RealGrabAndXmodmapRegrab_Xvfb drives a
@@ -675,9 +639,7 @@ func TestIntegration_GrabManager_RealGrabAndXmodmapRegrab_Xvfb(t *testing.T) {
 	requireBinaryForIntegration(t, "xmodmap")
 	requireBinaryForIntegration(t, "xdotool")
 
-	dispNum := pickFreeIntegrationDisplay(t)
-	startIntegrationXvfb(t, dispNum)
-	display := fmt.Sprintf(":%d", dispNum)
+	display := xvfbtest.Start(t).Display
 
 	conn, info, err := x11.Open(display)
 	if err != nil {
@@ -811,9 +773,7 @@ const genericEventCodeForTest = 35
 func TestIntegration_ResolveMod_Xvfb_WithoutResourceLine(t *testing.T) {
 	requireBinaryForIntegration(t, "Xvfb")
 
-	dispNum := pickFreeIntegrationDisplay(t)
-	startIntegrationXvfb(t, dispNum)
-	display := fmt.Sprintf(":%d", dispNum)
+	display := xvfbtest.Start(t).Display
 
 	conn, info, err := x11.Open(display)
 	if err != nil {
@@ -854,9 +814,7 @@ func TestIntegration_ResolveMod_Xvfb_WithResourceLine(t *testing.T) {
 	requireBinaryForIntegration(t, "Xvfb")
 	requireBinaryForIntegration(t, "python3")
 
-	dispNum := pickFreeIntegrationDisplay(t)
-	startIntegrationXvfb(t, dispNum)
-	display := fmt.Sprintf(":%d", dispNum)
+	display := xvfbtest.Start(t).Display
 
 	conn, info, err := x11.Open(display)
 	if err != nil {
