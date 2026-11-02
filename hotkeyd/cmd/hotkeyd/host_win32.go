@@ -18,9 +18,12 @@ import "hotkeyd/internal/bind"
 // bind.ReservedChords refuses it under Mod1 anyway.
 func hostOverrides() map[string][]bind.Action {
 	over := map[string][]bind.Action{
-		// Windows Terminal, a new window each time (a second $mod+Return is a
-		// second managed window, not a tab).
-		"$mod+Return": runAction("wt.exe -w new"),
+		// WezTerm, a new window each time (a second $mod+Return is a second
+		// managed window, not a tab): frameless, its cell kwi3's module
+		// (dotfiles wezterm/, kwi3-wv1u). termpath.go finds scoop's
+		// wezterm-gui.exe and falls back to Windows Terminal
+		// (`wt.exe -w new`) when there is no WezTerm.
+		"$mod+Return": runAction(wezGuiExe + " start"),
 
 		// $mod+s/$mod+b without their notify-send: the host spawns nothing,
 		// so the exec half could only fail (C15, adr0019).

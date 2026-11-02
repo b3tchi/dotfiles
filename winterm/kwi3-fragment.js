@@ -127,6 +127,26 @@ function fmt(x) {
     return String(Number(x.toPrecision(12)));
 }
 
+// The font and module config.js sets for kwi3.host "win32": {fontRaw,
+// family, px, mw, mh}. Throws an Error naming what is missing. Shared with
+// dotfiles wezterm/kwi3-cell.js (kwi3-wv1u), so both terminals read one
+// rule.
+function fontAndModule(settings, configPath) {
+    const fontRaw = settings.font;
+    if (typeof fontRaw !== 'string') throw new Error(configPath + ' sets no font for kwi3.host "win32"');
+    const parts = fontRaw.trim().split(/\s+/);
+    const px = Number(parts[parts.length - 1]);
+    if (parts.length < 2 || !/^[1-9][0-9]*$/.test(parts[parts.length - 1])) {
+        throw new Error('font "' + fontRaw + '" is not "<family> <px>"');
+    }
+    const family = parts.slice(0, -1).join(' ');
+    const mod = settings.module;
+    if (!Array.isArray(mod) || mod.length !== 2 || !mod.every(n => Number.isInteger(n) && n > 0)) {
+        throw new Error(configPath + ' sets no module [w, h] for kwi3.host "win32"');
+    }
+    return { fontRaw, family, px, mw: mod[0], mh: mod[1] };
+}
+
 function main() {
     const o = parseArgs(process.argv.slice(2));
     let settings;
@@ -135,19 +155,13 @@ function main() {
     } catch (e) {
         die(1, o.config + ': ' + (e && e.message ? e.message : e));
     }
-    const fontRaw = settings.font;
-    if (typeof fontRaw !== 'string') die(1, o.config + ' sets no font for kwi3.host "win32"');
-    const parts = fontRaw.trim().split(/\s+/);
-    const px = Number(parts[parts.length - 1]);
-    if (parts.length < 2 || !/^[1-9][0-9]*$/.test(parts[parts.length - 1])) {
-        die(1, 'font "' + fontRaw + '" is not "<family> <px>"');
+    let fm;
+    try {
+        fm = fontAndModule(settings, o.config);
+    } catch (e) {
+        die(1, e.message);
     }
-    const family = parts.slice(0, -1).join(' ');
-    const mod = settings.module;
-    if (!Array.isArray(mod) || mod.length !== 2 || !mod.every(n => Number.isInteger(n) && n > 0)) {
-        die(1, o.config + ' sets no module [w, h] for kwi3.host "win32"');
-    }
-    const [mw, mh] = mod;
+    const { fontRaw, family, px, mw, mh } = fm;
     const cellWidth = fmt(mw / px);
     const cellHeight = fmt(mh / px);
     // The renderer's own rounding (AtlasEngine: roundf(value * fontSizeInPx)).
@@ -178,6 +192,7 @@ function main() {
     process.stdout.write(JSON.stringify(frag, null, 4) + '\n');
 }
 
-// winmetrics/kwi3-titlebar.js runs config.js the same way (kwi3-9mcs).
-module.exports = { evaluate, resolveInclude };
+// winmetrics/kwi3-titlebar.js (kwi3-9mcs) and wezterm/kwi3-cell.js
+// (kwi3-wv1u) run config.js the same way.
+module.exports = { evaluate, resolveInclude, fontAndModule };
 if (require.main === module) main();

@@ -41,6 +41,38 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- --FONTS
 	-- config.wsl_domains = domains
 	config.default_domain = "WSL:arch"
+
+	-- kwi3 (i3kwin-win32) tiles this window (kwi3-wv1u). "RESIZE": no
+	-- caption drawn and WS_THICKFRAME kept - WezTerm makes it
+	-- WS_OVERLAPPEDWINDOW and folds the caption into the client area
+	-- (WM_NCCALCSIZE). "NONE" is a bare WS_POPUP, which the host types
+	-- `utility` and never tiles. The host still sees WS_CAPTION in the
+	-- style and draws its own titlebar above it until kwi3-i0fg.
+	config.window_decorations = "RESIZE"
+	-- kwi3 owns the window's size: a font zoom changes the cell, never the
+	-- window.
+	config.adjust_window_size_when_changing_font_size = false
+
+	-- Windows has IosevkaTerm Nerd Font (scoop nerd-fonts/IosevkaTerm-NF),
+	-- not the Iosevka Nerd Font Mono above, which WezTerm reports as a
+	-- configuration error and replaces with a fallback.
+	config.font = wezterm.font("IosevkaTerm Nerd Font")
+
+	-- Font and a cell of exactly kwi3's module, generated from kwi3's
+	-- config.js by wezterm/install-kwi3-cell.sh (dotfiles). Absent: the font
+	-- above and WezTerm's own cell.
+	for _, dir in ipairs({ wezterm.config_dir, wezterm.home_dir .. "/.config/wezterm" }) do
+		local path = dir .. "/kwi3-cell.lua"
+		local ok, cell = pcall(dofile, path)
+		if ok and type(cell) == "table" then
+			wezterm.add_to_config_reload_watch_list(path)
+			config.font = wezterm.font(cell.font_family)
+			config.font_size = cell.font_size
+			config.cell_width = cell.cell_width
+			config.line_height = cell.line_height
+			break
+		end
+	end
 end
 
 return config
