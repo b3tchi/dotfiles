@@ -19,6 +19,14 @@
 #       SPIF_SENDCHANGE: live in every window and kept in the registry
 #       (HKCU\Control Panel\Desktop\WindowMetrics). Machine-wide for this user.
 #
+#   ncm.ps1 check <border>,<caption>,<padded>,<fontLfHeight>
+#       The argument check `set` makes (ConvertTo-NcmValues, the ONE function
+#       both verbs call) and nothing else: prints the four values it would
+#       write and exits 0, or the usage and 2. Its branch calls no
+#       SystemParametersInfoW at all - not even the GET - so a test can prove
+#       `set`'s refusals here without any path to SPI_SETNONCLIENTMETRICS
+#       (kwi3-059f).
+#
 # NONCLIENTMETRICSW is 504 bytes with iPaddedBorderWidth (Vista+): cbSize 0,
 # iBorderWidth 4, iScrollWidth 8, iScrollHeight 12, iCaptionWidth 16,
 # iCaptionHeight 20, lfCaptionFont 24 (LOGFONTW, 92 bytes: lfHeight +0,
@@ -56,6 +64,16 @@ function Get-Ncm {
 }
 function I32($b, $o) { [BitConverter]::ToInt32($b, $o) }
 
+# The argument check of `set` and `check`: exactly four comma-separated
+# integers, else usage and exit 2. It never touches Windows.
+function ConvertTo-NcmValues([string]$list, [string]$verb) {
+    $values = @($list.Split(',') | Where-Object { $_ -match '^-?[0-9]+$' } | ForEach-Object { [int]$_ })
+    if ($values.Count -ne 4 -or $list.Split(',').Count -ne 4) {
+        [Console]::Error.WriteLine("usage: ncm.ps1 $verb <border>,<caption>,<padded>,<fontLfHeight>"); exit 2
+    }
+    return ,$values
+}
+
 switch ($verb) {
     'read' {
         $b = Get-Ncm
@@ -92,11 +110,14 @@ switch ($verb) {
         [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress -Depth 3))
         exit 0
     }
+    'check' {
+        # No Windows call on this path: never a metrics write (kwi3-059f).
+        $values = ConvertTo-NcmValues $list 'check'
+        [Console]::Out.WriteLine(($values -join ','))
+        exit 0
+    }
     'set' {
-        $values = @($list.Split(',') | Where-Object { $_ -match '^-?[0-9]+$' } | ForEach-Object { [int]$_ })
-        if ($values.Count -ne 4 -or $list.Split(',').Count -ne 4) {
-            [Console]::Error.WriteLine("usage: ncm.ps1 set <border>,<caption>,<padded>,<fontLfHeight>"); exit 2
-        }
+        $values = ConvertTo-NcmValues $list 'set'
         $b = Get-Ncm
         [BitConverter]::GetBytes([int]$values[0]).CopyTo($b, 4)
         [BitConverter]::GetBytes([int]$values[1]).CopyTo($b, 20)
@@ -108,5 +129,5 @@ switch ($verb) {
         }
         exit 0
     }
-    default { [Console]::Error.WriteLine("usage: ncm.ps1 read | set <border>,<caption>,<padded>,<fontLfHeight>"); exit 2 }
+    default { [Console]::Error.WriteLine("usage: ncm.ps1 read | set|check <border>,<caption>,<padded>,<fontLfHeight>"); exit 2 }
 }
