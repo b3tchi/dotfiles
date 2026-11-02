@@ -122,10 +122,15 @@ Windows build. What it does, from the code:
   (blocked: Win+D, show desktop)`, never as a passed key.
 - **The table** is `config.go` built with `-tags win32`, and
   `cmd/hotkeyd/host_win32.go` changes what differs on Windows:
-  - `$mod+Return` runs `wt.exe -w new`. Its font and a cell of exactly
-    kwi3's module (8x21, padding 0, no scrollbar) come from a WT fragment
-    that `winterm/install-kwi3-fragment.sh` writes from kwi3's config.js
-    (kwi3-hoex.47; re-run it after changing `font`/`module` there).
+  - `$mod+Return` runs `wezterm-gui.exe start`, a new frameless WezTerm
+    window (kwi3-wv1u). `cmd/hotkeyd/termpath.go` starts scoop's real GUI
+    exe - `%SCOOP%\apps\wezterm\current\wezterm-gui.exe`, else
+    `%USERPROFILE%\scoop\...` - then PATH, and with no WezTerm at all
+    falls back to `wt.exe -w new`, saying which once. WezTerm's font and a
+    cell of exactly kwi3's module come from `kwi3-cell.lua`, which
+    `wezterm/install-kwi3-cell.sh` writes from kwi3's config.js (re-run it
+    after changing `font`/`module` there); Windows Terminal's from the WT
+    fragment `winterm/install-kwi3-fragment.sh` writes (kwi3-hoex.47).
   - `$mod+d`, `$mod+p` (the project picker, kwi3-hoex.38) and the
     `switcher` layer run `kwi3-run.exe <verb>` (see below).
   - `$mod+1..8` (`Ctrl`/`Shift` to move) go straight to workspace RPC.
@@ -217,7 +222,8 @@ and the hook only on the input desktop. So key delivery over RDP is still
 - the Dvorak/US layout. Jan's session has both loaded, and the translator
   assumes US.
 
-Windows Terminal for `$mod+Return` is not installed yet (kwi3-hoex.16). Jan
+WezTerm for `$mod+Return` is installed (scoop, kwi3-wv1u) but not yet
+deployed with its `kwi3-cell.lua` or seen on Jan's session. Jan
 saw it work live on 2026-10-27: `Alt+d` opened the launcher on his session.
 That was not yet the kwi3-hoex.17 acceptance.
 

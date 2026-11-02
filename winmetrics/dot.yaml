@@ -1,0 +1,11 @@
+# Windows non-client metrics fitted to kwi3 (kwi3-9mcs): a captioned
+# window's titlebar + top frame is made exactly one module row of kwi3's
+# config.js (21 px at module 8x21), so kwi3's tiles keep their clients on
+# the grid. Nothing is linked: winmetrics/kwi3-titlebar.sh sets the metrics
+# with SystemParametersInfo (live, and kept in HKCU\Control Panel\Desktop\
+# WindowMetrics). Run it by hand from WSL once %APPDATA%\kwi3\config.js
+# exists, and again after a module change; --dry-run shows what it would do,
+# --restore puts Windows' defaults back. It reads config.js through
+# winterm/kwi3-fragment.js.
+depends:
+  - winterm
