@@ -108,7 +108,10 @@ Windows build. What it does, from the code:
   (blocked: Win+D, show desktop)`, never as a passed key.
 - **The table** is `config.go` built with `-tags win32`, and
   `cmd/hotkeyd/host_win32.go` changes what differs on Windows:
-  - `$mod+Return` runs `wt.exe -w new`.
+  - `$mod+Return` runs `wt.exe -w new`. Its font and a cell of exactly
+    kwi3's module (8x21, padding 0, no scrollbar) come from a WT fragment
+    that `winterm/install-kwi3-fragment.sh` writes from kwi3's config.js
+    (kwi3-hoex.47; re-run it after changing `font`/`module` there).
   - `$mod+d` and the `switcher` layer run `kwi3-run.exe <verb>` (see
     below).
   - `$mod+1..8` (`Ctrl`/`Shift` to move) go straight to workspace RPC.
