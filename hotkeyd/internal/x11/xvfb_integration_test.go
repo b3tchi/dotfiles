@@ -5,15 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand/v2"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"syscall"
 	"testing"
-	"time"
+
+	"hotkeyd/internal/xvfbtest"
 )
 
 // requireBinary skips the test if name is not on PATH.
@@ -24,107 +21,12 @@ func requireBinary(t *testing.T, name string) {
 	}
 }
 
-// pickFreeDisplay finds a display number with no existing Unix socket.
-func pickFreeDisplay(t *testing.T) int {
-	t.Helper()
-	for attempt := 0; attempt < 50; attempt++ {
-		n := 200 + rand.IntN(2000)
-		if !socketUp(SocketPath(n)) {
-			return n
-		}
-	}
-	t.Fatal("could not find a free display number")
-	return 0
-}
-
-// startXvfb launches Xvfb on the given display number with the given
-// extra arguments (e.g. "-auth", path) and waits for its socket to
-// appear.
-func startXvfb(t *testing.T, dispNum int, extraArgs ...string) (cleanup func()) {
-	t.Helper()
-	requireBinary(t, "Xvfb")
-
-	sockPath := SocketPath(dispNum)
-	args := append([]string{fmt.Sprintf(":%d", dispNum), "-nolisten", "tcp", "-noreset", "-screen", "0", "320x240x24"}, extraArgs...)
-	cmd := exec.Command("Xvfb", args...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting Xvfb: %v", err)
-	}
-
-	if !waitForSocket(sockPath, 5*time.Second) {
-		stopXvfb(cmd, dispNum)
-		t.Fatalf("Xvfb did not create its socket in time: %s", stderr.String())
-	}
-
-	return func() {
-		stopXvfb(cmd, dispNum)
-		os.Remove(sockPath)
-	}
-}
-
-// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
-// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
-// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
-// leave one per test.
-func stopXvfb(cmd *exec.Cmd, dispNum int) {
-	cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { cmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		cmd.Process.Kill()
-		<-done
-	}
-	removeOwnXLock(dispNum, cmd.Process.Pid)
-}
-
-// removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb
-// that lost the display to another server must not take that server's
-// lock with it.
-func removeOwnXLock(dispNum, pid int) {
-	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
-	if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
-		os.Remove(lock)
-	}
-}
-
-// socketUp reports whether an X server is reachable at path, either as a
-// file or in Linux's abstract namespace -- the same two places
-// dialUnixWithAbstractFallback tries. Under WSLg /tmp/.X11-unix is a
-// read-only mount, so Xvfb binds only the abstract socket and a file-only
-// check never sees it come up (or sees a taken display as free).
-func socketUp(path string) bool {
-	if _, err := os.Stat(path); err == nil {
-		return true
-	}
-	c, err := net.Dial("unix", "@"+path)
-	if err != nil {
-		return false
-	}
-	c.Close()
-	return true
-}
-
-func waitForSocket(path string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if socketUp(path) {
-			return true
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return false
-}
-
 // makeXauthCookie writes a fresh Xauthority file at a temp path containing
 // a MIT-MAGIC-COOKIE-1 entry for the given display number, using the real
 // `xauth` binary (mirrors poc015's rig discipline: Xvfb -auth requires the
 // cookie path to be genuinely exercised, gotcha 3). `xauth add` writes to
-// the file directly and needs no running server, so this can run before
-// Xvfb starts.
+// the file directly and needs no running server, so this runs before
+// Xvfb starts, once per display number xvfbtest.StartWith tries.
 func makeXauthCookie(t *testing.T, dispNum int) (path string) {
 	t.Helper()
 	requireBinary(t, "xauth")
@@ -161,9 +63,7 @@ func withXauthority(t *testing.T, path string) {
 }
 
 func TestOpen_Xvfb_Bare(t *testing.T) {
-	dispNum := pickFreeDisplay(t)
-	cleanup := startXvfb(t, dispNum)
-	defer cleanup()
+	dispNum := xvfbtest.Start(t).Num
 
 	// Bare Xvfb accepts unauthenticated connections (poc015 gotcha 3) --
 	// this is the "success without a cookie" half of the rig.
@@ -185,10 +85,11 @@ func TestOpen_Xvfb_Bare(t *testing.T) {
 }
 
 func TestOpen_Xvfb_WithAuth_CorrectCookieSucceeds(t *testing.T) {
-	dispNum := pickFreeDisplay(t)
-	authPath := makeXauthCookie(t, dispNum)
-	cleanup := startXvfb(t, dispNum, "-auth", authPath)
-	defer cleanup()
+	var authPath string
+	dispNum := xvfbtest.StartWith(t, func(n int) []string {
+		authPath = makeXauthCookie(t, n)
+		return []string{"-auth", authPath}
+	}).Num
 
 	withXauthority(t, authPath)
 
@@ -203,10 +104,11 @@ func TestOpen_Xvfb_WithAuth_CorrectCookieSucceeds(t *testing.T) {
 }
 
 func TestOpen_Xvfb_WithAuth_WithheldCookieFails(t *testing.T) {
-	dispNum := pickFreeDisplay(t)
-	authPath := makeXauthCookie(t, dispNum)
-	cleanup := startXvfb(t, dispNum, "-auth", authPath)
-	defer cleanup()
+	var authPath string
+	dispNum := xvfbtest.StartWith(t, func(n int) []string {
+		authPath = makeXauthCookie(t, n)
+		return []string{"-auth", authPath}
+	}).Num
 
 	// Deliberately withhold the cookie: point XAUTHORITY at an empty file
 	// instead of the real one.
@@ -225,19 +127,4 @@ func TestOpen_Xvfb_WithAuth_WithheldCookieFails(t *testing.T) {
 		t.Fatalf("error is %T, want *ErrSetupFailed: %v", err, err)
 	}
 	t.Logf("server refused as expected: %v", setupFailed)
-}
-
-// The rig must leave no /tmp/.X<n>-lock behind: a SIGKILLed Xvfb cannot
-// remove its own, and every run of this suite used to strand one per test.
-func TestStartXvfb_CleanupLeavesNoLock(t *testing.T) {
-	dispNum := pickFreeDisplay(t)
-	cleanup := startXvfb(t, dispNum)
-	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
-	if _, err := os.Stat(lock); err != nil {
-		t.Fatalf("Xvfb up but no lock at %s: %v", lock, err)
-	}
-	cleanup()
-	if _, err := os.Stat(lock); !os.IsNotExist(err) {
-		t.Fatalf("cleanup left %s behind (stat err: %v)", lock, err)
-	}
 }

@@ -11,10 +11,8 @@ package main
 // makes that test fail — see each test's doc for which mutant it kills.
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -31,6 +29,7 @@ import (
 	"hotkeyd/internal/layer"
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
+	"hotkeyd/internal/xvfbtest"
 )
 
 // ---------------------------------------------------------------------
@@ -1892,21 +1891,16 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 	requireBinary(t, "i3")
 	requireBinary(t, "xdotool")
 
-	const display = ":198" // an unusual number: siblings may also run Xvfb concurrently
+	// A display of its own, never a fixed number: two runs of this package
+	// at once (two worktrees, a -tags phone run beside a plain one) shared
+	// :198 and failed each other (kwi3-j94x).
+	xvfb := xvfbtest.Start(t)
+	display := xvfb.Display
 	sockPath := filepath.Join(t.TempDir(), "i3ipc-hotkeyd-integration.sock")
 	i3CfgPath := filepath.Join(t.TempDir(), "i3-hotkeyd-integration.conf")
 	if err := os.WriteFile(i3CfgPath,
 		[]byte("font pango:monospace 10\nipc-socket "+sockPath+"\n"), 0o644); err != nil {
 		t.Fatalf("writing i3 config: %v", err)
-	}
-
-	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset")
-	if err := xvfb.Start(); err != nil {
-		t.Fatalf("starting Xvfb: %v", err)
-	}
-	t.Cleanup(func() { stopXvfb(xvfb, 198) })
-	if !waitForXAccepting(198, 5*time.Second) {
-		t.Fatal("Xvfb did not create its socket in time")
 	}
 
 	// --shmlog-size 0: the cleanup below is a SIGKILL, which leaves i3's
@@ -2009,37 +2003,12 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 func TestIntegration_XServerDeath_DaemonExitsFatally_Xvfb(t *testing.T) {
 	requireBinary(t, "Xvfb")
 
-	// An unusual number, distinct from the sibling smoke's :198 and from
-	// every internal/x11 Xvfb test, so a full-suite run cannot collide.
-	const display = ":187"
-
-	// This test SIGKILLs its own Xvfb, which by definition cannot clean up
-	// /tmp/.X187-lock or its socket on the way out -- so the rig must
-	// clear its own debris, or the SECOND run of this test fails at
-	// startup ("no X server listening") for a reason that has nothing to
-	// do with the behaviour under test.
-	clearStaleXvfb(t, 187)
-
-	xvfbLog := &lockedBuffer{}
-	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp")
-	xvfb.Stderr = xvfbLog
-	if err := xvfb.Start(); err != nil {
-		t.Fatalf("starting Xvfb: %v", err)
-	}
-	killed := false
-	t.Cleanup(func() {
-		if !killed {
-			stopXvfb(xvfb, 187)
-			return
-		}
-		// SIGKILLed by the test itself, on purpose: it cannot have removed
-		// its lock, so the rig does.
-		xvfb.Wait()
-		removeOwnXLock(187, xvfb.Process.Pid)
-	})
-	if !waitForXAccepting(187, 5*time.Second) {
-		t.Fatalf("Xvfb did not start accepting connections on %s in time; Xvfb said: %s", display, xvfbLog.String())
-	}
+	// A display of its own, never a fixed number (it was :187, which two
+	// concurrent runs shared - kwi3-j94x). This test SIGKILLs its Xvfb,
+	// which then cannot remove its own lock; xvfbtest's cleanup does,
+	// while the lock still names that Xvfb.
+	xvfb := xvfbtest.Start(t)
+	display := xvfb.Display
 
 	t.Setenv("XAUTHORITY", filepath.Join(t.TempDir(), "nonexistent-Xauthority"))
 	t.Setenv("DISPLAY", display)
@@ -2069,10 +2038,9 @@ func TestIntegration_XServerDeath_DaemonExitsFatally_Xvfb(t *testing.T) {
 
 	// The X server dies hard -- no orderly close, exactly the case
 	// adr0014 asks this daemon family to fail fast on.
-	if err := xvfb.Process.Signal(syscall.SIGKILL); err != nil {
+	if err := xvfb.Kill(); err != nil {
 		t.Fatalf("SIGKILL Xvfb: %v", err)
 	}
-	killed = true
 	start := time.Now()
 
 	// 5s is ~5x the ~1s scale hotkeyd.py exits at, and well under the 12s
@@ -2096,80 +2064,6 @@ func TestIntegration_XServerDeath_DaemonExitsFatally_Xvfb(t *testing.T) {
 		t.Fatalf("lock was not released on the X-death exit path: %v", err)
 	}
 	l.Release()
-}
-
-// xSocketPath is where a local X server for displayNum listens.
-func xSocketPath(displayNum int) string {
-	return fmt.Sprintf("/tmp/.X11-unix/X%d", displayNum)
-}
-
-// xAccepting reports whether something is actually listening on
-// displayNum's socket. os.Stat is NOT enough: a SIGKILLed X server leaves
-// its socket inode behind, and a rig that only stats it happily proceeds
-// against a dead display. The abstract namespace is tried too, as
-// x11.dialUnixWithAbstractFallback does: under WSLg /tmp/.X11-unix is a
-// read-only mount, so Xvfb binds only "@/tmp/.X11-unix/X<n>".
-func xAccepting(displayNum int) bool {
-	for _, addr := range []string{xSocketPath(displayNum), "@" + xSocketPath(displayNum)} {
-		if c, err := net.DialTimeout("unix", addr, 250*time.Millisecond); err == nil {
-			c.Close()
-			return true
-		}
-	}
-	return false
-}
-
-// xTaken reports whether displayNum is unsafe to hand a fresh Xvfb: a
-// socket file (live or stale) or a listener in either namespace.
-func xTaken(displayNum int) bool {
-	if _, err := os.Stat(xSocketPath(displayNum)); err == nil {
-		return true
-	}
-	return xAccepting(displayNum)
-}
-
-func waitForXAccepting(displayNum int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if xAccepting(displayNum) {
-			return true
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return false
-}
-
-// clearStaleXvfb removes the lock file and socket a hard-killed X server
-// left on displayNum, so a fresh Xvfb can claim it. Refuses (skips the
-// test) if something is genuinely listening there -- deleting a LIVE
-// server's lock would be sabotage, and this number is only reserved by
-// convention.
-func clearStaleXvfb(t *testing.T, displayNum int) {
-	t.Helper()
-	if xAccepting(displayNum) {
-		t.Skipf("display :%d is in use by a live X server; this test needs it exclusively", displayNum)
-	}
-	os.Remove(xSocketPath(displayNum))
-	os.Remove(fmt.Sprintf("/tmp/.X%d-lock", displayNum))
-}
-
-// lockedBuffer is a race-free io.Writer for capturing a child process's
-// stderr while the test goroutine may read it.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
 }
 
 // waitForGrabReportActive polls display's grab report until Active >= n or
@@ -2219,32 +2113,5 @@ func TestWarnIfKeyboardGrabbed_NamesDisplayReasonAndConsequence(t *testing.T) {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("warning does not mention %q: %s", want, lines[0])
 		}
-	}
-}
-
-// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
-// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
-// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
-// leave one per test.
-func stopXvfb(cmd *exec.Cmd, dispNum int) {
-	cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { cmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		cmd.Process.Kill()
-		<-done
-	}
-	removeOwnXLock(dispNum, cmd.Process.Pid)
-}
-
-// removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb
-// that lost the display to another server must not take that server's
-// lock with it.
-func removeOwnXLock(dispNum, pid int) {
-	lock := fmt.Sprintf("/tmp/.X%d-lock", dispNum)
-	if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
-		os.Remove(lock)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"hotkeyd/internal/xvfbtest"
 )
 
 // eventCounts tallies what the flood test observed. malformed and
@@ -99,11 +101,7 @@ func TestXI2_GrabFloodUngrab_Xvfb(t *testing.T) {
 	requireBinary(t, "Xvfb")
 	requireBinary(t, "xdotool")
 
-	dispNum := pickFreeDisplay(t)
-	cleanup := startXvfb(t, dispNum)
-	defer cleanup()
-
-	display := fmt.Sprintf(":%d", dispNum)
+	display := xvfbtest.Start(t).Display
 	conn, info, err := Open(display)
 	if err != nil {
 		t.Fatalf("Open(%s): %v", display, err)
