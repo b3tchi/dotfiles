@@ -178,4 +178,6 @@ function main() {
     process.stdout.write(JSON.stringify(frag, null, 4) + '\n');
 }
 
-main();
+// winmetrics/kwi3-titlebar.js runs config.js the same way (kwi3-9mcs).
+module.exports = { evaluate, resolveInclude };
+if (require.main === module) main();

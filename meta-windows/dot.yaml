@@ -4,6 +4,7 @@
 depends:
   - wezterm
   - winterm
+  - winmetrics
   - pwsh
   - powertoys
   - fancywm
