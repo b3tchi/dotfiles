@@ -49,8 +49,6 @@ var win32Removed = []string{
 	"$mod+0",
 	// restart in place: kwi3-restart is X11's; Windows waits for sp014
 	"$mod+Shift+c",
-	// the project picker: kwi3-run.exe has no `projects` verb
-	"$mod+p",
 	// the apps + session group: blurlock, alsamixer, i3-nagbar
 	"$mod+9", "$mod+Ctrl+m", "$mod+Shift+e",
 }
@@ -58,5 +56,7 @@ var win32Removed = []string{
 // overlayCmd is the Windows runner (kwi3 repo, i3kwin/runner/win32): one
 // resident process, each later start forwards its verb to it - launcher,
 // switcher, switcher-prev, switcher-confirm, switcher-cancel,
-// switcher-search.
+// switcher-search, and projects (kwi3-hoex.38: the shared table's $mod+p,
+// `<overlay> projects`, is the project picker over
+// %APPDATA%\project\projects.yaml, which install-win32.sh copies from WSL).
 func overlayCmd() string { return "kwi3-run.exe" }

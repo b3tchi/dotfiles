@@ -64,6 +64,7 @@ func TestWin32_EntryChords(t *testing.T) {
 	cases := map[string][]bind.Action{
 		"$mod+Return": runAction("wt.exe -w new"),
 		"$mod+d":      runAction("kwi3-run.exe launcher"),
+		"$mod+p":      runAction("kwi3-run.exe projects"), // kwi3-hoex.38
 		"$mod+Tab": {
 			bind.Run{Cmd: "kwi3-run.exe switcher"},
 			bind.EnterLayer{Layer: "switcher"},
@@ -114,6 +115,7 @@ func TestWin32_EveryRunIsAWindowsProgram(t *testing.T) {
 	verbs := map[string]bool{
 		"launcher": true, "switcher": true, "switcher-prev": true,
 		"switcher-confirm": true, "switcher-cancel": true, "switcher-search": true,
+		"projects": true,
 	}
 	for where, cmd := range allRuns() {
 		w := strings.Fields(cmd)
@@ -174,7 +176,6 @@ func TestWin32_LinuxOnlyChordsAbsent(t *testing.T) {
 		"$mod+n", "$mod+v", // notifications, clipboard
 		"$mod+0",                                // the system layer's entry
 		"$mod+Shift+c",                          // restart in place (sp014)
-		"$mod+p",                                // project picker: no kwi3-run verb
 		"$mod+9", "$mod+Ctrl+m", "$mod+Shift+e", // blurlock, alsamixer, i3-nagbar
 		bind.PanicChord, // the host's recover chord, never hotkeyd's
 	}
@@ -224,8 +225,8 @@ func TestWin32_TableSize(t *testing.T) {
 	}
 	chords := chordsOf(Binds)
 	sort.Strings(chords)
-	if len(Binds) != 59 {
-		t.Errorf("Windows Binds has %d chords, want 59 (70 shared less 11 removed): %v", len(Binds), chords)
+	if len(Binds) != 60 {
+		t.Errorf("Windows Binds has %d chords, want 60 (70 shared less 10 removed): %v", len(Binds), chords)
 	}
 }
 
