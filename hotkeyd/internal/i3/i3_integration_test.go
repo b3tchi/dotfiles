@@ -2,11 +2,13 @@ package i3
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -36,7 +38,6 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 	requireBinary(t, "i3")
 
 	dir := t.TempDir()
-	display := ":97"
 	sockPath = filepath.Join(dir, "i3ipc-live.sock")
 	cfgPath := filepath.Join(dir, "i3-live.conf")
 	if err := os.WriteFile(cfgPath,
@@ -45,20 +46,20 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 		t.Fatalf("writing i3 config: %v", err)
 	}
 
-	xvfb := exec.Command("Xvfb", display, "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset")
-	if err := xvfb.Start(); err != nil {
-		t.Fatalf("starting Xvfb: %v", err)
-	}
-	xSockPath := fmt.Sprintf("/tmp/.X11-unix/X%s", strings.TrimPrefix(display, ":")) // :97, stopXvfb below
-	if !waitForX(xSockPath, 5*time.Second) {
-		stopXvfb(xvfb, 97)
-		t.Fatal("Xvfb did not create its socket in time")
-	}
+	xvfb := startOwnXvfb(t)
+	display := fmt.Sprintf(":%d", xvfb.num)
 
-	i3Cmd := exec.Command("i3", "-c", cfgPath)
+	// --shmlog-size 0: no SHM log. i3 unlinks its 25 MB /dev/shm/i3-log-<pid>
+	// only on a clean exit, and killI3 is a SIGKILL, so every run of this
+	// package used to leave two behind (kwi3-hoex.31: 476 of them had filled
+	// /dev/shm, and i3 then failed to start - "Could not ftruncate SHM
+	// segment for the i3 log: No space left on device").
+	i3Cmd := exec.Command("i3", "--shmlog-size", "0", "-c", cfgPath)
 	i3Cmd.Env = append(os.Environ(), "DISPLAY="+display)
+	i3Out := &syncBuilder{} // i3's own words, for a start that fails
+	i3Cmd.Stdout, i3Cmd.Stderr = i3Out, i3Out
 	if err := i3Cmd.Start(); err != nil {
-		stopXvfb(xvfb, 97)
+		xvfb.stop()
 		t.Fatalf("starting i3: %v", err)
 	}
 
@@ -73,29 +74,130 @@ func startLiveI3(t *testing.T) (sockPath string, killI3 func(), cleanup func()) 
 	}
 	cleanup = func() {
 		killI3()
-		stopXvfb(xvfb, 97)
+		xvfb.stop()
 		os.Remove(sockPath)
 	}
 
-	ready := waitForPath(sockPath, 5*time.Second) && i3Answers(display, sockPath)
+	// The socket FILE is not readiness: i3 binds it before it listens, so
+	// one i3-msg straight after it appears can be refused (kwi3-hoex.31,
+	// measured: about 1 in 15 starts with four runs at once, i3 silent).
+	// Ask until it answers, within the same 5 s.
+	var probe string
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	for !ready && time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			ready, probe = i3Answers(display, sockPath)
+		}
+		if !ready {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 	if !ready {
 		cleanup()
-		t.Fatal("live i3 did not start")
+		t.Fatalf("live i3 did not start on %s; last i3-msg: %q; i3 said:\n%s", display, probe, i3Out.String())
 	}
 	return sockPath, killI3, cleanup
 }
 
-// waitForX is waitForPath for an X socket, which may exist only in Linux's
+// startOwnXvfb starts an Xvfb on a display of its own and returns it once
+// it serves: a random number in 200..2199 (internal/x11's range), tried
+// again elsewhere when that display is someone else's. It used to be a
+// fixed :97, so two runs of this package at once - two `go test` runs, two
+// worktrees, two agents - shared one display: the loser's Xvfb exited
+// "already active", its i3 met the winner's i3 on the winner's server, and
+// either run could fail "live i3 did not start" (kwi3-hoex.31, measured:
+// two concurrent -count=10 runs, both red). Ours is decided by the X lock,
+// which Xvfb writes before it listens: /tmp/.X<n>-lock naming OUR pid
+// while the process lives, never a socket that merely answers.
+func startOwnXvfb(t *testing.T) *ownXvfb {
+	t.Helper()
+	for attempt := 0; attempt < 20; attempt++ {
+		n := 200 + rand.IntN(2000)
+		xSock := fmt.Sprintf("/tmp/.X11-unix/X%d", n)
+		if xAnswers(xSock) {
+			continue // a server is already there
+		}
+		xvfb := exec.Command("Xvfb", fmt.Sprintf(":%d", n), "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset")
+		if err := xvfb.Start(); err != nil {
+			t.Fatalf("starting Xvfb: %v", err)
+		}
+		x := &ownXvfb{cmd: xvfb, num: n, exited: make(chan struct{})}
+		go func() { _ = xvfb.Wait(); close(x.exited) }()
+		if ownsDisplay(xvfb.Process.Pid, n, x.exited, 5*time.Second) && waitForX(xSock, 5*time.Second) {
+			return x
+		}
+		x.stop() // lost the display to another server (or never served): try another
+	}
+	t.Fatal("could not start an Xvfb on a display of its own in 20 tries")
+	return nil
+}
+
+// ownXvfb is a test Xvfb this process started, and the display it holds.
+type ownXvfb struct {
+	cmd    *exec.Cmd
+	num    int
+	exited chan struct{}
+}
+
+// stop ends it with SIGTERM, so it removes its own /tmp/.X<n>-lock on the
+// way out, falling back to SIGKILL if it hangs. A SIGKILLed Xvfb strands
+// the lock, and every run of the suite used to leave one per test.
+func (x *ownXvfb) stop() {
+	_ = x.cmd.Process.Signal(syscall.SIGTERM) // our own child, by its handle
+	select {
+	case <-x.exited:
+	case <-time.After(2 * time.Second):
+		_ = x.cmd.Process.Kill()
+		<-x.exited
+	}
+	removeOwnXLock(x.num, x.cmd.Process.Pid)
+}
+
+// ownsDisplay waits until /tmp/.X<n>-lock names pid, or the server exits.
+func ownsDisplay(pid, n int, exited <-chan struct{}, within time.Duration) bool {
+	lock := fmt.Sprintf("/tmp/.X%d-lock", n)
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		select {
+		case <-exited:
+			return false
+		default:
+		}
+		if b, err := os.ReadFile(lock); err == nil && strings.TrimSpace(string(b)) == fmt.Sprint(pid) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// syncBuilder is a strings.Builder exec's copier may write while the test
+// reads it.
+type syncBuilder struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuilder) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuilder) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// waitForX waits for an X socket, which may exist only in Linux's
 // abstract namespace: under WSLg /tmp/.X11-unix is a read-only mount, so
 // Xvfb cannot create the file and binds "@/tmp/.X11-unix/X<n>" alone.
 func waitForX(path string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
-		if c, err := net.Dial("unix", "@"+path); err == nil {
-			c.Close()
+		if xAnswers(path) {
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -103,24 +205,27 @@ func waitForX(path string, timeout time.Duration) bool {
 	return false
 }
 
-func waitForPath(path string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
-		time.Sleep(50 * time.Millisecond)
+// xAnswers is one look for an X socket: its file, else its abstract name.
+func xAnswers(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if c, err := net.Dial("unix", "@"+path); err == nil {
+		c.Close()
+		return true
 	}
 	return false
 }
 
 // i3Answers probes readiness the same way test-hotkeyd.sh does: a real
 // i3-msg round trip with I3SOCK pinned, so a socket file existing (i3 not
-// yet finished its own startup) is not mistaken for readiness.
-func i3Answers(display, sockPath string) bool {
+// yet finished its own startup) is not mistaken for readiness. It says
+// what i3-msg printed, for a start that never answers.
+func i3Answers(display, sockPath string) (bool, string) {
 	cmd := exec.Command("i3-msg", "-t", "get_version")
 	cmd.Env = append(os.Environ(), "DISPLAY="+display, "I3SOCK="+sockPath)
-	return cmd.Run() == nil
+	out, err := cmd.CombinedOutput()
+	return err == nil, strings.TrimSpace(string(out))
 }
 
 func TestIntegration_Client_AgainstRealI3(t *testing.T) {
@@ -223,23 +328,6 @@ func TestIntegration_Client_I3Death(t *testing.T) {
 	if ok {
 		t.Error("ok = true dispatching to a dead i3, want false")
 	}
-}
-
-// stopXvfb ends a test Xvfb with SIGTERM, so it removes its own
-// /tmp/.X<n>-lock on the way out, falling back to SIGKILL if it hangs.
-// A SIGKILLed Xvfb strands the lock, and every run of the suite used to
-// leave one per test.
-func stopXvfb(cmd *exec.Cmd, dispNum int) {
-	cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { cmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		cmd.Process.Kill()
-		<-done
-	}
-	removeOwnXLock(dispNum, cmd.Process.Pid)
 }
 
 // removeOwnXLock deletes /tmp/.X<n>-lock only when it names pid: an Xvfb

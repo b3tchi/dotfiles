@@ -107,7 +107,7 @@ func TestKwi3Run_Windows_Deployed(t *testing.T) {
 	_, src, sig, done := startDryRunDaemonWith(t, modes.addr, true, binds, map[string]bind.Layer{})
 	postAltDigit(t, src, '1')
 	var got string
-	waitForLong(t, "the deployed kwi3-run.exe runs", func() bool {
+	waitForWithin(t, "the deployed kwi3-run.exe runs", freshImageWait, func() bool {
 		b, err := os.ReadFile(filepath.Join(marker, "kwi3-run-ran.txt"))
 		got = string(b)
 		return err == nil && strings.Contains(got, "\n")

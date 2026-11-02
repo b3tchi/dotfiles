@@ -301,3 +301,8 @@ package covers. No test registers a chord anyone types: the
 `RegisterHotKey` test uses only Ctrl+Alt+Shift+F22/F23. No test installs a
 real `WH_KEYBOARD_LL` hook either, and the real installer refuses inside a
 test binary.
+
+A package that fails keeps its `-test.v` log outside the scratch directory,
+in `$HOTKEYD_TEST_LOGDIR` (default `~/.cache/hotkeyd-test-win32/`), as
+`<date>-<pid>/<pkg>.log`. The script names it on a `kept log:` line and
+lists the `--- FAIL` lines it holds.
