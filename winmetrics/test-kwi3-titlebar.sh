@@ -7,7 +7,8 @@
 # The stub keeps its metrics in a file under a private temp dir and logs
 # every `set`. The derivation itself is test-kwi3-titlebar.js's. One case
 # runs the REAL ncm.ps1 `read` (read-only: SPI_GETNONCLIENTMETRICS, GDI text
-# metrics, AdjustWindowRectExForDpi) and one the default config.js lookup
+# metrics, AdjustWindowRectExForDpi), its no-write `check` verb (set's own
+# argument check; `set` itself is never run) and one the default config.js lookup
 # with a private %APPDATA% through WSLENV; both need WSL interop.
 # Exit 0 all passed, 1 a failure, 77 no node (a skip, never a pass).
 set -uo pipefail
@@ -165,11 +166,33 @@ process.exit(m.inset === t.inset(m) && m.smCyCaption === m.caption + 1 && m.smCy
 check "the current caption font fits its floor (Windows enforced it)" 'node -e "
 const t = require(process.argv[1]); const m = JSON.parse(require(\"fs\").readFileSync(process.argv[2], \"utf8\"));
 process.exit(t.captionFloor(m.fonts, m.font) <= m.caption ? 0 : 1);" "$HERE/kwi3-titlebar.js" "$ROOT/real.json"'
-for a in "set 1,2" "set 1,16,x,-11" "bogus"; do
-    env -C /mnt/c "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$HERE/ncm.ps1")" $a >/dev/null 2>&1
-    r=$?
-    check "ncm.ps1 $a: usage, exit 2 (before any SPI call)" '[ "$r" = 2 ]'
+
+echo "== ncm.ps1's argument check, through its no-write verb (kwi3-059f)"
+# `set`'s refusals are proven through `check`, never through `set`: if the
+# check ever regressed, `set` would write machine-wide metrics. `check` runs
+# the SAME function (ConvertTo-NcmValues) and its branch calls no
+# SystemParametersInfoW at all - the two source assertions below hold that.
+NCM_PS1="$HERE/ncm.ps1"
+ncm_check() {
+    env -C /mnt/c "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$NCM_PS1")" "$@" 2>"$ROOT/ncmchk.err" \
+        | tr -d '\r' >"$ROOT/ncmchk.out"
+    echo "${PIPESTATUS[0]}"
+}
+r="$(ncm_check check 1,16,0,-11)"
+check "ncm.ps1 check 1,16,0,-11: exit 0, prints the four values" '[ "$r" = 0 ] && [ "$(cat "$ROOT/ncmchk.out")" = "1,16,0,-11" ]'
+for a in "1,2" "1,16,x,-11" "1,16,0,-11,5" ""; do
+    r="$(ncm_check check "$a")"
+    check "ncm.ps1 check '$a': usage, exit 2" '[ "$r" = 2 ] && grep -q "^usage: ncm.ps1 check " "$ROOT/ncmchk.err"'
 done
+r="$(ncm_check bogus)"
+check "ncm.ps1 bogus: usage, exit 2" '[ "$r" = 2 ] && grep -q "^usage: ncm.ps1 read" "$ROOT/ncmchk.err"'
+# branch <name>: the text of one switch branch of ncm.ps1.
+branch() { awk -v b="    '$1' {" '$0 == b { on = 1 } on { print } on && /^    }$/ { exit }' "$NCM_PS1"; }
+check "set's first statement is the shared check, before any Windows call" \
+    '[ "$(branch set | sed -n 2p)" = "        \$values = ConvertTo-NcmValues \$list '"'set'"'" ]'
+check "check's branch calls the shared check and nothing that reaches SystemParametersInfoW" \
+    'branch check | grep -q "ConvertTo-NcmValues \$list" && ! branch check | grep -qE "SystemParametersInfoW|Get-Ncm|Kwi3Ncm" \
+     && ! awk "/^function ConvertTo-NcmValues/,/^}/" "$NCM_PS1" | grep -qE "SystemParametersInfoW|Get-Ncm|Kwi3Ncm"'
 
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]
