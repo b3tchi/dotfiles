@@ -197,7 +197,7 @@ else
     Xvfb "$XD" -screen 0 800x600x24 >/dev/null 2>&1 &
     XVFB_PID=$!
     sleep 1.5
-    DISPLAY="$XD" i3 -c "$XCFG" >/dev/null 2>&1 &
+    DISPLAY="$XD" i3 --shmlog-size 0 -c "$XCFG" >/dev/null 2>&1 &
     I3_PID=$!
     sleep 1.5
 
@@ -499,7 +499,7 @@ EOF
     Xvfb "$D11" -screen 0 640x480x24 >/dev/null 2>&1 &
     X11P=$!
     sleep 1.5
-    DISPLAY="$D11" i3 -c "$T11/i3.conf" >/dev/null 2>&1 &
+    DISPLAY="$D11" i3 --shmlog-size 0 -c "$T11/i3.conf" >/dev/null 2>&1 &
     I11P=$!
     sleep 1.5
 

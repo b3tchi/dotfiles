@@ -366,7 +366,7 @@ for dpy in "$XA" "$XB" "$XC" "$XD"; do
     XVFB_PIDS+=($!)
 done
 sleep 1.5
-DISPLAY="$XA" i3 -c "$T/i3.conf" >/dev/null 2>&1 &
+DISPLAY="$XA" i3 --shmlog-size 0 -c "$T/i3.conf" >/dev/null 2>&1 &
 I3_PIDS+=($!)
 sleep 1.5
 
@@ -1079,7 +1079,7 @@ DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
 echo "panic: resume reloads displays panic never recorded"
 SOCK_B="$T/i3-b.sock"
 sed "s|ipc-socket $SOCK_A|ipc-socket $SOCK_B|" "$T/i3.conf" > "$T/i3-b.conf"
-DISPLAY="$XB" i3 -c "$T/i3-b.conf" >/dev/null 2>&1 &
+DISPLAY="$XB" i3 --shmlog-size 0 -c "$T/i3-b.conf" >/dev/null 2>&1 &
 I3_PIDS+=($!)
 sleep 1.5
 

@@ -119,7 +119,9 @@ func StartXRig(display, dir string) (*XRig, error) {
 	}
 
 	i3log, _ := os.Create(filepath.Join(dir, "i3.log"))
-	r.i3 = exec.Command("i3", "-c", cfg)
+	// --shmlog-size 0: i3 unlinks its 25 MB /dev/shm/i3-log-<pid> only on a
+	// clean exit, and killTree falls back to SIGKILL (kwi3-j75v).
+	r.i3 = exec.Command("i3", "--shmlog-size", "0", "-c", cfg)
 	r.i3.Env = childEnv(os.Environ(), display, "")
 	r.i3.Stdout, r.i3.Stderr = i3log, i3log
 	r.i3.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
