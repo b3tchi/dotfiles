@@ -1194,16 +1194,24 @@ fi
 
 # And the marker is what the real daemon writes — not a constant that only the
 # tests agree on. Re-pointed at the Go source at dotfiles-ylmp.16: the string
-# lives in internal/proc/lock.go as `LockMarker`, which AcquireLock writes as
-# line 2 of the lock file. The grep asks for the DECLARATION, not a bare
-# occurrence, so a comment mentioning the old spelling cannot keep this green
-# after the constant itself is renamed or its value changed.
-printf '  ' >/dev/null
-if grep -q 'LockMarker = "heartbeat=1"' "$HERE/internal/proc/lock.go"; then
-    ok "the marker string is in the daemon, not only in the suite"
+# is the `LockMarker` const in internal/proc, which AcquireLock writes as line
+# 2 of the lock file. sp012 T1 moved the const from lock.go to lock_shared.go
+# (kwi3-begn), so the check looks in EVERY non-test file of the package and
+# requires exactly ONE declaration: a move cannot turn it red again, while a
+# second, build-tagged declaration (one per OS, each free to drift) or none at
+# all still does. The grep asks for the DECLARATION, not a bare occurrence, so
+# a comment mentioning the old spelling cannot keep this green after the
+# constant itself is renamed or its value changed.
+marker_decls="$(grep -HnE '^[[:space:]]*(const[[:space:]]+)?LockMarker[[:space:]]*=' \
+                    $(ls "$HERE"/internal/proc/*.go | grep -v '_test\.go$') 2>/dev/null)"
+marker_n="$(printf '%s' "$marker_decls" | grep -c .)"
+if [ "$marker_n" -eq 1 ] &&
+   printf '%s\n' "$marker_decls" |
+       grep -qE ':[0-9]+:[[:space:]]*(const[[:space:]]+)?LockMarker[[:space:]]*=[[:space:]]*"heartbeat=1"[[:space:]]*(//.*)?$'; then
+    ok "the marker string is in the daemon, not only in the suite (${marker_decls%%:*})"
 else
-    bad "no 'LockMarker = \"heartbeat=1\"' in internal/proc/lock.go — the stage \
-is testing a fiction"
+    bad "want exactly one 'LockMarker = \"heartbeat=1\"' in internal/proc/*.go, \
+found $marker_n declaration(s): ${marker_decls:-none} — the stage is testing a fiction"
 fi
 
 
