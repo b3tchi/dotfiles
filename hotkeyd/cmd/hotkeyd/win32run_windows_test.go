@@ -214,7 +214,21 @@ func TestWin32Run_Windows_E2E_HostFocusesWorkspace2(t *testing.T) {
 
 func waitForLong(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	waitForWithin(t, what, 10*time.Second, ok)
+}
+
+// freshImageWait bounds a wait on an .exe the test has just WRITTEN and
+// then runs (kwi3-hoex.31). A new image is scanned before Windows runs it:
+// measured here, a copy of this test binary started 1-4.5 s later than
+// the binary itself, more on a build's first run than on a repeat; and
+// Defender's block at first sight can hold an unknown file for its cloud
+// verdict for 10 s by default. A 10 s wait for such a start is the
+// scanner's own budget, so the wait is three times that.
+const freshImageWait = 30 * time.Second
+
+func waitForWithin(t *testing.T, what string, within time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
 		if ok() {
 			return

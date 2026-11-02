@@ -1909,7 +1909,9 @@ func TestIntegration_StartChordDispatchCleanShutdown_Xvfb(t *testing.T) {
 		t.Fatal("Xvfb did not create its socket in time")
 	}
 
-	i3Cmd := exec.Command("i3", "-c", i3CfgPath)
+	// --shmlog-size 0: the cleanup below is a SIGKILL, which leaves i3's
+	// 25 MB /dev/shm/i3-log-<pid> behind (kwi3-hoex.31).
+	i3Cmd := exec.Command("i3", "--shmlog-size", "0", "-c", i3CfgPath)
 	i3Cmd.Env = append(os.Environ(), "DISPLAY="+display)
 	if err := i3Cmd.Start(); err != nil {
 		t.Fatalf("starting i3: %v", err)

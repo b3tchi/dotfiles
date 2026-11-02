@@ -106,20 +106,55 @@ func (p *I3Proxy) serve(client net.Conn) {
 	// client -> server: verbatim via a TeeReader, with the tee decoded for
 	// RUN_COMMAND payloads. Recording happens on the copy, never on the
 	// forwarded bytes, so a decode problem can never corrupt what i3 sees.
-	pr, pw := io.Pipe()
-	go func() {
-		_ = scanFrames(pr, func(mtype uint32, payload []byte) {
-			if mtype != i3TypeRunCommand {
-				return
-			}
-			p.mu.Lock()
-			p.cmds = append(p.cmds, string(payload))
-			p.mu.Unlock()
-		})
-		_, _ = io.Copy(io.Discard, pr)
-	}()
-	_, _ = io.Copy(server, io.TeeReader(client, pw))
-	pw.Close()
+	//
+	// The decode is SYNCHRONOUS (kwi3-hoex.31): TeeReader hands the bytes
+	// to the recorder before io.Copy forwards them, so a command is
+	// recorded before i3 can have seen it - and so before its reply, or
+	// anything it causes, can reach whoever then reads Commands(). It used
+	// to be decoded on a goroutine behind an io.Pipe, which could still be
+	// appending after the reply had been relayed (measured: about 1 run
+	// in 500 of TestI3Proxy_RelaysBothWaysAndRecordsCommands read []).
+	rec := &frameRecorder{onFrame: func(mtype uint32, payload []byte) {
+		if mtype != i3TypeRunCommand {
+			return
+		}
+		p.mu.Lock()
+		p.cmds = append(p.cmds, string(payload))
+		p.mu.Unlock()
+	}}
+	_, _ = io.Copy(server, io.TeeReader(client, rec))
+}
+
+// frameRecorder decodes i3 IPC frames from the bytes written to it, in the
+// Write call itself, handing each complete frame to onFrame. It never
+// returns an error, so the TeeReader it sits behind never fails a read: a
+// stream it cannot decode (a bad magic) only stops the recording.
+type frameRecorder struct {
+	buf     []byte
+	broken  bool
+	onFrame func(mtype uint32, payload []byte)
+}
+
+func (r *frameRecorder) Write(b []byte) (int, error) {
+	if r.broken {
+		return len(b), nil
+	}
+	r.buf = append(r.buf, b...)
+	const headerLen = len(i3Magic) + 8
+	for len(r.buf) >= headerLen {
+		if string(r.buf[:len(i3Magic)]) != i3Magic {
+			r.broken, r.buf = true, nil
+			break
+		}
+		length := int(binary.LittleEndian.Uint32(r.buf[len(i3Magic):]))
+		if len(r.buf)-headerLen < length {
+			break
+		}
+		mtype := binary.LittleEndian.Uint32(r.buf[len(i3Magic)+4:])
+		r.onFrame(mtype, r.buf[headerLen:headerLen+length])
+		r.buf = r.buf[headerLen+length:]
+	}
+	return len(b), nil
 }
 
 // Commands returns every RUN_COMMAND payload seen since the last Reset.

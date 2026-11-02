@@ -196,7 +196,7 @@ func startLockHolder(t *testing.T, exe string) (*exec.Cmd, chan error) {
 			_ = cmd.Process.Kill() // our own child, by its handle
 		}
 	})
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(freshImageWait) // exe may be a copy just written
 	for {
 		if b, err := os.ReadFile(ready); err == nil && len(b) > 0 {
 			if strings.HasPrefix(string(b), "ERR") {

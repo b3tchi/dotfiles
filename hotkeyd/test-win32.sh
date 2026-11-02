@@ -47,6 +47,14 @@
 # exits on its own within a minute. The scratch directory is removed at the
 # end unless KEEP=1.
 #
+# Logs (kwi3-hoex.31). Each package's -test.v output goes to the terminal
+# AND to a log. A package that fails keeps its log OUTSIDE the scratch
+# directory, as <date>-<pid>/<pkg>.log under $HOTKEYD_TEST_LOGDIR (default
+# ~/.cache/hotkeyd-test-win32, $XDG_CACHE_HOME honoured), so it survives
+# the cleanup and a caller that piped the run through `tail`. The script
+# then prints a `kept log:` line naming it and the `--- FAIL` lines it
+# holds. A passing package's log goes with the scratch directory.
+#
 # Exit status: 0 when every package passed, 1 when any failed, 2 on a usage
 # or setup error (no Go, no Windows interop, a build that failed).
 set -uo pipefail
@@ -81,6 +89,21 @@ export LOCALAPPDATA="$scratch_win\\localappdata"
 export USERPROFILE="$scratch_win\\home"
 export WSLENV="LOCALAPPDATA:USERPROFILE${WSLENV:+:$WSLENV}"
 
+logdir="${HOTKEYD_TEST_LOGDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/hotkeyd-test-win32}/$(date +%Y%m%d-%H%M%S)-$$"
+
+# keep_log PKG LOG: copy a failing package's log out of the scratch dir.
+keep_log() {
+    local name kept
+    name="$(basename "$2")"
+    if ! mkdir -p "$logdir" || ! cp "$2" "$logdir/$name"; then
+        echo "test-win32.sh: could not keep the log of $1 in $logdir" >&2
+        return
+    fi
+    kept="$logdir/$name"
+    echo "test-win32.sh: kept log: $kept"
+    grep -E -e '^[[:space:]]*--- FAIL' -e '^panic:' -e '^\*\*\* Test killed' "$kept" | sed 's/^/test-win32.sh:   /'
+}
+
 failed=()
 for spec in "$@"; do
     pkg="${spec%%:*}"
@@ -99,10 +122,14 @@ for spec in "$@"; do
     args=(-test.v -test.count=1)
     [ -n "$run" ] && args+=(-test.run "$run")
     [ -n "$skip" ] && args+=(-test.skip "$skip")
-    if env -C "$scratch" "$exe" "${args[@]}"; then
+    log="$scratch/$name.log"
+    env -C "$scratch" "$exe" "${args[@]}" 2>&1 | tee "$log"
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" -eq 0 ]; then
         echo "== $pkg: PASS"
     else
-        echo "== $pkg: FAIL"
+        echo "== $pkg: FAIL (exit $rc)"
+        keep_log "$pkg" "$log"
         failed+=("$pkg")
     fi
 done
