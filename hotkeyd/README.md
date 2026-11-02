@@ -25,6 +25,20 @@ it. The list is copied first, before the build and before the check below,
 so an edit to it takes a re-run of the script and nothing more. A checkout
 without the list is refused before anything is touched.
 
+The same way it copies the project registry (kwi3-hoex.38) - WSL's own
+`~/.config/project/projects.yaml`, the file nushell's `project add` writes
+(`$PROJECT_CONFIG_PATH` names another) - to
+`%APPDATA%\project\projects.yaml`, where `kwi3-run.exe projects` (`$mod+p`)
+reads it. A copy, never read through `\\wsl.localhost` at run time: after a
+`project add`/`remove`, re-run the script (the copy is made before the build
+and the stale-image refusal, so a running daemon does not stop it). No
+registry in WSL is a warning, not a refusal; `$mod+p` then shows the error.
+Only the names matter on Windows: picking one runs `project go <name>` in
+WSL, which reads WSL's registry. Beside it the script writes
+`%APPDATA%\project\wsl.txt` (`distro <name>`, `user <name>`: this WSL
+distro and the user running the script), because a bare `wsl.exe` starts
+the default user - root on Jan's box - whose home has no `project go`.
+
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
 been copied by then. It never ends a process. Stop the daemon first with
@@ -117,12 +131,12 @@ Windows build. What it does, from the code:
     `wezterm/install-kwi3-cell.sh` writes from kwi3's config.js (re-run it
     after changing `font`/`module` there); Windows Terminal's from the WT
     fragment `winterm/install-kwi3-fragment.sh` writes (kwi3-hoex.47).
-  - `$mod+d` and the `switcher` layer run `kwi3-run.exe <verb>` (see
-    below).
+  - `$mod+d`, `$mod+p` (the project picker, kwi3-hoex.38) and the
+    `switcher` layer run `kwi3-run.exe <verb>` (see below).
   - `$mod+1..8` (`Ctrl`/`Shift` to move) go straight to workspace RPC.
   - `$mod+s`/`$mod+b` split with no notification.
   - The Linux-only chords are removed: screenshots, `$mod+n`, `$mod+v`,
-    `$mod+0`, `$mod+Shift+c`, `$mod+p`, `$mod+9`, `$mod+Ctrl+m` and
+    `$mod+0`, `$mod+Shift+c`, `$mod+9`, `$mod+Ctrl+m` and
     `$mod+Shift+e`.
 
   `install-win32.sh` passes the tag. An untagged Windows build carries the
