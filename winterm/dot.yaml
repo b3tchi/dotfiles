@@ -1,4 +1,7 @@
+# Windows Terminal. WT's own settings.json is Jan's live file and is never
+# linked or written from here (kwi3-zt8l): the font and kwi3's character
+# cell come from a WT fragment beside it, which winterm/install-kwi3-fragment.sh
+# writes from kwi3's config.js. Run that by hand from WSL once WT and
+# %APPDATA%\kwi3\config.js exist, and again after a font/module change.
 windows:
-  links:
-    settings.json: ~\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json
   installs: winget install Microsoft.WindowsTerminal
