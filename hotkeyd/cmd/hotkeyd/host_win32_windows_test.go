@@ -30,8 +30,8 @@ func TestWin32_RunsSplitWithTheWindowsSplitter(t *testing.T) {
 		}
 		var want []string
 		switch {
-		case cmd == "wt.exe -w new":
-			want = []string{"wt.exe", "-w", "new"}
+		case cmd == "wezterm-gui.exe start":
+			want = []string{"wezterm-gui.exe", "start"}
 		case strings.HasPrefix(cmd, "kwi3-run.exe "):
 			want = []string{"kwi3-run.exe", strings.TrimPrefix(cmd, "kwi3-run.exe ")}
 		default:

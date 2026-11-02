@@ -1,8 +1,16 @@
+# On Windows, kwi3's terminal ($mod+Return, hotkeyd): frameless, with
+# kwi3's font and a cell of exactly its module from kwi3-cell.lua beside
+# wezterm.lua, which wezterm/install-kwi3-cell.sh writes from kwi3's
+# config.js. Run that by hand from WSL once WezTerm, the font and
+# %APPDATA%\kwi3\config.js exist, and again after a font/module change.
 windows:
   links:
     wezterm.lua: ~\.config\wezterm\wezterm.lua
 
-  installs: winget install wez.wezterm
+  installs:
+    cmd: |
+      scoop bucket add extras
+      scoop install extras/wezterm
 
 linux:
   links:

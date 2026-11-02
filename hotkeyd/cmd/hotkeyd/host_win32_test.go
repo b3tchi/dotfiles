@@ -62,7 +62,7 @@ func allRuns() map[string]string {
 
 func TestWin32_EntryChords(t *testing.T) {
 	cases := map[string][]bind.Action{
-		"$mod+Return": runAction("wt.exe -w new"),
+		"$mod+Return": runAction("wezterm-gui.exe start"),
 		"$mod+d":      runAction("kwi3-run.exe launcher"),
 		"$mod+Tab": {
 			bind.Run{Cmd: "kwi3-run.exe switcher"},
@@ -108,8 +108,9 @@ func TestWin32_SwitcherLayerDrivesKwi3Run(t *testing.T) {
 	}
 }
 
-// Every program the Windows table can start is one Windows has: Windows
-// Terminal or the runner, the runner only with a verb it knows.
+// Every program the Windows table can start is one Windows has: WezTerm
+// (termpath.go falls back to Windows Terminal) or the runner, the runner
+// only with a verb it knows.
 func TestWin32_EveryRunIsAWindowsProgram(t *testing.T) {
 	verbs := map[string]bool{
 		"launcher": true, "switcher": true, "switcher-prev": true,
@@ -118,7 +119,7 @@ func TestWin32_EveryRunIsAWindowsProgram(t *testing.T) {
 	for where, cmd := range allRuns() {
 		w := strings.Fields(cmd)
 		switch {
-		case cmd == "wt.exe -w new":
+		case cmd == "wezterm-gui.exe start":
 		case len(w) == 2 && w[0] == "kwi3-run.exe" && verbs[w[1]]:
 		default:
 			t.Errorf("%s runs %q, not a Windows program this session has", where, cmd)

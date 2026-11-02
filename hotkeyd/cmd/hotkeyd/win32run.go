@@ -79,7 +79,9 @@ type win32Config struct {
 	Trace func(string)
 	// Run starts a bind.Run's command; nil is proc.Run behind
 	// kwi3RunStarter, which starts the DEPLOYED kwi3-run.exe
-	// (%LOCALAPPDATA%\kwi3\run\current.txt) before trying PATH.
+	// (%LOCALAPPDATA%\kwi3\run\current.txt) before trying PATH, behind
+	// termStarter, which finds WezTerm (or falls back to Windows Terminal)
+	// for wezterm-gui.exe.
 	Run func(string) error
 }
 
@@ -184,10 +186,16 @@ func startWin32(cfg win32Config) (*Daemon, *win32.Source, error) {
 
 	run := cfg.Run
 	if run == nil {
-		run = (&kwi3RunStarter{
-			start:  proc.Run,
+		rfs := runFS{ReadFile: os.ReadFile, Stat: os.Stat}
+		run = (&termStarter{
+			start: (&kwi3RunStarter{
+				start:  proc.Run,
+				getenv: os.Getenv,
+				fs:     rfs,
+				log:    log,
+			}).Run,
 			getenv: os.Getenv,
-			fs:     runFS{ReadFile: os.ReadFile, Stat: os.Stat},
+			fs:     rfs,
 			log:    log,
 		}).Run
 	}

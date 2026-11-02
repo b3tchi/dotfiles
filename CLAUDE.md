@@ -232,7 +232,7 @@ Manual symlink script being phased out. Some apps (gitconfig, tigrc, fish, code,
   - `gruvbox.conf` - Gruvbox color scheme
 
 ### Terminal Emulators
-- WezTerm: `wezterm/wezterm.lua`
+- WezTerm: `wezterm/wezterm.lua` (on Windows kwi3's frameless tiled terminal; its font and cell from `wezterm/install-kwi3-cell.sh`)
 - Windows Terminal: `winterm/`
 
 ## Neovim Configuration
