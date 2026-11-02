@@ -249,7 +249,7 @@ for i in $(seq 1 40); do dpy_up "$DPY" && break; sleep 0.25; done
 dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 sleep 0.5
 
-DISPLAY="$DPY" "$I3BIN" -c "$TMP/i3.conf" >"$TMP/i3.log" 2>&1 &
+DISPLAY="$DPY" "$I3BIN" --shmlog-size 0 -c "$TMP/i3.conf" >"$TMP/i3.log" 2>&1 &
 I3_PID=$!
 for i in $(seq 1 40); do [ -S "$XSOCK" ] && break; sleep 0.25; done
 DISPLAY="$DPY" I3SOCK="$XSOCK" i3-msg -t get_version >/dev/null 2>&1 \

@@ -187,7 +187,7 @@ include $HOTKEYD_I3_CONFIG_D/*.conf
 bindsym Mod4+Shift+r exec --no-startup-id $HERE/hotkeyd-panic.sh panic
 EOF
 for dpy in "$XA" "$XB"; do
-    DISPLAY="$dpy" i3 -c "$T/i3.conf" >/dev/null 2>&1 &
+    DISPLAY="$dpy" i3 --shmlog-size 0 -c "$T/i3.conf" >/dev/null 2>&1 &
     I3_PIDS+=($!)
 done
 sleep 1.5

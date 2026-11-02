@@ -236,7 +236,7 @@ case "$NAV_TEST_MOD" in
   Mod1) XDO_MOD="alt" ;;
 esac
 
-DISPLAY="$DPY" i3 -c "$TMP/harness.conf" >"$TMP/i3.log" 2>&1 &
+DISPLAY="$DPY" i3 --shmlog-size 0 -c "$TMP/harness.conf" >"$TMP/i3.log" 2>&1 &
 I3_PID=$!
 for _ in $(seq 1 20); do [ -S "$I3SOCK" ] && break; sleep 0.5; done
 [ -S "$I3SOCK" ] || { echo "FATAL: harness i3 did not come up" >&2; tail -5 "$TMP/i3.log" >&2; exit 1; }
