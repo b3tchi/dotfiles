@@ -202,3 +202,42 @@ func TestKwi3RunStarter_OtherCommandsUntouched(t *testing.T) {
 		t.Fatalf("started %q", (*started)[3])
 	}
 }
+
+// kwi3-etpz: a hotkeyd installed as part of kwi3's package (scoop's
+// apps\kwi3\<version>) has the runner of the same install beside it; that
+// one is started, before any deployed copy current.txt names.
+const pkg = `C:\Users\j\scoop\apps\kwi3\0.3.0`
+
+func TestKwi3RunStarter_PackagedRunnerBesideHotkeydFirst(t *testing.T) {
+	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1")
+	f[pkg] = isDir
+	f[pkg+`\kwi3-run.exe`] = "MZ"
+	s, started, logged := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
+	s.self = pkg + `\hotkeyd.exe`
+	_ = s.Run("kwi3-run.exe launcher")
+	_ = s.Run("kwi3-run.exe switcher")
+	want := `"` + pkg + `\kwi3-run.exe" launcher|"` + pkg + `\kwi3-run.exe" switcher`
+	if strings.Join(*started, "|") != want {
+		t.Fatalf("started %q, want %q", *started, want)
+	}
+	if len(*logged) != 1 || !strings.Contains((*logged)[0], pkg+`\kwi3-run.exe`) ||
+		!strings.Contains((*logged)[0], "beside") {
+		t.Fatalf("logged %q, want one line naming the runner beside hotkeyd", *logged)
+	}
+}
+
+func TestKwi3RunStarter_NoRunnerBesideHotkeydUsesCurrentTxt(t *testing.T) {
+	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1")
+	s, started, _ := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
+	s.self = lad + `\hotkeyd\bin\hotkeyd.exe`
+	_ = s.Run("kwi3-run.exe launcher")
+	if (*started)[0] != `"`+lad+`\kwi3\run\v1\kwi3-run.exe" launcher` {
+		t.Fatalf("started %q, want the deployed copy", *started)
+	}
+	// A directory named kwi3-run.exe beside it is no runner either.
+	f[lad+`\hotkeyd\bin\kwi3-run.exe`] = isDir
+	_ = s.Run("kwi3-run.exe launcher")
+	if (*started)[1] != (*started)[0] {
+		t.Fatalf("started %q, want the deployed copy again", *started)
+	}
+}

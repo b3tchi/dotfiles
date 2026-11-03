@@ -10,6 +10,11 @@ package main
 // restart - and falls back to the PATH lookup only when there is no
 // deployed copy. Portable (no build tag) so it is tested on Linux too;
 // only win32run.go wires it in.
+//
+// kwi3-etpz: kwi3's scoop package installs hotkeyd.exe and kwi3-run.exe
+// side by side (apps\kwi3\<version>). A kwi3-run.exe beside this
+// executable is the runner of the same install, and it comes first:
+// before current.txt, then PATH.
 
 import (
 	"errors"
@@ -84,7 +89,10 @@ func resolveKwi3Run(localAppData string, f runFS) (path, why string) {
 // PATH, is said once - and again only when that answer changes (a
 // redeploy, a deploy removed).
 type kwi3RunStarter struct {
-	start  func(string) error
+	start func(string) error
+	// self is this executable's path (os.Executable); a kwi3-run.exe in
+	// the same directory is started first. "" skips that lookup.
+	self   string
 	getenv func(string) string
 	fs     runFS
 	log    func(string)
@@ -99,6 +107,10 @@ func (s *kwi3RunStarter) Run(command string) error {
 	if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
 		return s.start(command)
 	}
+	if exe := besideSelf(s.self, s.fs); exe != "" {
+		s.say("kwi3-run: starting " + exe + ", beside hotkeyd")
+		return s.start(`"` + exe + `"` + rest)
+	}
 	exe, why := resolveKwi3Run(s.getenv("LOCALAPPDATA"), s.fs)
 	if exe != "" {
 		s.say("kwi3-run: starting the deployed " + exe)
@@ -110,6 +122,20 @@ func (s *kwi3RunStarter) Run(command string) error {
 		return fmt.Errorf("kwi3-run.exe not found: no deployed copy (%s), and not on PATH: %w", why, err)
 	}
 	return nil
+}
+
+// besideSelf is <self's directory>\kwi3-run.exe when that is a file, else
+// "".
+func besideSelf(self string, f runFS) string {
+	i := strings.LastIndexAny(self, `\/`)
+	if i < 0 {
+		return ""
+	}
+	exe := self[:i] + `\` + kwi3RunExe
+	if fi, err := f.Stat(exe); err != nil || fi.IsDir() {
+		return ""
+	}
+	return exe
 }
 
 func (s *kwi3RunStarter) say(line string) {

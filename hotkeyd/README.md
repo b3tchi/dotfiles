@@ -8,6 +8,14 @@ kwi3 Win32 host (`i3kwin-win32`, sp012) runs it.
 
 ### Install
 
+For daily use hotkeyd.exe comes with kwi3's own scoop package (kwi3
+`i3kwin/adapters/win32/package.sh`, a local build of this tree's
+`hotkeyd/` beside the kwi3 host and runner, installed with `scoop install
+kwi3`); the package also copies the runner list below on install and
+update. `install-win32.sh` stays for development - a hotkeyd of its own in
+`%LOCALAPPDATA%\hotkeyd\bin`, which the host and session.ps1 use only when
+they do not run from the package.
+
 From WSL:
 
 ```sh
@@ -241,8 +249,17 @@ That was not yet the kwi3-hoex.17 acceptance.
 
 ### The runner: which `kwi3-run.exe`
 
-`$mod+d` and the `$mod+Tab` switcher run `kwi3-run.exe <verb>`. kwi3's
-`i3kwin/runner/win32/deploy.sh` puts each deploy in a new
+`$mod+d` and the `$mod+Tab` switcher run `kwi3-run.exe <verb>`.
+
+First, the runner of the same install: when a `kwi3-run.exe` sits in the
+directory hotkeyd.exe itself runs from - kwi3's scoop package installs
+both side by side, `%USERPROFILE%\scoop\apps\kwi3\<version>\` - that one
+is started (`kwi3-run: starting <path>, beside hotkeyd`, logged once), so a
+packaged hotkeyd and its runner are always the same version. The rules
+below apply only when there is none beside it (an install-win32.sh copy in
+`%LOCALAPPDATA%\hotkeyd\bin`).
+
+kwi3's `i3kwin/runner/win32/deploy.sh` puts each deploy in a new
 `%LOCALAPPDATA%\kwi3\run\v<N>` and names it in
 `%LOCALAPPDATA%\kwi3\run\current.txt`; nothing puts it on PATH. So a Run
 whose program is the bare word `kwi3-run.exe` starts
