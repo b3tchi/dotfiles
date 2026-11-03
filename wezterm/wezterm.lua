@@ -40,7 +40,9 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	--
 	-- --FONTS
 	-- config.wsl_domains = domains
-	config.default_domain = "WSL:arch"
+	-- A new window is Windows PowerShell on the local domain; WSL is reached
+	-- through `wsl.exe` ($mod+p's project picker starts it explicitly).
+	config.default_prog = { "powershell.exe", "-NoLogo" }
 
 	-- kwi3 (i3kwin-win32) tiles this window (kwi3-wv1u). "RESIZE": no
 	-- caption drawn and WS_THICKFRAME kept - WezTerm makes it
