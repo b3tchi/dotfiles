@@ -1836,7 +1836,12 @@ PanelWindow {
             implicitWidth: rect ? Math.max(1, rect.w) : 1
             implicitHeight: Math.max(1, thickness)
             aboveWindows: true
-            exclusiveZone: root.split ? -1 : 0
+            // -1 on the top bar too, never 0: a zero zone is still MOVED
+            // out of other surfaces' exclusive zones, so the top bar's own
+            // zone pushed the strip down onto the tab's bottom edge (an
+            // underline, where X11 draws it above the tab). -1 is "do not
+            // move me": the margins above count from the screen edge.
+            exclusiveZone: -1
             focusable: false
             mask: Region {}
             color: "transparent"
