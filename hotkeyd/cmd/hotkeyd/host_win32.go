@@ -61,5 +61,6 @@ var win32Removed = []string{
 // switcher, switcher-prev, switcher-confirm, switcher-cancel,
 // switcher-search, and projects (kwi3-hoex.38: the shared table's $mod+p,
 // `<overlay> projects`, is the project picker over
-// %APPDATA%\project\projects.yaml, which install-win32.sh copies from WSL).
+// %APPDATA%\project\projects.yaml - Windows' own registry, kept by hand,
+// kwi3-4zxc).
 func overlayCmd() string { return "kwi3-run.exe" }

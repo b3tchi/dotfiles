@@ -10,20 +10,17 @@
 #
 #   %APPDATA%\kwi3\runner-list.json
 #
-# and (kwi3-hoex.38) the nushell project registry - WSL's own
-# ~/.config/project/projects.yaml, the file `project add` writes, or
-# $PROJECT_CONFIG_PATH (the variable nushell's project module sets) - to
-# where kwi3-run.exe's `projects` verb ($mod+p) reads it:
+# The project registry kwi3-run.exe's `projects` verb ($mod+p) reads,
 #
 #   %APPDATA%\project\projects.yaml
 #
-# Jan 2026-11-02: a Windows copy, never read through \\wsl.localhost at run
-# time. No registry in WSL is a WARNING and the install goes on ($mod+p
-# then shows "no project registry"). Beside it, %APPDATA%\project\wsl.txt
-# names the distro and the user this script runs as ("distro <name>",
-# "user <name>"): a bare wsl.exe starts the default distro as ITS default
-# user - root on Jan's box (Lxss DefaultUid 0) - whose home has no
-# `project go`, so kwi3-run's `wsl.exe -d <distro> -u <user>` comes from it.
+# is Jan's own, maintained on Windows with Windows paths (kwi3-4zxc: $mod+p
+# runs with no WSL at all), and this script NEVER writes, replaces or
+# deletes it - it only says whether it is there. It used to copy WSL's
+# registry over it and write %APPDATA%\project\wsl.txt beside it
+# (kwi3-hoex.38); nothing reads wsl.txt any more, so a wsl.txt this script
+# wrote (its first line says so) is removed, and any other file of that
+# name is left alone and named.
 #
 # A copy, not a link: an edit to the list takes a re-run of this script. The
 # list is copied first, before the build, and does not wait on the stale-image
@@ -93,31 +90,24 @@ cp "$list_src" "$list_dest.new" || die "cannot write $list_win.new"
 mv -f "$list_dest.new" "$list_dest" || { rm -f "$list_dest.new"; die "cannot replace $list_win"; }
 echo "install-win32.sh: copied $list_src to $list_win"
 
-# The project registry (kwi3-hoex.38), the same way: before the build, so a
-# `project add` reaches $mod+p with a re-run even while the daemon runs.
-proj_src="${PROJECT_CONFIG_PATH:-$HOME/.config/project/projects.yaml}"
+# The project registry is Jan's (kwi3-4zxc): only looked at, never written.
 proj_win="$ad_win\\project\\projects.yaml"
-if [ -f "$proj_src" ]; then
-    proj_dest="$(wslpath -u "$proj_win")" || die "cannot map $proj_win into WSL"
-    mkdir -p "$(dirname "$proj_dest")" || die "cannot create $(dirname "$proj_win")"
-    cp "$proj_src" "$proj_dest.new" || die "cannot write $proj_win.new"
-    mv -f "$proj_dest.new" "$proj_dest" || { rm -f "$proj_dest.new"; die "cannot replace $proj_win"; }
-    echo "install-win32.sh: copied $proj_src to $proj_win"
+proj_dest="$(wslpath -u "$proj_win")" || die "cannot map $proj_win into WSL"
+if [ -f "$proj_dest" ]; then
+    echo "install-win32.sh: project registry $proj_win present (left as it is)"
+else
+    echo "install-win32.sh: note: no project registry at $proj_win - \$mod+p lists nothing until it exists (name -> {path, ssh?}, Windows paths)" >&2
 fi
-# The WSL target beside it, always: the distro (the \\wsl.localhost\<distro>
-# root wslpath names) and this user.
-wsl_distro="$(wslpath -w / 2>/dev/null | sed -n 's/^\\\\wsl[^\\]*\\\([^\\]*\)\\*$/\1/p')"
-wsl_user="$(id -un)"
-[ -n "$wsl_distro" ] && [ -n "$wsl_user" ] || die "cannot name this WSL distro ($(wslpath -w / 2>&1)) or user"
+# kwi3-hoex.38's wsl.txt: removed only when this script wrote it.
 wsl_win="$ad_win\\project\\wsl.txt"
 wsl_dest="$(wslpath -u "$wsl_win")" || die "cannot map $wsl_win into WSL"
-mkdir -p "$(dirname "$wsl_dest")" || die "cannot create $(dirname "$wsl_win")"
-printf '# written by dotfiles hotkeyd/install-win32.sh: kwi3-run projects starts wsl.exe -d <distro> -u <user>\r\ndistro %s\r\nuser %s\r\n' \
-    "$wsl_distro" "$wsl_user" >"$wsl_dest.new" || die "cannot write $wsl_win.new"
-mv -f "$wsl_dest.new" "$wsl_dest" || { rm -f "$wsl_dest.new"; die "cannot replace $wsl_win"; }
-echo "install-win32.sh: wrote $wsl_win (distro $wsl_distro, user $wsl_user)"
-if [ ! -f "$proj_src" ]; then
-    echo "install-win32.sh: WARNING: no project registry at $proj_src - $proj_win not written; \$mod+p shows \"no project registry\" until it exists and this is re-run" >&2
+if [ -f "$wsl_dest" ]; then
+    if head -n 1 "$wsl_dest" | grep -q '^# written by dotfiles hotkeyd/install-win32.sh'; then
+        rm -f "$wsl_dest" || die "cannot remove $wsl_win"
+        echo "install-win32.sh: removed $wsl_win (written by an earlier install; nothing reads it now)"
+    else
+        echo "install-win32.sh: note: $wsl_win was not written by this script - left alone (nothing reads it)" >&2
+    fi
 fi
 
 stage="$(mktemp -d)" || die "cannot create a staging directory"

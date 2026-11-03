@@ -25,19 +25,31 @@ it. The list is copied first, before the build and before the check below,
 so an edit to it takes a re-run of the script and nothing more. A checkout
 without the list is refused before anything is touched.
 
-The same way it copies the project registry (kwi3-hoex.38) - WSL's own
-`~/.config/project/projects.yaml`, the file nushell's `project add` writes
-(`$PROJECT_CONFIG_PATH` names another) - to
-`%APPDATA%\project\projects.yaml`, where `kwi3-run.exe projects` (`$mod+p`)
-reads it. A copy, never read through `\\wsl.localhost` at run time: after a
-`project add`/`remove`, re-run the script (the copy is made before the build
-and the stale-image refusal, so a running daemon does not stop it). No
-registry in WSL is a warning, not a refusal; `$mod+p` then shows the error.
-Only the names matter on Windows: picking one runs `project go <name>` in
-WSL, which reads WSL's registry. Beside it the script writes
-`%APPDATA%\project\wsl.txt` (`distro <name>`, `user <name>`: this WSL
-distro and the user running the script), because a bare `wsl.exe` starts
-the default user - root on Jan's box - whose home has no `project go`.
+The project registry `kwi3-run.exe projects` (`$mod+p`) reads,
+`%APPDATA%\project\projects.yaml`, is NOT installed by the script
+(kwi3-4zxc: `$mod+p` runs with no WSL at all). It is Windows' own, kept
+by hand, in nushell's `project` shape with Windows paths:
+
+```yaml
+projects:
+  dotfiles:
+    path: C:\Users\jan\src\dotfiles     # local: WezTerm workspace "dotfiles", PowerShell here
+  remote-thing:
+    path: /srv/thing                     # an ssh entry's path is the REMOTE one
+    ssh: workstation                     # a Host in %USERPROFILE%\.ssh\config
+```
+
+The script never writes, replaces or deletes it; it only says whether it
+is there. Picking a project switches to workspace `<project>_1` and opens
+a new WezTerm window in its own workspace named after the project -
+`wezterm-gui.exe start --workspace <project> --cwd <path> --
+powershell.exe -NoLogo` (Windows Terminal: `wt.exe -w new -d <path>
+powershell.exe -NoLogo`) - or, for an `ssh` entry, Windows OpenSSH
+attaching the remote tmux session group the way `project go` does
+(`ssh.exe -t <profile> "TMUX_TARGET=$(~/.local/bin/tmux-start start 0
+<project> '' '<path>') bash -li"`). A `%APPDATA%\project\wsl.txt` an
+earlier install wrote (kwi3-hoex.38) is removed, since nothing reads it;
+a file of that name the script did not write is left alone and named.
 
 It **refuses** (exit 2, the daemon not copied) while any process runs from
 that path, and names each pid and command line. The runner list has already
