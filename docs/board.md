@@ -20,11 +20,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp039|networked-clipboard-hub]]
-
 
 ## ready
 
+- [[sp039|networked-clipboard-hub]]
 - [[sp038|session-launcher]]
 - [[sp037|infinifu-lifecycle-drives-pi-worker]]
 
