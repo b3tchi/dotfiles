@@ -110,7 +110,7 @@ linux:
       else
         mkdir -p "$(dirname "$SRC")"
         CLONE_LOG=$(mktemp)
-        if ! git clone --quiet --no-checkout "$REPO" "$SRC" >"$CLONE_LOG" 2>&1; then
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$REPO" "$SRC" >"$CLONE_LOG" 2>&1; then
           echo "kwi3: git clone of $REPO failed and $SRC does not exist -- nothing to build." >&2
           echo "kwi3: $(tail -n1 "$CLONE_LOG")" >&2
           rm -f "$CLONE_LOG"
@@ -121,7 +121,7 @@ linux:
 
       # Fetched from $REPO itself, not `origin`, so a changed KWI3_REPO is
       # honoured by an existing clone too.
-      if ! git -C "$SRC" fetch --quiet --force "$REPO" '+refs/tags/*:refs/tags/*' 2>/dev/null; then
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" fetch --quiet --force "$REPO" '+refs/tags/*:refs/tags/*' 2>/dev/null; then
         echo "kwi3: WARNING -- could not reach $REPO to fetch release tags (network down?); using the newest tag already in $SRC." >&2
       fi
 

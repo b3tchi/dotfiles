@@ -85,9 +85,10 @@ linux:
           fd ripgrep fzf sd \
           go rust nodejs \
           wezterm \
-          go-yq dasel \
+          go-yq \
           chafa \
           xclip \
+          unzip \
           pacman-contrib \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
@@ -96,6 +97,9 @@ linux:
           git clone https://aur.archlinux.org/yay.git ~/yay
         fi
         cd ~/yay && makepkg -si --noconfirm && cd -
+
+        # dasel left the official repos (AUR only, like Manjaro's dasel-bin)
+        yay -S --needed --noconfirm dasel-bin
 
         curl -fsSL https://bun.sh/install | bash
         ln -sf ~/.bun/bin/bun ~/.local/bin/bun
