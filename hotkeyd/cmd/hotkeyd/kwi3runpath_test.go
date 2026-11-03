@@ -1,10 +1,10 @@
 package main
 
-// kwi3-hoex.27: a Run of kwi3-run.exe starts the DEPLOYED runner, the one
-// %LOCALAPPDATA%\kwi3\run\current.txt names (kwi3's
-// i3kwin/runner/win32/deploy.sh), read afresh on every start, and falls
-// back to the PATH lookup only when there is none. Portable: the file
-// system is a map, so these run untagged on Linux too.
+// A Run of kwi3-run.exe starts the runner beside hotkeyd.exe (kwi3's
+// scoop package, kwi3-etpz), and falls back to the PATH lookup only when
+// there is none; the retired %LOCALAPPDATA%\kwi3\run\current.txt deploy
+// is never read (kwi3-dfnb). Portable: the file system is a map, so these
+// run untagged on Linux too.
 
 import (
 	"errors"
@@ -22,16 +22,6 @@ const isDir = "\x00dir"
 
 func (f fakeRunFS) fs() runFS {
 	return runFS{
-		ReadFile: func(p string) ([]byte, error) {
-			v, ok := f[p]
-			if !ok {
-				return nil, fs.ErrNotExist
-			}
-			if v == isDir {
-				return nil, errors.New("is a directory")
-			}
-			return []byte(v), nil
-		},
 		Stat: func(p string) (fs.FileInfo, error) {
 			v, ok := f[p]
 			if !ok {
@@ -51,173 +41,44 @@ func (i fakeInfo) ModTime() time.Time { return time.Time{} }
 func (i fakeInfo) IsDir() bool        { return i.dir }
 func (i fakeInfo) Sys() any           { return nil }
 
-const lad = `C:\Users\j\AppData\Local`
+const pkg = `C:\Users\j\scoop\apps\kwi3\0.3.0`
 
-func deployed(current string, versions ...string) fakeRunFS {
-	f := fakeRunFS{lad + `\kwi3\run\current.txt`: current}
-	for _, v := range versions {
-		f[lad+`\kwi3\run\`+v] = isDir
-		f[lad+`\kwi3\run\`+v+`\kwi3-run.exe`] = "MZ"
+// packaged is kwi3's package directory with hotkeyd.exe and, when
+// runner, kwi3-run.exe beside it.
+func packaged(runner bool) fakeRunFS {
+	f := fakeRunFS{pkg: isDir, pkg + `\hotkeyd.exe`: "MZ"}
+	if runner {
+		f[pkg+`\kwi3-run.exe`] = "MZ"
 	}
 	return f
 }
 
-func TestResolveKwi3Run(t *testing.T) {
-	exe1 := lad + `\kwi3\run\v1\kwi3-run.exe`
-	cases := []struct {
-		name   string
-		lad    string
-		fs     fakeRunFS
-		want   string
-		whyHas string
-	}{
-		// What deploy.sh writes: the absolute v<N> directory, CRLF.
-		{"absolute CRLF", lad, deployed(lad+`\kwi3\run\v1`+"\r\n", "v1"), exe1, ""},
-		{"BOM, spaces, trailing backslash", lad,
-			deployed("\ufeff  "+lad+`\kwi3\run\v1\`+" \t\r\n", "v1"), exe1, ""},
-		{"LF, more lines ignored", lad,
-			deployed(lad+`\kwi3\run\v1`+"\nv2\n", "v1", "v2"), exe1, ""},
-		{"relative name", lad, deployed("v1\r\n", "v1"), exe1, ""},
-		{"no LOCALAPPDATA", "", deployed("v1\r\n", "v1"), "", "%LOCALAPPDATA% is unset"},
-		{"no current.txt", lad, fakeRunFS{}, "", `no ` + lad + `\kwi3\run\current.txt`},
-		{"current.txt unreadable", lad, fakeRunFS{lad + `\kwi3\run\current.txt`: isDir}, "",
-			"cannot read " + lad + `\kwi3\run\current.txt`},
-		{"empty", lad, deployed("\r\n"), "", "is empty"},
-		{"BOM only", lad, deployed("\ufeff"), "", "is empty"},
-		{"dir missing", lad, deployed(lad + `\kwi3\run\v9` + "\r\n"), "",
-			`names ` + lad + `\kwi3\run\v9, which is not a directory`},
-		{"exe missing", lad, fakeRunFS{
-			lad + `\kwi3\run\current.txt`: "v1\r\n",
-			lad + `\kwi3\run\v1`:          isDir,
-		}, "", `no ` + exe1},
-		{"exe is a directory", lad, fakeRunFS{
-			lad + `\kwi3\run\current.txt`: "v1\r\n",
-			lad + `\kwi3\run\v1`:          isDir,
-			exe1:                          isDir,
-		}, "", `no ` + exe1},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, why := resolveKwi3Run(c.lad, c.fs.fs())
-			if got != c.want {
-				t.Fatalf("path = %q (why %q), want %q", got, why, c.want)
-			}
-			if c.want != "" && why != "" {
-				t.Fatalf("resolved, but why = %q", why)
-			}
-			if c.want == "" && !strings.Contains(why, c.whyHas) {
-				t.Fatalf("why = %q, want it to contain %q", why, c.whyHas)
-			}
-		})
-	}
-}
-
-// starter builds a kwi3RunStarter over f with a recorded start and log.
-func starter(f fakeRunFS, env map[string]string, startErr error) (*kwi3RunStarter, *[]string, *[]string) {
+// starter builds a kwi3RunStarter over f, running as self, with a
+// recorded start and log.
+func starter(f fakeRunFS, self string, startErr error) (*kwi3RunStarter, *[]string, *[]string) {
 	var started, logged []string
 	s := &kwi3RunStarter{
 		start: func(cmd string) error {
 			started = append(started, cmd)
 			return startErr
 		},
-		getenv: func(k string) string { return env[k] },
-		fs:     f.fs(),
-		log:    func(l string) { logged = append(logged, l) },
+		self: self,
+		fs:   f.fs(),
+		log:  func(l string) { logged = append(logged, l) },
 	}
 	return s, &started, &logged
 }
 
-func TestKwi3RunStarter_StartsDeployedCopyAndSaysOnce(t *testing.T) {
-	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1")
-	s, started, logged := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
+func TestKwi3RunStarter_PackagedRunnerBesideHotkeyd(t *testing.T) {
+	s, started, logged := starter(packaged(true), pkg+`\hotkeyd.exe`, nil)
 	for _, verb := range []string{"launcher", "switcher", "switcher-confirm"} {
 		if err := s.Run("kwi3-run.exe " + verb); err != nil {
 			t.Fatal(err)
 		}
 	}
-	exe := `"` + lad + `\kwi3\run\v1\kwi3-run.exe"`
+	exe := `"` + pkg + `\kwi3-run.exe"`
 	want := []string{exe + " launcher", exe + " switcher", exe + " switcher-confirm"}
 	if strings.Join(*started, "|") != strings.Join(want, "|") {
-		t.Fatalf("started %q, want %q", *started, want)
-	}
-	if len(*logged) != 1 || !strings.Contains((*logged)[0], lad+`\kwi3\run\v1\kwi3-run.exe`) {
-		t.Fatalf("logged %q, want one line naming the deployed exe", *logged)
-	}
-}
-
-func TestKwi3RunStarter_RedeployIsPickedUp(t *testing.T) {
-	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1", "v2")
-	s, started, logged := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
-	_ = s.Run("kwi3-run.exe launcher")
-	f[lad+`\kwi3\run\current.txt`] = lad + `\kwi3\run\v2` + "\r\n"
-	_ = s.Run("kwi3-run.exe launcher")
-	_ = s.Run("kwi3-run.exe launcher")
-	if !strings.Contains((*started)[0], `\v1\kwi3-run.exe"`) || !strings.Contains((*started)[1], `\v2\kwi3-run.exe"`) ||
-		(*started)[2] != (*started)[1] {
-		t.Fatalf("started %q: want v1 then v2 twice", *started)
-	}
-	if len(*logged) != 2 || !strings.Contains((*logged)[1], `\v2\kwi3-run.exe`) {
-		t.Fatalf("logged %q: want one line per outcome (v1, then v2)", *logged)
-	}
-}
-
-func TestKwi3RunStarter_FallsBackToPath(t *testing.T) {
-	s, started, logged := starter(fakeRunFS{}, map[string]string{"LOCALAPPDATA": lad}, nil)
-	_ = s.Run("kwi3-run.exe launcher")
-	_ = s.Run("kwi3-run.exe switcher")
-	if strings.Join(*started, "|") != "kwi3-run.exe launcher|kwi3-run.exe switcher" {
-		t.Fatalf("started %q, want the bare PATH lookup", *started)
-	}
-	if len(*logged) != 1 || !strings.Contains((*logged)[0], "PATH") ||
-		!strings.Contains((*logged)[0], `current.txt`) {
-		t.Fatalf("logged %q, want one line saying why it fell back to PATH", *logged)
-	}
-}
-
-func TestKwi3RunStarter_PathMissNamesBothPlaces(t *testing.T) {
-	s, _, _ := starter(fakeRunFS{}, map[string]string{"LOCALAPPDATA": lad}, errors.New("start kwi3-run.exe: executable file not found in %PATH%"))
-	err := s.Run("kwi3-run.exe launcher")
-	if err == nil {
-		t.Fatal("no error")
-	}
-	for _, w := range []string{lad + `\kwi3\run\current.txt`, "PATH", "not found"} {
-		if !strings.Contains(err.Error(), w) {
-			t.Fatalf("error %q does not name %q", err, w)
-		}
-	}
-}
-
-func TestKwi3RunStarter_OtherCommandsUntouched(t *testing.T) {
-	f := deployed("v1\r\n", "v1")
-	s, started, logged := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
-	for _, c := range []string{"wt.exe -w new", "kwi3-run.exe2 x", `"kwi3-run.exe" launcher`} {
-		_ = s.Run(c)
-	}
-	if strings.Join(*started, "|") != `wt.exe -w new|kwi3-run.exe2 x|"kwi3-run.exe" launcher` || len(*logged) != 0 {
-		t.Fatalf("started %q logged %q: only a bare kwi3-run.exe first word is resolved", *started, *logged)
-	}
-	// The bare program with no verb is still resolved.
-	_ = s.Run("kwi3-run.exe")
-	if (*started)[3] != `"`+lad+`\kwi3\run\v1\kwi3-run.exe"` {
-		t.Fatalf("started %q", (*started)[3])
-	}
-}
-
-// kwi3-etpz: a hotkeyd installed as part of kwi3's package (scoop's
-// apps\kwi3\<version>) has the runner of the same install beside it; that
-// one is started, before any deployed copy current.txt names.
-const pkg = `C:\Users\j\scoop\apps\kwi3\0.3.0`
-
-func TestKwi3RunStarter_PackagedRunnerBesideHotkeydFirst(t *testing.T) {
-	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1")
-	f[pkg] = isDir
-	f[pkg+`\kwi3-run.exe`] = "MZ"
-	s, started, logged := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
-	s.self = pkg + `\hotkeyd.exe`
-	_ = s.Run("kwi3-run.exe launcher")
-	_ = s.Run("kwi3-run.exe switcher")
-	want := `"` + pkg + `\kwi3-run.exe" launcher|"` + pkg + `\kwi3-run.exe" switcher`
-	if strings.Join(*started, "|") != want {
 		t.Fatalf("started %q, want %q", *started, want)
 	}
 	if len(*logged) != 1 || !strings.Contains((*logged)[0], pkg+`\kwi3-run.exe`) ||
@@ -226,18 +87,69 @@ func TestKwi3RunStarter_PackagedRunnerBesideHotkeydFirst(t *testing.T) {
 	}
 }
 
-func TestKwi3RunStarter_NoRunnerBesideHotkeydUsesCurrentTxt(t *testing.T) {
-	f := deployed(lad+`\kwi3\run\v1`+"\r\n", "v1")
-	s, started, _ := starter(f, map[string]string{"LOCALAPPDATA": lad}, nil)
-	s.self = lad + `\hotkeyd\bin\hotkeyd.exe`
+// The retired deploy (%LOCALAPPDATA%\kwi3\run\current.txt and its v<N>)
+// is never read: with no runner beside hotkeyd, PATH is next, even when
+// an old deploy is still on disk.
+func TestKwi3RunStarter_NoRunnerBesideFallsBackToPath(t *testing.T) {
+	const lad = `C:\Users\j\AppData\Local`
+	f := packaged(false)
+	f[lad+`\kwi3\run\current.txt`] = lad + `\kwi3\run\v1` + "\r\n"
+	f[lad+`\kwi3\run\v1`] = isDir
+	f[lad+`\kwi3\run\v1\kwi3-run.exe`] = "MZ"
+	s, started, logged := starter(f, pkg+`\hotkeyd.exe`, nil)
 	_ = s.Run("kwi3-run.exe launcher")
-	if (*started)[0] != `"`+lad+`\kwi3\run\v1\kwi3-run.exe" launcher` {
-		t.Fatalf("started %q, want the deployed copy", *started)
+	_ = s.Run("kwi3-run.exe switcher")
+	if strings.Join(*started, "|") != "kwi3-run.exe launcher|kwi3-run.exe switcher" {
+		t.Fatalf("started %q, want the bare PATH lookup", *started)
 	}
-	// A directory named kwi3-run.exe beside it is no runner either.
-	f[lad+`\hotkeyd\bin\kwi3-run.exe`] = isDir
+	if len(*logged) != 1 || !strings.Contains((*logged)[0], "PATH") ||
+		!strings.Contains((*logged)[0], pkg+`\kwi3-run.exe`) || strings.Contains((*logged)[0], "current.txt") {
+		t.Fatalf("logged %q, want one line naming the missing runner beside hotkeyd and PATH", *logged)
+	}
+}
+
+func TestKwi3RunStarter_DirectoryBesideIsNoRunner(t *testing.T) {
+	f := packaged(false)
+	f[pkg+`\kwi3-run.exe`] = isDir
+	s, started, _ := starter(f, pkg+`\hotkeyd.exe`, nil)
 	_ = s.Run("kwi3-run.exe launcher")
-	if (*started)[1] != (*started)[0] {
-		t.Fatalf("started %q, want the deployed copy again", *started)
+	if (*started)[0] != "kwi3-run.exe launcher" {
+		t.Fatalf("started %q, want the PATH lookup", *started)
+	}
+}
+
+func TestKwi3RunStarter_UnknownSelfUsesPath(t *testing.T) {
+	s, started, logged := starter(packaged(true), "", nil)
+	_ = s.Run("kwi3-run.exe launcher")
+	if (*started)[0] != "kwi3-run.exe launcher" || !strings.Contains((*logged)[0], "unknown") {
+		t.Fatalf("started %q logged %q, want PATH and a line saying hotkeyd's path is unknown", *started, *logged)
+	}
+}
+
+func TestKwi3RunStarter_PathMissNamesBothPlaces(t *testing.T) {
+	s, _, _ := starter(packaged(false), pkg+`\hotkeyd.exe`, errors.New("start kwi3-run.exe: executable file not found in %PATH%"))
+	err := s.Run("kwi3-run.exe launcher")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, w := range []string{pkg + `\kwi3-run.exe`, "PATH", "not found"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Fatalf("error %q does not name %q", err, w)
+		}
+	}
+}
+
+func TestKwi3RunStarter_OtherCommandsUntouched(t *testing.T) {
+	s, started, logged := starter(packaged(true), pkg+`\hotkeyd.exe`, nil)
+	for _, c := range []string{"wt.exe -w new", "kwi3-run.exe2 x", `"kwi3-run.exe" launcher`} {
+		_ = s.Run(c)
+	}
+	if strings.Join(*started, "|") != `wt.exe -w new|kwi3-run.exe2 x|"kwi3-run.exe" launcher` || len(*logged) != 0 {
+		t.Fatalf("started %q logged %q: only a bare kwi3-run.exe first word is resolved", *started, *logged)
+	}
+	// The bare program with no verb is still resolved.
+	_ = s.Run("kwi3-run.exe")
+	if (*started)[3] != `"`+pkg+`\kwi3-run.exe"` {
+		t.Fatalf("started %q", (*started)[3])
 	}
 }

@@ -7,7 +7,7 @@ import "hotkeyd/internal/bind"
 // hostOverrides for Windows (`go build -tags win32`, sp012 Task 6): Jan's
 // RDP session under i3kwin-win32. The tag is explicit, never implied by
 // GOOS: an untagged GOOS=windows build carries the Linux table, and
-// install-win32.sh builds with -tags win32.
+// kwi3's package.sh builds hotkeyd.exe with -tags win32.
 //
 // There is no shell on Windows: every Run here is split by internal/proc's
 // SplitCommand (spaces separate words, double quotes group, nothing else

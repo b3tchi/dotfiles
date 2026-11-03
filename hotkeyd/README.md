@@ -8,33 +8,23 @@ kwi3 Win32 host (`i3kwin-win32`, sp012) runs it.
 
 ### Install
 
-For daily use hotkeyd.exe comes with kwi3's own scoop package (kwi3
-`i3kwin/adapters/win32/package.sh`, a local build of this tree's
-`hotkeyd/` beside the kwi3 host and runner, installed with `scoop install
-kwi3`); the package also copies the runner list below on install and
-update. `install-win32.sh` stays for development - a hotkeyd of its own in
-`%LOCALAPPDATA%\hotkeyd\bin`, which the host and session.ps1 use only when
-they do not run from the package.
+hotkeyd.exe comes only with kwi3's own scoop package: kwi3's
+`i3kwin/adapters/win32/package.sh` builds this tree's `hotkeyd/`
+(`GOOS=windows -tags win32 -ldflags -H=windowsgui` - the Windows chord
+table, no console window; the built image's own `--check` must pass) and
+puts it beside the kwi3 host and runner, and `scoop install kwi3` /
+`scoop update kwi3` installs the three side by side in
+`%USERPROFILE%\scoop\apps\kwi3\<version>`. scoop's `hotkeyd` shim runs
+it. There is no other install: the old `%LOCALAPPDATA%\hotkeyd\bin` copy
+is not read by anything any more.
 
-From WSL:
-
-```sh
-hotkeyd/install-win32.sh
-```
-
-It cross-builds `GOOS=windows -tags win32 -ldflags -H=windowsgui` (the
-Windows chord table, no console window), runs the built image's own
-`--check`, and copies it to `%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe`, the
-path the host runs.
-
-It also copies the runner's program list, `kwi3/runner-list.json` in this
-checkout, to `%APPDATA%\kwi3\runner-list.json`, where `kwi3-run.exe` reads
-it. The list is copied first, before the build and before the check below,
-so an edit to it takes a re-run of the script and nothing more. A checkout
-without the list is refused before anything is touched.
+The package also copies the runner's program list, `kwi3/runner-list.json`
+in this checkout, to `%APPDATA%\kwi3\runner-list.json`, where
+`kwi3-run.exe` reads it, on every install and update (kwi3's
+`post-install.ps1`). An edit to the list takes a new package.
 
 The project registry `kwi3-run.exe projects` (`$mod+p`) reads,
-`%APPDATA%\project\projects.yaml`, is NOT installed by the script
+`%APPDATA%\project\projects.yaml`, is NOT installed by anything
 (kwi3-4zxc: `$mod+p` runs with no WSL at all). It is Windows' own, kept
 by hand, in nushell's `project` shape with Windows paths:
 
@@ -47,7 +37,7 @@ projects:
     ssh: workstation                     # a Host in %USERPROFILE%\.ssh\config
 ```
 
-The script never writes, replaces or deletes it; it only says whether it
+The package never writes, replaces or deletes it; it only says whether it
 is there. Picking a project switches to workspace `<project>_1` and opens
 a new WezTerm window in its own workspace named after the project -
 `wezterm-gui.exe start --workspace <project> --cwd <path> --
@@ -55,19 +45,12 @@ powershell.exe -NoLogo` (Windows Terminal: `wt.exe -w new -d <path>
 powershell.exe -NoLogo`) - or, for an `ssh` entry, Windows OpenSSH
 attaching the remote tmux session group the way `project go` does
 (`ssh.exe -t <profile> "TMUX_TARGET=$(~/.local/bin/tmux-start start 0
-<project> '' '<path>') bash -li"`). A `%APPDATA%\project\wsl.txt` an
-earlier install wrote (kwi3-hoex.38) is removed, since nothing reads it;
-a file of that name the script did not write is left alone and named.
+<project> '' '<path>') bash -li"`).
 
-It **refuses** (exit 2, the daemon not copied) while any process runs from
-that path, and names each pid and command line. The runner list has already
-been copied by then. It never ends a process. Stop the daemon first with
-`hotkeyd.exe stop` (below), then install, then start the new image with
-kwi3's `session.sh start --allow-default-desktop` (job-free; the host
-already serving is only reported), or with `hotkeyd recover`, which reuses
-the old daemon's arguments but, run from WSL, lands in WSL's job. A
-`LOCALAPPDATA=<dir> APPDATA=<dir2> WSLENV=LOCALAPPDATA:APPDATA` prefix
-installs under those directories instead of the real profile.
+scoop refuses to update a package while it runs, so an update is
+`kwi3-session stop; scoop update kwi3; kwi3-session start
+--allow-default-desktop` (kwi3's `session.ps1`: `stop` stops hotkeyd with
+`hotkeyd stop`, below, the resident runner and the host).
 
 Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 
@@ -75,12 +58,12 @@ Per-desktop files live in `%LOCALAPPDATA%\hotkeyd\`, named after the desktop:
 - `<desktop>.sock`: the control socket.
 - `<desktop>.args`: the daemon's arguments, for `recover`.
 - `<desktop>.log`: the stderr of a daemon `recover` or kwi3's
-  `session.sh` started (the previous one is kept as `.log.1`).
+  `kwi3-session` started (the previous one is kept as `.log.1`).
 
 ### `stop`
 
 ```
-"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" stop [--display DESKTOP]
+hotkeyd stop [--display DESKTOP]
 ```
 
 Stops this desktop's daemon (kwi3-hoex.30); `--display` names another
@@ -110,7 +93,7 @@ lock over and says so.
 ### `--input win32`
 
 ```
-"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" --input win32
+hotkeyd --input win32
 ```
 
 The Windows key source (sp012). `win32` is also the default input of a
@@ -159,7 +142,7 @@ Windows build. What it does, from the code:
     `$mod+0`, `$mod+Shift+c`, `$mod+9`, `$mod+Ctrl+m` and
     `$mod+Shift+e`.
 
-  `install-win32.sh` passes the tag. An untagged Windows build carries the
+  kwi3's package.sh passes the tag. An untagged Windows build carries the
   Linux table.
 - **kwi3** is `$KWI3SOCK`. Unset, it is the host's own pipe,
   `\\.\pipe\kwi3-<%USERNAME%>-<desktop>`. The log says so, and the pipe
@@ -168,23 +151,17 @@ Windows build. What it does, from the code:
   keeps it out of every registration and the hook passes it, so the host's
   own `RegisterHotKey` gets it.
 
-**Start it after the host, with kwi3's `session.sh`.** The kwi3 host
+**Start it after the host, with kwi3's `kwi3-session`.** The kwi3 host
 `i3kwin-win32` starts first, and hotkeyd once the host's pipe
-(`\\.\pipe\kwi3-<user>-<desktop>`) answers. kwi3's
-`i3kwin/adapters/win32/session.sh start --allow-default-desktop` does both
-in that order (kwi3-hoex.29; kwi3's `AGENTS.md`, Windows host, has the
-details): it creates each through `Win32_Process.Create`, so neither -
-nor any program a chord starts - is in WSL's kill-on-close job, and
-hotkeyd's stderr goes to `<desktop>.log` here. With the host already up it
-starts only hotkeyd. Its startup lines say how many chords were registered
-(`<n> of <m> chords registered via RegisterHotKey on desktop <name>
-($mod=Mod1) ...`) and whether the hook went in.
-
-Started from WSL directly (`cmd.exe /c ...hotkeyd.exe --input win32`),
-hotkeyd lands in WSL's one kill-on-close job, together with the host and
-every program a chord starts, and `wsl --shutdown` or the WSL VM stopping
-kills all of them; closing the terminal does not. `hotkeyd recover` run
-from WSL starts its new daemon in that job too.
+(`\\.\pipe\kwi3-<user>-<desktop>`) answers. `kwi3-session start
+--allow-default-desktop` (scoop's shim for the package's `session.ps1`;
+kwi3's `AGENTS.md`, Windows host, has the details) does both in that
+order, from the package's version directory: it creates each through
+`Win32_Process.Create`, so neither - nor any program a chord starts - is
+in a job, and hotkeyd's stderr goes to `<desktop>.log` here. With the host
+already up it starts only hotkeyd. Its startup lines say how many chords
+were registered (`<n> of <m> chords registered via RegisterHotKey on
+desktop <name> ($mod=Mod1) ...`) and whether the hook went in.
 
 Two environment variables are for tests and rigs only:
 
@@ -251,38 +228,26 @@ That was not yet the kwi3-hoex.17 acceptance.
 
 `$mod+d` and the `$mod+Tab` switcher run `kwi3-run.exe <verb>`.
 
-First, the runner of the same install: when a `kwi3-run.exe` sits in the
-directory hotkeyd.exe itself runs from - kwi3's scoop package installs
-both side by side, `%USERPROFILE%\scoop\apps\kwi3\<version>\` - that one
-is started (`kwi3-run: starting <path>, beside hotkeyd`, logged once), so a
-packaged hotkeyd and its runner are always the same version. The rules
-below apply only when there is none beside it (an install-win32.sh copy in
-`%LOCALAPPDATA%\hotkeyd\bin`).
+The runner of the same install: a Run whose program is the bare word
+`kwi3-run.exe` starts the `kwi3-run.exe` in the directory hotkeyd.exe
+itself runs from - kwi3's scoop package installs both side by side,
+`%USERPROFILE%\scoop\apps\kwi3\<version>\` - so a packaged hotkeyd and
+its runner are always the same version (`kwi3-run: starting <path>, beside
+hotkeyd`, logged once). A runner that is already running keeps its own
+version until `kwi3-run.exe quit` (`kwi3-session stop` sends it): a later
+start only hands it the verb.
 
-kwi3's `i3kwin/runner/win32/deploy.sh` puts each deploy in a new
-`%LOCALAPPDATA%\kwi3\run\v<N>` and names it in
-`%LOCALAPPDATA%\kwi3\run\current.txt`; nothing puts it on PATH. So a Run
-whose program is the bare word `kwi3-run.exe` starts
-`<the directory current.txt names>\kwi3-run.exe`. current.txt is read again
-for every start, so the next chord after a deploy uses the new version and
-hotkeyd needs no restart. (A runner that is already running keeps its own
-version until `kwi3-run.exe quit`: a later start only hands it the verb.)
-
-The first line of current.txt counts. It is an absolute directory, as
-deploy.sh writes it, or a name relative to `%LOCALAPPDATA%\kwi3\run`. A BOM,
-blanks, the CR and a trailing backslash are ignored.
-
-With no deployed copy (no `%LOCALAPPDATA%`, no current.txt, an empty one, or
-one naming a directory or exe that is missing), `kwi3-run.exe` is looked up
-on PATH as any other program. The log says which copy was used, or why it
-fell back to PATH, once, and again only when that changes. When PATH has
-none either, the chord's log line names both places:
-`kwi3-run.exe not found: no deployed copy (<why>), and not on PATH: ...`.
+With none beside it, `kwi3-run.exe` is looked up on PATH as any other
+program. The old `%LOCALAPPDATA%\kwi3\run\current.txt` deploy is never
+read. The log says which copy was used, or that it fell back to PATH,
+once, and again only when that changes. When PATH has none either, the
+chord's log line names both places: `kwi3-run.exe not found: no
+<dir>\kwi3-run.exe, and not on PATH: ...`.
 
 ### `--health`
 
 ```
-"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" --health [--display <desktop>]
+hotkeyd --health [--display <desktop>]
 ```
 
 It checks these in order and names the first that fails:
@@ -302,7 +267,7 @@ Exit codes: 0 when it serves, 6 when check 1, 2 or 4 fails, and 9 when check
 ### `recover`
 
 ```
-"%LOCALAPPDATA%\hotkeyd\bin\hotkeyd.exe" recover [--display <desktop>]
+hotkeyd recover [--display <desktop>]
 ```
 
 The host runs `recover` from its recover chord (`$mod+Shift+r`, the host's
