@@ -52,6 +52,8 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- kwi3 owns the window's size: a font zoom changes the cell, never the
 	-- window.
 	config.adjust_window_size_when_changing_font_size = false
+	-- Closing the window (or kwi3 closing it) never asks for confirmation.
+	config.window_close_confirmation = "NeverPrompt"
 
 	-- Windows has IosevkaTerm Nerd Font (scoop nerd-fonts/IosevkaTerm-NF),
 	-- not the Iosevka Nerd Font Mono above, which WezTerm reports as a
