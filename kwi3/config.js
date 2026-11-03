@@ -119,6 +119,20 @@ if (kwi3.host === 'win32') {
         w.moveTo(kwi3.grid.center(w));
         w.focus();
     });
+
+    // WezTerm (window_decorations = "RESIZE", wezterm/wezterm.lua) folds its
+    // caption into its own client, so its frame is all it needs: no kwi3
+    // titlebar over it, the row given back to the terminal. The focus ring
+    // stays (unlike noFrame()). Other GUI applications keep kwi3's bar above
+    // their own caption - Jan's call (kwi3-i0fg, 2026-11-03). A host older
+    // than kwi3-i0fg has no clientDecorated() on the handle, so it is
+    // checked rather than called blind (a throwing rule is only rolled
+    // back and logged, but there is no reason to log it every window).
+    kwi3.onWindowAdded({ class: /^org\.wezfurlong\.wezterm$/ }, w => {
+        if (typeof w.clientDecorated === 'function') {
+            w.clientDecorated();
+        }
+    });
 }
 
 // =====================================================================
