@@ -39,8 +39,8 @@
 #
 # %LOCALAPPDATA% and %APPDATA% are read from Windows through cmd.exe, so an
 # override passed in through WSLENV (LOCALAPPDATA=C:\a APPDATA=C:\b
-# WSLENV=LOCALAPPDATA:APPDATA) installs there instead of the real profile
-# (hotkeyd/install-win32.sh's rule). WT itself only ever reads the REAL
+# WSLENV=LOCALAPPDATA:APPDATA) installs there instead of the real profile.
+# WT itself only ever reads the REAL
 # %LOCALAPPDATA% (SHGetKnownFolderPath), so such an install is inert.
 #
 # Exit: 0 installed or unchanged; 1 the config.js could not be mapped;

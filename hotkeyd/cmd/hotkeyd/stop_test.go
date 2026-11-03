@@ -142,7 +142,7 @@ func TestStop_HandleOpenedBeforeTheStop(t *testing.T) {
 
 func TestStop_IgnoresStop_HotkeydImage_EndedByPid(t *testing.T) {
 	for _, tc := range []struct{ name, image, self string }{
-		{"hotkeyd.exe", `C:\Users\j\AppData\Local\hotkeyd\bin\HOTKEYD.EXE`, ""},
+		{"hotkeyd.exe", `C:\Users\j\scoop\apps\kwi3\0.3.0\HOTKEYD.EXE`, ""},
 		{"this binary", `C:\t\hotkeyd.test.exe`, `c:\T\hotkeyd.test.exe`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

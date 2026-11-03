@@ -1,8 +1,8 @@
 package main
 
-// kwi3-hoex.27 on a real Windows file system: deploy.sh's layout under a
-// private directory (t.TempDir, never the real %LOCALAPPDATA%), read with
-// os.ReadFile/os.Stat. Run through hotkeyd/test-win32.sh.
+// The runner beside hotkeyd.exe on a real Windows file system: kwi3's
+// package layout under a private directory (t.TempDir), read with os.Stat.
+// Run through hotkeyd/test-win32.sh.
 
 import (
 	"os"
@@ -15,50 +15,33 @@ import (
 )
 
 func TestKwi3RunPath_Windows_RealFS(t *testing.T) {
-	lad := t.TempDir()
-	run := filepath.Join(lad, "kwi3", "run")
-	for _, v := range []string{"v1", "v2"} {
-		if err := os.MkdirAll(filepath.Join(run, v), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(run, v, "kwi3-run.exe"), []byte("MZ"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cur := filepath.Join(run, "current.txt")
-	rfs := runFS{ReadFile: os.ReadFile, Stat: os.Stat}
-
-	if p, why := resolveKwi3Run(lad, rfs); p != "" || !strings.Contains(why, cur) {
-		t.Fatalf("no current.txt: %q %q", p, why)
-	}
-	// What deploy.sh writes: the absolute directory and CRLF.
-	if err := os.WriteFile(cur, []byte(filepath.Join(run, "v1")+"\r\n"), 0o644); err != nil {
+	pkgDir := filepath.Join(t.TempDir(), "kwi3", "0.3.0")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	for _, n := range []string{"hotkeyd.exe", "kwi3-run.exe"} {
+		if err := os.WriteFile(filepath.Join(pkgDir, n), []byte("MZ"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var started, logged []string
 	s := &kwi3RunStarter{
-		start:  func(c string) error { started = append(started, c); return nil },
-		getenv: func(k string) string { return map[string]string{"LOCALAPPDATA": lad}[k] },
-		fs:     rfs,
-		log:    func(l string) { logged = append(logged, l) },
+		start: func(c string) error { started = append(started, c); return nil },
+		self:  filepath.Join(pkgDir, "hotkeyd.exe"),
+		fs:    runFS{Stat: os.Stat},
+		log:   func(l string) { logged = append(logged, l) },
 	}
 	_ = s.Run("kwi3-run.exe launcher")
-	if err := os.WriteFile(cur, []byte(filepath.Join(run, "v2")+"\r\n"), 0o644); err != nil {
+	if err := os.Remove(filepath.Join(pkgDir, "kwi3-run.exe")); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Run("kwi3-run.exe switcher")
 	want := []string{
-		`"` + filepath.Join(run, "v1", "kwi3-run.exe") + `" launcher`,
-		`"` + filepath.Join(run, "v2", "kwi3-run.exe") + `" switcher`,
+		`"` + filepath.Join(pkgDir, "kwi3-run.exe") + `" launcher`,
+		`kwi3-run.exe switcher`,
 	}
 	if strings.Join(started, "|") != strings.Join(want, "|") || len(logged) != 2 {
 		t.Fatalf("started %q logged %q, want %q and two lines", started, logged, want)
-	}
-	if err := os.Remove(filepath.Join(run, "v2", "kwi3-run.exe")); err != nil {
-		t.Fatal(err)
-	}
-	if p, why := resolveKwi3Run(lad, rfs); p != "" || !strings.Contains(why, "no "+filepath.Join(run, "v2", "kwi3-run.exe")) {
-		t.Fatalf("exe removed: %q %q", p, why)
 	}
 }
 
@@ -67,11 +50,12 @@ func TestKwi3RunPath_Windows_RealFS(t *testing.T) {
 // exits.
 const asKwi3RunEnv = "HOTKEYD_TEST_AS_KWI3RUN"
 
-// The daemon's own Run (startWin32 with no cfg.Run) starts the copy
-// current.txt names - a copy of this test binary under a private
-// %LOCALAPPDATA% - for a posted WM_HOTKEY bound to `kwi3-run.exe launcher`.
-// Nothing is on PATH under that name.
-func TestKwi3Run_Windows_Deployed(t *testing.T) {
+// The daemon's own Run (startWin32 with no cfg.Run) starts the
+// kwi3-run.exe beside this executable - a copy of this test binary written
+// next to it - for a posted WM_HOTKEY bound to `kwi3-run.exe launcher`.
+// Nothing is on PATH under that name, and a retired current.txt deploy
+// under the private %LOCALAPPDATA% is never read.
+func TestKwi3Run_Windows_BesideHotkeyd(t *testing.T) {
 	// A SHORT private directory: the daemon's sockets live under
 	// %LOCALAPPDATA%, and t.TempDir's names overflow sun_path.
 	lad, err := os.MkdirTemp("", "hk")
@@ -80,10 +64,6 @@ func TestKwi3Run_Windows_Deployed(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(lad) })
 	t.Setenv("LOCALAPPDATA", lad)
-	v1 := filepath.Join(lad, "kwi3", "run", "v1")
-	if err := os.MkdirAll(v1, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +72,18 @@ func TestKwi3Run_Windows_Deployed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exe := filepath.Join(v1, "kwi3-run.exe")
+	exe := filepath.Join(filepath.Dir(self), "kwi3-run.exe")
 	if err := os.WriteFile(exe, img, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(exe) })
+	// The retired deploy: a second copy current.txt names. Started, it
+	// would report ITS path, not exe's.
+	v1 := filepath.Join(lad, "kwi3", "run", "v1")
+	if err := os.MkdirAll(v1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v1, "kwi3-run.exe"), img, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(lad, "kwi3", "run", "current.txt"), []byte(v1+"\r\n"), 0o644); err != nil {
@@ -107,7 +97,7 @@ func TestKwi3Run_Windows_Deployed(t *testing.T) {
 	_, src, sig, done := startDryRunDaemonWith(t, modes.addr, true, binds, map[string]bind.Layer{})
 	postAltDigit(t, src, '1')
 	var got string
-	waitForWithin(t, "the deployed kwi3-run.exe runs", freshImageWait, func() bool {
+	waitForWithin(t, "the kwi3-run.exe beside hotkeyd runs", freshImageWait, func() bool {
 		b, err := os.ReadFile(filepath.Join(marker, "kwi3-run-ran.txt"))
 		got = string(b)
 		return err == nil && strings.Contains(got, "\n")

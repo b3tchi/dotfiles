@@ -1,7 +1,7 @@
 package main
 
 // kwi3-hoex.30: `hotkeyd stop [--display DESKTOP]`, the Windows daemon's
-// stop - what install-win32.sh asks for before it replaces a running
+// stop - what a script asks for before it replaces a running
 // hotkeyd.exe, and what a person runs instead of `taskkill`. Plain
 // `taskkill /PID` reports SUCCESS and leaves the daemon running (it has no
 // console and no top-level window that answers WM_CLOSE; MEASURED under
