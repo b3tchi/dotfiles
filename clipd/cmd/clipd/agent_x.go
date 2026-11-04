@@ -34,19 +34,6 @@ import (
 
 var displayRe = regexp.MustCompile(`^[A-Za-z0-9._-]*:[0-9]+(\.[0-9]+)?$`)
 
-// agentXState is the agent's state dir: $CLIPD_STATE_DIR, else
-// $XDG_RUNTIME_DIR/clipd/state.
-func agentXState() (string, error) {
-	if d := os.Getenv("CLIPD_STATE_DIR"); d != "" {
-		return d, nil
-	}
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		return "", fmt.Errorf("XDG_RUNTIME_DIR unset; set CLIPD_STATE_DIR")
-	}
-	return filepath.Join(base, "clipd", "state"), nil
-}
-
 func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
 	if len(args) > 1 {
 		return bad()
@@ -75,7 +62,7 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 		fmt.Fprintln(errOut, "clipd: agent x:", err)
 		return exitConfig
 	}
-	state, err := agentXState()
+	state, err := runtimePath("CLIPD_STATE_DIR", "state")
 	if err != nil {
 		fmt.Fprintln(errOut, "clipd: agent x:", err)
 		return exitConfig
