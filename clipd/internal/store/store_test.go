@@ -418,3 +418,104 @@ func TestListSkipsHeartbeatUnderEntryName(t *testing.T) {
 		t.Fatalf("items %d skipped %d", len(items), st.Skipped)
 	}
 }
+
+func TestHeartbeatsReadsEveryOrigin(t *testing.T) {
+	r, me := newRig(t)
+	peerID, _ := age.GenerateX25519Identity()
+	peer := r.store("peer-1", peerID, r.self.Recipient())
+	if err := me.WriteHeartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	r.now = t0.Add(-time.Minute)
+	if err := peer.WriteHeartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	// An entry, a temp file and Syncthing's marker are not heartbeats.
+	if _, err := me.Write(text("x", t0, 300)); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(r.dir, ".hb-x.tmp"), []byte("junk"), 0o600)
+	os.Mkdir(filepath.Join(r.dir, ".stfolder"), 0o700)
+
+	hbs, st, err := me.Heartbeats()
+	if err != nil || st.Skipped != 0 {
+		t.Fatalf("err %v skipped %d", err, st.Skipped)
+	}
+	if len(hbs) != 2 || hbs["me"].Created != t0.UnixMilli() || hbs["peer-1"].Created != t0.Add(-time.Minute).UnixMilli() {
+		t.Fatalf("heartbeats %+v", hbs)
+	}
+}
+
+// A heartbeat whose decrypted origin disagrees with its filename is a
+// peer claiming another's liveness: skipped, never credited.
+func TestHeartbeatsRejectOriginMismatch(t *testing.T) {
+	r, me := newRig(t)
+	liar := r.store("liar", r.self)
+	if err := liar.WriteHeartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(r.dir, "hb-liar.age"), filepath.Join(r.dir, "hb-honest.age")); err != nil {
+		t.Fatal(err)
+	}
+	// An entry stored under a heartbeat name is not a heartbeat either.
+	id, err := me.Write(text("payload-secret", t0, 300))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Rename(filepath.Join(r.dir, id+".age"), filepath.Join(r.dir, "hb-entry.age"))
+	// Undecryptable garbage.
+	os.WriteFile(filepath.Join(r.dir, "hb-garbage.age"), []byte("not age"), 0o600)
+
+	hbs, st, err := me.Heartbeats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hbs) != 0 || st.Skipped != 3 {
+		t.Fatalf("heartbeats %+v skipped %d", hbs, st.Skipped)
+	}
+	for _, l := range r.logs {
+		if strings.Contains(l, "payload-secret") {
+			t.Fatalf("payload in log %q", l)
+		}
+	}
+}
+
+func TestHeartbeatsMissingFolder(t *testing.T) {
+	_, s := newRig(t)
+	s.Dir = filepath.Join(s.Dir, "gone")
+	if _, _, err := s.Heartbeats(); !errors.Is(err, ErrNoFolder) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+// Windows: Syncthing or Defender can hold hb-<origin>.age open for a
+// moment, failing the replacing rename (dotfiles-jxzw). A bounded retry
+// absorbs it; a persistent failure still surfaces and leaves no temp.
+func TestHeartbeatRenameRetriesTransient(t *testing.T) {
+	r, s := newRig(t)
+	var calls int
+	s.rename = func(a, b string) error {
+		calls++
+		if calls < 3 {
+			return errors.New("sharing violation")
+		}
+		return os.Rename(a, b)
+	}
+	if err := s.WriteHeartbeat(); err != nil {
+		t.Fatalf("transient failure not absorbed: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("rename calls %d", calls)
+	}
+	calls = 0
+	s.rename = func(a, b string) error { calls++; return errors.New("held") }
+	if err := s.WriteHeartbeat(); err == nil {
+		t.Fatal("persistent failure swallowed")
+	}
+	if calls != heartbeatRenameTries {
+		t.Fatalf("unbounded retry: %d calls", calls)
+	}
+	if got := names(t, r.dir); len(got) != 1 || got[0] != "hb-me.age" {
+		t.Fatalf("files %v", got)
+	}
+}

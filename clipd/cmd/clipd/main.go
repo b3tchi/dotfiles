@@ -11,16 +11,24 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"time"
 
 	"filippo.io/age"
 
 	"clipd/internal/crypt"
+	"clipd/internal/entry"
+	"clipd/internal/status"
+	"clipd/internal/store"
 )
 
 const (
@@ -33,7 +41,8 @@ const usage = `usage:
   clipd keygen                  create this device's age identity
   clipd recipients add <age1…>  pin a peer's recipient
   clipd recipients rm <age1…>   unpin a peer's recipient
-  clipd recipients list         print pinned recipients`
+  clipd recipients list         print pinned recipients
+  clipd status                  peer heartbeats + Syncthing link (exit 0 ok, 3 stale, 4 syncthing unreachable)`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -109,6 +118,11 @@ func run(args []string, out, errOut io.Writer) int {
 		return 0
 	case "recipients":
 		return recipients(args[1:], out, errOut, fail, bad)
+	case "status":
+		if len(args) != 1 {
+			return bad()
+		}
+		return statusCmd(out, errOut, fail)
 	default:
 		return bad()
 	}
@@ -150,4 +164,95 @@ func recipients(args []string, out, errOut io.Writer, fail func(error) int, bad 
 	default:
 		return bad()
 	}
+}
+
+// deviceName is this device's origin: $CLIPD_DEVICE, else the hostname
+// reduced to the store's origin alphabet.
+func deviceName() string {
+	if d := os.Getenv("CLIPD_DEVICE"); d != "" {
+		return d
+	}
+	h, _ := os.Hostname()
+	h = regexp.MustCompile(`[^A-Za-z0-9_-]+`).ReplaceAllString(strings.SplitN(h, ".", 2)[0], "-")
+	h = strings.TrimLeft(h, "_-")
+	if len(h) > 64 {
+		h = h[:64]
+	}
+	if h == "" {
+		h = "clipd"
+	}
+	return h
+}
+
+// syncFolder is the Syncthing folder: $CLIPD_FOLDER, else tmpfs
+// $XDG_RUNTIME_DIR/clipd/folder on Linux, %LOCALAPPDATA%\clipd\folder on
+// Windows (sp039 plan, runtime paths).
+func syncFolder() (string, error) {
+	if d := os.Getenv("CLIPD_FOLDER"); d != "" {
+		return d, nil
+	}
+	base, env := os.Getenv("XDG_RUNTIME_DIR"), "XDG_RUNTIME_DIR"
+	if runtime.GOOS == "windows" {
+		base, env = os.Getenv("LOCALAPPDATA"), "LOCALAPPDATA"
+	}
+	if base == "" {
+		return "", fmt.Errorf("%s unset; set CLIPD_FOLDER", env)
+	}
+	return filepath.Join(base, "clipd", "folder"), nil
+}
+
+func statusCmd(out, errOut io.Writer, fail func(error) int) int {
+	self, err := loadIdentity()
+	if err != nil {
+		return fail(err)
+	}
+	rp, err := configPath("recipients.txt")
+	if err != nil {
+		return fail(err)
+	}
+	pins, err := crypt.ListRecipients(rp)
+	if err != nil {
+		return fail(err)
+	}
+	pinned := 0
+	for _, r := range pins {
+		if r != self.Recipient().String() {
+			pinned++
+		}
+	}
+	in := status.Input{Self: deviceName(), Pinned: pinned, Now: time.Now(), Heartbeats: map[string]time.Time{}}
+
+	// Heartbeats: each device's own evidence. A missing folder leaves
+	// every peer "never" — reported, not fatal.
+	if dir, err := syncFolder(); err != nil {
+		fmt.Fprintln(errOut, "clipd: sync folder:", err)
+	} else {
+		st := &store.Store{Dir: dir, Origin: in.Self, Self: self, Cap: entry.DefaultCap,
+			Logf: func(f string, a ...any) { fmt.Fprintf(errOut, "clipd: "+f+"\n", a...) }}
+		hbs, _, err := st.Heartbeats()
+		if err != nil {
+			fmt.Fprintln(errOut, "clipd:", err)
+		}
+		for o, e := range hbs {
+			in.Heartbeats[o] = time.UnixMilli(e.Created)
+		}
+	}
+
+	// Syncthing link: a third party's view, shown but never trusted alone.
+	paths := status.ConfigPaths()
+	if p := os.Getenv("CLIPD_SYNCTHING_CONFIG"); p != "" {
+		paths = []string{p}
+	}
+	stc, err := status.FindConfig(paths)
+	if err == nil {
+		stc.FolderID = "clipd"
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		in.Links, err = stc.Links(ctx)
+		cancel()
+	}
+	in.LinkErr = err
+
+	rep := status.Evaluate(in)
+	rep.Write(out)
+	return rep.Exit
 }

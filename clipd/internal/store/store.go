@@ -39,6 +39,13 @@ const (
 	SkewTolerance = 60 * time.Second
 	// TmpMaxAge: a temp file older than this is a crashed write.
 	TmpMaxAge = time.Minute
+
+	// heartbeatRenameTries bounds the replacing rename of a heartbeat. On
+	// Windows Syncthing or Defender may hold hb-<origin>.age open for a
+	// moment (dotfiles-jxzw); a few short retries absorb that, and a beat
+	// that still fails is one missed beat, well inside the 90 s stale bound.
+	heartbeatRenameTries = 5
+	heartbeatRenameWait  = 20 * time.Millisecond
 )
 
 var (
@@ -46,6 +53,7 @@ var (
 	ErrBadOrigin = errors.New("store: origin must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 
 	idFile   = regexp.MustCompile(`^[0-9a-f]{16}\.age$`)
+	hbFile   = regexp.MustCompile(`^hb-([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.age$`)
 	tmpFile  = regexp.MustCompile(`^\.(?:[0-9a-f]{16}|hb-[A-Za-z0-9_-]+)\.tmp$`)
 	originRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 )
@@ -64,6 +72,7 @@ type Store struct {
 	// beforePublish is a test seam called with the complete temp file
 	// and the final name, just before the final name appears.
 	beforePublish func(tmp, final string)
+	rename        func(old, new string) error // test seam; nil = os.Rename
 }
 
 type Item struct {
@@ -190,11 +199,78 @@ func (s *Store) WriteHeartbeat() error {
 	if s.beforePublish != nil {
 		s.beforePublish(tmp, final)
 	}
-	if err := os.Rename(tmp, final); err != nil {
-		os.Remove(tmp)
-		return err
+	rename := s.rename
+	if rename == nil {
+		rename = os.Rename
 	}
-	return nil
+	for try := 1; ; try++ {
+		err = rename(tmp, final)
+		if err == nil {
+			return nil
+		}
+		if try == heartbeatRenameTries {
+			os.Remove(tmp)
+			return fmt.Errorf("store: publish heartbeat after %d tries: %w", try, err)
+		}
+		time.Sleep(heartbeatRenameWait)
+	}
+}
+
+// Heartbeats returns the heartbeat of every origin found in the folder,
+// keyed by origin. A file whose decrypted origin differs from its name,
+// that is not a heartbeat, or that cannot be decrypted is skipped and
+// counted: a peer must not be credited with liveness it did not report.
+func (s *Store) Heartbeats() (map[string]entry.Entry, Stats, error) {
+	var st Stats
+	if err := s.checkFolder(); err != nil {
+		return nil, st, err
+	}
+	des, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return nil, st, err
+	}
+	hbs := map[string]entry.Entry{}
+	for _, d := range des {
+		m := hbFile.FindStringSubmatch(d.Name())
+		if m == nil || !d.Type().IsRegular() {
+			continue
+		}
+		e, err := s.readHeartbeat(d.Name())
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // replaced or removed between ReadDir and read
+		}
+		if err == nil && e.Origin != m[1] {
+			err = errors.New("store: heartbeat origin does not match its name")
+		}
+		if err != nil {
+			st.Skipped++
+			s.logf("store: skip heartbeat %s: %v", m[1], err)
+			continue
+		}
+		hbs[m[1]] = e
+	}
+	return hbs, st, nil
+}
+
+// readHeartbeat decrypts a heartbeat, bounded to what an empty-data
+// envelope can need.
+func (s *Store) readHeartbeat(name string) (entry.Entry, error) {
+	ct, err := os.ReadFile(filepath.Join(s.Dir, name))
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	plain, err := crypt.Decrypt(ct, s.Self, entry.MaxEncoded(0))
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	e, err := entry.Decode(plain, 0)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	if e.Mime != entry.MimeHeartbeat {
+		return entry.Entry{}, errors.New("store: entry under a heartbeat name")
+	}
+	return e, nil
 }
 
 // scan decrypts every entry file, skipping (and counting) the ones it
