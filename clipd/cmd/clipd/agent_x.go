@@ -33,37 +33,19 @@ import (
 	"clipd/internal/xsel"
 )
 
-var (
-	displayRe    = regexp.MustCompile(`^[A-Za-z0-9._-]*:[0-9]+(\.[0-9]+)?$`)
-	agentXOrigin = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
-)
+var displayRe = regexp.MustCompile(`^[A-Za-z0-9._-]*:[0-9]+(\.[0-9]+)?$`)
 
-// agentXRuntime resolves an $XDG_RUNTIME_DIR/clipd/<sub> path unless the
-// override env var is set.
-func agentXRuntime(override, sub string) (string, error) {
-	if d := os.Getenv(override); d != "" {
+// agentXState is the agent's state dir: $CLIPD_STATE_DIR, else
+// $XDG_RUNTIME_DIR/clipd/state.
+func agentXState() (string, error) {
+	if d := os.Getenv("CLIPD_STATE_DIR"); d != "" {
 		return d, nil
 	}
 	base := os.Getenv("XDG_RUNTIME_DIR")
 	if base == "" {
-		return "", fmt.Errorf("XDG_RUNTIME_DIR unset; set %s", override)
+		return "", fmt.Errorf("XDG_RUNTIME_DIR unset; set CLIPD_STATE_DIR")
 	}
-	return filepath.Join(base, "clipd", sub), nil
-}
-
-func agentXDevice() string {
-	if d := os.Getenv("CLIPD_DEVICE"); d != "" {
-		return d
-	}
-	h, _ := os.Hostname()
-	h = strings.TrimLeft(agentXOrigin.ReplaceAllString(strings.SplitN(h, ".", 2)[0], "-"), "_-")
-	if len(h) > 64 {
-		h = h[:64]
-	}
-	if h == "" {
-		h = "clipd"
-	}
-	return h
+	return filepath.Join(base, "clipd", "state"), nil
 }
 
 func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
@@ -82,12 +64,12 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 		fmt.Fprintf(errOut, "clipd: agent x: %q is not an X display name\n", dpy)
 		return exitConfig
 	}
-	folder, err := agentXRuntime("CLIPD_FOLDER", "folder")
+	folder, err := syncFolder()
 	if err != nil {
 		fmt.Fprintln(errOut, "clipd: agent x:", err)
 		return exitConfig
 	}
-	state, err := agentXRuntime("CLIPD_STATE_DIR", "state")
+	state, err := agentXState()
 	if err != nil {
 		fmt.Fprintln(errOut, "clipd: agent x:", err)
 		return exitConfig
@@ -121,7 +103,7 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 	defer release()
 
 	lg := log.New(errOut, "clipd: ", log.LstdFlags)
-	origin := agentXDevice()
+	origin := deviceName()
 	st := &store.Store{Dir: folder, Origin: origin, Self: self, Peers: peers, Cap: entry.DefaultCap, Logf: lg.Printf}
 	sel := &xsel.X{Display: dpy, Xclip: os.Getenv("CLIPD_XCLIP"), Clipnotify: os.Getenv("CLIPD_CLIPNOTIFY")}
 	a := &agent.Agent{Store: st, StateDir: state, Name: dpy, Logf: lg.Printf}
