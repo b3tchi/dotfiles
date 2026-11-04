@@ -35,12 +35,13 @@ linux:
       curl -fsSL https://claude.ai/install.sh | sh
       chmod +x ~/.dotfiles/claude/akm/akm ~/.dotfiles/claude/akm/akm-root
 
-      # Mirror slash commands to personal claude account dir.
+      # Mirror slash commands + settings.json to personal claude account dir.
       # ~/.claude → ~/.claude-work symlink; ~/.claude-personal is separate.
       if [ -d ~/.claude-personal ]; then
         mkdir -p ~/.claude-personal/commands
         ln -sf ~/.dotfiles/claude/commands/epic-create.md ~/.claude-personal/commands/epic-create.md
         ln -sf ~/.dotfiles/claude/commands/preview.md ~/.claude-personal/commands/preview.md
+        ln -sfn ~/.dotfiles/claude/settings.json ~/.claude-personal/settings.json
       fi
 
       # LSP servers (binaries) — required by code intelligence plugins.
