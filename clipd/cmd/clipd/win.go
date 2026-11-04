@@ -67,8 +67,9 @@ func openStore(logf func(string, ...any)) (*store.Store, error) {
 	return &store.Store{Dir: dir, Origin: deviceName(), Self: self, Peers: peers, Cap: entry.DefaultCap, Logf: logf}, nil
 }
 
-func agentCmd(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
-	if len(args) != 1 || args[0] != "windows" {
+// agentWindows runs `clipd agent windows` (args: none).
+func agentWindows(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
+	if len(args) != 0 {
 		return bad()
 	}
 	if runtime.GOOS != "windows" {

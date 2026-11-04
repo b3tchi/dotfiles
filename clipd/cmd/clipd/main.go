@@ -127,7 +127,14 @@ func run(args []string, out, errOut io.Writer) int {
 		}
 		return statusCmd(out, errOut, fail)
 	case "agent":
-		return agentCmd(args[1:], errOut, fail, bad)
+		if len(args) < 2 {
+			return bad()
+		}
+		switch args[1] {
+		case "windows":
+			return agentWindows(args[2:], errOut, fail, bad)
+		}
+		return bad()
 	case "list":
 		return listCmd(args[1:], out, fail, bad)
 	case "pick":
