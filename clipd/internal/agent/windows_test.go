@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -10,6 +12,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -271,7 +274,7 @@ func TestEchoGuardSkipsPicked(t *testing.T) {
 	a, sink, _, _ := newAgent(c)
 	a.StateDir = t.TempDir()
 	a.Prime()
-	if err := writeState(a.StateDir, WinPickedFile, WinHash(entry.MimeText, []byte("from peer"))); err != nil {
+	if _, err := WinPick(rigWith(t, "from peer"), "", a.StateDir, func(bool, []byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	c.copyText("from peer", winclip.Format{ID: 0xC200, Name: winclip.HistoryName})
@@ -388,8 +391,20 @@ func TestWinPick(t *testing.T) {
 		t.Fatalf("--latest: %v %v", err, got)
 	}
 	h, _ := os.ReadFile(filepath.Join(state, WinPickedFile))
-	if strings.TrimSpace(string(h)) != WinHash(entry.MimeText, []byte("latest remote")) {
+	key, err := os.ReadFile(filepath.Join(state, WinKeyFile))
+	if err != nil || len(key) != 32 {
+		t.Fatalf("hash key: %v len %d", err, len(key))
+	}
+	if strings.TrimSpace(string(h)) != WinHash(key, entry.MimeText, []byte("latest remote")) {
 		t.Fatalf("echo guard not recorded: %q", h)
+	}
+	// Keyed, not a plain sha256 a short secret could be brute-forced from.
+	plain := sha256.Sum256(append([]byte(entry.MimeText+"\x00"), "latest remote"...))
+	if strings.Contains(string(h), hex.EncodeToString(plain[:])) || strings.Contains(string(h), "latest") {
+		t.Fatal("last-picked holds an unkeyed hash or plaintext")
+	}
+	if fi, _ := os.Stat(filepath.Join(state, WinKeyFile)); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("hash.key mode %v", fi.Mode().Perm())
 	}
 	if _, err := WinPick(self, old, state, pub); err != nil || got[1] != "old" {
 		t.Fatalf("by id: %v %v", err, got)
@@ -406,6 +421,13 @@ func TestWinPick(t *testing.T) {
 	if _, err := WinPick(empty, "", state, pub); !errors.Is(err, ErrWinNotFound) {
 		t.Fatalf("latest with no remote: %v", err)
 	}
+}
+
+// rigWith returns a store view (origin "win") holding one remote text entry.
+func rigWith(t *testing.T, text string) *store.Store {
+	self, peer := storeRig(t)
+	put(t, peer, entry.MimeText, []byte(text), time.Second, 300)
+	return self
 }
 
 func equal[T comparable](a, b []T) bool {

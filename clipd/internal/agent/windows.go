@@ -22,6 +22,8 @@ package agent
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -41,8 +43,11 @@ const (
 	WinRereadDelay = 100 * time.Millisecond
 	// WinHeartbeat is the heartbeat (and sweep) period.
 	WinHeartbeat = 30 * time.Second
-	// WinPickedFile holds the hex hash of the last pick (echo guard).
+	// WinPickedFile holds the keyed hash of the last pick (echo guard);
+	// WinKeyFile the 32-byte HMAC key. Same names and scheme as the X
+	// agent's state (Task 4), so either side's pick is honoured.
 	WinPickedFile = "last-picked"
+	WinKeyFile    = "hash.key"
 )
 
 // WinView is an open clipboard.
@@ -101,15 +106,59 @@ type WinAgent struct {
 	lastSeq  uint32
 	settled  bool
 	lastHash string
+	key      []byte
 }
 
-// WinHash is the content hash used for dedupe and the echo guard.
-func WinHash(mime string, data []byte) string {
-	h := sha256.New()
+// WinHash is the content hash used for dedupe and the echo guard:
+// HMAC-SHA256 under the state dir's key, never a plain hash — a plain
+// sha256 of a short password in last-picked could be brute-forced.
+func WinHash(key []byte, mime string, data []byte) string {
+	h := hmac.New(sha256.New, key)
 	h.Write([]byte(mime))
 	h.Write([]byte{0})
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// winLoadKey returns dir's 32-byte hash key, creating dir (0700) and key
+// (0600, O_EXCL — a concurrent creator wins and we read theirs).
+func winLoadKey(dir string) ([]byte, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("winagent: state dir: %w", err)
+	}
+	p := filepath.Join(dir, WinKeyFile)
+	for i := 0; i < 2; i++ {
+		b, err := os.ReadFile(p)
+		switch {
+		case err == nil && len(b) == 32:
+			return b, nil
+		case err == nil:
+			return nil, fmt.Errorf("winagent: %s: want 32 bytes, have %d", p, len(b))
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, fmt.Errorf("winagent: hash key: %w", err)
+		}
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, err
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("winagent: hash key: %w", err)
+		}
+		_, err = f.Write(key)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			os.Remove(p)
+			return nil, fmt.Errorf("winagent: hash key: %w", err)
+		}
+		return key, nil
+	}
+	return nil, fmt.Errorf("winagent: hash key %s unreadable", p)
 }
 
 func (a *WinAgent) logf(format string, args ...any) {
@@ -144,10 +193,22 @@ func (a *WinAgent) picked() string {
 	return strings.TrimSpace(string(b))
 }
 
-// Prime marks the clipboard as it is now settled, so content copied
-// before the agent started is not published.
-func (a *WinAgent) Prime() {
+// Prime loads the hash key (a random in-memory one when StateDir is "")
+// and marks the clipboard as it is now settled, so content copied before
+// the agent started is not published.
+func (a *WinAgent) Prime() error {
+	if a.StateDir == "" {
+		a.key = make([]byte, 32)
+		rand.Read(a.key)
+	} else {
+		k, err := winLoadKey(a.StateDir)
+		if err != nil {
+			return err
+		}
+		a.key = k
+	}
 	a.lastSeq, a.settled = a.Clip.Seq(), true
+	return nil
 }
 
 // capture reads the clipboard once. data is nil unless outcome is
@@ -228,7 +289,7 @@ func (a *WinAgent) Handle() WinOutcome {
 		a.logf("winagent: seq %d %s", seq, out)
 		return out
 	}
-	h := WinHash(mime, data)
+	h := WinHash(a.key, mime, data)
 	switch h {
 	case a.lastHash:
 		out = WinDup
@@ -264,7 +325,9 @@ func WinRun(ctx context.Context, a *WinAgent, s *store.Store, events <-chan stru
 			a.logf("winagent: swept %d", n)
 		}
 	}
-	a.Prime()
+	if err := a.Prime(); err != nil {
+		return err
+	}
 	beat()
 	t := time.NewTicker(WinHeartbeat)
 	defer t.Stop()
@@ -415,7 +478,11 @@ func WinPick(s *store.Store, id, stateDir string, publish func(isPNG bool, data 
 		return entry.Entry{}, ErrWinNotFound
 	}
 	e := hit.Entry
-	if err := writeState(stateDir, WinPickedFile, WinHash(e.Mime, e.Data)); err != nil {
+	key, err := winLoadKey(stateDir)
+	if err == nil {
+		err = writeState(stateDir, WinPickedFile, WinHash(key, e.Mime, e.Data))
+	}
+	if err != nil {
 		return e, fmt.Errorf("%w: echo guard: %v", ErrWinPublish, err)
 	}
 	if err := publish(e.Mime == entry.MimePNG, e.Data); err != nil {
@@ -429,9 +496,6 @@ var ErrWinPublish = errors.New("publish failed")
 
 // writeState replaces stateDir/name atomically (temp + rename).
 func writeState(dir, name, val string) error {
-	if dir == "" {
-		return nil
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
