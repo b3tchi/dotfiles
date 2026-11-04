@@ -1,0 +1,158 @@
+package main
+
+// sp039 Task 7: `agent windows`, `list`, `pick <id>|--latest`.
+//
+// Folder and device name come from syncFolder / deviceName (main.go).
+// Echo-guard state: $CLIPD_STATE_DIR, else %LOCALAPPDATA%\clipd\state
+// (Windows) / $XDG_RUNTIME_DIR/clipd/state.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"time"
+
+	"clipd/internal/agent"
+	"clipd/internal/crypt"
+	"clipd/internal/entry"
+	"clipd/internal/store"
+	"clipd/internal/winclip"
+)
+
+var (
+	errNoRuntimeDir = errors.New("no runtime dir: set CLIPD_STATE_DIR (LOCALAPPDATA / XDG_RUNTIME_DIR unset)")
+	idArg           = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
+
+// runtimePath resolves env, else <runtime base>/clipd/<leaf>.
+func runtimePath(env, leaf string) (string, error) {
+	if v := os.Getenv(env); v != "" {
+		return v, nil
+	}
+	base := os.Getenv("XDG_RUNTIME_DIR")
+	if runtime.GOOS == "windows" {
+		base = os.Getenv("LOCALAPPDATA")
+	}
+	if base == "" {
+		return "", errNoRuntimeDir
+	}
+	return filepath.Join(base, "clipd", leaf), nil
+}
+
+// openStore loads identity + pinned recipients and points at the folder.
+func openStore(logf func(string, ...any)) (*store.Store, error) {
+	self, err := loadIdentity()
+	if err != nil {
+		return nil, err
+	}
+	rp, err := configPath("recipients.txt")
+	if err != nil {
+		return nil, err
+	}
+	peers, err := crypt.LoadRecipients(rp)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err // no recipients file = no peers yet, entries for self only
+	}
+	dir, err := syncFolder()
+	if err != nil {
+		return nil, err
+	}
+	return &store.Store{Dir: dir, Origin: deviceName(), Self: self, Peers: peers, Cap: entry.DefaultCap, Logf: logf}, nil
+}
+
+func agentCmd(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
+	if len(args) != 1 || args[0] != "windows" {
+		return bad()
+	}
+	if runtime.GOOS != "windows" {
+		fmt.Fprintln(errOut, "clipd: agent windows runs on windows only")
+		return exitFail
+	}
+	lg := log.New(errOut, "clipd ", log.LstdFlags|log.Lmicroseconds)
+	s, err := openStore(lg.Printf)
+	if err != nil {
+		return fail(err)
+	}
+	state, err := runtimePath("CLIPD_STATE_DIR", "state")
+	if err != nil {
+		return fail(err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	// Started at logon, the session's clipboard may not be usable yet.
+	l, err := agent.WinBackoff(ctx, 8, time.Sleep, lg.Printf, winclip.Listen)
+	if err != nil {
+		return fail(err)
+	}
+	defer l.Close()
+	a := &agent.WinAgent{Clip: winClipboard{}, Sink: s, Cap: s.Cap, TTL: entry.DefaultTTL, StateDir: state, Logf: lg.Printf}
+	lg.Printf("winagent: listening device=%s folder=%s", s.Origin, s.Dir)
+	if err := agent.WinRun(ctx, a, s, l.Events()); err != nil {
+		return fail(err)
+	}
+	return 0
+}
+
+// winClipboard adapts winclip.Clipboard to agent.WinClipboard.
+type winClipboard struct{ c winclip.Clipboard }
+
+func (w winClipboard) Seq() uint32 { return w.c.Seq() }
+func (w winClipboard) View(fn func(agent.WinView) error) error {
+	return w.c.View(func(v winclip.View) error { return fn(v) })
+}
+
+func listCmd(args []string, out io.Writer, fail func(error) int, bad func() int) int {
+	if len(args) != 0 {
+		return bad()
+	}
+	s, err := openStore(nil)
+	if err != nil {
+		return fail(err)
+	}
+	if err := agent.WinList(s, out); err != nil {
+		return fail(err)
+	}
+	return 0
+}
+
+// pickCmd: exit 0 published, 1 not found/expired, 2 publish failed, 78
+// config. Mirrors ft007's clip-set.sh contract.
+func pickCmd(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
+	if len(args) != 1 {
+		return bad()
+	}
+	id := args[0]
+	if id == "--latest" {
+		id = ""
+	} else if !idArg.MatchString(id) {
+		return bad()
+	}
+	s, err := openStore(nil)
+	if err != nil {
+		return fail(err)
+	}
+	state, err := runtimePath("CLIPD_STATE_DIR", "state")
+	if err != nil {
+		return fail(err)
+	}
+	_, err = agent.WinPick(s, id, state, winclip.Publish)
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, agent.ErrWinPublish):
+		fmt.Fprintln(errOut, "clipd:", err)
+		return exitUsage // 2 = publish failed (clip-set.sh contract)
+	case errors.Is(err, agent.ErrWinNotFound):
+		fmt.Fprintln(errOut, "clipd:", err)
+		return exitFail
+	default:
+		return fail(err)
+	}
+}

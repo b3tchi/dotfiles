@@ -42,7 +42,10 @@ const usage = `usage:
   clipd recipients add <age1…>  pin a peer's recipient
   clipd recipients rm <age1…>   unpin a peer's recipient
   clipd recipients list         print pinned recipients
-  clipd status                  peer heartbeats + Syncthing link (exit 0 ok, 3 stale, 4 syncthing unreachable)`
+  clipd status                  peer heartbeats + Syncthing link (exit 0 ok, 3 stale, 4 syncthing unreachable)
+  clipd agent windows           watch the Windows clipboard, write entries
+  clipd list                    live remote entries: id, origin, age-s, preview
+  clipd pick <id>|--latest      put an entry on the native clipboard`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -123,6 +126,12 @@ func run(args []string, out, errOut io.Writer) int {
 			return bad()
 		}
 		return statusCmd(out, errOut, fail)
+	case "agent":
+		return agentCmd(args[1:], errOut, fail, bad)
+	case "list":
+		return listCmd(args[1:], out, fail, bad)
+	case "pick":
+		return pickCmd(args[1:], errOut, fail, bad)
 	default:
 		return bad()
 	}
