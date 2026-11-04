@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func (r *rig) store(origin string, id *age.X25519Identity, peers ...*age.X25519R
 		Logf: func(f string, a ...any) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			r.logs = append(r.logs, f)
+			r.logs = append(r.logs, fmt.Sprintf(f, a...))
 		},
 	}
 }
@@ -67,34 +68,48 @@ func names(t *testing.T, dir string) []string {
 
 func TestWriteIsAtomicUnderConcurrentList(t *testing.T) {
 	r, s := newRig(t)
-	const n = 1000
+	const n = 300
+	payload := strings.Repeat("x", 1<<20)
+	// Same plaintext length and recipients => same ciphertext length, so a
+	// reader can judge completeness with a cheap stat instead of a slow
+	// decrypt — fast enough to catch a non-atomic write mid-flight.
+	ct, err := s.seal(text(payload, t0, 300))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(len(ct))
+
 	var done atomic.Bool
 	var partial atomic.Int32
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Everything named <id>.age must always be a whole, decryptable
-		// entry — exactly what a Syncthing scan would pick up.
+		// Every <id>.age is checked once, the moment it is first seen —
+		// what a Syncthing scan racing the writer would pick up.
+		seen := map[string]bool{}
+		f, err := os.Open(r.dir)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
 		for !done.Load() {
-			des, _ := os.ReadDir(r.dir)
-			for _, d := range des {
-				if !idFile.MatchString(d.Name()) {
+			f.Seek(0, 0)
+			names, _ := f.Readdirnames(-1)
+			for _, name := range names {
+				if seen[name] || !idFile.MatchString(name) {
 					continue
 				}
-				b, err := os.ReadFile(filepath.Join(r.dir, d.Name()))
-				if err != nil {
-					continue // swept/renamed between ReadDir and ReadFile
-				}
-				if _, err := crypt.Decrypt(b, r.self, entry.MaxEncoded(entry.DefaultCap)); err != nil {
+				seen[name] = true
+				if st, err := os.Stat(filepath.Join(r.dir, name)); err == nil && st.Size() != want {
 					partial.Add(1)
 				}
 			}
 		}
 	}()
-	big := strings.Repeat("x", 64<<10) // multi-chunk age payload
 	for i := 0; i < n; i++ {
-		if _, err := s.Write(text(big, t0, 300)); err != nil {
+		if _, err := s.Write(text(payload, t0, 300)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -370,5 +385,36 @@ func TestPublishOnlyAfterCompleteTmp(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("publish seam called %d times, want 2", calls)
+	}
+}
+
+// Edge case: the temp name is opened O_EXCL, so a pre-existing temp file
+// (a second writer, a stale leftover) fails the write and is left intact.
+func TestWriteRefusesExistingTmp(t *testing.T) {
+	r, s := newRig(t)
+	id := "0011223344556677"
+	tmp := filepath.Join(r.dir, "."+id+".tmp")
+	os.WriteFile(tmp, []byte("other writer"), 0o600)
+	s.newID = func() (string, error) { return id, nil }
+	if _, err := s.Write(text("a", t0, 300)); err == nil {
+		t.Fatal("write over existing tmp succeeded")
+	}
+	if b, _ := os.ReadFile(tmp); string(b) != "other writer" {
+		t.Fatalf("tmp changed: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(r.dir, id+".age")); !os.IsNotExist(err) {
+		t.Fatal("entry published anyway")
+	}
+}
+
+func TestListSkipsHeartbeatUnderEntryName(t *testing.T) {
+	r, s := newRig(t)
+	if err := s.WriteHeartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	os.Rename(filepath.Join(r.dir, "hb-me.age"), filepath.Join(r.dir, "0123456789abcdef.age"))
+	items, st, _ := s.List()
+	if len(items) != 0 || st.Skipped != 1 {
+		t.Fatalf("items %d skipped %d", len(items), st.Skipped)
 	}
 }

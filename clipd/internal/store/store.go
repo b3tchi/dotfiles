@@ -275,7 +275,8 @@ func (s *Store) List() ([]Item, Stats, error) {
 }
 
 // Sweep deletes expired entries (ours at expiry, a peer's SkewTolerance
-// later) and our crashed temp files. Files it cannot decrypt are left to
+// later) and temp files older than TmpMaxAge from any writer (a crash
+// leftover; Syncthing may have synced a peer's). Files it cannot decrypt are left to
 // their writer. It returns how many entries it removed.
 func (s *Store) Sweep() (int, Stats, error) {
 	items, st, err := s.scan()
