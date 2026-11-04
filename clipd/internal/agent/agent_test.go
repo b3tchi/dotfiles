@@ -624,3 +624,26 @@ func TestWriteOffCapturePath(t *testing.T) {
 		t.Fatalf("%d entries, want %d", len(items), n)
 	}
 }
+
+// The X agent and the Windows code share one echo-guard format: same
+// hash.key, same keyed hash, same last-picked file. A pick recorded by
+// either side is an echo to the X agent.
+func TestPickHashSharedWithWindows(t *testing.T) {
+	e := newEnv(t)
+	key, err := winLoadKey(e.state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(key, e.a.key) {
+		t.Fatal("hash.key differs between X agent and windows code")
+	}
+	if got, want := keyedHash(key, entry.MimeText, []byte("p")), WinHash(key, entry.MimeText, []byte("p")); got != want {
+		t.Fatalf("hash %s != WinHash %s", got, want)
+	}
+	if err := writeState(e.state, WinPickedFile, WinHash(key, entry.MimeText, []byte("win-pick"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.a.Offer(entry.MimeText, []byte("win-pick")); got != Echo {
+		t.Fatalf("pick recorded by windows code: %q, want echo", got)
+	}
+}
