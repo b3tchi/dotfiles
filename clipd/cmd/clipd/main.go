@@ -44,6 +44,7 @@ const usage = `usage:
   clipd recipients list         print pinned recipients
   clipd status                  peer heartbeats + Syncthing link (exit 0 ok, 3 stale, 4 syncthing unreachable)
   clipd agent windows           watch the Windows clipboard, write entries
+  clipd agent x <display>       watch that X display's CLIPBOARD
   clipd list                    live remote entries: id, origin, age-s, preview
   clipd pick <id>|--latest      put an entry on the native clipboard`
 
@@ -133,6 +134,8 @@ func run(args []string, out, errOut io.Writer) int {
 		switch args[1] {
 		case "windows":
 			return agentWindows(args[2:], errOut, fail, bad)
+		case "x":
+			return agentX(args[2:], errOut, fail, bad)
 		}
 		return bad()
 	case "list":
