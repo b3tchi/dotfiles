@@ -44,6 +44,85 @@ type fakeX struct {
 
 	// per-call latency (answered, just slow — a loaded host)
 	targetsDelay, readDelay time.Duration
+
+	// gates: the next call for a target blocks until the test closes the
+	// channel (one-shot) — ordering under test control, not timing.
+	gates map[string]chan struct{}
+
+	servedLog []string // payload bytes returned, per payload read
+}
+
+func (f *fakeX) wasServed(data string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, d := range f.servedLog {
+		if d == data {
+			return true
+		}
+	}
+	return false
+}
+
+// within is the deadline for every wait in these tests: far beyond any
+// expected latency, so a slow (loaded, -race) host only makes them
+// slower, never red; a hang still fails instead of spinning forever.
+const within = 10 * time.Second
+
+func pollUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %v waiting for %s", within, what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitArmed blocks until a clipnotify is subscribed (arm mode), so the
+// next copyText raises an event.
+func (f *fakeX) waitArmed(t *testing.T) {
+	t.Helper()
+	pollUntil(t, "clipnotify armed", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.waiter != nil
+	})
+}
+
+func (f *fakeX) armed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waiter != nil
+}
+
+// gate makes the next call for target block until the returned channel
+// is closed.
+func (f *fakeX) gate(target string) chan struct{} {
+	ch := make(chan struct{})
+	f.mu.Lock()
+	if f.gates == nil {
+		f.gates = map[string]chan struct{}{}
+	}
+	f.gates[target] = ch
+	f.mu.Unlock()
+	return ch
+}
+
+// waitCalls blocks until n xclip calls for target have started.
+func (f *fakeX) waitCalls(t *testing.T, target string, n int) {
+	t.Helper()
+	pollUntil(t, fmt.Sprintf("%d %s calls", n, target), func() bool { return f.countCalls(target) >= n })
+}
+
+func (f *fakeX) countCalls(target string) int {
+	n := 0
+	for _, c := range f.callLog() {
+		if c == target {
+			n++
+		}
+	}
+	return n
 }
 
 // copyText replaces the clipboard (a new owner) and, in arm mode, fires
@@ -124,16 +203,30 @@ func (f *fakeX) Output(ctx context.Context, env []string, limit int, name string
 	if target == "TARGETS" {
 		d = f.targetsDelay
 	}
+	g := f.gates[target]
+	delete(f.gates, target)
 	f.mu.Unlock()
 	if hang {
 		<-ctx.Done()
 		return nil, ctx.Err()
+	}
+	if g != nil {
+		select {
+		case <-g:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if !sleep(ctx, d) {
 		return nil, ctx.Err()
 	}
 	if len(out) > limit {
 		return nil, xsel.ErrTooLarge
+	}
+	if target != "TARGETS" && err == nil {
+		f.mu.Lock()
+		f.servedLog = append(f.servedLog, string(out))
+		f.mu.Unlock()
 	}
 	return out, err
 }
@@ -382,36 +475,28 @@ func TestMissingFolderRetriesWithBoundedBackoff(t *testing.T) {
 	writes := &countingStore{Store: e.st}
 	e.a.Store = writes
 	e.a.Heartbeat = 10 * time.Millisecond
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- e.a.RunX(ctx, e.sel) }()
+	startRun(t, e)
 	e.x.ownText("waiting")
 	e.x.notify <- nil
+	pollUntil(t, "2 write attempts", func() bool { return writes.writes.Load() >= 2 })
+	// bounded: backoff 20..80 ms plus heartbeat-triggered tries (10 ms)
+	// is tens of attempts per 300 ms; a hot loop would be thousands.
+	n := writes.writes.Load()
 	time.Sleep(300 * time.Millisecond)
-	// backoff 20,40,80,80ms plus heartbeat-triggered tries are bounded
-	// by heartbeat (10ms): far below a hot loop's thousands.
-	if n := writes.writes.Load(); n < 2 || n > 60 {
-		t.Fatalf("%d write attempts in 300ms", n)
+	if d := writes.writes.Load() - n; d > 60 {
+		t.Fatalf("%d write attempts in 300ms: not bounded", d)
 	}
 	if err := os.Mkdir(folder, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for len(e.entries()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	waitEntry(t, e, "waiting")
+	if n := len(e.entries()); n != 1 {
+		t.Fatalf("%d entries", n)
 	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	items := e.entries()
-	if len(items) != 1 || string(items[0].Entry.Data) != "waiting" {
-		t.Fatalf("items %+v", items)
-	}
-	if _, err := os.Stat(filepath.Join(folder, "hb-testhost.age")); err != nil {
-		t.Fatalf("no heartbeat after folder came back: %v", err)
-	}
+	pollUntil(t, "heartbeat after folder came back", func() bool {
+		_, err := os.Stat(filepath.Join(folder, "hb-testhost.age"))
+		return err == nil
+	})
 }
 
 func TestPendingExpires(t *testing.T) {
@@ -452,43 +537,59 @@ func startRun(t *testing.T, e *env) (context.CancelFunc, chan error) {
 	return cancel, done
 }
 
-func waitEntries(t *testing.T, e *env, n int, within time.Duration) {
+func waitEntries(t *testing.T, e *env, n int) {
 	t.Helper()
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
-		if len(e.entries()) >= n {
-			return
+	pollUntil(t, fmt.Sprintf("%d entries", n), func() bool { return len(e.entries()) >= n })
+}
+
+// waitEntry blocks until an entry decrypting to data exists.
+func waitEntry(t *testing.T, e *env, data string) {
+	t.Helper()
+	pollUntil(t, "entry "+data, func() bool { return e.has(data) })
+}
+
+func (e *env) has(data string) bool {
+	for _, it := range e.entries() {
+		if string(it.Entry.Data) == data {
+			return true
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("%d entries after %v, want %d", len(e.entries()), within, n)
+	return false
+}
+
+// waitQuiet blocks until no xclip call has started for quiet; a capture
+// loop that never settles (confirms polling forever) fails it.
+func (f *fakeX) waitQuiet(t *testing.T, quiet time.Duration) {
+	t.Helper()
+	n, since := len(f.callLog()), time.Now()
+	pollUntil(t, fmt.Sprintf("no xclip calls for %v", quiet), func() bool {
+		if m := len(f.callLog()); m != n {
+			n, since = m, time.Now()
+		}
+		return time.Since(since) >= quiet
+	})
+}
+
+func (f *fakeX) setArmDelay(d time.Duration) {
+	f.mu.Lock()
+	f.armDelay = d
+	f.mu.Unlock()
 }
 
 func TestTimeoutContinues(t *testing.T) {
 	e := newEnv(t)
 	startRun(t, e)
 	e.x.ownText("hung-owner")
+	e.x.mu.Lock()
 	e.x.hang = 1
-	start := time.Now()
+	e.x.mu.Unlock()
 	e.x.notify <- nil
-	for len(e.x.callLog()) == 0 {
-		time.Sleep(time.Millisecond)
-	}
-	// let the hung read reach its deadline, then copy again
-	time.Sleep(150 * time.Millisecond)
+	pollUntil(t, "metadata line for the timed-out read", func() bool {
+		return strings.Contains(e.logs.String(), "timed out")
+	})
 	e.x.ownText("next-copy")
 	e.x.notify <- nil
-	waitEntries(t, e, 1, 2*time.Second)
-	if d := time.Since(start); d > time.Second {
-		t.Fatalf("next copy processed after %v", d)
-	}
-	items := e.entries()
-	if len(items) != 1 || string(items[0].Entry.Data) != "next-copy" {
-		t.Fatalf("items %+v", items)
-	}
-	if !strings.Contains(e.logs.String(), "timed out") {
-		t.Fatalf("no metadata line for the timeout:\n%s", e.logs)
-	}
+	waitEntry(t, e, "next-copy") // the loop continued past the hung owner
 }
 
 func TestBurstNoDupFinalKept(t *testing.T) {
@@ -499,8 +600,8 @@ func TestBurstNoDupFinalKept(t *testing.T) {
 		e.x.notify <- nil
 		time.Sleep(5 * time.Millisecond)
 	}
-	waitEntries(t, e, 1, time.Second)
-	time.Sleep(200 * time.Millisecond)
+	waitEntry(t, e, "burst-19") // the final copy is the clipboard: kept
+	e.x.waitQuiet(t, time.Second)
 	seen := map[string]int{}
 	for _, it := range e.entries() {
 		seen[string(it.Entry.Data)]++
@@ -510,9 +611,6 @@ func TestBurstNoDupFinalKept(t *testing.T) {
 			t.Fatalf("%s written %d times", k, n)
 		}
 	}
-	if seen["burst-19"] != 1 {
-		t.Fatalf("final copy lost; have %v", seen)
-	}
 }
 
 func TestHeartbeatAtStartAndPeriodic(t *testing.T) {
@@ -521,18 +619,17 @@ func TestHeartbeatAtStartAndPeriodic(t *testing.T) {
 	startRun(t, e)
 	hb := filepath.Join(e.st.Dir, "hb-testhost.age")
 	var first time.Time
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if fi, err := os.Stat(hb); err == nil {
-			if first.IsZero() {
-				first = fi.ModTime()
-			} else if fi.ModTime().After(first) {
-				return
-			}
+	pollUntil(t, "heartbeat rewritten", func() bool {
+		fi, err := os.Stat(hb)
+		if err != nil {
+			return false
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("heartbeat not rewritten")
+		if first.IsZero() {
+			first = fi.ModTime()
+			return false
+		}
+		return fi.ModTime().After(first)
+	})
 }
 
 func TestWatcherGivesUpBounded(t *testing.T) {
@@ -568,73 +665,75 @@ func TestSweepRunsOnTick(t *testing.T) {
 // A copy landing after a capture's reads but before clipnotify re-arms
 // produces no event. The agent must still end up with it: it is the
 // current clipboard (rejection #1, gap 1: A, C, B -> {A, C} on 4a81bd02).
+// Ordering is forced, not timed: clipnotify never re-arms after C's
+// event, and B lands while C's payload read is held open.
 func TestRearmGapCopyNotLost(t *testing.T) {
 	e := newEnv(t)
 	e.x.useArm = true
-	e.x.armDelay = 150 * time.Millisecond
+	e.x.armDelay = time.Millisecond
 	startRun(t, e)
-	time.Sleep(200 * time.Millisecond) // first arm
+	e.x.waitArmed(t)
 	e.x.copyText("A")
-	waitEntries(t, e, 1, time.Second)
-	time.Sleep(200 * time.Millisecond) // re-armed
+	waitEntry(t, e, "A")
+	e.x.waitCalls(t, "UTF8_STRING", 2)     // A's confirm read A (dup)
+	e.x.waitQuiet(t, 200*time.Millisecond) // ...and finished its re-check
+	e.x.waitArmed(t)
+	e.x.setArmDelay(time.Hour) // the re-arm after C's event never subscribes
+	g := e.x.gate("UTF8_STRING")
 	e.x.copyText("C")
-	waitEntries(t, e, 2, time.Second)
-	time.Sleep(20 * time.Millisecond) // C read; clipnotify still arming
-	e.x.copyText("B")
-	waitEntries(t, e, 3, 2*time.Second)
-	got := map[string]bool{}
-	for _, it := range e.entries() {
-		got[string(it.Entry.Data)] = true
+	e.x.waitCalls(t, "UTF8_STRING", 3) // A, A's confirm, C (held)
+	if e.x.armed() {
+		t.Fatal("clipnotify re-armed; B would raise an event")
 	}
-	if !got["A"] || !got["B"] || !got["C"] {
-		t.Fatalf("entries %v, want A B C", got)
-	}
+	e.x.copyText("B") // nothing armed: no event for B
+	close(g)
+	waitEntry(t, e, "C")
+	waitEntry(t, e, "B")
 }
 
-// slowStore makes every Write take d, like encrypt + fsync on a busy box.
-type slowStore struct {
+// gateStore blocks every Write until release is closed.
+type gateStore struct {
 	*store.Store
-	d time.Duration
+	release chan struct{}
+	once    *sync.Once
 }
 
-func (s slowStore) Write(e entry.Entry) (string, error) {
-	time.Sleep(s.d)
+func (s gateStore) open() { s.once.Do(func() { close(s.release) }) }
+
+func (s gateStore) Write(e entry.Entry) (string, error) {
+	<-s.release
 	return s.Store.Write(e)
 }
 
-// Encrypt/write must not gate the next capture (gap 2): with writes at
-// 60 ms and copies every 30 ms (above Floor), every copy is still read
-// and written; a synchronous write path loses about half.
+// Encrypt/write must not gate the next capture (gap 2). With every Write
+// blocked, the capture loop must still read each new copy; a synchronous
+// write path stalls in the first Write and never reads the second.
 func TestWriteOffCapturePath(t *testing.T) {
 	e := newEnv(t)
-	e.a.Store = slowStore{e.st, 60 * time.Millisecond}
+	gs := gateStore{e.st, make(chan struct{}), &sync.Once{}}
+	e.a.Store = gs
 	e.x.useArm = true
 	e.x.armDelay = time.Millisecond
 	startRun(t, e)
-	time.Sleep(50 * time.Millisecond)
-	const n = 10
+	t.Cleanup(gs.open) // runs before startRun's: a failing run never hangs in Write
+	const n = 5
 	for i := 0; i < n; i++ {
+		e.x.waitArmed(t)
 		e.x.copyText(fmt.Sprintf("q-%02d", i))
-		time.Sleep(30 * time.Millisecond)
+		want := fmt.Sprintf("q-%02d", i)
+		pollUntil(t, "read of "+want+" while writes are blocked", func() bool { return e.x.wasServed(want) })
 	}
-	waitEntries(t, e, n, 3*time.Second)
-	items := e.entries()
-	seen := map[string]bool{}
-	for _, it := range items {
-		if seen[string(it.Entry.Data)] {
-			t.Fatalf("dup %s", it.Entry.Data)
-		}
-		seen[string(it.Entry.Data)] = true
-	}
-	// ordering: created follows copy order
-	for i := 1; i < len(items); i++ {
-		// List is newest first
-		if string(items[i-1].Entry.Data) <= string(items[i].Entry.Data) {
-			t.Fatalf("order: %s before %s", items[i-1].Entry.Data, items[i].Entry.Data)
-		}
-	}
+	gs.open()
+	waitEntries(t, e, n)
+	e.x.waitQuiet(t, 500*time.Millisecond)
+	items := e.entries() // newest first
 	if len(items) != n {
 		t.Fatalf("%d entries, want %d", len(items), n)
+	}
+	for i, it := range items {
+		if want := fmt.Sprintf("q-%02d", n-1-i); string(it.Entry.Data) != want {
+			t.Fatalf("entry %d = %s, want %s (order)", i, it.Entry.Data, want)
+		}
 	}
 }
 
@@ -665,30 +764,28 @@ func TestPickHashSharedWithWindows(t *testing.T) {
 // A newer copy made during the stall must supersede it — the stalled read
 // is cancelled (its result is stale) and the new copy written well inside
 // the bound (rejection #2: 1 s stalls swallowed copies at 150 ms spacing).
+// The bound is 5 s here so "well inside" has room on a loaded host.
 func TestStalledCaptureSupersededByNewerCopy(t *testing.T) {
 	e := newEnv(t)
-	e.sel.Timeout = time.Second
+	e.sel.Timeout = 5 * time.Second
 	e.x.useArm = true
 	e.x.armDelay = time.Millisecond
 	startRun(t, e)
-	time.Sleep(30 * time.Millisecond)
+	e.x.waitArmed(t)
 	e.x.mu.Lock()
 	e.x.hang = 1 // the next TARGETS read never gets an answer
 	e.x.mu.Unlock()
 	e.x.copyText("stuck-owner")
-	for len(e.x.callLog()) == 0 {
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(50 * time.Millisecond) // the read is now stalled
+	e.x.waitCalls(t, "TARGETS", 1) // the read is now stalled
+	e.x.waitArmed(t)
 	t0 := time.Now()
 	e.x.copyText("fresh")
-	waitEntries(t, e, 1, 2*time.Second)
-	if d := time.Since(t0); d > 500*time.Millisecond {
-		t.Fatalf("newer copy written %v after it was made; the stalled read was not superseded", d)
+	waitEntry(t, e, "fresh")
+	if d := time.Since(t0); d > 2500*time.Millisecond {
+		t.Fatalf("newer copy written %v after it was made (bound 5s): the stalled read was not superseded", d)
 	}
-	items := e.entries()
-	if len(items) != 1 || string(items[0].Entry.Data) != "fresh" {
-		t.Fatalf("items %+v", items)
+	if e.has("stuck-owner") {
+		t.Fatal("stale content of the stalled capture was written")
 	}
 	if !strings.Contains(e.logs.String(), "superseded") {
 		t.Fatalf("no supersede log line:\n%s", e.logs)
@@ -791,64 +888,66 @@ func TestCaptureEvictionForgetsDedupe(t *testing.T) {
 
 // A capture that is slow but whose in-flight call began after the newer
 // copy is reading the NEW owner: it must not be superseded (under load
-// that churn cancelled most of a 50 ms burst).
+// that churn cancelled most of a 50 ms burst). Ordering is forced with
+// gates: B lands while A's TARGETS call is held; the TARGETS call is then
+// released, so the call in flight at the supersede check is the payload
+// read, begun after B — held well past Supersede.
 func TestSlowCaptureOnNewOwnerNotSuperseded(t *testing.T) {
 	e := newEnv(t)
-	e.sel.Timeout = time.Second
+	e.sel.Timeout = 10 * time.Second
+	e.a.Supersede = time.Second
 	e.x.useArm = true
 	e.x.armDelay = time.Millisecond
-	e.x.targetsDelay = 60 * time.Millisecond
-	e.x.readDelay = 250 * time.Millisecond
 	startRun(t, e)
-	time.Sleep(30 * time.Millisecond)
+	e.x.waitArmed(t)
+	gT := e.x.gate("TARGETS")
 	e.x.copyText("A")
-	time.Sleep(20 * time.Millisecond) // during A's TARGETS read
-	e.x.copyText("B")
-	waitEntries(t, e, 1, 2*time.Second)
-	time.Sleep(700 * time.Millisecond) // follow-up + confirm captures
+	e.x.waitCalls(t, "TARGETS", 1) // A's TARGETS held
+	e.x.waitArmed(t)
+	gP := e.x.gate("UTF8_STRING")
+	e.x.copyText("B") // newer event while A's capture runs
+	// The agent stamps the event when its loop takes it, not when the
+	// owner changed; a call begun in between counts as "before" (a
+	// harmless false positive: the replacement capture reads the same
+	// new owner). Let the loop take B first: the watcher re-arms only
+	// after handing the event over, and a quarter of Supersede is ample.
+	e.x.waitArmed(t)
+	time.Sleep(e.a.Supersede / 4)
+	close(gT)
+	e.x.waitCalls(t, "UTF8_STRING", 1) // payload read began after B
+	time.Sleep(3 * e.a.Supersede)      // the supersede check runs meanwhile
+	close(gP)
+	waitEntry(t, e, "B")
+	e.x.waitQuiet(t, 500*time.Millisecond)
 	if strings.Contains(e.logs.String(), "superseded") {
 		t.Fatalf("slow-but-live capture was superseded:\n%s", e.logs)
-	}
-	got := map[string]bool{}
-	for _, it := range e.entries() {
-		got[string(it.Entry.Data)] = true
-	}
-	if !got["B"] {
-		t.Fatalf("entries %v, want B (current clipboard)", got)
 	}
 }
 
 // Copies that keep landing while clipnotify is still re-arming raise no
 // events at all; a confirm that finds a new copy must be followed by
 // another confirm, or the copy after it is lost though it is current.
+// Ordering is forced: clipnotify never re-arms after A's event; B lands
+// while A's payload read is held, C while the first confirm's is.
 func TestConfirmChainsWhileCopiesKeepComing(t *testing.T) {
 	e := newEnv(t)
 	e.x.useArm = true
 	e.x.armDelay = time.Millisecond
 	startRun(t, e)
-	time.Sleep(30 * time.Millisecond)
-	e.x.mu.Lock()
-	e.x.armDelay = time.Hour // after this event, clipnotify never re-arms
-	e.x.mu.Unlock()
+	e.x.waitArmed(t)
+	e.x.setArmDelay(time.Hour) // after this event, clipnotify never re-arms
+	g1 := e.x.gate("UTF8_STRING")
 	e.x.copyText("A")
-	waitEntries(t, e, 1, time.Second)
-	time.Sleep(100 * time.Millisecond)
-	e.x.copyText("B") // no event: only the confirm after A sees it
-	waitEntries(t, e, 2, time.Second)
-	time.Sleep(50 * time.Millisecond)
-	e.x.copyText("C") // no event: only a confirm after B's confirm sees it
-	waitEntries(t, e, 3, 2*time.Second)
-	got := map[string]bool{}
-	for _, it := range e.entries() {
-		got[string(it.Entry.Data)] = true
-	}
-	if !got["A"] || !got["B"] || !got["C"] {
-		t.Fatalf("entries %v", got)
-	}
-	// and the chain ends: once nothing changes, confirms stop.
-	n := len(e.x.callLog())
-	time.Sleep(800 * time.Millisecond)
-	if m := len(e.x.callLog()); m-n > 3 {
-		t.Fatalf("confirms keep polling an unchanged clipboard: %d more xclip calls", m-n)
-	}
+	e.x.waitCalls(t, "UTF8_STRING", 1) // A's read, held
+	e.x.copyText("B")                  // no event
+	g2 := e.x.gate("UTF8_STRING")
+	close(g1)
+	e.x.waitCalls(t, "UTF8_STRING", 2) // first confirm reads B, held
+	e.x.copyText("C")                  // no event: only a second confirm sees it
+	close(g2)
+	waitEntry(t, e, "A")
+	waitEntry(t, e, "B")
+	waitEntry(t, e, "C")
+	// and the chain ends: once a confirm finds nothing new, polling stops.
+	e.x.waitQuiet(t, time.Second)
 }

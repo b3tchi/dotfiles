@@ -86,7 +86,7 @@ func TestReadTimeoutBounded(t *testing.T) {
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err %v", err)
 	}
-	if d := time.Since(start); d > 500*time.Millisecond {
+	if d := time.Since(start); d > 3*time.Second { // unbounded = blocks forever
 		t.Fatalf("took %v", d)
 	}
 }
@@ -154,7 +154,7 @@ func TestExecRunnerTimeoutKills(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 3*time.Second { // sleep 5 not killed = 5 s
 		t.Fatalf("hung %v", d)
 	}
 }
@@ -168,7 +168,7 @@ func TestReadCancelledByCaller(t *testing.T) {
 	if !errors.Is(err, ErrCanceled) || errors.Is(err, ErrTimeout) {
 		t.Fatalf("err %v", err)
 	}
-	if d := time.Since(start); d > 300*time.Millisecond {
+	if d := time.Since(start); d > 3*time.Second { // not cancelled = blocks forever
 		t.Fatalf("cancel took %v", d)
 	}
 	// a result that raced in after cancel is still discarded
