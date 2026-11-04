@@ -309,7 +309,7 @@ func WinBackoff[T any](ctx context.Context, tries int, sleep func(time.Duration)
 
 // ErrWinNotFound: no live entry with that id (expired, swept, never
 // existed) or, for --latest, no live remote entry. CLI exit 1.
-var ErrWinNotFound = errors.New("clipd: no such live entry")
+var ErrWinNotFound = errors.New("no such live entry")
 
 // WinList writes `<id>\t<origin>\t<age-s>\t<preview>` for every live
 // remote entry, newest first. Own entries are omitted: they are already
@@ -425,7 +425,7 @@ func WinPick(s *store.Store, id, stateDir string, publish func(isPNG bool, data 
 }
 
 // ErrWinPublish: the native clipboard was not set. CLI exit 2.
-var ErrWinPublish = errors.New("clipd: publish failed")
+var ErrWinPublish = errors.New("publish failed")
 
 // writeState replaces stateDir/name atomically (temp + rename).
 func writeState(dir, name, val string) error {

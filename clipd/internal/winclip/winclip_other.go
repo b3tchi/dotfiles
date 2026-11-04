@@ -7,9 +7,9 @@ package winclip
 
 type Listener struct{}
 
-func Listen() (*Listener, error)        { return nil, ErrUnsupported }
+func Listen() (*Listener, error)          { return nil, ErrUnsupported }
 func (*Listener) Events() <-chan struct{} { return nil }
-func (*Listener) Close()                 {}
+func (*Listener) Close()                  {}
 
 func Seq() uint32 { return 0 }
 
