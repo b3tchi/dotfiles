@@ -34,6 +34,25 @@ type fakeX struct {
 	notify   chan error // clipnotify returns each value sent
 	waits    atomic.Int32
 	failWait error // when set, clipnotify fails at once with it
+
+	// arm mode (useArm): clipnotify subscribes armDelay after it is
+	// spawned, like a real process; copy() wakes only an armed waiter, so
+	// a copy landing while nothing is armed produces no event at all.
+	useArm   bool
+	armDelay time.Duration
+	waiter   chan struct{}
+}
+
+// copyText replaces the clipboard (a new owner) and, in arm mode, fires
+// the armed clipnotify, if any.
+func (f *fakeX) copyText(s string) {
+	f.ownText(s)
+	f.mu.Lock()
+	if f.waiter != nil {
+		close(f.waiter)
+		f.waiter = nil
+	}
+	f.mu.Unlock()
 }
 
 func newFakeX() *fakeX { return &fakeX{notify: make(chan error, 64)} }
@@ -53,6 +72,21 @@ func (f *fakeX) Output(ctx context.Context, env []string, limit int, name string
 		f.waits.Add(1)
 		if f.failWait != nil {
 			return nil, f.failWait
+		}
+		if f.useArm {
+			if !sleep(ctx, f.armDelay) {
+				return nil, ctx.Err()
+			}
+			ch := make(chan struct{})
+			f.mu.Lock()
+			f.waiter = ch
+			f.mu.Unlock()
+			select {
+			case <-ch:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 		select {
 		case err := <-f.notify:
@@ -444,7 +478,7 @@ func TestTimeoutContinues(t *testing.T) {
 	}
 }
 
-func TestBurstEachDistinctOnce(t *testing.T) {
+func TestBurstNoDupFinalKept(t *testing.T) {
 	e := newEnv(t)
 	startRun(t, e)
 	for i := 0; i < 20; i++ {
@@ -515,5 +549,78 @@ func TestSweepRunsOnTick(t *testing.T) {
 	e.a.Tick()
 	if n := len(e.entries()); n != 0 {
 		t.Fatalf("own expired entry not swept: %d", n)
+	}
+}
+
+// A copy landing after a capture's reads but before clipnotify re-arms
+// produces no event. The agent must still end up with it: it is the
+// current clipboard (rejection #1, gap 1: A, C, B -> {A, C} on 4a81bd02).
+func TestRearmGapCopyNotLost(t *testing.T) {
+	e := newEnv(t)
+	e.x.useArm = true
+	e.x.armDelay = 150 * time.Millisecond
+	startRun(t, e)
+	time.Sleep(200 * time.Millisecond) // first arm
+	e.x.copyText("A")
+	waitEntries(t, e, 1, time.Second)
+	time.Sleep(200 * time.Millisecond) // re-armed
+	e.x.copyText("C")
+	waitEntries(t, e, 2, time.Second)
+	time.Sleep(20 * time.Millisecond) // C read; clipnotify still arming
+	e.x.copyText("B")
+	waitEntries(t, e, 3, 2*time.Second)
+	got := map[string]bool{}
+	for _, it := range e.entries() {
+		got[string(it.Entry.Data)] = true
+	}
+	if !got["A"] || !got["B"] || !got["C"] {
+		t.Fatalf("entries %v, want A B C", got)
+	}
+}
+
+// slowStore makes every Write take d, like encrypt + fsync on a busy box.
+type slowStore struct {
+	*store.Store
+	d time.Duration
+}
+
+func (s slowStore) Write(e entry.Entry) (string, error) {
+	time.Sleep(s.d)
+	return s.Store.Write(e)
+}
+
+// Encrypt/write must not gate the next capture (gap 2): with writes at
+// 60 ms and copies every 30 ms (above Floor), every copy is still read
+// and written; a synchronous write path loses about half.
+func TestWriteOffCapturePath(t *testing.T) {
+	e := newEnv(t)
+	e.a.Store = slowStore{e.st, 60 * time.Millisecond}
+	e.x.useArm = true
+	e.x.armDelay = time.Millisecond
+	startRun(t, e)
+	time.Sleep(50 * time.Millisecond)
+	const n = 10
+	for i := 0; i < n; i++ {
+		e.x.copyText(fmt.Sprintf("q-%02d", i))
+		time.Sleep(30 * time.Millisecond)
+	}
+	waitEntries(t, e, n, 3*time.Second)
+	items := e.entries()
+	seen := map[string]bool{}
+	for _, it := range items {
+		if seen[string(it.Entry.Data)] {
+			t.Fatalf("dup %s", it.Entry.Data)
+		}
+		seen[string(it.Entry.Data)] = true
+	}
+	// ordering: created follows copy order
+	for i := 1; i < len(items); i++ {
+		// List is newest first
+		if string(items[i-1].Entry.Data) <= string(items[i].Entry.Data) {
+			t.Fatalf("order: %s before %s", items[i-1].Entry.Data, items[i].Entry.Data)
+		}
+	}
+	if len(items) != n {
+		t.Fatalf("%d entries, want %d", len(items), n)
 	}
 }

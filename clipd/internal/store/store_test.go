@@ -519,3 +519,16 @@ func TestHeartbeatRenameRetriesTransient(t *testing.T) {
 		t.Fatalf("files %v", got)
 	}
 }
+
+func TestValidOrigin(t *testing.T) {
+	for _, ok := range []string{"a", "host-1", "Host_2", strings.Repeat("x", 64)} {
+		if err := ValidOrigin(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "-a", "_a", "a b", "a.b", strings.Repeat("x", 65)} {
+		if err := ValidOrigin(bad); !errors.Is(err, ErrBadOrigin) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}

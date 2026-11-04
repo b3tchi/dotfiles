@@ -22,6 +22,7 @@
 #
 # usage: clipd/test-clipd-x.sh
 # env:   TEST_DISPLAY=:94  XVFB=Xvfb  KEEP_TMP=1 (debug: keep $TMP)
+#        BURST_MIN=15   (50 ms burst: copies that must be captured, of 20)
 set -u
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -159,8 +160,9 @@ start_xvfb() {
 # execs it), not a subshell's.
 AENV=(env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" CLIPD_CONFIG_DIR="$CFG" CLIPD_DEVICE=testhost CLIPD_DISPLAY=)
 
-start_agent() {
-  spawn "${AENV[@]}" "$CLIPD" agent x "$DPY" >>"$TMP/agent.log" 2>&1
+start_agent() { # [VAR=VAL ...]: extra env for this agent
+  rm -f "$FOLDER/hb-testhost.age"
+  spawn "${AENV[@]}" "$@" "$CLIPD" agent x "$DPY" >>"$TMP/agent.log" 2>&1
   AGENT_PID=$SPAWNED
   # ready once the startup heartbeat exists
   local i
@@ -187,6 +189,23 @@ own() { # <payload-string> <target...>: python owner; sets REQLOG
 }
 
 own_text() { own "$1" UTF8_STRING STRING text/plain; }
+
+XCOPY_N=0
+xcopy() { # <text>: copy via xclip (fast to spawn, unlike the python owner)
+  XCOPY_N=$((XCOPY_N + 1))
+  printf '%s' "$1" >"$TMP/x.$XCOPY_N"
+  spawn xclip -display "$DPY" -selection clipboard -quiet -i "$TMP/x.$XCOPY_N" >/dev/null 2>&1
+  XCOPIES+=("$SPAWNED")
+}
+XCOPIES=()
+
+has_entry() { # <text>: is there an entry decrypting to exactly <text>?
+  local f
+  for f in $(entries); do
+    [ "$(decrypt_field "$f" data)" = "$1" ] && { echo yes; return; }
+  done
+  echo no
+}
 
 entries() { find "$FOLDER" -maxdepth 1 -regextype posix-extended -regex '.*/[0-9a-f]{16}\.age' | sort; }
 count() { entries | wc -l | tr -d ' '; }
@@ -289,27 +308,62 @@ assert_eq "timeout logged as metadata" yes "$(grep -q 'timed out' "$TMP/agent.lo
 stop_pid "$HUNG_PID"
 BASE="$(count)"
 
-scenario "burst: 20 copies in ~1 s"
-[ -n "$OWNER_PID" ] && stop_pid "$OWNER_PID"; OWNER_PID=""
-BURST=()
-for i in $(seq -w 1 20); do
-  printf 'burst-%s' "$i" >"$TMP/b.$i"
-  spawn xclip -display "$DPY" -selection clipboard -quiet -i "$TMP/b.$i" >/dev/null 2>&1
-  BURST+=("$SPAWNED")
-  sleep 0.05
-done
+# burst <gap-s> <min-of-20> <tag>: 20 xclip copies <gap> apart; assert
+# each written at most once, the final one kept, and >= <min> captured.
+# Capture cost is three bounded xclip spawns (TARGETS, payload, TARGETS
+# re-check): 30-140 ms measured under load average 4-6, so at 50 ms
+# spacing a copy can be replaced on the server before it is read — hence
+# a floor there and 20/20 at 150 ms (sp039 T4 deviation, rejection #1).
+burst() {
+  local gap="$1" min="$2" tag="$3" i got
+  scenario "burst: 20 copies, $gap s apart"
+  [ -n "$OWNER_PID" ] && stop_pid "$OWNER_PID"; OWNER_PID=""
+  for i in $(seq -w 1 20); do
+    xcopy "$tag-$i"
+    sleep "$gap"
+  done
+  sleep 1.5
+  for f in $(entries); do decrypt_field "$f" data; echo; done | grep "^$tag-" | sort >"$TMP/$tag.got"
+  assert_eq "no content written twice" 0 "$(uniq -d "$TMP/$tag.got" | wc -l | tr -d ' ')"
+  assert_eq "final copy captured" yes "$(grep -qx "$tag-20" "$TMP/$tag.got" && echo yes || echo no)"
+  got=$(wc -l <"$TMP/$tag.got" | tr -d ' ')
+  if [ "$got" -ge "$min" ]; then
+    pass "$got of 20 captured (>= $min)"
+  else
+    fail "copies captured" ">= $min" "$got  missing: $(seq -w 1 20 | sed "s/^/$tag-/" | grep -vxF -f "$TMP/$tag.got" | tr '\n' ' ')"
+  fi
+  for p in "${XCOPIES[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
+  XCOPIES=()
+}
+burst 0.05 "${BURST_MIN:-15}" burst
+burst 0.15 20 slowburst
+
+scenario "slow clipnotify re-arm (150 ms spawn delay): copy in the re-arm window"
+cat >"$TMP/slow-clipnotify" <<'SH'
+#!/bin/sh
+sleep 0.15
+exec clipnotify "$@"
+SH
+chmod +x "$TMP/slow-clipnotify"
+kill -TERM "$AGENT_PID"; wait "$AGENT_PID" 2>/dev/null
+start_agent CLIPD_CLIPNOTIFY="$TMP/slow-clipnotify"
+sleep 0.5
+xcopy "rearm-A"; sleep 0.6
+xcopy "rearm-C"; sleep 0.06
+xcopy "rearm-B"
 sleep 1.5
-for f in $(entries); do decrypt_field "$f" data; echo; done | grep '^burst-' | sort >"$TMP/burst.got"
-assert_eq "no content written twice" 0 "$(uniq -d "$TMP/burst.got" | wc -l | tr -d ' ')"
-assert_eq "final copy captured" yes "$(grep -qx 'burst-20' "$TMP/burst.got" && echo yes || echo no)"
-printf '  INFO  %s of 20 burst copies captured (X keeps only the newest; overwritten ones are unrecoverable)\n' \
-  "$(wc -l <"$TMP/burst.got" | tr -d ' ')"
-for p in "${BURST[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
+assert_eq "A written" yes "$(has_entry rearm-A)"
+assert_eq "C written" yes "$(has_entry rearm-C)"
+assert_eq "B (landed while clipnotify was re-arming) written" yes "$(has_entry rearm-B)"
+assert_eq "B is the current clipboard" rearm-B \
+  "$(timeout 2 xclip -display "$DPY" -selection clipboard -t UTF8_STRING -o 2>/dev/null)"
+for p in "${XCOPIES[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
+XCOPIES=()
 
 scenario "agent health"
 assert_eq "agent still running" alive "$(kill -0 "$AGENT_PID" 2>/dev/null && echo alive || echo dead)"
 leak=no
-for s in "hello" "pm-secret" "after-the-hang" "burst-"; do
+for s in "hello" "pm-secret" "after-the-hang" "burst-" "rearm-"; do
   grep -qF "$s" "$TMP/agent.log" && leak="$s"
 done
 assert_eq "no payload text in the agent log" no "$leak"

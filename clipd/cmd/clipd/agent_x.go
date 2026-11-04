@@ -15,7 +15,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -64,6 +63,13 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 		fmt.Fprintf(errOut, "clipd: agent x: %q is not an X display name\n", dpy)
 		return exitConfig
 	}
+	origin := deviceName()
+	if err := store.ValidOrigin(origin); err != nil {
+		// Checked before the loop: Store.Write would refuse every copy and
+		// the agent would run, silently writing nothing.
+		fmt.Fprintf(errOut, "clipd: agent x: device name (CLIPD_DEVICE or hostname): %v\n", err)
+		return exitConfig
+	}
 	folder, err := syncFolder()
 	if err != nil {
 		fmt.Fprintln(errOut, "clipd: agent x:", err)
@@ -103,7 +109,6 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 	defer release()
 
 	lg := log.New(errOut, "clipd: ", log.LstdFlags)
-	origin := deviceName()
 	st := &store.Store{Dir: folder, Origin: origin, Self: self, Peers: peers, Cap: entry.DefaultCap, Logf: lg.Printf}
 	sel := &xsel.X{Display: dpy, Xclip: os.Getenv("CLIPD_XCLIP"), Clipnotify: os.Getenv("CLIPD_CLIPNOTIFY")}
 	a := &agent.Agent{Store: st, StateDir: state, Name: dpy, Logf: lg.Printf}
@@ -113,9 +118,6 @@ func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() in
 	lg.Printf("agent x: serving %s as %s, folder %s, %d peers", dpy, origin, folder, len(peers))
 	if err := a.RunX(ctx, sel); err != nil {
 		lg.Printf("agent x: %v", err)
-		if errors.Is(err, store.ErrBadOrigin) {
-			return exitConfig
-		}
 		return exitFail
 	}
 	return 0

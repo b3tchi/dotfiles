@@ -39,3 +39,19 @@ func TestAgentXConfigErrorsAre78(t *testing.T) {
 		t.Fatalf("no runtime dir: exit %d %q", code, errOut)
 	}
 }
+
+func TestAgentXBadOriginIs78(t *testing.T) {
+	cfg := t.TempDir()
+	if code, _, _ := runCLI(t, cfg, "keygen"); code != 0 {
+		t.Fatal("keygen")
+	}
+	run := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", run)
+	for _, bad := range []string{"bad name", "-lead", "a/b", strings.Repeat("x", 65)} {
+		t.Setenv("CLIPD_DEVICE", bad)
+		code, _, errOut := runCLI(t, cfg, "agent", "x", ":93")
+		if code != 78 || !strings.Contains(errOut, "origin must match") {
+			t.Fatalf("CLIPD_DEVICE=%q: exit %d err %q", bad, code, errOut)
+		}
+	}
+}
