@@ -116,6 +116,16 @@ func (s *Store) id() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+// ValidOrigin reports ErrBadOrigin for a device name the store would
+// refuse to write under, so callers can fail at startup rather than on
+// every write.
+func ValidOrigin(origin string) error {
+	if !originRe.MatchString(origin) {
+		return ErrBadOrigin
+	}
+	return nil
+}
+
 func (s *Store) seal(e entry.Entry) ([]byte, error) {
 	if !originRe.MatchString(s.Origin) {
 		return nil, ErrBadOrigin
