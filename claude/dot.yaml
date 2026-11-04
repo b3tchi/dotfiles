@@ -119,16 +119,6 @@ linux:
         done
       fi
 
-      # Disable auto-compact. Global config (not settings.json) holds it:
-      # ~/.claude.json for the default dir, $CLAUDE_CONFIG_DIR/.claude.json otherwise.
-      set_global_cfg() {
-        f="$1"
-        [ -f "$f" ] && command -v jq >/dev/null 2>&1 || { echo "skip autoCompact: $f or jq missing"; return; }
-        jq '.autoCompactEnabled=false' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-      }
-      set_global_cfg "$HOME/.claude.json"
-      set_global_cfg "$HOME/.claude-personal/.claude.json"
-
       # wiki-oxide MCP register is now declared in the wiki-oxide plugin manifest
       # (claude/marketplace/plugins/wiki-oxide/.claude-plugin/plugin.json). Plugin
       # install above handles registration via mcpServers declarative config.

@@ -1,4 +1,7 @@
 {
+  "env": {
+    "DISABLE_AUTO_COMPACT": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(agent-inbox:*)"
