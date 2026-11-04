@@ -204,6 +204,30 @@ When inside tmux, switches the client to the project's session group. When outsi
 | `project remove <name>` | Unregister a project |
 | `project go <name>` | Navigate to project. Local: cd + tmux session management (unchanged). Remote: delegates to `tmux-to-workstation connect -g <name> --cwd <path> -- <ssh-alias>`; no local cd. |
 
+### Windows
+
+The module loads under Windows nu (scoop `nu`; `nushell/dot.yaml` links
+`scripts` to `%APPDATA%\nushell\scripts`, which `NU_LIB_DIRS` searches).
+`list`, `add`, `remove`, `lookup` and `config` work; `go` is refused with a
+message, because it needs tmux.
+
+- The registry is `%USERPROFILE%\.config\project\projects.yaml` - the file
+  kwi3's Windows project picker (`$mod+p`) reads. It is located through
+  `%USERPROFILE%`, not nu's `~` (the profile known folder).
+- `add` keeps the picker's rules: a project name is letters, digits, `. _ -`,
+  starting with a letter or digit; a local path is stored as an absolute
+  Windows path (`X:\...`, or `\\server\share` such as
+  `\\wsl.localhost\arch\home\jan\repo`), a relative one expanded first;
+  a remote path (`--ssh`) is the path on the remote host, stored as given
+  (no `'` or control character, not checked locally); an ssh profile is
+  letters, digits, `. _ - @`, starting with a letter, digit or `_`.
+- The file is written with every name and value on one single-quoted line
+  (`to yaml` would fold a long path onto a second line, which the picker does
+  not read).
+- `config` opens `$env.EDITOR`, else `notepad.exe`.
+- A box without `~/.local/bin/wm-ipc.nu` loads `wm-none.nu` in its place, so
+  the auto-cd falls back to `$env.PROJECT`.
+
 ### Auto-cd on Startup
 
 When the `PROJECT` environment variable is set (by bashrc), nushell's `export-env` block automatically changes to the project directory. This happens transparently when opening a terminal on a project workspace.
