@@ -158,3 +158,23 @@ func TestExecRunnerTimeoutKills(t *testing.T) {
 		t.Fatalf("hung %v", d)
 	}
 }
+
+func TestReadCancelledByCaller(t *testing.T) {
+	x := &X{Display: ":1", Timeout: time.Second, Runner: &recRunner{block: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
+	start := time.Now()
+	_, err := x.Targets(ctx)
+	if !errors.Is(err, ErrCanceled) || errors.Is(err, ErrTimeout) {
+		t.Fatalf("err %v", err)
+	}
+	if d := time.Since(start); d > 300*time.Millisecond {
+		t.Fatalf("cancel took %v", d)
+	}
+	// a result that raced in after cancel is still discarded
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	if out, err := (&X{Display: ":1", Runner: &recRunner{out: []byte("stale")}}).Read(ctx2, TargetUTF8, 10); out != nil || !errors.Is(err, ErrCanceled) {
+		t.Fatalf("after cancel: %q %v", out, err)
+	}
+}

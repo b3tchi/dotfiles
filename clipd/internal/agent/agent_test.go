@@ -41,6 +41,9 @@ type fakeX struct {
 	useArm   bool
 	armDelay time.Duration
 	waiter   chan struct{}
+
+	// per-call latency (answered, just slow — a loaded host)
+	targetsDelay, readDelay time.Duration
 }
 
 // copyText replaces the clipboard (a new owner) and, in arm mode, fires
@@ -74,7 +77,10 @@ func (f *fakeX) Output(ctx context.Context, env []string, limit int, name string
 			return nil, f.failWait
 		}
 		if f.useArm {
-			if !sleep(ctx, f.armDelay) {
+			f.mu.Lock()
+			armDelay := f.armDelay
+			f.mu.Unlock()
+			if !sleep(ctx, armDelay) {
 				return nil, ctx.Err()
 			}
 			ch := make(chan struct{})
@@ -114,9 +120,16 @@ func (f *fakeX) Output(ctx context.Context, env []string, limit int, name string
 	} else {
 		err = errors.New("exit status 1")
 	}
+	d := f.readDelay
+	if target == "TARGETS" {
+		d = f.targetsDelay
+	}
 	f.mu.Unlock()
 	if hang {
 		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if !sleep(ctx, d) {
 		return nil, ctx.Err()
 	}
 	if len(out) > limit {
@@ -645,5 +658,197 @@ func TestPickHashSharedWithWindows(t *testing.T) {
 	}
 	if got := e.a.Offer(entry.MimeText, []byte("win-pick")); got != Echo {
 		t.Fatalf("pick recorded by windows code: %q, want echo", got)
+	}
+}
+
+// An owner that never answers stalls a capture for the whole read bound.
+// A newer copy made during the stall must supersede it — the stalled read
+// is cancelled (its result is stale) and the new copy written well inside
+// the bound (rejection #2: 1 s stalls swallowed copies at 150 ms spacing).
+func TestStalledCaptureSupersededByNewerCopy(t *testing.T) {
+	e := newEnv(t)
+	e.sel.Timeout = time.Second
+	e.x.useArm = true
+	e.x.armDelay = time.Millisecond
+	startRun(t, e)
+	time.Sleep(30 * time.Millisecond)
+	e.x.mu.Lock()
+	e.x.hang = 1 // the next TARGETS read never gets an answer
+	e.x.mu.Unlock()
+	e.x.copyText("stuck-owner")
+	for len(e.x.callLog()) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // the read is now stalled
+	t0 := time.Now()
+	e.x.copyText("fresh")
+	waitEntries(t, e, 1, 2*time.Second)
+	if d := time.Since(t0); d > 500*time.Millisecond {
+		t.Fatalf("newer copy written %v after it was made; the stalled read was not superseded", d)
+	}
+	items := e.entries()
+	if len(items) != 1 || string(items[0].Entry.Data) != "fresh" {
+		t.Fatalf("items %+v", items)
+	}
+	if !strings.Contains(e.logs.String(), "superseded") {
+		t.Fatalf("no supersede log line:\n%s", e.logs)
+	}
+}
+
+// A superseded capture must never offer what it read: a cancel that lands
+// after the payload read (during the TARGETS re-check) drops the payload,
+// so the hint re-check is never skipped.
+func TestCancelDuringRecheckDropsPayload(t *testing.T) {
+	e := newEnv(t)
+	q := &queue{max: 1 << 20, wake: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	sel := &cancelOnRecheck{fakeX: e.x, cancel: cancel}
+	e.x.ownText("payload-then-cancel")
+	e.a.captureInto(ctx, &xsel.X{Display: ":93", Timeout: time.Second, Runner: sel}, q)
+	if p := q.pop(); p != nil {
+		t.Fatalf("cancelled capture queued %q", p.e.Data)
+	}
+	if n := len(sel.targets); n != 2 {
+		t.Fatalf("%d TARGETS calls, want 2 (gate + re-check)", n)
+	}
+}
+
+// cancelOnRecheck cancels the capture as the second TARGETS read starts
+// and then blocks it until cancelled.
+type cancelOnRecheck struct {
+	*fakeX
+	cancel  context.CancelFunc
+	targets []string
+}
+
+func (c *cancelOnRecheck) Output(ctx context.Context, env []string, limit int, name string, args ...string) ([]byte, error) {
+	if args[len(args)-2] == "TARGETS" {
+		c.targets = append(c.targets, "TARGETS")
+		if len(c.targets) == 2 {
+			c.cancel()
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	}
+	return c.fakeX.Output(ctx, env, limit, name, args...)
+}
+
+func pe(s string) *pendingEntry {
+	return &pendingEntry{e: entry.Entry{Mime: entry.MimeText, Data: []byte(s)}, hash: s}
+}
+
+// Under a writer backlog the queue evicts oldest-first, stays within its
+// byte bound, and never evicts the entry just pushed — the current
+// clipboard — even when that one alone is over the bound.
+func TestQueueEvictsOldestKeepsNewest(t *testing.T) {
+	q := &queue{max: 10, wake: make(chan struct{}, 1)}
+	var evicted []string
+	for _, s := range []string{"aaaa", "bbbb", "cccc", "dddd"} {
+		for _, p := range q.push(pe(s)) {
+			evicted = append(evicted, string(p.e.Data))
+		}
+		if q.bytes > q.max {
+			t.Fatalf("after %s: %d bytes > max %d", s, q.bytes, q.max)
+		}
+	}
+	if strings.Join(evicted, ",") != "aaaa,bbbb" {
+		t.Fatalf("evicted %v, want oldest first", evicted)
+	}
+	if p := q.items[len(q.items)-1]; string(p.e.Data) != "dddd" {
+		t.Fatalf("newest not kept: %q", p.e.Data)
+	}
+	big := strings.Repeat("z", 25)
+	ev := q.push(pe(big))
+	if len(ev) != 2 || len(q.items) != 1 || string(q.items[0].e.Data) != big {
+		t.Fatalf("over-max newest: evicted %d, queue %d", len(ev), len(q.items))
+	}
+	if p := q.pop(); string(p.e.Data) != big || q.bytes != 0 || q.pop() != nil {
+		t.Fatal("pop after over-max push")
+	}
+}
+
+// Through the agent: evicted entries are logged (metadata) and forgotten
+// for dedupe, so copying the same content again is sent.
+func TestCaptureEvictionForgetsDedupe(t *testing.T) {
+	e := newEnv(t)
+	q := &queue{max: 6, wake: make(chan struct{}, 1)}
+	for _, s := range []string{"one", "two", "three"} {
+		e.x.ownText(s)
+		e.a.captureInto(context.Background(), e.sel, q)
+	}
+	if !strings.Contains(e.logs.String(), "drop queued") {
+		t.Fatalf("no eviction log:\n%s", e.logs)
+	}
+	if strings.Contains(e.logs.String(), "one") {
+		t.Fatal("payload in log")
+	}
+	// "one" was evicted unwritten: a fresh copy of it must not be a Dup.
+	p, out := e.a.decide(entry.MimeText, []byte("one"))
+	if p == nil || out != "" {
+		t.Fatalf("re-copy of evicted content: %q", out)
+	}
+}
+
+// A capture that is slow but whose in-flight call began after the newer
+// copy is reading the NEW owner: it must not be superseded (under load
+// that churn cancelled most of a 50 ms burst).
+func TestSlowCaptureOnNewOwnerNotSuperseded(t *testing.T) {
+	e := newEnv(t)
+	e.sel.Timeout = time.Second
+	e.x.useArm = true
+	e.x.armDelay = time.Millisecond
+	e.x.targetsDelay = 60 * time.Millisecond
+	e.x.readDelay = 250 * time.Millisecond
+	startRun(t, e)
+	time.Sleep(30 * time.Millisecond)
+	e.x.copyText("A")
+	time.Sleep(20 * time.Millisecond) // during A's TARGETS read
+	e.x.copyText("B")
+	waitEntries(t, e, 1, 2*time.Second)
+	time.Sleep(700 * time.Millisecond) // follow-up + confirm captures
+	if strings.Contains(e.logs.String(), "superseded") {
+		t.Fatalf("slow-but-live capture was superseded:\n%s", e.logs)
+	}
+	got := map[string]bool{}
+	for _, it := range e.entries() {
+		got[string(it.Entry.Data)] = true
+	}
+	if !got["B"] {
+		t.Fatalf("entries %v, want B (current clipboard)", got)
+	}
+}
+
+// Copies that keep landing while clipnotify is still re-arming raise no
+// events at all; a confirm that finds a new copy must be followed by
+// another confirm, or the copy after it is lost though it is current.
+func TestConfirmChainsWhileCopiesKeepComing(t *testing.T) {
+	e := newEnv(t)
+	e.x.useArm = true
+	e.x.armDelay = time.Millisecond
+	startRun(t, e)
+	time.Sleep(30 * time.Millisecond)
+	e.x.mu.Lock()
+	e.x.armDelay = time.Hour // after this event, clipnotify never re-arms
+	e.x.mu.Unlock()
+	e.x.copyText("A")
+	waitEntries(t, e, 1, time.Second)
+	time.Sleep(100 * time.Millisecond)
+	e.x.copyText("B") // no event: only the confirm after A sees it
+	waitEntries(t, e, 2, time.Second)
+	time.Sleep(50 * time.Millisecond)
+	e.x.copyText("C") // no event: only a confirm after B's confirm sees it
+	waitEntries(t, e, 3, 2*time.Second)
+	got := map[string]bool{}
+	for _, it := range e.entries() {
+		got[string(it.Entry.Data)] = true
+	}
+	if !got["A"] || !got["B"] || !got["C"] {
+		t.Fatalf("entries %v", got)
+	}
+	// and the chain ends: once nothing changes, confirms stop.
+	n := len(e.x.callLog())
+	time.Sleep(800 * time.Millisecond)
+	if m := len(e.x.callLog()); m-n > 3 {
+		t.Fatalf("confirms keep polling an unchanged clipboard: %d more xclip calls", m-n)
 	}
 }

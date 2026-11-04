@@ -27,9 +27,22 @@
 //     1-slot channel and each capture reads the newest clipboard.
 //   - clipnotify subscribes some time after it is spawned, so a copy made
 //     between a capture's reads and that subscription raises no event at
-//     all. Every event capture is therefore followed by one confirm
+//     all. Every event capture is therefore followed by a confirm
 //     capture Confirm later; dedupe makes it free when nothing changed,
-//     and when something did, it is the copy the re-arm window hid.
+//     and when something did, it is the copy the re-arm window hid — and
+//     another confirm follows, until one finds nothing new.
+//   - one capture runs at a time. An event arriving while it runs means
+//     the owner changed under it. If, Supersede later, the capture is
+//     still inside a selection call that began BEFORE that event, the
+//     call is waiting on the replaced owner and could only stall to its
+//     1 s bound while newer copies come and go: the capture is cancelled
+//     (xclip child killed, result discarded before decide) and the new
+//     clipboard captured. A call begun after the event already reads the
+//     new owner and is left alone, so a capture that is merely slow
+//     under load is not thrown away. The capture that replaces a
+//     cancelled one is never itself cancelled, which bounds the churn
+//     under fast bursts. A cancel during the TARGETS re-check drops the
+//     payload (fails closed), so the hint check is never skipped.
 //   - captures only read and dedupe; encrypt + write + state run in a
 //     writer goroutine fed by a FIFO queue, so a slow write never delays
 //     the next read. Order is preserved; queued plaintext is bounded by
@@ -84,6 +97,7 @@ const (
 	DefaultRetryBase = time.Second
 	DefaultRetryMax  = 30 * time.Second
 	DefaultConfirm   = 250 * time.Millisecond
+	DefaultSupersede = 100 * time.Millisecond
 	MaxWatchFailures = 5
 
 	keyFile    = "hash.key"
@@ -128,6 +142,7 @@ type Agent struct {
 	RetryBase  time.Duration // 0 = DefaultRetryBase
 	RetryMax   time.Duration // 0 = DefaultRetryMax
 	Confirm    time.Duration // 0 = DefaultConfirm
+	Supersede  time.Duration // 0 = DefaultSupersede
 	QueueBytes int           // queued plaintext bound; 0 = 4*Cap
 
 	Now  func() time.Time
@@ -433,7 +448,9 @@ func (a *Agent) Tick() {
 func (a *Agent) readX(ctx context.Context, sel Selection) (mime string, data []byte, ok bool) {
 	ts, err := sel.Targets(ctx)
 	if err != nil {
-		a.logf("agent: skip: %v", err)
+		if !errors.Is(err, xsel.ErrCanceled) {
+			a.logf("agent: skip: %v", err)
+		}
 		return "", nil, false
 	}
 	if xsel.Hinted(ts) {
@@ -447,7 +464,9 @@ func (a *Agent) readX(ctx context.Context, sel Selection) (mime string, data []b
 	}
 	data, err = sel.Read(ctx, target, a.cap())
 	if err != nil {
-		a.logf("agent: skip: %v", err)
+		if !errors.Is(err, xsel.ErrCanceled) {
+			a.logf("agent: skip: %v", err)
+		}
 		return "", nil, false
 	}
 	if len(data) == 0 {
@@ -519,15 +538,24 @@ func (q *queue) pop() *pendingEntry {
 	return p
 }
 
-func (a *Agent) captureInto(ctx context.Context, sel Selection, q *queue) {
+// captureInto reads, dedupes and queues the current clipboard. It reports
+// whether a new copy was accepted.
+func (a *Agent) captureInto(ctx context.Context, sel Selection, q *queue) bool {
 	start := time.Now()
 	mime, data, ok := a.readX(ctx, sel)
 	if !ok {
-		return
+		return false
+	}
+	if ctx.Err() != nil {
+		// Superseded in the instant after the reads returned (xsel
+		// already discards any read whose caller cancelled; this closes
+		// the gap between readX returning and decide).
+		clear(data)
+		return false
 	}
 	p, _ := a.decide(mime, data)
 	if p == nil {
-		return
+		return false
 	}
 	p.read = time.Since(start)
 	for _, old := range q.push(p) {
@@ -535,6 +563,7 @@ func (a *Agent) captureInto(ctx context.Context, sel Selection, q *queue) {
 		clear(old.e.Data)
 		a.forget(old.hash)
 	}
+	return true
 }
 
 // writeLoop is RunX's writer goroutine: it owns pending/retry state,
@@ -616,22 +645,149 @@ func (a *Agent) RunX(ctx context.Context, sel Selection) error {
 		a.writeLoop(ctx, q)
 	}()
 
+	// One capture runs at a time, in its own goroutine, so this loop can
+	// keep reacting to events while it runs. Its selection calls are
+	// tracked so a stall can be told apart from a merely slow capture.
+	type capture struct {
+		cancel   context.CancelFunc
+		done     chan struct{}
+		start    time.Time
+		sel      *trackedSel
+		confirm  bool // a confirm capture that finds nothing new ends the chain
+		exempt   bool // replaces a superseded capture: never superseded
+		accepted bool // set before done closes
+	}
+	var cur *capture
+	var newerAt time.Time // first unhandled event while cur runs; zero = none
+	var lastAt time.Time  // latest event while cur runs
+	start := func(confirm, exempt bool) {
+		cctx, ccancel := context.WithCancel(ctx)
+		c := &capture{cancel: ccancel, done: make(chan struct{}), start: time.Now(),
+			sel: &trackedSel{Selection: sel}, confirm: confirm, exempt: exempt}
+		go func() {
+			defer close(c.done)
+			c.accepted = a.captureInto(cctx, c.sel, q)
+		}()
+		cur = c
+	}
+	stopCur := func() {
+		if cur != nil {
+			cur.cancel()
+			<-cur.done
+			cur = nil
+		}
+	}
+	defer stopCur()
+
 	confirm := time.NewTimer(time.Hour)
 	confirm.Stop()
 	defer confirm.Stop()
+	supersede := time.NewTimer(time.Hour)
+	supersede.Stop()
+	defer supersede.Stop()
+	superseded := false // cur was cancelled by a supersede
 	for {
+		var done chan struct{}
+		if cur != nil {
+			done = cur.done
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case err := <-errc:
 			return err
 		case <-events:
-			a.captureInto(ctx, sel, q)
-			confirm.Reset(dur(a.Confirm, DefaultConfirm))
+			now := time.Now()
+			switch {
+			case cur == nil:
+				start(false, false)
+			case newerAt.IsZero():
+				newerAt, lastAt = now, now
+				if !cur.exempt {
+					supersede.Reset(dur(a.Supersede, DefaultSupersede))
+				}
+			default:
+				lastAt = now
+			}
+		case <-supersede.C:
+			// The owner changed under cur at newerAt. A selection call that
+			// began before then and is still running is waiting on the
+			// replaced owner and can only stall to its bound: cancel. A
+			// call begun after newerAt reads the new owner; if more
+			// events came since, check again against the latest one.
+			if cur == nil || newerAt.IsZero() {
+				break
+			}
+			if began, busy := cur.sel.inFlight(); busy && began.Before(newerAt) {
+				a.logf("agent: capture superseded by a newer copy after %dms; cancelled", time.Since(cur.start).Milliseconds())
+				superseded = true
+				cur.cancel()
+			} else if lastAt.After(newerAt) {
+				newerAt = lastAt
+				supersede.Reset(max(dur(a.Supersede, DefaultSupersede)-time.Since(lastAt), 0))
+			}
+		case <-done:
+			// Confirm after every event capture, and keep confirming while
+			// confirms still find new copies: a copy made during clipnotify
+			// re-arm raises no event, and the one after it may not either.
+			again := !cur.confirm || cur.accepted
+			cur.cancel()
+			cur = nil
+			supersede.Stop()
+			pending := !newerAt.IsZero()
+			newerAt, lastAt = time.Time{}, time.Time{}
+			if pending {
+				start(false, superseded)
+			} else if again {
+				confirm.Reset(dur(a.Confirm, DefaultConfirm))
+			}
+			superseded = false
 		case <-confirm.C:
-			a.captureInto(ctx, sel, q)
+			if cur == nil {
+				start(true, false)
+			}
+			// else: the running capture reads the newest clipboard and
+			// schedules its own confirm.
 		}
 	}
+}
+
+// trackedSel records when the selection call in flight began.
+type trackedSel struct {
+	Selection
+	mu    sync.Mutex
+	began time.Time
+	busy  bool
+}
+
+func (t *trackedSel) enter() {
+	t.mu.Lock()
+	t.began, t.busy = time.Now(), true
+	t.mu.Unlock()
+}
+
+func (t *trackedSel) exit() {
+	t.mu.Lock()
+	t.busy = false
+	t.mu.Unlock()
+}
+
+func (t *trackedSel) inFlight() (time.Time, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.began, t.busy
+}
+
+func (t *trackedSel) Targets(ctx context.Context) ([]string, error) {
+	t.enter()
+	defer t.exit()
+	return t.Selection.Targets(ctx)
+}
+
+func (t *trackedSel) Read(ctx context.Context, target string, limit int) ([]byte, error) {
+	t.enter()
+	defer t.exit()
+	return t.Selection.Read(ctx, target, limit)
 }
 
 // watch re-arms clipnotify in its own goroutine so a slow capture never

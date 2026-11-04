@@ -219,6 +219,15 @@ wait_count() { # <n> <seconds>: poll until count == n
   return 1
 }
 
+wait_count_ms() { # <n> <ms>
+  local end=$(( $(date +%s%N) + $2 * 1000000 ))
+  while [ "$(date +%s%N)" -lt "$end" ]; do
+    [ "$(count)" = "$1" ] && return 0
+    sleep 0.01
+  done
+  return 1
+}
+
 decrypt_field() { # <file> <field>: data is base64-decoded, written raw
   age -d -i "$CFG/identity.txt" "$1" | python3 -c '
 import base64, json, sys
@@ -294,7 +303,7 @@ scenario "hung owner"
 spawn env DISPLAY="$DPY" python3 "$TMP/hung-owner.py" >"$TMP/hung.out" 2>&1
 HUNG_PID=$SPAWNED
 for i in $(seq 1 40); do grep -q owned "$TMP/hung.out" && break; sleep 0.05; done
-sleep 0.2
+sleep 1.3 # past the 1 s read bound: this scenario is the timeout path
 t0=$(date +%s%N)
 own_text "after-the-hang"
 if wait_count $((BASE + 1)) 2; then
@@ -306,6 +315,29 @@ fi
 assert_eq "it holds the next copy" "after-the-hang" "$(decrypt_field "$(newest)" data)"
 assert_eq "timeout logged as metadata" yes "$(grep -q 'timed out' "$TMP/agent.log" && echo yes || echo no)"
 stop_pid "$HUNG_PID"
+BASE="$(count)"
+
+scenario "stalled read superseded by a newer copy"
+# A never-answering owner stalls the capture's TARGETS read; a copy made
+# 50 ms into the stall must be written well inside the 1 s bound (the
+# stalled read is cancelled, not waited out — rejection #2).
+spawn env DISPLAY="$DPY" python3 "$TMP/hung-owner.py" >"$TMP/hung2.out" 2>&1
+HUNG_PID=$SPAWNED
+for i in $(seq 1 40); do grep -q owned "$TMP/hung2.out" && break; sleep 0.05; done
+sleep 0.05
+t0=$(date +%s%N)
+xcopy "after-the-stall"
+if wait_count_ms $((BASE + 1)) 700; then
+  ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+  pass "newer copy written in ${ms} ms (< 700, read bound 1000)"
+else
+  fail "newer copy written within 700 ms" $((BASE + 1)) "$(count)"
+fi
+assert_eq "it holds the newer copy" "after-the-stall" "$(decrypt_field "$(newest)" data)"
+assert_eq "supersede logged" yes "$(grep -q 'superseded by a newer copy' "$TMP/agent.log" && echo yes || echo no)"
+stop_pid "$HUNG_PID"
+for p in "${XCOPIES[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
+XCOPIES=()
 BASE="$(count)"
 
 # burst <gap-s> <min-of-20> <tag>: 20 xclip copies <gap> apart; assert

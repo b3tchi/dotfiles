@@ -43,6 +43,7 @@ var (
 	ErrTimeout  = errors.New("xsel: selection read timed out")
 	ErrTooLarge = errors.New("xsel: selection over size limit")
 	ErrNoOwner  = errors.New("xsel: selection read failed")
+	ErrCanceled = errors.New("xsel: selection read cancelled")
 )
 
 // Runner runs one external command. Output returns at most limit bytes of
@@ -92,11 +93,17 @@ func (x *X) Env() []string {
 	return append(env, "DISPLAY="+x.Display)
 }
 
-func (x *X) read(ctx context.Context, target string, limit int) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, x.timeout())
+func (x *X) read(parent context.Context, target string, limit int) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, x.timeout())
 	defer cancel()
 	out, err := x.runner().Output(ctx, x.Env(), limit, orDefault(x.Xclip, "xclip"),
 		"-display", x.Display, "-selection", "clipboard", "-t", target, "-o")
+	if parent.Err() != nil {
+		// The caller gave up on this read (a newer copy superseded it):
+		// whatever it returned is stale.
+		clear(out)
+		return nil, fmt.Errorf("%w: %s", ErrCanceled, target)
+	}
 	switch {
 	case err == nil:
 		return out, nil
