@@ -179,11 +179,22 @@ win_watch() {
       [Console]::OutputEncoding=[Text.Encoding]::ASCII
       function emit($s) { try { [Console]::Out.WriteLine($s); [Console]::Out.Flush() } catch { exit 1 } }
       emit ("P" + $PID)
+      Add-Type -AssemblyName System.Windows.Forms
+      $ex = "ExcludeClipboardContentFromMonitorProcessing"
       $last = $null
       $hb = [Diagnostics.Stopwatch]::StartNew()
       while ($true) {
         Start-Sleep -Milliseconds '"$WPOLL"'
-        try { $c = Get-Clipboard -Raw -ErrorAction Stop } catch { $c = $null }
+        # Password managers (KeePass, 1Password, ...) mark secrets with this
+        # format; never read or forward them. Checked again after the read in
+        # case the owner changed mid-read (dotfiles-erl2).
+        try {
+          $c = $null
+          if (-not [Windows.Forms.Clipboard]::ContainsData($ex)) {
+            $c = Get-Clipboard -Raw -ErrorAction Stop
+            if ([Windows.Forms.Clipboard]::ContainsData($ex)) { $c = $null }
+          }
+        } catch { $c = $null }
         if ($c -and $c -cne $last) {
           $last = $c
           emit ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c)))
