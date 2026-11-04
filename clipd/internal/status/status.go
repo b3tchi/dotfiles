@@ -37,6 +37,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"clipd/internal/store"
 )
 
 const (
@@ -67,10 +69,13 @@ type Input struct {
 }
 
 type Row struct {
-	Name  string
-	Self  bool
-	Seen  bool
-	Age   time.Duration // since the last heartbeat's created; 0 if unseen
+	Name string
+	Self bool
+	Seen bool
+	Age  time.Duration // since the last heartbeat's created; 0 if unseen
+	// Ahead is how far the beat's created lies in our future, set only
+	// past store.SkewTolerance; such a beat is stale, not fresh.
+	Ahead time.Duration
 	Stale bool
 	Link  string // connected | disconnected | unknown | not in folder | self
 }
@@ -87,10 +92,15 @@ func judge(name string, hbs map[string]time.Time, now time.Time) Row {
 	if c, ok := hbs[name]; ok {
 		r.Seen = true
 		r.Age = now.Sub(c)
-		if r.Age < 0 {
-			r.Age = 0 // writer's clock ahead of ours
+		switch {
+		case r.Age < -store.SkewTolerance:
+			// A future-dated beat proves nothing about now: a clock a day
+			// ahead would read fresh for a day after its agent died.
+			r.Ahead, r.Age = -r.Age, 0
+		case r.Age < 0:
+			r.Age = 0 // ordinary skew
 		}
-		r.Stale = r.Age > StaleAfter
+		r.Stale = r.Ahead > 0 || r.Age > StaleAfter
 	}
 	return r
 }
@@ -162,6 +172,10 @@ func (rep Report) Write(w io.Writer) {
 		if r.Seen {
 			seen = r.Age.Truncate(time.Second).String() + " ago"
 		}
+		if r.Ahead > 0 {
+			seen = r.Ahead.Truncate(time.Second).String() + " in future"
+			state = "stale (clock ahead)"
+		}
 		if !r.Stale {
 			state = "fresh"
 		}
@@ -178,7 +192,7 @@ func (rep Report) Write(w io.Writer) {
 	case ExitOK:
 		fmt.Fprintln(w, "status: ok")
 	case ExitStale:
-		fmt.Fprintln(w, "status: stale — a peer (or this agent) has not written a heartbeat within 90 s")
+		fmt.Fprintln(w, "status: stale — a peer (or this agent) has no heartbeat within the last 90 s, or its clock runs ahead by more than 60 s")
 	default:
 		fmt.Fprintln(w, "status: unknown — heartbeats shown above, link state unavailable")
 	}

@@ -104,3 +104,17 @@ func TestStatusCLINoIdentity(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 }
+
+// A pinned recipient no folder device or heartbeat accounts for is a peer
+// we never heard from: exit 3, listed as unnamed.
+func TestStatusCLIUnnamedPinnedPeer(t *testing.T) {
+	cfg := statusRig(t)
+	extra, _ := age.GenerateX25519Identity()
+	if err := crypt.AddRecipient(filepath.Join(cfg, "recipients.txt"), extra.Recipient().String()); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCLI(t, cfg, "status")
+	if code != 3 || !strings.Contains(out, "1 unnamed pinned peer(s)") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}

@@ -288,3 +288,37 @@ func TestReadConfigErrorsHideKey(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+// A beat dated in the future is not evidence of recent life: a writer
+// with a clock a day ahead would otherwise read fresh for a day after
+// its agent died. Up to SkewTolerance ahead is ordinary skew.
+func TestFutureHeartbeatIsNotFresh(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		ahead time.Duration
+		fresh bool
+	}{{"peer", 30 * time.Second, true}, {"peer", 60 * time.Second, true}, {"peer", 61 * time.Second, false},
+		{"peer", 24 * time.Hour, false}, {"me", 24 * time.Hour, false}} {
+		hbs := map[string]time.Time{"me": now, "peer": now}
+		hbs[c.name] = now.Add(c.ahead)
+		r := Evaluate(Input{
+			Self:       "me",
+			Heartbeats: hbs,
+			Links:      []Link{{DeviceID: "PEER", Name: "peer", Connected: true}},
+			Now:        now,
+		})
+		x := row(t, r, c.name)
+		want := ExitOK
+		if !c.fresh {
+			want = ExitStale
+		}
+		if x.Stale == c.fresh || r.Exit != want {
+			t.Errorf("%s ahead %v: row %+v exit %d", c.name, c.ahead, x, r.Exit)
+		}
+		var b bytes.Buffer
+		r.Write(&b)
+		if !c.fresh && (!strings.Contains(b.String(), "clock ahead") || strings.Contains(b.String(), "status: ok")) {
+			t.Errorf("%s ahead %v: output\n%s", c.name, c.ahead, b.String())
+		}
+	}
+}
