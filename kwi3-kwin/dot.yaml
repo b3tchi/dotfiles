@@ -30,7 +30,14 @@
 # without the headers, and Arch's kwin package does not pull them in.
 #
 # Overrides: KWI3_SRC (the kwi3 clone), KWI3_DOTFILES (hotkeyd's source tree).
+#
+# kxkbrc: Dvorak for this box. x86_64 only, because a bare `rotz link` walks every
+# dot, and the phone (aarch64) runs its own KWin that reads ~/.config/kxkbrc too.
 linux:
+  {{#if (eq whoami.arch "x86_64")}}
+  links:
+    kxkbrc: ~/.config/kxkbrc
+  {{/if}}
   installs:
     depends:
       - kwi3
