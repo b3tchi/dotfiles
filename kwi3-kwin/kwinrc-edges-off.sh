@@ -35,6 +35,20 @@ off Effect-windowview \
 kwriteconfig6 --file kwinrc --group Windows --key ElectricBorderMaximize false
 kwriteconfig6 --file kwinrc --group Windows --key ElectricBorderTiling false
 
+# Same as kwi3's test rig (i3kwin/test/kwin-rig/session.sh): name every border
+# None, and do not load the effects that reserve borders at all. The border keys
+# above alone left the corners live. screenedge only draws the glow at a reserved
+# edge, so it has nothing to do here either.
+for _border in Top TopRight Right BottomRight Bottom BottomLeft Left TopLeft; do
+    kwriteconfig6 --file kwinrc --group ElectricBorders --key "$_border" None
+done
+for _effect in overview windowview desktopgrid screenedge; do
+    kwriteconfig6 --file kwinrc --group Plugins --key "${_effect}Enabled" false
+    # reconfigure keeps an already-loaded effect running, so unload it by hand.
+    gdbus call --session --dest org.kde.KWin --object-path /Effects \
+        --method org.kde.kwin.Effects.unloadEffect "$_effect" >/dev/null 2>&1 || true
+done
+
 # No session bus or no KWin (a deploy from a tty): the next KWin start reads it.
 gdbus call --session --dest org.kde.KWin --object-path /KWin \
     --method org.kde.KWin.reconfigure >/dev/null 2>&1 || true
