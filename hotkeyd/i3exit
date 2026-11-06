@@ -13,7 +13,37 @@
 # Every other verb (lock, suspend, reboot, ...) is WM-neutral and goes to the
 # system script unchanged.
 
-SYS=/usr/bin/i3exit
+# I3EXIT_SYS: test-i3exit.sh only, so a test can never reach the real script.
+SYS=${I3EXIT_SYS:-/usr/bin/i3exit}
+
+# kwi3-kwin-session has no system script to lean on: Arch ships no i3exit, and
+# i3kwin is a KWin script here, so there is no i3kwin-x11 to signal for logout.
+# Keyed on this session's socket so the phone's KWin (kwi3-phone) and every X11
+# session keep the paths below. Nothing can lock here (kwin_wayland runs with
+# --no-lockscreen and no locker is installed), so lock fails out loud: a key that
+# looks like it locked the screen and did not is worse than one that refuses.
+if [ "$WAYLAND_DISPLAY" = kwi3-kwin ]; then
+    case "$1" in
+        logout)
+            if [ -z "$XDG_SESSION_ID" ]; then
+                echo "i3exit: no XDG_SESSION_ID - not logging out" >&2
+                exit 1
+            fi
+            exec loginctl terminate-session "$XDG_SESSION_ID"
+            ;;
+        suspend | hibernate | reboot) exec systemctl "$1" ;;
+        shutdown) exec systemctl poweroff ;;
+        switch_user) exec dm-tool switch-to-greeter ;;
+        lock)
+            notify-send -u critical i3exit "No screen locker in this session - the screen is NOT locked"
+            exit 1
+            ;;
+        *)
+            echo "i3exit: unknown verb '$1'" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 if [ "$1" = logout ] && [ -n "$KWI3SOCK" ]; then
     for pid in $(pgrep -u "$(id -u)" -x i3kwin-x11); do
