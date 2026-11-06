@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=kwi3-kwin
+Comment=i3-style tiling as a KWin script on kwin_wayland
+Exec=kwi3-kwin-session
+TryExec=kwi3-kwin-session
+Type=Application
+DesktopNames=kwi3-kwin
+Keywords=tiling;wm;windowmanager;window;manager;wayland;

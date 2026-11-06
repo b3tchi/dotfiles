@@ -1,0 +1,101 @@
+# kwi3-kwin - i3kwin as a KWin script on kwin_wayland, as a lightdm session on
+# this box's own display, built from kwi3's kwin-host branch.
+# Usage: rotz install kwi3-kwin
+#
+# Opt-in: no meta lists this dot. It tracks an untagged branch, where the kwi3
+# dot builds releases only, and it pulls in KWin and a C++ toolchain.
+#
+# THREE STEPS, in this order, so the greeter never lists a session that cannot
+# start:
+#   1. packages: only asks sudo when one is missing (pacman -T).
+#   2. the kwin-host worktree of the kwi3 clone, at
+#      ~/.local/src/kwi3/.worktrees/kwin-host, then deploy-kwin-host.sh. A clean
+#      worktree is fast-forwarded. A dirty or diverged one is built as it stands,
+#      with a warning, so local work is never overwritten.
+#   3. kwi3-kwin-session -> /usr/local/bin and kwi3-kwin.desktop ->
+#      /usr/share/wayland-sessions, only when they differ. Copies, not links:
+#      see kwi3-lightdm/dot.yaml.
+#
+# NEVER sets the default session: kwi3-kwin is only listed in the greeter, unlike
+# kwi3-lightdm, which makes kwi3 the default once.
+#
+# Why deploy-kwin-host.sh and not kwi3's own `install.sh --local`: see its header.
+# In short, that cp would write through the ~/.local/bin symlinks the kwi3 dot
+# makes, and overwrite the X11 session's scripts.
+#
+# hotkeyd comes from dotfiles' origin/kwin-host until that branch merges, so this
+# step fetches it. The bar is still the checked-out quickshell config.
+#
+# vulkan-headers: KWinConfig.cmake runs find_dependency(Vulkan), which fails
+# without the headers, and Arch's kwin package does not pull them in.
+#
+# Overrides: KWI3_SRC (the kwi3 clone), KWI3_DOTFILES (hotkeyd's source tree).
+linux:
+  installs:
+    depends:
+      - kwi3
+      - quickshell
+    cmd: |
+      if ! command -v pacman >/dev/null 2>&1; then
+        echo "kwi3-kwin: pacman not found - this dot only knows Arch and Manjaro" >&2
+        exit 1
+      fi
+      MISSING=$(pacman -T kwin xorg-xwayland foot wofi cmake extra-cmake-modules ninja vulkan-headers go nodejs git)
+      if [ -n "$MISSING" ]; then
+        # shellcheck disable=SC2086
+        sudo pacman -S --needed --noconfirm $MISSING || {
+          echo "kwi3-kwin: could not install: $MISSING" >&2
+          exit 1
+        }
+      fi
+
+      SRC="${KWI3_SRC:-$HOME/.local/src/kwi3}"
+      WT="$SRC/.worktrees/kwin-host"
+      DOTFILES="${KWI3_DOTFILES:-$HOME/.dotfiles}"
+      if [ ! -d "$SRC/.git" ]; then
+        echo "kwi3-kwin: no kwi3 clone at $SRC - run 'rotz install kwi3' first" >&2
+        exit 1
+      fi
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" fetch --quiet origin \
+          '+refs/heads/kwin-host:refs/remotes/origin/kwin-host'; then
+        echo "kwi3-kwin: WARNING could not fetch kwi3 kwin-host - using the last fetched one" >&2
+      fi
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$DOTFILES" fetch --quiet origin \
+          '+refs/heads/kwin-host:refs/remotes/origin/kwin-host'; then
+        echo "kwi3-kwin: WARNING could not fetch dotfiles kwin-host - using the last fetched one" >&2
+      fi
+      if [ ! -e "$WT/.git" ]; then
+        if git -C "$SRC" rev-parse --verify --quiet refs/heads/kwin-host >/dev/null; then
+          git -C "$SRC" worktree add "$WT" kwin-host || exit 1
+        else
+          git -C "$SRC" worktree add --track -b kwin-host "$WT" origin/kwin-host || exit 1
+        fi
+      elif [ -n "$(git -C "$WT" status --porcelain)" ]; then
+        echo "kwi3-kwin: WARNING $WT has local changes - building it as it stands" >&2
+      elif ! git -C "$WT" merge --quiet --ff-only origin/kwin-host; then
+        echo "kwi3-kwin: WARNING $WT has diverged from origin/kwin-host - building it as it stands" >&2
+      fi
+
+      sh "$DOTFILES/kwi3-kwin/deploy-kwin-host.sh" "$WT" || {
+        echo "kwi3-kwin: deploy failed - session not installed or changed" >&2
+        exit 1
+      }
+
+      FAILED=0
+      put() {   # put SRC DST MODE
+        if [ -f "$2" ] && cmp -s "$1" "$2"; then
+          echo "kwi3-kwin: $2 unchanged"
+        elif sudo install -Dm "$3" "$1" "$2"; then
+          echo "kwi3-kwin: wrote $2"
+        else
+          echo "kwi3-kwin: FAILED to install $1 -> $2" >&2
+          FAILED=1
+        fi
+      }
+      # Session script first: a .desktop whose TryExec is missing is hidden anyway.
+      put "$DOTFILES/kwi3-kwin/kwi3-kwin-session" /usr/local/bin/kwi3-kwin-session 755
+      [ "$FAILED" = 1 ] || put "$DOTFILES/kwi3-kwin/kwi3-kwin.desktop" /usr/share/wayland-sessions/kwi3-kwin.desktop 644
+      if [ "$FAILED" = 1 ]; then
+        echo "kwi3-kwin: session NOT installed - re-run 'rotz install kwi3-kwin' once sudo works" >&2
+        exit 1
+      fi

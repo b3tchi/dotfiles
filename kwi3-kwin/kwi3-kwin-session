@@ -1,0 +1,123 @@
+#!/bin/sh
+# kwi3-kwin-session - display-manager entry point for kwi3's kwin-host branch:
+# i3kwin as a KWin script on kwin_wayland, on this box's own display.
+# kwi3-kwin.desktop names it in Exec=/TryExec=.
+#
+# Install (root): kwi3-kwin.desktop -> /usr/share/wayland-sessions/, this file
+# -> /usr/local/bin/. Copies, not symlinks: the greeter reads both as user
+# `lightdm` before login, and $HOME is mode 700.
+#
+# What it runs is deployed by deploy-kwin-host.sh, beside this file in dotfiles.
+# Helpers and hotkeyd sit in ~/.local/lib/kwi3-kwin/bin, ahead of ~/.local/bin on
+# PATH here only, so the X11 kwi3 session keeps its own release-pinned copies.
+#
+# Every positional argument is a program of its own to KWin, so the startup
+# child's mode travels in the environment, not as "$0 launch" (same as
+# kwi3-phone-session).
+#
+# foot opens at login, so a broken bar or hotkeyd still leaves a terminal.
+# To leave the session: loginctl terminate-session "$XDG_SESSION_ID"
+#
+# Testing from a running desktop, headless, without logging out:
+#   KWI3_KWIN_BACKEND=--virtual /usr/local/bin/kwi3-kwin-session
+# Any backend but --drm skips the user-manager environment and the notification
+# daemon: both are user-wide, and belong to the session already running.
+
+SOCKET=kwi3-kwin
+BACKEND=${KWI3_KWIN_BACKEND:---drm}
+RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}
+BIN=$HOME/.local/lib/kwi3-kwin/bin
+IMPORTED="WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP QT_QPA_PLATFORM MOZ_ENABLE_WAYLAND KWI3SOCK"
+
+# This session's KWin: the kwin_wayland whose command line names this socket.
+kwin_alive() {
+    for _p in $(pgrep -x kwin_wayland); do
+        tr '\0' ' ' <"/proc/$_p/cmdline" 2>/dev/null | grep -q -- "--socket $SOCKET" && return 0
+    done
+    return 1
+}
+
+# respawn LOGNAME CMD...: restart a daemon for as long as this KWin runs. Exit 3
+# is hotkeyd's "already running on this KWin".
+respawn() {
+    _log=$STATE/$1.log
+    shift
+    ( while kwin_alive; do
+          "$@" >>"$_log" 2>&1
+          [ "$?" = 3 ] && exit 0
+          sleep 2
+      done ) &
+}
+
+if [ -n "$KWI3_KWIN_LAUNCH" ]; then
+    # KWin's startup child. Xwayland's DISPLAY reaches foot and, through the
+    # user manager, whatever the Spawner starts with systemd-run --user.
+    unset KWI3_KWIN_LAUNCH
+    if [ "$BACKEND" = --drm ]; then
+        # shellcheck disable=SC2086
+        systemctl --user import-environment $IMPORTED
+    fi
+    foot &
+
+    # quickshell's scripts key their session on DISPLAY before WAYLAND_DISPLAY.
+    unset DISPLAY
+    respawn "$SOCKET-hotkeyd" hotkeyd --input kwin
+    if [ "$BACKEND" = --drm ] && [ -e "$HOME/.dotfiles/quickshell/notif/shell.qml" ]; then
+        respawn "$SOCKET-notif" quickshell -p "$HOME/.dotfiles/quickshell/notif"
+    fi
+    if [ -e "$HOME/.config/quickshell/shell.qml" ]; then
+        # QS_RDP=1: the main instance hosts the overlays itself.
+        QS_RDP=1 respawn "$SOCKET-bar" quickshell
+    fi
+    exit 0
+fi
+
+mkdir -p "$STATE"
+exec >"$STATE/$SOCKET.log" 2>&1
+
+command -v kwin_wayland >/dev/null 2>&1 || {
+    echo "kwi3-kwin-session: kwin_wayland not found - install the kwin package" >&2
+    exit 1
+}
+[ -x "$BIN/hotkeyd" ] || {
+    echo "kwi3-kwin-session: no $BIN/hotkeyd - run deploy-kwin-host.sh" >&2
+    exit 1
+}
+
+export PATH="$BIN:$HOME/.local/bin:$PATH"
+export QML_IMPORT_PATH="$HOME/.local/lib/kwi3/qml"
+export QT_PLUGIN_PATH="$HOME/.local/lib/qt6/plugins"
+export KWI3SOCK="$RT/kwi3-$SOCKET.rpc.sock"
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=KDE
+export QT_QPA_PLATFORM=wayland
+export MOZ_ENABLE_WAYLAND=1
+export KWI3_KWIN_BACKEND="$BACKEND"
+export KWI3_KWIN_LAUNCH=1
+unset WAYLAND_DISPLAY
+
+# Not exec, because two things must happen after KWin ends:
+#   - hotkeyd does not exit when its compositor dies, so this session's daemons
+#     are stopped here, picked by their $KWI3SOCK so the X11 session's are safe.
+#   - the user manager must not keep this session's WAYLAND_DISPLAY and DISPLAY,
+#     or an X11 session started later launches its apps at a dead display.
+cleanup() {
+    trap - EXIT INT TERM HUP
+    kill "$KWIN" 2>/dev/null
+    wait "$KWIN" 2>/dev/null
+    for _p in $(pgrep -u "$(id -u)" -x hotkeyd) $(pgrep -u "$(id -u)" -x quickshell); do
+        grep -qzx "KWI3SOCK=$KWI3SOCK" "/proc/$_p/environ" 2>/dev/null && kill "$_p"
+    done
+    if [ "$BACKEND" = --drm ]; then
+        # shellcheck disable=SC2086
+        systemctl --user unset-environment $IMPORTED
+    fi
+}
+trap 'cleanup; exit 143' INT TERM HUP
+kwin_wayland "$BACKEND" --xwayland --no-lockscreen --socket "$SOCKET" "$0" &
+KWIN=$!
+wait "$KWIN"
+rc=$?
+cleanup
+exit "$rc"
