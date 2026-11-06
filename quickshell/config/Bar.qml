@@ -1593,8 +1593,53 @@ PanelWindow {
     // second override-redirect popup): `rect` follows `ringScreenRect`,
     // which already picked the workspace tab or the mode segment above, so
     // this Window neither knows nor cares which one it is currently over.
+    //
+    // The hint above only means something on X11. On Wayland Qt ignores it and
+    // the Window becomes an ordinary xdg_toplevel, which KWin reports as a
+    // normalWindow, so i3kwin tiles it as half a screen of empty client - and
+    // a toplevel cannot place itself anyway. ringUsesLayerShell swaps in the
+    // layer-shell Loader below, only on this socket: kwi3-kwin-session's own.
+    // Not root.isPhone: kwi3-phone-session does not set QS_PHONE, so the phone
+    // would take this branch too, and its layout must stay as it is.
+    readonly property bool ringUsesLayerShell: Quickshell.env("WAYLAND_DISPLAY") === "kwi3-kwin"
+
     Loader {
-        active: Kwi3Grid.active
+        active: Kwi3Grid.active && root.ringUsesLayerShell
+        sourceComponent: Component {
+            PanelWindow {
+                readonly property var rect: root.ringScreenRect
+                readonly property int thickness: Kwi3Grid.frameThickness
+                readonly property var origin: (root.screen && root.screen.geometry) ? root.screen.geometry : ({ x: 0, y: 0 })
+
+                screen: root.screen
+                // Same condition as the X11 Window's own `visible` below.
+                visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                         && rect !== null && thickness > 0
+                anchors { top: true; left: true }
+                margins {
+                    left: rect ? rect.x - origin.x : 0
+                    top: rect ? rect.y - thickness - origin.y : 0
+                }
+                implicitWidth: rect ? Math.max(1, rect.w) : 1
+                implicitHeight: Math.max(1, thickness)
+                aboveWindows: true
+                // -1, not 0: at 0 the compositor measures these margins from
+                // the work area, which drops the ring 24px below the bar.
+                exclusiveZone: -1
+                focusable: false
+                color: "transparent"
+                mask: Region {}   // empty = fully click-through
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: root.ringColor
+                }
+            }
+        }
+    }
+
+    Loader {
+        active: Kwi3Grid.active && !root.ringUsesLayerShell
         sourceComponent: Component {
             Window {
                 id: wsFocusHighlight
