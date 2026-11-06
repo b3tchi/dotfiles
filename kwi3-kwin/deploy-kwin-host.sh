@@ -24,7 +24,8 @@
 # on its branch.
 #
 # Also applies kwinrc-settings.sh, which edits ~/.config/kwinrc and
-# ~/.config/kdeglobals. Both are backed up once, as <file>.pre-kwi3-kwin.
+# ~/.config/kdeglobals, and kwinrc-edges-off.sh, which edits ~/.config/kwinrc.
+# Both files are backed up once, as <file>.pre-kwi3-kwin.
 set -eu
 
 SRC=${1:-$HOME/.local/src/kwi3/.worktrees/kwin-host}
@@ -91,5 +92,6 @@ for f in kwinrc kdeglobals; do
     fi
 done
 sh "$SRC/i3kwin/phone/config/kwinrc-settings.sh"
+sh "$DOTFILES/kwi3-kwin/kwinrc-edges-off.sh"
 
 echo "==> done"
