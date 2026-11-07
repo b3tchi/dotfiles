@@ -211,7 +211,7 @@ wl=$(mktemp -d)
 cp "$(dirname "$0")/qs-screenshot.sh" "$wl/"
 printf '#!/bin/sh\necho "overlay $*"\nexit 0\n' >"$wl/qs-overlay.sh"
 chmod +x "$wl/qs-screenshot.sh" "$wl/qs-overlay.sh"
-got=$(env -u DISPLAY WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1)
+got=$(env -u DISPLAY WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1) || true
 if [ "$got" = "overlay region" ]; then
     ok "wayland: hands off to qs-overlay.sh region"
 else
