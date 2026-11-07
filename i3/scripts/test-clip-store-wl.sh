@@ -112,6 +112,19 @@ check "no display: exit 78" "$?" "78"
 env -u XDG_RUNTIME_DIR sh "$W" kwi3-test >/dev/null 2>&1
 check "no XDG_RUNTIME_DIR: exit 78, no persistent fallback" "$?" "78"
 
+# --- the watcher: wl-paste infers the type from a file on its stdout, and a
+# session starts this with stdout on a .log, so images never fired an event.
+cp "$T/bin/wl-paste" "$T/wl-paste.real"
+cat >"$T/bin/wl-paste" <<STUB
+#!/bin/sh
+readlink /proc/\$\$/fd/1 >"$WL_SEL/watch.stdout"
+echo "\$*" >"$WL_SEL/watch.args"
+STUB
+sh "$W" kwi3-test >>"$T/session.log" 2>&1
+check "watcher: stdout is not the session's log" "$(cat "$WL_SEL/watch.stdout")" "/dev/null"
+check "watcher: runs this script per event" "$(cat "$WL_SEL/watch.args")" "--watch sh $W --event kwi3-test"
+cp "$T/wl-paste.real" "$T/bin/wl-paste"
+
 # --- qs-clip.sh in a Wayland session
 qc() { WAYLAND_DISPLAY=kwi3-test sh "$QC" "$@"; }
 out=$(qc list); rc=$?
