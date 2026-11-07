@@ -217,7 +217,7 @@ if [ "$got" = "overlay region" ]; then
 else
     no "wayland: hands off to qs-overlay.sh region" "got '$got'"
 fi
-got=$(DISPLAY=:99 WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1)
+got=$(DISPLAY=:99 WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1) || true
 case "$got" in
     *"overlay region"*) no "wayland: DISPLAY set stays on the X11 path" "got '$got'" ;;
     *) ok "wayland: DISPLAY set stays on the X11 path" ;;
