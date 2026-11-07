@@ -162,10 +162,10 @@ let
 
   # Every minute: Kodi must answer (GetInfoLabels waits for the GUI thread),
   # and playback that isn't paused must move. Three misses in a row → restart.
-  # A video paused for 30 min puts the box to sleep, still paused: Kodi counts
+  # A video paused for 15 min puts the box to sleep, still paused: Kodi counts
   # paused as playing, so it never idle-suspends, and the hangs began after
   # hours paused (see Kodi issue 30259).
-  pauseLimit = 30 * 60;
+  pauseLimit = 15 * 60;
   watchdog = pkgs.writeShellScript "kodi-watchdog" ''
     set -u
     ${rpcLib}
