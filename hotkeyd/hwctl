@@ -1,6 +1,6 @@
 #!/bin/sh
 # hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
-# layer ($mod+c on kwi3: a letter steps up, held Alt steps down).
+# layer ($mod+c on kwi3: a letter steps up, held Alt or Shift steps down).
 # hwctl show : one line of KEY=VALUE pairs, for the bar's controls panel.
 #
 #   volume      default sink, 5 %, 0..100

@@ -1418,7 +1418,7 @@ PanelWindow {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
                       leftMargin: root.leftPad }
             mode: root.inNavMode ? root.navLayerSticky
-                : root.currentMode === "controls" && root.daemonMod === "reverse" ? "controls-reverse"
+                : root.currentMode === "controls" && (root.daemonMod === "reverse" || root.daemonMod === "reverse-shift") ? "controls-reverse"
                 : root.currentMode
             fontSize: root.fontSize
         }

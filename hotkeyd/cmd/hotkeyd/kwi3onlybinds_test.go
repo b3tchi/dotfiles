@@ -19,6 +19,7 @@ package main
 // session's grab set -- fails here without needing Xvfb or a real daemon.
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -218,4 +219,33 @@ func TestKwi3OnlyBinds_RestartRunsTheWrapper(t *testing.T) {
 		return
 	}
 	t.Fatal("Kwi3OnlyBinds has no $mod+Shift+c")
+}
+
+// Held Shift reverses every control, the same table as held Alt: the phone's
+// keyboard reaches Shift more easily, and $mod+c is entered with Alt down.
+func TestControlsShiftReversesLikeAlt(t *testing.T) {
+	mods := Layers["controls"].Mods
+	alt, ok := mods["reverse"]
+	if !ok || alt.Modifier != "Mod1" {
+		t.Fatalf("controls reverse = %+v, want Mod1", alt)
+	}
+	shift, ok := mods["reverse-shift"]
+	if !ok || shift.Modifier != "Shift" {
+		t.Fatalf("controls reverse-shift = %+v, want Shift", shift)
+	}
+	if !reflect.DeepEqual(shift.Binds, alt.Binds) {
+		t.Errorf("Shift binds differ from Alt's:\n%+v\n%+v", shift.Binds, alt.Binds)
+	}
+	var found bool
+	for _, b := range shift.Binds {
+		if b.Chord == "s" {
+			found = true
+			if want := runAction("$HOME/.local/bin/hwctl autosuspend -"); !reflect.DeepEqual(b.Actions, want) {
+				t.Errorf("Shift+s = %+v, want %+v", b.Actions, want)
+			}
+		}
+	}
+	if !found {
+		t.Error("no s in the Shift table")
+	}
 }

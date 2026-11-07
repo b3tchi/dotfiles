@@ -264,13 +264,14 @@ var Layers = map[string]bind.Layer{
 	},
 
 	// Phone controls (kwi3 only, entered by $mod+c): a letter steps one
-	// control up, held Alt steps it down, or flips a toggle (auto-rotate,
+	// control up, held Alt or Shift steps it down, or flips a toggle (auto-rotate,
 	// radios, GPS); persistent like nav, left with q / Escape / Return.
 	// hwctl does the work.
 	"controls": {
 		Binds: controlsBinds("+"),
 		Mods: map[string]bind.Mod{
-			"reverse": {Modifier: "Mod1", Binds: controlsBinds("-")},
+			"reverse":       {Modifier: "Mod1", Binds: controlsBinds("-")},
+			"reverse-shift": {Modifier: "Shift", Binds: controlsBinds("-")},
 		},
 		ExitKeys: []string{"q", "Escape", "Return"},
 	},
