@@ -326,21 +326,33 @@ cmd_active_window() {
 # process has one (native i3 and xrdp are both X11), else WAYLAND_DISPLAY
 # (sway). Empty when the process has neither.
 session_key_of() { # <pid>
-  # The readability test is NOT redundant with the `2>/dev/null` below: an
-  # unreadable /proc/<pid>/environ fails the SHELL's redirection, and the
-  # shell reports that on ITS stderr, which the redirection inside the
-  # substitution cannot suppress. Observed on this host as a bare
-  # "Permission denied" line surfacing out of a $mod+Shift+v press —
-  # a zombie quickshell (environ gone) and any instance belonging to another
-  # user both hit it. Both are non-candidates either way, so the only
-  # question is whether they scream on the way out.
-  [ -r "/proc/$1/environ" ] || return 1
-  _e="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)" || return 1
-  _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
-  [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
-  _v="$(printf '%s\n' "$_e" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
-  [ -n "$_v" ] && { printf 'WAYLAND_DISPLAY=%s\n' "$_v"; return 0; }
-  return 1
+  # Read it, rather than asking `[ -r ]` first: on busybox that says yes for a
+  # non-dumpable process (below), whose read is then refused. In braces so the
+  # outer 2>/dev/null also covers the SHELL's report of a failed redirection,
+  # which a `2>/dev/null` on tr itself cannot (a bare "Permission denied" out of
+  # a $mod+Shift+v press). A zombie or another user's instance lands below too,
+  # and `quickshell list` does not claim them.
+  if _e="$({ tr '\0' '\n' < "/proc/$1/environ"; } 2>/dev/null)"; then
+    _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
+    [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
+    _v="$(printf '%s\n' "$_e" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
+    [ -n "$_v" ] && { printf 'WAYLAND_DISPLAY=%s\n' "$_v"; return 0; }
+    return 1
+  fi
+  # A non-dumpable quickshell (one started under the phone screen's
+  # kwin_wayland, which hands its children an ambient capability) has an
+  # environ nobody can read, its own user included. quickshell itself still
+  # reports the display connection: "wayland/<name>" or "x11/<display>".
+  _v="$(quickshell list --all 2>/dev/null | awk -v pid="$1" '
+    /^Instance /                  { m = 0 }
+    $1 == "Process" && $3 == pid  { m = 1 }
+    m && /Display connection:/    { sub(/.*Display connection: /, ""); print; exit }
+  ')"
+  case "$_v" in
+    wayland/?*) printf 'WAYLAND_DISPLAY=%s\n' "${_v#wayland/}" ;;
+    ?*/?*)      printf 'DISPLAY=%s\n' "${_v#*/}" ;;
+    *)          return 1 ;;
+  esac
 }
 
 # "<pid> <session-key>" for every quickshell instance that answers `cliphistory`.

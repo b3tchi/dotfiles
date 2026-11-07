@@ -132,6 +132,36 @@ qc set ../x 2>/dev/null; check "set bad id: exit 1" "$?" "1"
 sh "$QC" list >/dev/null 2>&1; check "list with no display at all: exit 1" "$?" "1"
 out=$(DISPLAY=:77 WAYLAND_DISPLAY=kwi3-test sh "$QC" list); check "DISPLAY still wins when both are set" "$out" ""
 
+# --- toggle: a quickshell whose environ cannot be read, even by its own user.
+# Under the phone's kwin_wayland it is non-dumpable (an ambient capability), so
+# the read is refused, and on busybox `[ -r ]` says yes first. It must still be
+# found, through `quickshell list`, or $mod+v opens nothing.
+cat >"$T/nondump.py" <<'NONDUMP'
+import ctypes, time
+libc = ctypes.CDLL(None)
+libc.prctl(15, b"quickshell", 0, 0, 0)   # PR_SET_NAME, for pgrep -x
+libc.prctl(4, 0, 0, 0, 0)                # PR_SET_DUMPABLE
+time.sleep(20)
+NONDUMP
+env -u WAYLAND_DISPLAY python3 "$T/nondump.py" &
+qpid=$!
+sleep 0.3
+cat >"$T/bin/quickshell" <<STUB
+#!/bin/sh
+case " \$* " in
+*" list --all "*) printf 'Instance abc:\n  Process ID: $qpid\n  Display connection: wayland/kwi3-test\n' ;;
+*" show "*) echo "target cliphistory" ;;
+*" call "*) echo "\$*" >"$WL_SEL/toggled" ;;
+esac
+STUB
+chmod +x "$T/bin/quickshell"
+err=$(WAYLAND_DISPLAY=kwi3-test sh "$QC" toggle 2>&1); rc=$?
+check "toggle: unreadable environ still finds the instance" "$rc" "0"
+check "toggle: says nothing about it" "$err" ""
+check "toggle: calls that pid" "$(cat "$WL_SEL/toggled" 2>/dev/null)" "ipc --pid $qpid call cliphistory toggle"
+kill "$qpid" 2>/dev/null
+wait "$qpid" 2>/dev/null
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
