@@ -66,7 +66,7 @@ E=(env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_STATE_HOME="$TMP/state" XDG_RU
 cnu() { "${E[@]}" nu "$CLIPD_NU" "$@"; }
 
 apikey() { sed -n 's:.*<apikey>\(.*\)</apikey>.*:\1:p' "$HOMEDIR/config.xml"; }
-rest() { curl -s -H "X-API-Key: $(apikey)" "http://127.0.0.1:$GUI_PORT$1"; }
+rest() { local p="$1"; shift; curl -s -H "X-API-Key: $(apikey)" "$@" "http://127.0.0.1:$GUI_PORT$p"; }
 config_json() { rest /rest/config | jq -S 'del(.version)'; }
 
 start_syncthing() {
@@ -88,6 +88,13 @@ assert_eq ".stfolder marker created" yes "$([ -d "$FOLDER/.stfolder" ] && echo y
 assert_eq "dedicated home generated" yes "$([ -s "$HOMEDIR/config.xml" ] && echo yes || echo no)"
 assert_eq "its GUI on CLIPD_GUI_ADDRESS" "127.0.0.1:$GUI_PORT" \
   "$(sed -n '/<gui /,/<\/gui>/s:.*<address>\(.*\)</address>.*:\1:p' "$HOMEDIR/config.xml")"
+for opt in globalAnnounceEnabled localAnnounceEnabled relaysEnabled natEnabled startBrowser crashReportingEnabled; do
+  assert_eq "fresh home: $opt false before Syncthing ever runs" false \
+    "$(sed -n "s:.*<$opt>\(.*\)</$opt>.*:\1:p" "$HOMEDIR/config.xml")"
+done
+assert_eq "fresh home: listens only where told, before Syncthing ever runs" "$LISTEN" \
+  "$(sed -n 's:.*<listenAddress>\(.*\)</listenAddress>.*:\1:p' "$HOMEDIR/config.xml")"
+assert_eq "fresh home: usage reporting declined" -1 "$(sed -n 's:.*<urAccepted>\(.*\)</urAccepted>.*:\1:p' "$HOMEDIR/config.xml")"
 assert_eq "age identity created" yes "$([ -s "$TMP/cfg/identity.txt" ] && echo yes || echo no)"
 assert_eq "the user's HOME untouched" "" "$(ls -A "$TMP/home" | grep -v '^\.config$')"
 
@@ -134,6 +141,31 @@ for i in $(seq 1 40); do
 done
 assert_eq "folder idle again, no manual action" idle "$state"
 assert_eq "no folder errors" 0 "$(rest "/rest/folder/errors?folder=clipd" | jq '.errors // [] | length')"
+
+scenario "no IPv4 route: every other LAN-only option still applied"
+mkdir -p "$TMP/noroute"
+printf '#!/bin/sh\necho "RTNETLINK answers: Network is unreachable" >&2\nexit 2\n' > "$TMP/noroute/ip"
+chmod +x "$TMP/noroute/ip"
+rest /rest/config/options | jq '.relaysEnabled = true | .globalAnnounceEnabled = true | .natEnabled = true' \
+  | rest /rest/config/options -X PUT -H 'Content-Type: application/json' --data-binary @- >"$TMP/put.out"
+assert_eq "precondition: relays switched back on" true "$(rest /rest/config/options | jq -r .relaysEnabled)"
+code=0; "${E[@]}" CLIPD_LISTEN= PATH="$TMP/noroute:$TMP/bin:$PATH" nu "$CLIPD_NU" setup >"$TMP/noroute.out" 2>&1 || code=$?
+assert_eq "exit 78" 78 "$code"
+O="$(rest /rest/config/options)"
+assert_eq "relays off anyway" false "$(jq -r .relaysEnabled <<<"$O")"
+assert_eq "global discovery off anyway" false "$(jq -r .globalAnnounceEnabled <<<"$O")"
+assert_eq "NAT off anyway" false "$(jq -r .natEnabled <<<"$O")"
+assert_eq "listen address left as it was" "[\"$LISTEN\"]" "$(jq -c .listenAddresses <<<"$O")"
+assert_eq "says why" yes "$(grep -q 'no LAN address' "$TMP/noroute.out" && echo yes || echo no)"
+
+scenario "setup starts clipd's Syncthing unit itself"
+mkdir -p "$TMP/fakesysd"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$TMP/systemctl.log" > "$TMP/fakesysd/systemctl"
+chmod +x "$TMP/fakesysd/systemctl"
+: > "$TMP/systemctl.log"
+code=0; "${E[@]}" CLIPD_SYNCTHING_UNIT=clipd-test.service PATH="$TMP/fakesysd:$TMP/bin:$PATH" nu "$CLIPD_NU" setup >/dev/null 2>&1 || code=$?
+assert_eq "exit 0" 0 "$code"
+assert_eq "systemctl --user start <unit>" "--user start clipd-test.service" "$(cat "$TMP/systemctl.log")"
 
 # A second identity and device stand in for a peer.
 PEER_CFG="$TMP/peercfg"; mkdir -p "$PEER_CFG"
@@ -193,5 +225,23 @@ assert_eq "start without a display → exit 78" 78 "$code"
 kill "$START_PID" 2>/dev/null; wait "$START_PID" 2>/dev/null
 
 stop_syncthing
+
+scenario "two first setups at once (i3 starts :0 and :10 together)"
+bad=0
+for i in 1 2 3 4 5; do
+  R="$TMP/race$i"; mkdir -p "$R/state" "$R/run" "$R/cfg"; chmod 700 "$R/run"
+  RE=(env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_STATE_HOME="$R/state" XDG_RUNTIME_DIR="$R/run"
+      CLIPD_CONFIG_DIR="$R/cfg" CLIPD_GUI_ADDRESS="127.0.0.1:$GUI_PORT" CLIPD_LISTEN="$LISTEN"
+      CLIPD_SYNCTHING_UNIT= CLIPD_SETUP_WAIT=1 STNODEFAULTFOLDER=1)
+  "${RE[@]}" nu "$CLIPD_NU" setup >"$R/a.out" 2>&1 & pa=$!
+  "${RE[@]}" nu "$CLIPD_NU" setup >"$R/b.out" 2>&1 & pb=$!
+  wait "$pa"; ca=$?; wait "$pb"; cb=$?
+  # Syncthing is not running, so 4 is right for both; 78 means a lost race.
+  [ "$ca" = 4 ] && [ "$cb" = 4 ] || { bad=$((bad + 1)); echo "    run $i: exits $ca/$cb: $(cat "$R/a.out" "$R/b.out" | grep -v 'not answering' | head -2)"; }
+  syncthing device-id --home "$R/state/clipd/syncthing" >/dev/null 2>&1 || { bad=$((bad + 1)); echo "    run $i: unreadable cert"; }
+  [ -s "$R/cfg/identity.txt" ] || { bad=$((bad + 1)); echo "    run $i: no identity"; }
+done
+assert_eq "5 concurrent pairs: both exit 4, one valid identity and cert" 0 "$bad"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

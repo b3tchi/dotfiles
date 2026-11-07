@@ -12,14 +12,18 @@
 # settings sp039 needs (no discovery, relays or NAT) are per instance, and the
 # user's own Syncthing reaches a NAS through exactly those. clipd's instance
 # lives in ~/.local/state/clipd/syncthing, serves its GUI on 127.0.0.1:8385
-# and syncs on port 22100. The unit hardcodes that home: `clipd status` and
-# clipd.nu derive it from $XDG_STATE_HOME, so a non-default XDG_STATE_HOME
-# needs CLIPD_SYNCTHING_HOME set to match.
+# and syncs on port 22100. That home is fixed: the unit hardcodes
+# %h/.local/state, and clipd and clipd.nu derive it from $XDG_STATE_HOME, so
+# a non-default XDG_STATE_HOME is not supported.
 #
-# After install, on each host: `clipd.nu setup`, then exchange with every
-# peer its Syncthing device id (`syncthing device-id --home
-# ~/.local/state/clipd/syncthing`) and age recipient (printed by setup on
-# first run), and run `clipd.nu peer add <name> <device-id> <recipient>`.
+# The instance is LAN-only from its first start: clipd.nu writes the options
+# into config.xml when it generates the home, before the unit can run, and
+# listens on loopback until setup finds the LAN address.
+#
+# After install, on each host: `clipd.nu setup` (it starts the unit itself),
+# then exchange with every peer its Syncthing device id (`syncthing device-id
+# --home ~/.local/state/clipd/syncthing`) and age recipient (printed by setup
+# on first run), and run `clipd.nu peer add <name> <device-id> <recipient>`.
 #
 # The Go build is GUARDED, hotkeyd's pattern: built to a temp file beside the
 # target and renamed over it only on success, so a failed build never leaves a
