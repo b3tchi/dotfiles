@@ -4,8 +4,9 @@
 # hwctl show : one line of KEY=VALUE pairs, for the bar's controls panel.
 #
 #   volume      default sink, 5 %, 0..100
-#   brightness  every /sys/class/backlight device, 5 % of max, never off
-#               (needs the video group)
+#   brightness  every /sys/class/backlight device, to the next round 10 %, floor
+#               10 % so it is never off (needs the video group). Percent, not raw
+#               units: a step of max/10 truncates and drifts off the round numbers
 #   rotation    the first enabled KWin output, + clockwise, - counter
 #               (kscreen-doctor; $WAYLAND_DISPLAY must be the session's)
 #
@@ -24,6 +25,7 @@
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
+BACKLIGHT=${HWCTL_BACKLIGHT:-/sys/class/backlight}
 USAGE="usage: hwctl volume|brightness|rotation|autorotate|autosuspend|wifi|bluetooth|nfc|gps +|- | hwctl show"
 
 # rfkill TYPE -> on|off|-
@@ -46,13 +48,19 @@ suspend_delay() {
 	esac
 }
 
+# The device's current brightness in percent, to the nearest one.
+percent() { # <device dir>
+	_m=$(cat "$1/max_brightness")
+	echo $((($(cat "$1/brightness") * 100 + _m / 2) / _m))
+}
+
 control=$1 dir=$2
 if [ "$control" = show ]; then
 	vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]*%' | head -n 1)
 	bri=
-	for d in /sys/class/backlight/*; do
+	for d in "$BACKLIGHT"/*; do
 		[ -r "$d/brightness" ] || continue
-		bri="$(($(cat "$d/brightness") * 100 / $(cat "$d/max_brightness")))%"
+		bri="$(percent "$d")%"
 		break
 	done
 	rot=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0].rotation' 2>/dev/null)
@@ -84,14 +92,18 @@ volume)
 	pactl set-sink-volume @DEFAULT_SINK@ "$new%"
 	;;
 brightness)
-	for d in /sys/class/backlight/*; do
+	for d in "$BACKLIGHT"/*; do
 		[ -w "$d/brightness" ] || continue
 		max=$(cat "$d/max_brightness")
-		step=$((max / 20))
-		new=$(($(cat "$d/brightness") $dir step))
-		[ "$new" -gt "$max" ] && new=$max
-		[ "$new" -lt "$step" ] && new=$step
-		echo "$new" >"$d/brightness"
+		cur=$(percent "$d")
+		if [ "$dir" = + ]; then
+			new=$(((cur + 10) / 10 * 10))
+		else
+			new=$(((cur - 1) / 10 * 10))
+		fi
+		[ "$new" -gt 100 ] && new=100
+		[ "$new" -lt 10 ] && new=10
+		echo $(((new * max + 50) / 100)) >"$d/brightness"
 	done
 	;;
 rotation)

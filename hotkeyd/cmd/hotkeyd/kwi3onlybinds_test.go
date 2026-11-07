@@ -249,3 +249,17 @@ func TestControlsShiftReversesLikeAlt(t *testing.T) {
 		t.Error("no s in the Shift table")
 	}
 }
+
+// Holding the brightness key keeps stepping; every other control is one step
+// per press, since a held rotation or radio toggle would just flap.
+func TestControlsOnlyBrightnessRepeats(t *testing.T) {
+	l := Layers["controls"]
+	tables := map[string][]bind.Bind{"+": l.Binds, "alt": l.Mods["reverse"].Binds, "shift": l.Mods["reverse-shift"].Binds}
+	for name, binds := range tables {
+		for _, b := range binds {
+			if want := b.Chord == "b"; b.Repeat != want {
+				t.Errorf("%s table: %s Repeat = %v, want %v", name, b.Chord, b.Repeat, want)
+			}
+		}
+	}
+}

@@ -157,7 +157,8 @@ func navBinds(kind string) []bind.Bind {
 }
 
 // controlsBinds is the controls layer's table: one hwctl step per letter,
-// dir "+" or "-".
+// dir "+" or "-". Holding b keeps stepping brightness; everything else is one
+// step per press.
 func controlsBinds(dir string) []bind.Bind {
 	var out []bind.Bind
 	for _, c := range []struct{ key, control string }{
@@ -167,7 +168,11 @@ func controlsBinds(dir string) []bind.Bind {
 		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
 		{"n", "nfc"}, {"g", "gps"},
 	} {
-		out = append(out, bind.Bind{Chord: c.key, Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir)})
+		out = append(out, bind.Bind{
+			Chord:   c.key,
+			Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir),
+			Repeat:  c.control == "brightness",
+		})
 	}
 	return out
 }
