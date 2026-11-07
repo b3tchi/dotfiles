@@ -1,7 +1,6 @@
 // Command clipd is the cross-host clipboard agent ([[ft018]], sp039,
 // adr0039). This file is subcommand dispatch only; the work lives in
-// internal/. Task 2 adds keygen and recipients; agent, list, pick and
-// status arrive with Tasks 4-8.
+// internal/.
 //
 // Config lives in os.UserConfigDir()/clipd — ~/.config/clipd on Linux,
 // %APPDATA%\clipd on Windows — overridable with $CLIPD_CONFIG_DIR.
@@ -86,7 +85,8 @@ func exitFor(err error) int {
 	case err == nil:
 		return 0
 	case errors.Is(err, crypt.ErrPerms), errors.Is(err, crypt.ErrBadIdentity),
-		errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+		errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission),
+		errors.Is(err, errNoRuntimeDir):
 		return exitConfig
 	default:
 		return exitFail
@@ -217,7 +217,7 @@ func syncFolder() (string, error) {
 		base, env = os.Getenv("LOCALAPPDATA"), "LOCALAPPDATA"
 	}
 	if base == "" {
-		return "", fmt.Errorf("%s unset; set CLIPD_FOLDER", env)
+		return "", fmt.Errorf("%w: %s unset; set CLIPD_FOLDER", errNoRuntimeDir, env)
 	}
 	return filepath.Join(base, "clipd", "folder"), nil
 }

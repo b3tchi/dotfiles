@@ -398,11 +398,11 @@ XCOPIES=()
 
 CLI=(env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" CLIPD_CONFIG_DIR="$CFG" CLIPD_DEVICE=testhost CLIPD_DISPLAY=)
 
-peer_entry() { # <id> <mime> <age-s> <file>: entry from "peerhost", encrypted to us
-  python3 - "$2" "$3" "$4" <<'PYEOF' | age -r "$RECIPIENT" -o "$FOLDER/.$1.tmp"
+peer_entry() { # <id> <mime> <age-s> <file> [origin]: encrypted to us
+  python3 - "$2" "$3" "$4" "${5:-peerhost}" <<'PYEOF' | age -r "$RECIPIENT" -o "$FOLDER/.$1.tmp"
 import base64, json, sys, time
-mime, age, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-print(json.dumps({"v": 1, "origin": "peerhost", "created": int((time.time() - age) * 1000),
+mime, age, path, origin = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+print(json.dumps({"v": 1, "origin": origin, "created": int((time.time() - age) * 1000),
                   "ttl_s": 300, "mime": mime,
                   "data": base64.b64encode(open(path, "rb").read()).decode()}))
 PYEOF
@@ -421,11 +421,15 @@ printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x07\x00\x00\x00\x05rest'
 peer_entry "$ID_TEXT" "text/plain;charset=utf-8" 20 "$TMP/pick.txt"
 peer_entry "$ID_PNG" image/png 10 "$TMP/pick.png"
 peer_entry "$ID_OLD" "text/plain;charset=utf-8" 400 "$TMP/pick.txt"
+ID_FORGED=aaaaaaaaaaaaaaa4
+peer_entry "$ID_FORGED" "text/plain;charset=utf-8" 1 "$TMP/pick.txt" "$(printf 'evil\tinjected\nffffffffffffffff\tfake\t0\tforged row')"
 BASE="$(count)"
 
 scenario "clipd list"
 "${CLI[@]}" "$CLIPD" list >"$TMP/list.out" 2>"$TMP/list.err"
 assert_eq "exit 0" 0 "$?"
+assert_eq "forged origin: no injected row" 0 "$(grep -c 'forged row' "$TMP/list.out")"
+assert_eq "forged origin: entry not listed" 0 "$(grep -c "$ID_FORGED" "$TMP/list.out")"
 assert_eq "own entries omitted" 0 "$(grep -c testhost "$TMP/list.out")"
 assert_eq "expired entry omitted" 0 "$(grep -c "$ID_OLD" "$TMP/list.out")"
 assert_eq "newest first" "$ID_PNG $ID_TEXT" "$(cut -f1 "$TMP/list.out" | tr '\n' ' ' | sed 's/ $//')"
@@ -460,6 +464,8 @@ assert_eq "newest remote entry published" "$WANT" "$(read_sel clipboard image/pn
 scenario "clipd pick: refused picks change nothing"
 code=0; "${CLI[@]}" "$CLIPD" pick "$ID_OLD" "$DPY" >/dev/null 2>&1 || code=$?
 assert_eq "expired id → exit 1" 1 "$code"
+code=0; "${CLI[@]}" "$CLIPD" pick "$ID_FORGED" "$DPY" >/dev/null 2>&1 || code=$?
+assert_eq "forged-origin id → exit 1" 1 "$code"
 code=0; "${CLI[@]}" "$CLIPD" pick ffffffffffffffff "$DPY" >/dev/null 2>&1 || code=$?
 assert_eq "unknown id → exit 1" 1 "$code"
 code=0; env DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" CLIPD_CONFIG_DIR="$CFG" CLIPD_DEVICE=testhost CLIPD_DISPLAY= \

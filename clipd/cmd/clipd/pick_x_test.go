@@ -157,3 +157,36 @@ func TestPickPublishFailureIsExit2(t *testing.T) {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
 }
+
+// With no runtime dir nothing can be located: a config failure, which a
+// picker must not read as "that entry is gone".
+func TestPickRuntimeDirUnsetIs78(t *testing.T) {
+	cfg, id := winRig(t)
+	x := stubXclip(t, false)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	folder, state := os.Getenv("CLIPD_FOLDER"), os.Getenv("CLIPD_STATE_DIR")
+	for _, c := range []struct{ name, folder, state string }{
+		{"neither", "", ""},
+		{"no folder", "", state},
+		{"no state dir", folder, ""},
+	} {
+		t.Setenv("CLIPD_FOLDER", c.folder)
+		t.Setenv("CLIPD_STATE_DIR", c.state)
+		if code, _, _ := runCLI(t, cfg, "pick", id, ":93"); code != exitConfig {
+			t.Fatalf("%s: exit %d, want 78", c.name, code)
+		}
+	}
+	if calls := xclipCalls(x); calls != "" {
+		t.Fatalf("published anyway:\n%s", calls)
+	}
+}
+
+func TestListRuntimeDirUnsetIs78(t *testing.T) {
+	cfg, _ := winRig(t)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("CLIPD_FOLDER", "")
+	if code, _, _ := runCLI(t, cfg, "list"); code != exitConfig {
+		t.Fatalf("exit %d, want 78", code)
+	}
+}

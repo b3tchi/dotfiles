@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	errNoRuntimeDir = errors.New("no runtime dir: set CLIPD_STATE_DIR (LOCALAPPDATA / XDG_RUNTIME_DIR unset)")
+	errNoRuntimeDir = errors.New("no runtime dir")
 	idArg           = regexp.MustCompile(`^[0-9a-f]{16}$`)
 )
 
@@ -43,7 +43,7 @@ func runtimePath(env, leaf string) (string, error) {
 		base = os.Getenv("LOCALAPPDATA")
 	}
 	if base == "" {
-		return "", errNoRuntimeDir
+		return "", fmt.Errorf("%w: LOCALAPPDATA / XDG_RUNTIME_DIR unset; set %s", errNoRuntimeDir, env)
 	}
 	return filepath.Join(base, "clipd", leaf), nil
 }

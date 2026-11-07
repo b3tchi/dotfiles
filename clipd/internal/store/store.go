@@ -331,6 +331,12 @@ func (s *Store) read(name string) (entry.Entry, error) {
 	if e.Mime == entry.MimeHeartbeat {
 		return entry.Entry{}, errors.New("store: heartbeat under an entry name")
 	}
+	// The sealer picks its own origin (age has no sender auth, recipients are
+	// public) and `clipd list` prints it as a column: a tab or newline would
+	// forge rows. Skipped like any unreadable file, so sweep leaves it too.
+	if err := ValidOrigin(e.Origin); err != nil {
+		return entry.Entry{}, err
+	}
 	return e, nil
 }
 
