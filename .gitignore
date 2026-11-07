@@ -44,3 +44,6 @@ agent-monitor/agent-monitor
 # likelier the more the pipeline is used.
 .worktrees/
 .claude/worktrees/
+
+# bd CLI lock files
+*.gate.lock*

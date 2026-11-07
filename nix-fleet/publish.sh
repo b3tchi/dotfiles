@@ -17,7 +17,11 @@ NIX_IMAGE="${NIX_IMAGE:-nixos/nix:2.28.3}"   # used only when nix isn't installe
 SRC="$(cd "$(dirname "$0")" && pwd)"
 VER="v$(date +%Y%m%d-%H%M%S)"
 
-SSH=(ssh -i "$NAS_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -p "$NAS_PORT")
+# Check the NAS against the keys pinned in this repo, not ~/.ssh/known_hosts:
+# that file only knows the name it first connected under, so a new DNS name or
+# a new publisher PC failed with "Host key verification failed".
+SSH=(ssh -i "$NAS_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -p "$NAS_PORT"
+     -o HostKeyAlias=nas -o "UserKnownHostsFile=$SRC/nas_known_hosts" -o StrictHostKeyChecking=yes)
 
 # `flake lock` takes the flake positionally; `flake update` needs --flake.
 LOCK_CMD="lock"
@@ -38,10 +42,11 @@ hosts=("$@")
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
+failed=0
 for h in "${hosts[@]}"; do
   share="$NAS_BASE-$h"
   "${SSH[@]}" "$NAS" "test -d '$share' && test -w '$share'" \
-    || { echo "✗ $h: $share missing or not writable on NAS, skipping" >&2; continue; }
+    || { echo "✗ $h: can't reach the NAS, or $share is missing or not writable; skipping" >&2; failed=1; continue; }
   echo "→ $h ($VER)"
 
   # Only this host's folder + shared files: hosts can't see each other.
@@ -57,4 +62,5 @@ for h in "${hosts[@]}"; do
   "${SSH[@]}" "$NAS" "cd '$share' && ln -sfn '$VER' current.tmp && mv -fT current.tmp current && readlink current"
 done
 
+[ "$failed" -eq 0 ] || { echo "✗ Some hosts were not published" >&2; exit 1; }
 echo "Done. Hosts apply within ~10 min. Rollback: ssh to NAS, ln -sfn <older-ver> $NAS_BASE-<host>/current"
