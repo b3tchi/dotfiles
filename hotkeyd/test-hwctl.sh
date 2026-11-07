@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test-hwctl.sh - hwctl's flag-file toggles and what `hwctl show` reports for
-# them. The device tools it calls are stubbed away. Usage: hotkeyd/test-hwctl.sh
+# test-hwctl.sh - hwctl's auto-suspend stepper and what `hwctl show` reports for
+# it. The device tools it calls are stubbed away. Usage: hotkeyd/test-hwctl.sh
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 H="$here/hwctl"
@@ -20,20 +20,25 @@ for c in pactl kscreen-doctor jq rfkill systemctl; do
     chmod +x "$T/bin/$c"
 done
 export PATH="$T/bin:$PATH" XDG_CONFIG_HOME="$T/cfg"
-FLAG="$T/cfg/spacewar/no-autosuspend"
+CONF="$T/cfg/spacewar/autosuspend"
 field() { sh "$H" show | tr ' ' '\n' | sed -n "s/^$1=//p"; }
+step() { sh "$H" autosuspend "$1"; field autosuspend; }
 
-check "autosuspend is on by default" "$(field autosuspend)" "on"
-[ -e "$FLAG" ] && check "no flag by default" yes no || check "no flag by default" no no
-sh "$H" autosuspend +
-check "toggle: + turns it off" "$(field autosuspend)" "off"
-[ -e "$FLAG" ] && check "off: the flag exists" yes yes || check "off: the flag exists" no yes
-sh "$H" autosuspend -
-check "toggle: - flips it back on" "$(field autosuspend)" "on"
-[ -e "$FLAG" ] && check "on: the flag is gone" yes no || check "on: the flag is gone" no no
-sh "$H" autosuspend + 
-sh "$H" autosuspend +
-check "toggle: + flips too" "$(field autosuspend)" "on"
+check "no setting: shows the default" "$(field autosuspend)" "1min"
+[ -e "$CONF" ] && check "show writes nothing" yes no || check "show writes nothing" no no
+check "+ from the default" "$(step +)" "10min"
+check "the setting is stored" "$(cat "$CONF")" "10min"
+check "+ steps up" "$(step +)" "1hr"
+check "+ steps to off" "$(step +)" "off"
+check "+ wraps to the shortest" "$(step +)" "30s"
+check "+ from 30s" "$(step +)" "1min"
+check "- steps down" "$(step -)" "30s"
+check "- wraps to off" "$(step -)" "off"
+check "- from off" "$(step -)" "1hr"
+check "- again" "$(step -)" "10min"
+echo garbage >"$CONF"
+check "garbage setting: shows the default" "$(field autosuspend)" "1min"
+check "garbage setting: + steps from the default" "$(step +)" "10min"
 check "autorotate still reported" "$(field autorotate)" "off"
 sh "$H" nosuch + 2>/dev/null
 check "unknown control: exit 2" "$?" "2"

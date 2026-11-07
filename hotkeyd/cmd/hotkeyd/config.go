@@ -162,7 +162,8 @@ func controlsBinds(dir string) []bind.Bind {
 	var out []bind.Bind
 	for _, c := range []struct{ key, control string }{
 		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
-		// toggles: + and - both flip them
+		// s steps through the idle delays; the rest are toggles, which + and -
+		// both flip
 		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
 		{"n", "nfc"}, {"g", "gps"},
 	} {
