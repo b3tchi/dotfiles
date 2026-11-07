@@ -129,6 +129,7 @@ fi
 MISSING=""
 command -v node >/dev/null 2>&1 || MISSING="$MISSING nodejs"
 command -v go >/dev/null 2>&1 || MISSING="$MISSING go"
+command -v wl-paste >/dev/null 2>&1 || MISSING="$MISSING wl-clipboard"
 if [ -n "$MISSING" ]; then
   echo "kwi3: missing on this machine:$MISSING" >&2
   echo "kwi3: install them (doas apk add$MISSING) and re-run 'rotz install kwi3'." >&2

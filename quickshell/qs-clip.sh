@@ -103,13 +103,18 @@ case "$WIDTH" in '' | *[!0-9]*) die "QS_CLIP_PREVIEW must be a number, got '$WID
 # $XDG_RUNTIME_DIR/clip-store/<display> shape) so a consumer always looks
 # where the writer wrote. Unset $XDG_RUNTIME_DIR fails loudly (exit 78, the
 # family convention every store script shares) rather than falling back to
-# any persistent path. An unset $DISPLAY is a plain usage error (exit 1):
+# any persistent path. With no $DISPLAY the store is keyed on $WAYLAND_DISPLAY
+# (a KWin session, i3/scripts/clip-store-wl.sh). Neither is a usage error (exit 1):
 # `list`/`set` run inside a specific session's own quickshell process, which
 # always has one — there is nothing to derive here, unlike `toggle`.
 store_dir() {
   if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
     printf '%s: XDG_RUNTIME_DIR is unset; refusing to guess a store location\n' "$PROG" >&2
     return 78
+  fi
+  if [ -z "${DISPLAY:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    printf '%s/clip-store/%s\n' "$XDG_RUNTIME_DIR" "$WAYLAND_DISPLAY"
+    return 0
   fi
   if [ -z "${DISPLAY:-}" ]; then
     printf '%s: DISPLAY is unset; cannot locate this session'"'"'s clipboard store\n' "$PROG" >&2
@@ -232,6 +237,18 @@ cmd_set() {
   # the same "nothing was touched" promise clip-set.sh's own precondition
   # checks make for every other failure it can detect up front.
   [ -f "$_store/$1" ] || { printf '%s: no such entry: %s\n' "$PROG" "$1" >&2; exit 1; }
+
+  # A Wayland session: its own clipboard, through wl-copy. clip-set.sh is X only
+  # (xclip, a fan-out over every X display). Off stdout and stderr, because wl-copy
+  # stays behind as the clipboard's owner and the picker waits for those to close.
+  if [ -z "${DISPLAY:-}" ]; then
+    case "$1" in
+      *.img) _type=image/png ;;
+      *)     _type='text/plain;charset=utf-8' ;;
+    esac
+    wl-copy --type "$_type" <"$_store/$1" >/dev/null 2>&1 || exit 1
+    exit 0
+  fi
 
   [ -r "$CLIP_SET" ] || die "clip-set.sh not found at $CLIP_SET"
   # The SOURCE DISPLAY is passed explicitly as $2 (sp016 task 5, the egm.3
