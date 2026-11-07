@@ -532,3 +532,37 @@ func TestValidOrigin(t *testing.T) {
 		}
 	}
 }
+
+// A folder writer chooses the origin it seals: age has no sender auth, and
+// recipients are public. `clipd list` prints origin as a column, so a tab or
+// newline in it would forge rows the user then picks from.
+func TestListSkipsInvalidOrigin(t *testing.T) {
+	r, s := newRig(t)
+	for i, origin := range []string{"evil\tinjected\nffffffffffffffff\tfake\t0\tforged", "esc\x1b[2Jape", "-dash", " "} {
+		pt, err := entry.Encode(entry.Entry{Origin: origin, Created: time.Now().UnixMilli(), TTLs: 300, Mime: entry.MimeText, Data: []byte("x")}, entry.DefaultCap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ct, err := crypt.Encrypt(pt, s.Self, s.Peers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := fmt.Sprintf("%016x.age", i+1)
+		if err := os.WriteFile(filepath.Join(r.dir, name), ct, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Write(entry.Entry{Created: time.Now().UnixMilli(), TTLs: 300, Mime: entry.MimeText, Data: []byte("good")}); err != nil {
+		t.Fatal(err)
+	}
+	items, st, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || string(items[0].Entry.Data) != "good" {
+		t.Fatalf("items %+v", items)
+	}
+	if st.Skipped != 4 {
+		t.Fatalf("skipped %d, want 4", st.Skipped)
+	}
+}

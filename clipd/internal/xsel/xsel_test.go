@@ -1,8 +1,11 @@
 package xsel
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -176,5 +179,143 @@ func TestReadCancelledByCaller(t *testing.T) {
 	cancel2()
 	if out, err := (&X{Display: ":1", Runner: &recRunner{out: []byte("stale")}}).Read(ctx2, TargetUTF8, 10); out != nil || !errors.Is(err, ErrCanceled) {
 		t.Fatalf("after cancel: %q %v", out, err)
+	}
+}
+
+type runnerFunc func(args []string) ([]byte, error)
+
+func (f runnerFunc) Output(_ context.Context, _ []string, _ int, _ string, args ...string) ([]byte, error) {
+	return f(args)
+}
+
+type feed struct {
+	env   []string
+	name  string
+	args  []string
+	stdin []byte
+}
+
+type recFeeder struct {
+	feeds []feed
+	err   error
+}
+
+func (r *recFeeder) Feed(_ context.Context, env []string, stdin []byte, name string, args ...string) error {
+	r.feeds = append(r.feeds, feed{env, name, args, append([]byte(nil), stdin...)})
+	return r.err
+}
+
+func selectionOf(args []string) string {
+	for i, a := range args {
+		if a == "-selection" {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func TestPublishFeedsBothSelectionsOnStdin(t *testing.T) {
+	t.Setenv("DISPLAY", ":77")
+	payload := []byte("a\x00b\r\nžluť\n")
+	f := &recFeeder{}
+	x := &X{Display: ":93", Feeder: f, Runner: runnerFunc(func([]string) ([]byte, error) { return bytes.Clone(payload), nil })}
+	if err := x.Publish(context.Background(), TargetUTF8, payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.feeds) != 2 {
+		t.Fatalf("feeds %d, want 2", len(f.feeds))
+	}
+	for i, sel := range []string{"clipboard", "primary"} {
+		c := f.feeds[i]
+		want := []string{"-display", ":93", "-selection", sel, "-t", TargetUTF8, "-i"}
+		if c.name != "xclip" || !reflect.DeepEqual(c.args, want) {
+			t.Fatalf("feed %d: %s %v", i, c.name, c.args)
+		}
+		if string(c.stdin) != string(payload) {
+			t.Fatalf("feed %d stdin %q", i, c.stdin)
+		}
+		for _, kv := range c.env {
+			if kv == "DISPLAY=:77" {
+				t.Fatal("inherited DISPLAY reached xclip")
+			}
+		}
+	}
+}
+
+// xclip forks before it owns the selection: exit 0 is not yet a paste that
+// works, so Publish keeps reading until the display serves the bytes back.
+func TestPublishWaitsUntilServedBack(t *testing.T) {
+	reads := 0
+	x := &X{Display: ":93", Feeder: &recFeeder{}, SettlePoll: time.Millisecond,
+		Runner: runnerFunc(func([]string) ([]byte, error) {
+			reads++
+			if reads <= 3 {
+				return []byte("stale"), nil
+			}
+			return []byte("fresh"), nil
+		})}
+	if err := x.Publish(context.Background(), TargetUTF8, []byte("fresh")); err != nil {
+		t.Fatal(err)
+	}
+	if reads < 5 { // 3 stale + clipboard + primary
+		t.Fatalf("reads %d: returned before both selections served it", reads)
+	}
+}
+
+func TestPublishChecksPrimaryToo(t *testing.T) {
+	x := &X{Display: ":93", Feeder: &recFeeder{}, SettlePoll: time.Millisecond, PublishTimeout: 50 * time.Millisecond,
+		Runner: runnerFunc(func(args []string) ([]byte, error) {
+			if selectionOf(args) == "primary" {
+				return []byte("stale"), nil
+			}
+			return []byte("sekret"), nil
+		})}
+	err := x.Publish(context.Background(), TargetUTF8, []byte("sekret"))
+	if !errors.Is(err, ErrNotServed) {
+		t.Fatalf("err %v, want ErrNotServed", err)
+	}
+	if strings.Contains(err.Error(), "sekret") {
+		t.Fatalf("payload in error: %v", err)
+	}
+}
+
+func TestPublishFeedFailureStops(t *testing.T) {
+	f := &recFeeder{err: errors.New("exit status 1")}
+	x := &X{Display: ":93", Feeder: f, Runner: runnerFunc(func([]string) ([]byte, error) {
+		t.Error("read after a failed feed")
+		return nil, nil
+	})}
+	if err := x.Publish(context.Background(), TargetUTF8, []byte("sekret")); err == nil || strings.Contains(err.Error(), "sekret") {
+		t.Fatalf("err %v", err)
+	}
+	if len(f.feeds) != 1 {
+		t.Fatalf("feeds %d after CLIPBOARD failed", len(f.feeds))
+	}
+}
+
+// A real xclip backgrounds itself and keeps serving. Feed must return when
+// the parent exits, not when the daemon does, and must deliver stdin.
+func TestFeedReturnsWhileDaemonLives(t *testing.T) {
+	dir := t.TempDir()
+	got := filepath.Join(dir, "got")
+	script := "cat >" + got + "; sleep 30 & echo noise; exit 0"
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := (ExecRunner{}).Feed(ctx, os.Environ(), []byte("in\x00put"), "sh", "-c", script); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("Feed waited %v for the backgrounded child", d)
+	}
+	b, err := os.ReadFile(got)
+	if err != nil || string(b) != "in\x00put" {
+		t.Fatalf("stdin %q %v", b, err)
+	}
+}
+
+func TestFeedFailureIsAnError(t *testing.T) {
+	if err := (ExecRunner{}).Feed(context.Background(), os.Environ(), nil, "sh", "-c", "exit 3"); err == nil {
+		t.Fatal("want error")
 	}
 }

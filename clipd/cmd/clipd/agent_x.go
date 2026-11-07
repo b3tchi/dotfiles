@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -34,20 +35,29 @@ import (
 
 var displayRe = regexp.MustCompile(`^[A-Za-z0-9._-]*:[0-9]+(\.[0-9]+)?$`)
 
-func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
-	if len(args) > 1 {
-		return bad()
-	}
+// namedDisplay resolves the display from an optional argument or
+// $CLIPD_DISPLAY, never from the inherited $DISPLAY.
+func namedDisplay(args []string) (string, error) {
 	dpy := os.Getenv("CLIPD_DISPLAY")
 	if len(args) == 1 {
 		dpy = args[0]
 	}
 	if dpy == "" {
-		fmt.Fprintln(errOut, "clipd: agent x: display required (argument or CLIPD_DISPLAY); inherited $DISPLAY is never used")
-		return exitConfig
+		return "", errors.New("display required (argument or CLIPD_DISPLAY); inherited $DISPLAY is never used")
 	}
 	if !displayRe.MatchString(dpy) {
-		fmt.Fprintf(errOut, "clipd: agent x: %q is not an X display name\n", dpy)
+		return "", fmt.Errorf("%q is not an X display name", dpy)
+	}
+	return dpy, nil
+}
+
+func agentX(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
+	if len(args) > 1 {
+		return bad()
+	}
+	dpy, err := namedDisplay(args)
+	if err != nil {
+		fmt.Fprintln(errOut, "clipd: agent x:", err)
 		return exitConfig
 	}
 	origin := deviceName()

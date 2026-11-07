@@ -1,7 +1,6 @@
 // Command clipd is the cross-host clipboard agent ([[ft018]], sp039,
 // adr0039). This file is subcommand dispatch only; the work lives in
-// internal/. Task 2 adds keygen and recipients; agent, list, pick and
-// status arrive with Tasks 4-8.
+// internal/.
 //
 // Config lives in os.UserConfigDir()/clipd — ~/.config/clipd on Linux,
 // %APPDATA%\clipd on Windows — overridable with $CLIPD_CONFIG_DIR.
@@ -46,7 +45,9 @@ const usage = `usage:
   clipd agent windows           watch the Windows clipboard, write entries
   clipd agent x <display>       watch that X display's CLIPBOARD
   clipd list                    live remote entries: id, origin, age-s, preview
-  clipd pick <id>|--latest      put an entry on the native clipboard`
+  clipd pick <id>|--latest [display]
+                                put an entry on the native clipboard
+                                (X: display, or CLIPD_DISPLAY, is required)`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -84,7 +85,8 @@ func exitFor(err error) int {
 	case err == nil:
 		return 0
 	case errors.Is(err, crypt.ErrPerms), errors.Is(err, crypt.ErrBadIdentity),
-		errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+		errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission),
+		errors.Is(err, errNoRuntimeDir):
 		return exitConfig
 	default:
 		return exitFail
@@ -215,7 +217,7 @@ func syncFolder() (string, error) {
 		base, env = os.Getenv("LOCALAPPDATA"), "LOCALAPPDATA"
 	}
 	if base == "" {
-		return "", fmt.Errorf("%s unset; set CLIPD_FOLDER", env)
+		return "", fmt.Errorf("%w: %s unset; set CLIPD_FOLDER", errNoRuntimeDir, env)
 	}
 	return filepath.Join(base, "clipd", "folder"), nil
 }
