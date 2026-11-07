@@ -162,6 +162,11 @@ let
 
   # Every minute: Kodi must answer (GetInfoLabels waits for the GUI thread),
   # and playback that isn't paused must move. Three misses in a row → restart.
+  # A video paused for 30 min is stopped: Kodi counts paused as playing, so it
+  # never idle-suspends, and the hangs began after hours paused (see Kodi
+  # issue 30259). Stopping keeps the resume point; Kodi then sleeps after its
+  # usual 30 idle minutes in the menu.
+  pauseLimit = 30 * 60;
   watchdog = pkgs.writeShellScript "kodi-watchdog" ''
     set -u
     ${rpcLib}
@@ -174,8 +179,19 @@ let
       speed=''${p%% *}; pos=''${p#* }
       [ "$speed" != 0 ] && [ "$pos" = "$(cat $st/pos 2>/dev/null)" ] && ok=0
       echo "$pos" > $st/pos
+      if [ "$speed" = 0 ]; then
+        [ -s $st/paused ] || date +%s > $st/paused
+        if [ $(( $(date +%s) - $(cat $st/paused) )) -ge ${toString pauseLimit} ]; then
+          echo "paused for ${toString (pauseLimit / 60)} min: stopping playback (resume point kept)"
+          rpc '{"jsonrpc":"2.0","id":1,"method":"Player.Stop","params":{"playerid":1}}' >/dev/null \
+            || echo "Player.Stop got no answer"
+          rm -f $st/paused $st/pos
+        fi
+      else
+        rm -f $st/paused
+      fi
     else
-      rm -f $st/pos
+      rm -f $st/pos $st/paused
     fi
     if [ $ok = 1 ]; then echo 0 > $st/fails; exit 0; fi
     fails=$((fails + 1)); echo $fails > $st/fails
