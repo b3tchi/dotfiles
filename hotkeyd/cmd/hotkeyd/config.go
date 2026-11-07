@@ -163,7 +163,7 @@ func controlsBinds(dir string) []bind.Bind {
 	for _, c := range []struct{ key, control string }{
 		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
 		// toggles: + and - both flip them
-		{"a", "autorotate"}, {"w", "wifi"}, {"t", "bluetooth"},
+		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
 		{"n", "nfc"}, {"g", "gps"},
 	} {
 		out = append(out, bind.Bind{Chord: c.key, Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir)})

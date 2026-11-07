@@ -599,6 +599,14 @@
         },
         {
           "actions": [
+            "run:$HOME/.local/bin/hwctl autosuspend +"
+          ],
+          "chord": "s",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
             "run:$HOME/.local/bin/hwctl wifi +"
           ],
           "chord": "w",
@@ -668,6 +676,14 @@
                 "run:$HOME/.local/bin/hwctl autorotate -"
               ],
               "chord": "a",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl autosuspend -"
+              ],
+              "chord": "s",
               "device": "",
               "on_release": false
             },

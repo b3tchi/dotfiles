@@ -28,6 +28,7 @@ Singleton {
         {text: "brightness", key: "b", value: controlValues.brightness || ""},
         {text: "rotation", key: "r", value: controlValues.rotation || ""},
         {text: "auto-rotate", key: "a", value: controlValues.autorotate || ""},
+        {text: "auto-suspend", key: "s", value: controlValues.autosuspend || ""},
         {text: "wifi", key: "w", value: controlValues.wifi || ""},
         {text: "bluetooth", key: "t", value: controlValues.bluetooth || ""},
         {text: "nfc", key: "n", value: controlValues.nfc || ""},

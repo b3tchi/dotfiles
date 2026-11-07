@@ -209,7 +209,7 @@ ShellRoot {
 
     // ---- controls: each word carries its live value; pill says + / - ----
     ModeBarTheme.controlValues = {volume: "50%", brightness: "40%", rotation: "right",
-                                  autorotate: "off", wifi: "on", bluetooth: "off", nfc: "on", gps: "in-use"}
+                                  autorotate: "off", autosuspend: "on", wifi: "on", bluetooth: "off", nfc: "on", gps: "in-use"}
     emit("controls-rows", j(ModeBarTheme.controlRows))
     emit("hints-controls", j(ModeBarTheme.hintsFor("controls")))
     emit("hints-controls-reverse", j(ModeBarTheme.hintsFor("controls-reverse")))
@@ -325,7 +325,7 @@ assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
 
 scenario "controls — panel rows carry live values, strip keeps + / - pill"
 assert_case "controls-rows" \
-  '[{"text":"volume","key":"v","value":"50%"},{"text":"brightness","key":"b","value":"40%"},{"text":"rotation","key":"r","value":"right"},{"text":"auto-rotate","key":"a","value":"off"},{"text":"wifi","key":"w","value":"on"},{"text":"bluetooth","key":"t","value":"off"},{"text":"nfc","key":"n","value":"on"},{"text":"gps","key":"g","value":"in-use"}]'
+  '[{"text":"volume","key":"v","value":"50%"},{"text":"brightness","key":"b","value":"40%"},{"text":"rotation","key":"r","value":"right"},{"text":"auto-rotate","key":"a","value":"off"},{"text":"auto-suspend","key":"s","value":"on"},{"text":"wifi","key":"w","value":"on"},{"text":"bluetooth","key":"t","value":"off"},{"text":"nfc","key":"n","value":"on"},{"text":"gps","key":"g","value":"in-use"}]'
 assert_case "hints-controls" \
   '[{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
 assert_case "hints-controls-reverse" \

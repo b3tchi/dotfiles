@@ -12,6 +12,9 @@
 # Toggles (+ and - both flip them):
 #   autorotate  ~/.config/spacewar/autorotate, which the phone's
 #               spacewar-autorotate watches (nothing-pmos controls/)
+#   autosuspend ~/.config/spacewar/no-autosuspend, which the phone's
+#               spacewar-idle-suspend checks (nothing-pmos suspend/): on unless
+#               that file exists
 #   wifi, bluetooth, nfc
 #               rfkill soft block (the seat's /dev/rfkill ACL)
 #   gps         qmi-gnss.socket, geoclue's NMEA source (a polkit rule in
@@ -19,7 +22,8 @@
 #               client holds a GNSS session
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
-USAGE="usage: hwctl volume|brightness|rotation|autorotate|wifi|bluetooth|nfc|gps +|- | hwctl show"
+NOSUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/no-autosuspend
+USAGE="usage: hwctl volume|brightness|rotation|autorotate|autosuspend|wifi|bluetooth|nfc|gps +|- | hwctl show"
 
 # rfkill TYPE -> on|off|-
 radio() {
@@ -42,12 +46,13 @@ if [ "$control" = show ]; then
 	rot=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0].rotation' 2>/dev/null)
 	case "$rot" in 1) rot=normal ;; 2) rot=left ;; 4) rot=inverted ;; 8) rot=right ;; *) rot=- ;; esac
 	if [ -e "$AUTOROTATE" ]; then auto=on; else auto=off; fi
+	if [ -e "$NOSUSPEND" ]; then susp=off; else susp=on; fi
 	gps=off
 	if systemctl is-active -q qmi-gnss.socket 2>/dev/null; then
 		gps=on
 		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
 	fi
-	echo "volume=${vol:--} brightness=${bri:--} rotation=$rot autorotate=$auto" \
+	echo "volume=${vol:--} brightness=${bri:--} rotation=$rot autorotate=$auto autosuspend=$susp" \
 		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps"
 	exit 0
 fi
@@ -94,6 +99,13 @@ autorotate)
 		rm -f "$AUTOROTATE"
 	else
 		mkdir -p "${AUTOROTATE%/*}" && : >"$AUTOROTATE"
+	fi
+	;;
+autosuspend)
+	if [ -e "$NOSUSPEND" ]; then
+		rm -f "$NOSUSPEND"
+	else
+		mkdir -p "${NOSUSPEND%/*}" && : >"$NOSUSPEND"
 	fi
 	;;
 wifi) rfkill toggle wlan ;;
