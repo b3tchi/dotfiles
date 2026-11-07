@@ -5,6 +5,7 @@
 # usage: qs-clip.sh [toggle]      open/close the picker on the active session
 #        qs-clip.sh list          print the history as "<id>\t<preview>" lines
 #        qs-clip.sh set <id>      put store entry <id> on the clipboard
+#                                 (an r:<id> is a remote entry, through clipd)
 #        qs-clip.sh active-window print the title of the session's active window
 #
 # The picker itself is quickshell/config/ClipHistory.qml, hosted inside the
@@ -69,6 +70,12 @@
 # whose last reader was seconds ago, pruned by a cap enforcement in between)
 # — but does not otherwise duplicate clip-set.sh's job.
 #
+# REMOTE ENTRIES (sp039 task 6, [[ft018]]): `list` also offers what `clipd list`
+# reports from other hosts as "r:<16-hex-id>\t⇄ <origin>: <preview>", after the
+# local rows; `set r:<id>` hands that id to `clipd pick`. clipd stays optional:
+# absent, failing or slow (2 s) it costs the picker its remote rows and nothing
+# else. See list_remote and cmd_set_remote.
+#
 # Test: quickshell/test-clip-history.sh (headless; file-store fixtures need
 # no X server for `list`/`set` — only the `toggle` session-derivation
 # regression scenarios still use Xvfb + a running quickshell instance).
@@ -88,6 +95,7 @@ ENTRY_RE='^[0-9]{6}\.(clip|img)$'
 # production leaves all three unset.  (QS_CLIP_IPC_TIMEOUT, defined with
 # candidates() below, bounds each instance probe — see dotfiles-03ym.)
 CLIP_SET="${QS_CLIP_SET:-$SELF_DIR/../i3/scripts/clip-set.sh}"
+CLIPD="${QS_CLIP_CLIPD:-clipd}"
 CAP="${QS_CLIP_CAP:-200}"             # most entries the picker will ever show
 WIDTH="${QS_CLIP_PREVIEW:-120}"       # preview characters before truncation
 
@@ -159,6 +167,12 @@ store_dir() {
 # Absent/empty store dir: no output, exit 0 — a fresh session with nothing
 # captured yet is not an error.
 cmd_list() {
+  list_local
+  list_remote
+  return 0
+}
+
+list_local() {
   _store="$(store_dir)"; _rc=$?
   [ "$_rc" -eq 0 ] || exit "$_rc"
 
@@ -182,6 +196,24 @@ cmd_list() {
     _n=$((_n + 1))
   done
   return 0
+}
+
+# clipd's rows for other hosts' live entries, in clipd's own newest-first order.
+# QS_CLIP_CAP does not apply: it bounds the local history.
+#
+# Captured whole before printing, so a clipd that fails part-way contributes
+# nothing rather than a truncated list. Rows that do not match clipd's format
+# are dropped; clipd has already escaped its previews onto one line.
+#
+# X only: `clipd pick` publishes through xclip, so on a Wayland session a remote
+# row could be listed but never picked.
+list_remote() {
+  [ -n "${DISPLAY:-}" ] || return 0
+  command -v "$CLIPD" >/dev/null 2>&1 || return 0
+  _rows="$(timeout 2 "$CLIPD" list 2>/dev/null)" || return 0
+  printf '%s\n' "$_rows" | gawk -F '\t' '
+    NF >= 4 && $1 ~ /^[0-9a-f]{16}$/ { printf "r:%s\t⇄ %s: %s\n", $1, $2, $4 }
+  '
 }
 
 # The first non-blank line of <file>, tabs/control-whitespace folded to a
@@ -217,6 +249,8 @@ preview_of() { # <path>
 # (lossy, truncated) preview.
 cmd_set() {
   [ $# -eq 1 ] || die "usage: $PROG set <id>"
+
+  case "$1" in r:*) cmd_set_remote "${1#r:}" ;; esac
 
   # Shape check only — six digits + the literal extension. This is NOT
   # parsing the id for meaning (no arithmetic, no stripped leading zeros); it
@@ -263,6 +297,29 @@ cmd_set() {
   # Bare display (strip any `:0.0` screen suffix) so clip-set.sh reads the
   # same per-display store store_dir() just checked — see the note there.
   exec sh "$CLIP_SET" "$1" "${DISPLAY%.*}"
+}
+
+# A remote entry: exec, so clipd's exit code IS this script's, the same 0/1/2
+# split as clip-set.sh's plus 78 for an unusable config. The shape check keeps
+# anything but an id out of clipd's argv; the character list is spelled out
+# because a range's meaning depends on the locale.
+#
+# Strips only a trailing screen number. Here the display is a connection string
+# for clipd, so the `${DISPLAY%.*}` idiom would maul `example.com:0`.
+cmd_set_remote() { # <16-hex-id>
+  case "$1" in
+    *[!0123456789abcdef]* | '') die "invalid id: 'r:$1'" ;;
+  esac
+  [ "${#1}" -eq 16 ] || die "invalid id: 'r:$1'"
+  if [ -z "${DISPLAY:-}" ]; then
+    printf '%s: remote entries need an X display\n' "$PROG" >&2
+    exit 78
+  fi
+  command -v "$CLIPD" >/dev/null 2>&1 || die "clipd not found"
+  case "$DISPLAY" in
+    *:*.*) exec "$CLIPD" pick "$1" "${DISPLAY%.*}" ;;
+    *)     exec "$CLIPD" pick "$1" "$DISPLAY" ;;
+  esac
 }
 
 # ---------------------------------------------------------- active-window ---

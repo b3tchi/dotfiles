@@ -401,6 +401,163 @@ rc="$(env -u DISPLAY XDG_RUNTIME_DIR="$RUN" sh "$QS_CLIP" list >/dev/null 2>&1; 
 assert_eq "exits 1, not 78" "1" "$rc"
 
 # ============================================================================
+# PHASE 0.5 — remote entries from clipd (sp039 task 6, ft007 widening)
+# ============================================================================
+#
+# `clipd` here is a stub that records argv and switches behaviour off a control
+# file, the same discipline as the clip-set.sh stub above. The ids and previews
+# it emits are fixtures; clipd's own list/pick are covered by
+# clipd/test-clipd-x.sh.
+
+CLIPD_STUB="$TMP/bin/clipd-stub"
+CLIPD_MODE="$TMP/clipd.mode"
+CLIPD_LOG="$TMP/clipd.argv"
+RID1=0123456789abcdef
+RID2=fedcba9876543210
+cat > "$CLIPD_STUB" <<STUBEOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$CLIPD_LOG"
+mode="\$(cat "$CLIPD_MODE" 2>/dev/null)"
+case "\$1" in
+  list)
+    case "\$mode" in
+      rows)    printf '$RID1\tpeer-a\t5\thello remote\n$RID2\tpeer-b\t90\t[image 3x2]\n' ;;
+      partial) printf '$RID1\tpeer-a\t5\tcut off\n'; exit 1 ;;
+      hang)    printf '$RID1\tpeer-a\t5\tlate\n'; sleep 30 ;;
+      noisy)   echo "clipd: leaked to stderr" >&2 ;;
+      garbage) printf 'not-an-id\tpeer\t1\tbad id\n$RID1\tonly-two-fields\nABCDEF0123456789\tpeer\t1\tupper\n$RID2\tpeer-b\t90\tgood\n' ;;
+    esac ;;
+  pick)
+    case "\$mode" in
+      pick1)  exit 1 ;;
+      pick2)  exit 2 ;;
+      pick78) exit 78 ;;
+    esac ;;
+esac
+exit 0
+STUBEOF
+chmod +x "$CLIPD_STUB"
+clipd_mode()  { printf '%s' "$1" > "$CLIPD_MODE"; : > "$CLIPD_LOG"; }
+clipd_calls() { tr '\n' '|' < "$CLIPD_LOG" | sed 's/|$//'; }
+rclip() { env DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" QS_CLIP_SET="$STUB" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" "$@"; }
+TAB="$(printf '\t')"
+
+scenario "remote: rows follow the local rows, r:-prefixed, clipd's order kept"
+reset_store; write_entry 1 "alpha"; write_entry 2 "bravo"
+clipd_mode rows
+out="$(rclip list)"; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "local rows first, then remote" \
+  "000002.clip${TAB}bravo|000001.clip${TAB}alpha|r:$RID1${TAB}⇄ peer-a: hello remote|r:$RID2${TAB}⇄ peer-b: [image 3x2]" \
+  "$(printf '%s\n' "$out" | tr '\n' '|' | sed 's/|$//')"
+assert_eq "clipd asked once, for list" "list" "$(clipd_calls)"
+assert_eq "two calls over unchanged state are identical" "$out" "$(rclip list)"
+
+scenario "remote: rows are offered with no local store at all"
+reset_store
+clipd_mode rows
+assert_eq "both remote rows listed" 2 "$(rclip list | grep -c '^r:')"
+
+scenario "remote: QS_CLIP_CAP bounds local rows only"
+reset_store; write_entry 1 "a"; write_entry 2 "b"; write_entry 3 "c"
+clipd_mode rows
+out="$(env QS_CLIP_CAP=1 DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" list)"
+assert_eq "one local row" 1 "$(printf '%s\n' "$out" | grep -c '^0')"
+assert_eq "remote rows still offered" 2 "$(printf '%s\n' "$out" | grep -c '^r:')"
+
+scenario "remote: clipd absent → local rows, exit 0"
+reset_store; write_entry 1 "alpha"
+out="$(env DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$TMP/no-such-clipd" sh "$QS_CLIP" list 2>"$TMP/err")"; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "local row only" "000001.clip${TAB}alpha" "$out"
+assert_eq "nothing on stderr" "" "$(cat "$TMP/err")"
+
+scenario "remote: clipd failing part-way → none of its rows, exit 0"
+clipd_mode partial
+out="$(rclip list)"; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "local row only" "000001.clip${TAB}alpha" "$out"
+
+scenario "remote: clipd stderr does not reach the picker"
+clipd_mode noisy
+assert_eq "nothing on stderr" "" "$(rclip list 2>&1 >/dev/null)"
+
+scenario "remote: a hung clipd is bounded at 2 s"
+clipd_mode hang
+t0=$(date +%s%N)
+out="$(rclip list)"; rc=$?
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+assert_eq "exit 0" 0 "$rc"
+assert_eq "local row only" "000001.clip${TAB}alpha" "$out"
+if [ "$ms" -lt 3000 ]; then pass "returned in $ms ms (< 3000)"; else fail "bounded" "< 3000 ms" "$ms ms"; fi
+
+scenario "remote: malformed clipd rows are dropped"
+reset_store
+clipd_mode garbage
+assert_eq "only the well-formed row survives" "r:$RID2${TAB}⇄ peer-b: good" "$(rclip list)"
+
+scenario "remote: a Wayland session offers no remote rows (pick is X only)"
+reset_store
+clipd_mode rows
+out="$(env -u DISPLAY WAYLAND_DISPLAY=wayland-9 XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" list)"; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "no rows" "" "$out"
+assert_eq "clipd not called" "" "$(clipd_calls)"
+
+scenario "remote: set r:<id> calls clipd pick on this display"
+clear_log; clipd_mode ok
+rclip set "r:$RID1"; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "clipd received pick <id> <display>" "pick $RID1 $DPY" "$(clipd_calls)"
+assert_eq "clip-set.sh not called" "" "$(logged)"
+
+scenario "remote: set propagates clipd's exit code verbatim"
+for code in 1 2 78; do
+  clipd_mode "pick$code"
+  rclip set "r:$RID1"; rc=$?
+  assert_eq "clipd exit $code" "$code" "$rc"
+done
+
+scenario "remote: set strips a screen suffix, and only a screen suffix"
+clipd_mode ok
+env DISPLAY="$DPY.0" XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" set "r:$RID1"
+assert_eq "$DPY.0 → $DPY" "pick $RID1 $DPY" "$(clipd_calls)"
+clipd_mode ok
+env DISPLAY="example.com:7" XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" set "r:$RID1"
+assert_eq "host-qualified display kept whole" "pick $RID1 example.com:7" "$(clipd_calls)"
+
+scenario "remote: a malformed r: id is refused before clipd"
+NL="$(printf '\nx')"; NL="${NL%x}"
+for bad in "r:" "r:0123456789abcde" "r:0123456789abcdef0" "r:0123456789ABCDEF" "r:../../etc/passw" \
+           "r:0123456789abcde " "r:-123456789abcde" "r:0123456789abcdef$NL"; do
+  clipd_mode ok
+  rclip set "$bad" 2>/dev/null; rc=$?
+  assert_eq "'$bad' → exit 1" 1 "$rc"
+  assert_eq "...clipd not called" "" "$(clipd_calls)"
+done
+
+scenario "remote: set r: with no X display is refused, not guessed"
+clipd_mode ok
+env -u DISPLAY WAYLAND_DISPLAY=wayland-9 XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$CLIPD_STUB" sh "$QS_CLIP" set "r:$RID1" 2>/dev/null; rc=$?
+assert_eq "exit 78" 78 "$rc"
+assert_eq "clipd not called" "" "$(clipd_calls)"
+
+scenario "remote: set r: with clipd absent changes nothing"
+env DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" QS_CLIP_CLIPD="$TMP/no-such-clipd" sh "$QS_CLIP" set "r:$RID1" 2>/dev/null; rc=$?
+assert_eq "exit 1" 1 "$rc"
+
+scenario "remote: a local id keeps the clip-set.sh path"
+reset_store; write_entry 1 "alpha"
+clear_log; clipd_mode ok; stub_mode log
+rclip set 000001.clip; rc=$?
+assert_eq "exit 0" 0 "$rc"
+assert_eq "clip-set.sh called" "000001.clip $DPY" "$(logged)"
+assert_eq "clipd not called" "" "$(clipd_calls)"
+reset_store
+clear_log
+clipd_mode none
+
+# ============================================================================
 # PHASE 1 — session derivation (toggle) is unchanged by the backend swap
 # ============================================================================
 #
@@ -466,7 +623,7 @@ dpy_up "$DPY2" || exit 1
 
 start_qs() { # <display> <logfile>
   env DISPLAY="$1" "${ISO[@]}" \
-      QS_CLIP_SH="$QS_CLIP" QS_CLIP_SET="$STUB" \
+      QS_CLIP_SH="$QS_CLIP" QS_CLIP_SET="$STUB" QS_CLIP_CLIPD="$CLIPD_STUB" \
       "$QUICKSHELL" -p "$TMP/entry" >"$2" 2>&1 &
   printf '%s' $!
 }
@@ -696,6 +853,27 @@ assert_eq "clip-set.sh (stub) received the SELECTED entry's FULL untruncated id 
   "000002.clip $DPY" "$(logged)"
 
 close_picker "$DPY"
+
+# The real ClipHistory.qml must carry an r: id through untouched as well: no QML
+# changed for the prefix, and this is the only place that is observed.
+scenario "picker: selecting a remote row publishes it through clipd, id intact (sp039 task 6)"
+reset_store
+write_entry 1 "alpha"
+clear_log; stub_mode log; clipd_mode rows
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+# Rows: 000001.clip, then r:$RID1, then r:$RID2. One Down lands on the first remote.
+send "$DPY" Down
+send "$DPY" Return
+gone_on "$DPY"
+assert_eq "clipd received the selected row's full id and the session display" \
+  "pick $RID1 $DPY" "$(tr '\n' '|' < "$CLIPD_LOG" | sed 's/|$//; s/^.*|//')"
+assert_eq "clip-set.sh not called" "" "$(logged)"
+close_picker "$DPY"
+clipd_mode none
 
 # ============================================================================
 # PHASE 1.55 — the Combo refactor's picker-level behavior (sp017 task 5)
