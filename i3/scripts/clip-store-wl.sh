@@ -64,7 +64,10 @@ if [ "$EVENT" = 0 ]; then
     # the watch does.
     exec 9>"$ROOT/$DPY.lock" || exit 1
     flock -n 9 || exit 0
-    exec wl-paste --watch sh "$0" --event "$DPY"
+    # Off stdout: wl-paste picks the type to watch from its output file's name, so
+    # a session's *.log there means text, and an image-only clipboard never fires
+    # an event. Nothing is written to stdout anyway. Errors stay on stderr.
+    exec wl-paste --watch sh "$0" --event "$DPY" >/dev/null
 fi
 
 # ------------------------------------------------------------- one change ---
