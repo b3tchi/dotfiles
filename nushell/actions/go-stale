@@ -113,6 +113,11 @@ export def go-modules [] {
       ["gopass/relay/**/*.go"]
     ]
     [
+      "clipd", "clipd/dot.yaml", "~/.local/bin/clipd",
+      "clipd", "./cmd/clipd", true,
+      ["clipd/*.go" "clipd/internal/**/*.go" "clipd/cmd/clipd/**/*.go"]
+    ]
+    [
       "d2-router", "d2/dot.yaml", "~/.local/bin/d2-router-d",
       "d2/router", ".", false,
       ["d2/router/*.go"]

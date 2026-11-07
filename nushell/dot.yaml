@@ -32,6 +32,7 @@ linux:
     actions/tmux-message: ~/.local/bin/tmux-message
     actions/tmux-project: ~/.local/bin/tmux-project
     actions/tmux-ssh: ~/.local/bin/tmux-ssh
+    actions/clipd.nu: ~/.local/bin/clipd.nu
     actions/wm-current-workspace: ~/.local/bin/wm-current-workspace
     actions/wm-ipc.nu: ~/.local/bin/wm-ipc.nu
     actions/ws-list.nu: ~/.local/bin/ws-list.nu
