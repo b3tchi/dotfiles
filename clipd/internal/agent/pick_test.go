@@ -135,3 +135,25 @@ func rigWith(t *testing.T, text string) *store.Store {
 	put(t, peer, entry.MimeText, []byte(text), time.Second, 300)
 	return self
 }
+
+func TestPickRecordsEchoHash(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := &store.Store{Dir: dir, Origin: "peer", Self: id, Cap: entry.DefaultCap}
+	self := &store.Store{Dir: dir, Origin: "self", Self: id, Cap: entry.DefaultCap}
+	picked := []byte("from peer")
+	got, err := peer.Write(entry.Entry{Created: time.Now().UnixMilli(), TTLs: 300, Mime: entry.MimeText, Data: picked})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Pick(self, got, e.state, func(bool, []byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if out := e.a.Offer(entry.MimeText, []byte("from peer")); out != Echo {
+		t.Fatalf("agent saw the pick as %q, want echo", out)
+	}
+}

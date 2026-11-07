@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test-clipd-x.sh — end-to-end test of `clipd agent x <display>` (sp039
-# Task 4) against a throwaway Xvfb.
+# test-clipd-x.sh — end-to-end test of `clipd agent x <display>`, `clipd list`
+# and `clipd pick` (sp039 Tasks 4 and 5) against a throwaway Xvfb.
 #
 # Never touches a live session: the agent serves TEST_DISPLAY (default :94;
 # the live :40 / :10 are refused outright), XDG_RUNTIME_DIR and
@@ -202,7 +202,7 @@ XCOPIES=()
 has_entry() { # <text>: is there an entry decrypting to exactly <text>?
   local f
   for f in $(entries); do
-    [ "$(decrypt_field "$f" data)" = "$1" ] && { echo yes; return; }
+    decrypt_field "$f" data | cmp -s - <(printf '%s' "$1") && { echo yes; return; }
   done
   echo no
 }
@@ -241,7 +241,7 @@ newest() { ls -t $(entries) 2>/dev/null | head -1; }
 
 # --------------------------------------------------------------- scenarios --
 
-"${AENV[@]}" "$CLIPD" keygen >/dev/null || { echo "FATAL: keygen"; exit 1; }
+RECIPIENT="$("${AENV[@]}" "$CLIPD" keygen)" || { echo "FATAL: keygen"; exit 1; }
 start_xvfb
 
 scenario "display contract"
@@ -392,10 +392,111 @@ assert_eq "B is the current clipboard" rearm-B \
 for p in "${XCOPIES[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
 XCOPIES=()
 
+# ---------------------------------------------------------- list and pick --
+# Runs with the agent above still serving the display, so every pick also
+# proves the echo guard: a picked entry must not be written back.
+
+CLI=(env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" CLIPD_CONFIG_DIR="$CFG" CLIPD_DEVICE=testhost CLIPD_DISPLAY=)
+
+peer_entry() { # <id> <mime> <age-s> <file>: entry from "peerhost", encrypted to us
+  python3 - "$2" "$3" "$4" <<'PYEOF' | age -r "$RECIPIENT" -o "$FOLDER/.$1.tmp"
+import base64, json, sys, time
+mime, age, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+print(json.dumps({"v": 1, "origin": "peerhost", "created": int((time.time() - age) * 1000),
+                  "ttl_s": 300, "mime": mime,
+                  "data": base64.b64encode(open(path, "rb").read()).decode()}))
+PYEOF
+  mv "$FOLDER/.$1.tmp" "$FOLDER/$1.age"
+}
+
+read_sel() { # <selection> <target>: as hex, so NUL and trailing newlines survive
+  timeout 2 xclip -display "$DPY" -selection "$1" -t "$2" -o 2>/dev/null | od -An -tx1
+}
+
+ID_TEXT=aaaaaaaaaaaaaaa1
+ID_PNG=aaaaaaaaaaaaaaa2
+ID_OLD=aaaaaaaaaaaaaaa3
+printf 'pick žluť\r\nline two\n\ttab end\n' >"$TMP/pick.txt"
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x07\x00\x00\x00\x05rest' >"$TMP/pick.png"
+peer_entry "$ID_TEXT" "text/plain;charset=utf-8" 20 "$TMP/pick.txt"
+peer_entry "$ID_PNG" image/png 10 "$TMP/pick.png"
+peer_entry "$ID_OLD" "text/plain;charset=utf-8" 400 "$TMP/pick.txt"
+BASE="$(count)"
+
+scenario "clipd list"
+"${CLI[@]}" "$CLIPD" list >"$TMP/list.out" 2>"$TMP/list.err"
+assert_eq "exit 0" 0 "$?"
+assert_eq "own entries omitted" 0 "$(grep -c testhost "$TMP/list.out")"
+assert_eq "expired entry omitted" 0 "$(grep -c "$ID_OLD" "$TMP/list.out")"
+assert_eq "newest first" "$ID_PNG $ID_TEXT" "$(cut -f1 "$TMP/list.out" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "png preview" '[image 7x5]' "$(sed -n 1p "$TMP/list.out" | cut -f4)"
+assert_eq "text preview stays on one line" 'pick žluť\r\nline two\n\ttab end\n' "$(sed -n 2p "$TMP/list.out" | cut -f4)"
+assert_eq "origin column" peerhost "$(sed -n 2p "$TMP/list.out" | cut -f2)"
+
+scenario "clipd pick text"
+code=0; "${CLI[@]}" "$CLIPD" pick "$ID_TEXT" "$DPY" >"$TMP/pick.out" 2>&1 || code=$?
+assert_eq "exit 0" 0 "$code"
+assert_eq "silent" "" "$(cat "$TMP/pick.out")"
+WANT="$(od -An -tx1 <"$TMP/pick.txt")"
+assert_eq "CLIPBOARD byte-exact, at once" "$WANT" "$(read_sel clipboard UTF8_STRING)"
+assert_eq "PRIMARY byte-exact, at once" "$WANT" "$(read_sel primary UTF8_STRING)"
+sleep 1
+assert_eq "agent did not re-send the pick" "$BASE" "$(count)"
+
+scenario "clipd pick png"
+code=0; "${CLI[@]}" "$CLIPD" pick "$ID_PNG" "$DPY" >"$TMP/pick.out" 2>&1 || code=$?
+assert_eq "exit 0" 0 "$code"
+WANT="$(od -An -tx1 <"$TMP/pick.png")"
+assert_eq "CLIPBOARD byte-exact as image/png" "$WANT" "$(read_sel clipboard image/png)"
+assert_eq "PRIMARY byte-exact as image/png" "$WANT" "$(read_sel primary image/png)"
+sleep 1
+assert_eq "agent did not re-send the pick" "$BASE" "$(count)"
+
+scenario "clipd pick --latest"
+code=0; "${CLI[@]}" "$CLIPD" pick --latest "$DPY" >/dev/null 2>&1 || code=$?
+assert_eq "exit 0" 0 "$code"
+assert_eq "newest remote entry published" "$WANT" "$(read_sel clipboard image/png)"
+
+scenario "clipd pick: refused picks change nothing"
+code=0; "${CLI[@]}" "$CLIPD" pick "$ID_OLD" "$DPY" >/dev/null 2>&1 || code=$?
+assert_eq "expired id → exit 1" 1 "$code"
+code=0; "${CLI[@]}" "$CLIPD" pick ffffffffffffffff "$DPY" >/dev/null 2>&1 || code=$?
+assert_eq "unknown id → exit 1" 1 "$code"
+code=0; env DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN" CLIPD_CONFIG_DIR="$CFG" CLIPD_DEVICE=testhost CLIPD_DISPLAY= \
+  "$CLIPD" pick "$ID_TEXT" >/dev/null 2>&1 || code=$?
+assert_eq "no display, valid DISPLAY inherited → exit 78" 78 "$code"
+assert_eq "CLIPBOARD unchanged after all three" "$WANT" "$(read_sel clipboard image/png)"
+
+scenario "clipd pick: display not answering"
+code=0; "${CLI[@]}" "$CLIPD" pick "$ID_TEXT" :77 >/dev/null 2>"$TMP/dead.err" || code=$?
+assert_eq "exit 2" 2 "$code"
+assert_eq "no payload in the error" no "$(grep -qF 'line two' "$TMP/dead.err" && echo yes || echo no)"
+
+scenario "clipd pick: a hung owner cannot hang the pick"
+spawn env DISPLAY="$DPY" python3 "$TMP/hung-owner.py" >"$TMP/hung3.out" 2>&1
+HUNG_PID=$SPAWNED
+for i in $(seq 1 40); do grep -q owned "$TMP/hung3.out" && break; sleep 0.05; done
+t0=$(date +%s%N)
+code=0; timeout 10 "${CLI[@]}" "$CLIPD" pick "$ID_TEXT" "$DPY" >/dev/null 2>&1 || code=$?
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+assert_eq "exit 0 (owner replaced, $ms ms)" 0 "$code"
+assert_eq "CLIPBOARD holds the pick" "$(od -An -tx1 <"$TMP/pick.txt")" "$(read_sel clipboard UTF8_STRING)"
+stop_pid "$HUNG_PID"
+sleep 0.5
+
+scenario "agent still sends real copies after picks"
+BASE="$(count)"
+xcopy "real-copy-after-pick"
+wait_count $((BASE + 1)) 3
+assert_eq "new entry written" $((BASE + 1)) "$(count)"
+assert_eq "it holds the copy" yes "$(has_entry real-copy-after-pick)"
+for p in "${XCOPIES[@]}"; do kill -0 "$p" 2>/dev/null && stop_pid "$p"; done
+XCOPIES=()
+
 scenario "agent health"
 assert_eq "agent still running" alive "$(kill -0 "$AGENT_PID" 2>/dev/null && echo alive || echo dead)"
 leak=no
-for s in "hello" "pm-secret" "after-the-hang" "burst-" "rearm-"; do
+for s in "hello" "pm-secret" "after-the-hang" "burst-" "rearm-" "line two"; do
   grep -qF "$s" "$TMP/agent.log" && leak="$s"
 done
 assert_eq "no payload text in the agent log" no "$leak"

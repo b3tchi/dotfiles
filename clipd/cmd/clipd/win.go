@@ -1,6 +1,7 @@
 package main
 
-// sp039 Task 7: `agent windows`, `list`, `pick <id>|--latest`.
+// sp039 Tasks 5 and 7: `agent windows`, `list`, `pick <id>|--latest`, with
+// a display argument on X.
 //
 // Folder and device name come from syncFolder / deviceName (main.go).
 // Echo-guard state: $CLIPD_STATE_DIR, else %LOCALAPPDATA%\clipd\state
@@ -24,6 +25,7 @@ import (
 	"clipd/internal/entry"
 	"clipd/internal/store"
 	"clipd/internal/winclip"
+	"clipd/internal/xsel"
 )
 
 var (
@@ -124,9 +126,14 @@ func listCmd(args []string, out io.Writer, fail func(error) int, bad func() int)
 }
 
 // pickCmd: exit 0 published, 1 not found/expired, 2 publish failed, 78
-// config. Mirrors ft007's clip-set.sh contract.
+// config. Mirrors ft007's clip-set.sh contract. The display is resolved
+// first, so a missing one publishes nothing and records no echo guard.
 func pickCmd(args []string, errOut io.Writer, fail func(error) int, bad func() int) int {
-	if len(args) != 1 {
+	maxArgs := 2 // <id>|--latest [display]
+	if runtime.GOOS == "windows" {
+		maxArgs = 1
+	}
+	if len(args) < 1 || len(args) > maxArgs {
 		return bad()
 	}
 	id := args[0]
@@ -134,6 +141,22 @@ func pickCmd(args []string, errOut io.Writer, fail func(error) int, bad func() i
 		id = ""
 	} else if !idArg.MatchString(id) {
 		return bad()
+	}
+	publish := winclip.Publish
+	if runtime.GOOS != "windows" {
+		dpy, err := namedDisplay(args[1:])
+		if err != nil {
+			fmt.Fprintln(errOut, "clipd: pick:", err)
+			return exitConfig
+		}
+		x := &xsel.X{Display: dpy, Xclip: os.Getenv("CLIPD_XCLIP")}
+		publish = func(isPNG bool, data []byte) error {
+			target := xsel.TargetUTF8
+			if isPNG {
+				target = xsel.TargetPNG
+			}
+			return x.Publish(context.Background(), target, data)
+		}
 	}
 	s, err := openStore(nil)
 	if err != nil {
@@ -143,7 +166,7 @@ func pickCmd(args []string, errOut io.Writer, fail func(error) int, bad func() i
 	if err != nil {
 		return fail(err)
 	}
-	_, err = agent.Pick(s, id, state, winclip.Publish)
+	_, err = agent.Pick(s, id, state, publish)
 	switch {
 	case err == nil:
 		return 0

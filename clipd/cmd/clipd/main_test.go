@@ -134,17 +134,20 @@ func TestListCLI(t *testing.T) {
 
 func TestPickCLIExitCodes(t *testing.T) {
 	cfg, id := winRig(t)
-	if code, _, _ := runCLI(t, cfg, "pick", "ffffffffffffffff"); code != exitFail {
+	display := []string{}
+	if runtime.GOOS != "windows" {
+		display = []string{":93"} // never reached: both fail before any publish
+	}
+	if code, _, _ := runCLI(t, cfg, append([]string{"pick", "ffffffffffffffff"}, display...)...); code != exitFail {
 		t.Fatalf("unknown id: exit %d", code)
 	}
-	if code, _, _ := runCLI(t, cfg, "pick", "../etc"); code != exitUsage {
+	if code, _, _ := runCLI(t, cfg, append([]string{"pick", "../etc"}, display...)...); code != exitUsage {
 		t.Fatalf("malformed id: exit %d", code)
 	}
-	if runtime.GOOS != "windows" { // no native publisher here → 2, payload not echoed
-		code, out, errOut := runCLI(t, cfg, "pick", id)
-		if code != 2 || out != "" || strings.Contains(errOut, "there") {
-			t.Fatalf("pick: exit %d out %q err %q", code, out, errOut)
-		}
+	if code, _, _ := runCLI(t, cfg, "pick", id, ":93", ":94"); code != exitUsage {
+		t.Fatalf("too many args: exit %d", code)
+	}
+	if runtime.GOOS != "windows" {
 		if code, _, _ := runCLI(t, cfg, "agent", "windows"); code != exitFail {
 			t.Fatalf("agent windows on %s: exit %d", runtime.GOOS, code)
 		}

@@ -46,7 +46,9 @@ const usage = `usage:
   clipd agent windows           watch the Windows clipboard, write entries
   clipd agent x <display>       watch that X display's CLIPBOARD
   clipd list                    live remote entries: id, origin, age-s, preview
-  clipd pick <id>|--latest      put an entry on the native clipboard`
+  clipd pick <id>|--latest [display]
+                                put an entry on the native clipboard
+                                (X: display, or CLIPD_DISPLAY, is required)`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
