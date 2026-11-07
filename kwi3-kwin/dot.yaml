@@ -31,6 +31,9 @@
 #
 # Overrides: KWI3_SRC (the kwi3 clone), KWI3_DOTFILES (hotkeyd's source tree).
 #
+# krdp: kwi3-kwin-session serves this screen on port 3389, so the machine's LAN
+# can reach it. Credentials: krdp-credentials.sh.
+#
 # kxkbrc: Dvorak for this box. x86_64 only, because a bare `rotz link` walks every
 # dot, and the phone (aarch64) runs its own KWin that reads ~/.config/kxkbrc too.
 linux:
@@ -47,7 +50,7 @@ linux:
         echo "kwi3-kwin: pacman not found - this dot only knows Arch and Manjaro" >&2
         exit 1
       fi
-      MISSING=$(pacman -T kwin xorg-xwayland foot wofi cmake extra-cmake-modules ninja vulkan-headers go nodejs git)
+      MISSING=$(pacman -T kwin krdp openssl xorg-xwayland foot wofi cmake extra-cmake-modules ninja vulkan-headers go nodejs git)
       if [ -n "$MISSING" ]; then
         # shellcheck disable=SC2086
         sudo pacman -S --needed --noconfirm $MISSING || {

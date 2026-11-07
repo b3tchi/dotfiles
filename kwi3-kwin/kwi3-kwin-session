@@ -73,6 +73,21 @@ if [ -n "$KWI3_KWIN_LAUNCH" ]; then
         # hotkeyd layers such as $mod+0 go live with no sign of them on the bar.
         QS_RDP=1 QS_LAYER_FEED="$BIN/hotkeyd" respawn "$SOCKET-bar" quickshell
     fi
+    # KRDP mirrors this screen to an RDP client on port 3389, as user $USER.
+    # Credentials come from krdp-credentials.sh; without them it stays off.
+    # Restarted because krdpserver exits on some client disconnects, and when
+    # started before KWin has its outputs up. --desktopfile is what earns it
+    # KWin's screencast and fake-input protocols.
+    _krdp_key=$HOME/.local/share/krdp/krdp.key
+    _krdp_pass=$HOME/.config/krdp/password
+    if [ "$BACKEND" = --drm ] && command -v krdpserver >/dev/null 2>&1 &&
+       [ -s "$_krdp_key" ] && [ -s "$_krdp_pass" ]; then
+        respawn "$SOCKET-krdp" krdpserver --plasma --monitor 0 \
+            --desktopfile org.kde.krdpserver \
+            --certificate "$HOME/.local/share/krdp/krdp.crt" \
+            --certificate-key "$_krdp_key" \
+            --username "$(id -un)" --password "$(cat "$_krdp_pass")" --port 3389
+    fi
     exit 0
 fi
 
@@ -109,7 +124,8 @@ cleanup() {
     trap - EXIT INT TERM HUP
     kill "$KWIN" 2>/dev/null
     wait "$KWIN" 2>/dev/null
-    for _p in $(pgrep -u "$(id -u)" -x hotkeyd) $(pgrep -u "$(id -u)" -x quickshell); do
+    for _p in $(pgrep -u "$(id -u)" -x hotkeyd) $(pgrep -u "$(id -u)" -x quickshell) \
+              $(pgrep -u "$(id -u)" -x krdpserver); do
         grep -qzx "KWI3SOCK=$KWI3SOCK" "/proc/$_p/environ" 2>/dev/null && kill "$_p"
     done
     if [ "$BACKEND" = --drm ]; then

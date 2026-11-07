@@ -94,4 +94,7 @@ done
 sh "$SRC/i3kwin/phone/config/kwinrc-settings.sh"
 sh "$DOTFILES/kwi3-kwin/kwinrc-edges-off.sh"
 
+echo "==> checking krdp credentials"
+sh "$DOTFILES/kwi3-kwin/krdp-credentials.sh"
+
 echo "==> done"
