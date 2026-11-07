@@ -326,16 +326,13 @@ cmd_active_window() {
 # process has one (native i3 and xrdp are both X11), else WAYLAND_DISPLAY
 # (sway). Empty when the process has neither.
 session_key_of() { # <pid>
-  # The readability test is NOT redundant with the `2>/dev/null` below: an
-  # unreadable /proc/<pid>/environ fails the SHELL's redirection, and the
-  # shell reports that on ITS stderr, which the redirection inside the
-  # substitution cannot suppress. Observed on this host as a bare
-  # "Permission denied" line surfacing out of a $mod+Shift+v press —
-  # a zombie quickshell (environ gone) and any instance belonging to another
-  # user both hit it. Both are non-candidates either way, so the only
-  # question is whether they scream on the way out.
-  if [ -r "/proc/$1/environ" ]; then
-    _e="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)" || return 1
+  # Read it, rather than asking `[ -r ]` first: on busybox that says yes for a
+  # non-dumpable process (below), whose read is then refused. In braces so the
+  # outer 2>/dev/null also covers the SHELL's report of a failed redirection,
+  # which a `2>/dev/null` on tr itself cannot (a bare "Permission denied" out of
+  # a $mod+Shift+v press). A zombie or another user's instance lands below too,
+  # and `quickshell list` does not claim them.
+  if _e="$({ tr '\0' '\n' < "/proc/$1/environ"; } 2>/dev/null)"; then
     _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
     [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
     _v="$(printf '%s\n' "$_e" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -1)"
