@@ -9,7 +9,7 @@
 # The rest is Core UX: `distro` (yazi, lazygit, bat, rg, fd, fzf, bottom,
 # ... plus bashrc), `nushell` + `tmux` (shell layer), `nvim`, `lazygit`
 # config, `gopass` (password store) - apk installs on Alpine.
-# The desktop session is meta-nura-kwi3, installed on its own.
+# The desktop session is the `kwi3` dot, installed on its own.
 #
 # FLAT, like every meta: lists dots only, never another meta.
 depends:
