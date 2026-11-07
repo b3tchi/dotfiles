@@ -2,43 +2,22 @@
 # installed ON the phone: runs the nothing-pmos repo's own install.sh (usb
 # OTG + Clicks charger-plug recovery, suspend, gps/XTRA, dtb audio/camera
 # fixes, kernel modules for haptics/glyph/nfc/reboot-mode, sensors,
-# bbq20kbd, bluetooth, UCM). Idempotent; one doas prompt. It does not build
-# modules or the dtb (that flashes boot_a): run `sh install.sh --build` in
-# the clone for that.
+# bbq20kbd, bluetooth, UCM, lock screen, hardening). Idempotent; one doas
+# prompt. It does not build modules or the dtb (that flashes boot_a): run
+# `sh install.sh --build` in the clone for that.
 #
-# SOURCE: the private b3tchi/nothing-pmos repo, branch main. The phone has
-# no GitHub account, so the clone ~/.local/src/nothing-pmos is FED FROM THE
-# DEV BOX (receive.denyCurrentBranch=updateInstead):
+# SOURCE: the private b3tchi/nothing-pmos repo, branch main, in
+# ~/.local/src/nothing-pmos. nothing-pmos/sync.sh fetches it from GitHub over
+# ssh (the `github` dot sets that up) and only fast-forwards. A push from the
+# dev box still works, for a phone without GitHub access:
 #
 #   git -C <nothing-pmos worktree> push phone:.local/src/nothing-pmos main
 #
 # A clone with local changes or on another branch is refused, never reset.
+# Tests: nothing-pmos/test-sync.sh.
 linux:
   installs:
+    depends:
+      - github
     cmd: |
-      SRC="$HOME/.local/src/nothing-pmos"
-      BRANCH=main
-
-      if [ ! -d "$SRC/.git" ]; then
-        mkdir -p "$SRC"
-        git -C "$SRC" init -q -b "$BRANCH"
-        git -C "$SRC" config receive.denyCurrentBranch updateInstead
-        echo "nothing-pmos: created $SRC (push $BRANCH into it from the dev box)"
-      fi
-      if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
-        echo "nothing-pmos: $SRC has local changes -- refusing to touch it." >&2
-        exit 1
-      fi
-      cur=$(git -C "$SRC" symbolic-ref --short HEAD 2>/dev/null || true)
-      if [ "$cur" != "$BRANCH" ]; then
-        echo "nothing-pmos: $SRC is on '$cur', not $BRANCH -- refusing to switch it." >&2
-        exit 1
-      fi
-      if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
-        echo "nothing-pmos: $SRC has no commit yet. From the dev box:" >&2
-        echo "nothing-pmos:   git -C <nothing-pmos worktree> push phone:.local/src/nothing-pmos $BRANCH" >&2
-        exit 1
-      fi
-      echo "nothing-pmos: $BRANCH at $(git -C "$SRC" rev-parse --short HEAD)"
-
-      sh "$SRC/install.sh"
+      sh "$HOME/.dotfiles/nothing-pmos/sync.sh"

@@ -14,15 +14,15 @@
 # SOURCE: the `kwin-host` branch of kwi3, not a release tag (Jan,
 # 2026-10-30) - nothing on kwin-host is tagged until it merges. The clone is
 # ~/.local/src/kwi3-kwin, apart from `kwi3`'s tag checkout in
-# ~/.local/src/kwi3. The phone has no GitHub account, so the clone is
-# normally FED FROM THE DEV BOX rather than fetched:
+# ~/.local/src/kwi3. It is fetched from $KWI3_REPO, GitHub over ssh (the
+# `github` dot sets that up; kwi3 is private, so the https URL never
+# worked), and only fast-forwarded. A push from the dev box still works:
 #
 #   git -C <kwi3 kwin-host worktree> push phone:.local/src/kwi3-kwin kwin-host
 #
 # (the clone accepts a push into its checked-out branch,
 # receive.denyCurrentBranch=updateInstead, like ~/.dotfiles on the phone).
-# A fetch from $KWI3_REPO is still tried, and only fast-forwards. A clone
-# with local changes is refused by name, never reset.
+# A clone with local changes is refused by name, never reset.
 #
 # NEEDS on the phone: node (config.js syntax check, font family) and go
 # (hotkeyd), plus cmake and the KWin/Qt headers install.sh's own build
@@ -46,7 +46,7 @@ set -u
 
 SRC="$HOME/.local/src/kwi3-kwin"
 BRANCH=kwin-host
-REPO="${KWI3_REPO:-https://github.com/b3tchi/kwi3}"
+REPO="${KWI3_REPO:-git@github.com:b3tchi/kwi3.git}"
 DOTS="$HOME/.dotfiles"
 
 if [ ! -d "$SRC/.git" ]; then
@@ -65,7 +65,8 @@ if [ "$cur" != "$BRANCH" ]; then
   exit 1
 fi
 
-if timeout 30 git -C "$SRC" fetch -q "$REPO" "$BRANCH" 2>/dev/null; then
+if GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=15" \
+  timeout 30 git -C "$SRC" fetch -q "$REPO" "$BRANCH" 2>/dev/null; then
   if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
     git -C "$SRC" reset -q --hard FETCH_HEAD
   elif ! git -C "$SRC" merge -q --ff-only FETCH_HEAD 2>/dev/null; then

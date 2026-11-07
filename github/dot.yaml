@@ -1,0 +1,31 @@
+# github — ssh access to GitHub for this machine: gh + openssh installed, an
+# ed25519 key, GitHub's host key pinned, gh logged in over ssh (one-time code
+# approved on another device), the key added to the account. github/setup.sh
+# does the work and says what it changed; a second run changes nothing.
+#
+# Dots that clone the private repos depend on it: on the phone `nothing-pmos`
+# (nothing-pmos/sync.sh) and `kwi3` (kwi3/install-nura.sh).
+#
+# The key has no passphrase, so fetches run unattended, and it is an account
+# key: whoever can read it can push to every repo. Only on machines whose disk
+# is encrypted and whose screen locks.
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm github-cli openssh
+      {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm github-cli openssh
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm github-cli openssh
+      {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+      if command -v apk >/dev/null 2>&1; then
+        missing=""
+        command -v gh >/dev/null 2>&1 || missing="$missing github-cli"
+        command -v ssh-keygen >/dev/null 2>&1 || missing="$missing openssh-client-default"
+        [ -z "$missing" ] || doas apk add $missing
+      fi
+      sh "$HOME/.dotfiles/github/setup.sh"
