@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -320,5 +321,26 @@ func TestFutureHeartbeatIsNotFresh(t *testing.T) {
 		if !c.fresh && (!strings.Contains(b.String(), "clock ahead") || strings.Contains(b.String(), "status: ok")) {
 			t.Errorf("%s ahead %v: output\n%s", c.name, c.ahead, b.String())
 		}
+	}
+}
+
+// sp039 T9: clipd runs its own Syncthing (home $XDG_STATE_HOME/clipd/syncthing)
+// beside any instance the user already has. Status must read that one and
+// never fall back to the user's own, whose link state says nothing about clipd.
+func TestConfigPathsPointAtDedicatedInstance(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("linux layout")
+	}
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	got := ConfigPaths()
+	want := []string{filepath.Join(state, "clipd", "syncthing", "config.xml")}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("ConfigPaths %v, want %v", got, want)
+	}
+	t.Setenv("XDG_STATE_HOME", "")
+	home, _ := os.UserHomeDir()
+	if got := ConfigPaths(); len(got) != 1 || got[0] != filepath.Join(home, ".local", "state", "clipd", "syncthing", "config.xml") {
+		t.Fatalf("default ConfigPaths %v", got)
 	}
 }
