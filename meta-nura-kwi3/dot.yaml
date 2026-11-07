@@ -1,13 +1,18 @@
 # Meta-package: the phone (postmarketOS) with kwi3 on KWin on its own
 # screen, replacing SXMO on Sway, and the headless KWin/KRdp session beside
 # it (sp039).
-# Usage: rotz install meta-phone-kwi3
+# Usage: rotz install meta-nura-kwi3
 #
 # It installs the WHOLE phone session, window manager included: `kwi3-phone`
 # runs the kwi3 repo's own `i3kwin/install.sh --local` on the phone, from
 # the kwin-host branch, for the i3kwin script, the kwi3keys plugin,
 # hotkeyd's phone build and kwi3-phone-session - the counterpart of `kwi3`
 # for the X11 host. It needs nodejs and go on the phone (doas apk add).
+#
+# Installing it also makes kwi3 the session at every start, the way a
+# meta-wsl-* sets the active WM: `kwi3-phone-session enable`, with a crash
+# guard (a kwi3 that dies within 60 s leaves that start to SXMO). Back to SXMO
+# at every start: `kwi3-phone-session disable`. No doas, tinydm stays on SXMO.
 #
 # FLAT, like every meta: lists dots only, never another meta.
 #
@@ -36,5 +41,6 @@ installs:
     - sxmo
     - kwi3-phone
   cmd: |
-    echo "meta-phone-kwi3: kwi3 on KWin installed from ~/.local/src/kwi3-kwin;"
-    echo "meta-phone-kwi3: load it with ~/.local/bin/i3reload (a running session keeps the old one)."
+    echo "meta-nura-kwi3: kwi3 on KWin installed from ~/.local/src/kwi3-kwin;"
+    echo "meta-nura-kwi3: load it with ~/.local/bin/i3reload (a running session keeps the old one)."
+    "$HOME/.local/bin/kwi3-phone-session" enable
