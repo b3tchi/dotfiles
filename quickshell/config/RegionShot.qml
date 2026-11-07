@@ -26,8 +26,12 @@ Scope {
     readonly property color accent: "#cb4b16"   // qs-region.py ACCENT_HEX
     readonly property int bw: 2                 // qs-region.py BW
     readonly property int minSel: 3             // qs-region.py MIN_SEL
-    readonly property string hotkeyd: Quickshell.env("HOME") + "/.dotfiles/hotkeyd/hotkeyd"
-    readonly property string shot: Quickshell.env("HOME") + "/.local/bin/kwi3-shot"
+    // QS_LAYER_FEED: the session's own hotkeyd where the default is the X11
+    // build (kwi3-kwin-session), as in Bar.qml.
+    readonly property string hotkeyd: Quickshell.env("QS_LAYER_FEED") || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/hotkeyd")
+    // From PATH: ~/.local/bin on the phone, ~/.local/lib/kwi3-kwin/bin ahead of
+    // it in a kwi3-kwin session.
+    readonly property string shot: "kwi3-shot"
 
     property bool open: false
     property bool dragging: false
