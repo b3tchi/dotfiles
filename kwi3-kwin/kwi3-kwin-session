@@ -63,6 +63,8 @@ if [ -n "$KWI3_KWIN_LAUNCH" ]; then
     # quickshell's scripts key their session on DISPLAY before WAYLAND_DISPLAY.
     unset DISPLAY
     respawn "$SOCKET-hotkeyd" hotkeyd --input kwin
+    # What $mod+v's picker lists. Single-instance per display.
+    respawn "$SOCKET-clip" sh "$HOME/.dotfiles/i3/scripts/clip-store-wl.sh" "$WAYLAND_DISPLAY"
     if [ "$BACKEND" = --drm ] && [ -e "$HOME/.dotfiles/quickshell/notif/shell.qml" ]; then
         respawn "$SOCKET-notif" quickshell -p "$HOME/.dotfiles/quickshell/notif"
     fi

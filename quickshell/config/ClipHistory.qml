@@ -95,13 +95,14 @@ Scope {
         Quickshell.env("QS_CLIP_SH") ?? (Quickshell.env("HOME") + "/.dotfiles/quickshell/qs-clip.sh")
 
     // Store dir for THIS session, computed the same way qs-clip.sh's
-    // store_dir() does (bare display — ":0.0" -> ":0" — under
+    // store_dir() does (the Wayland display when there is no X one; else the
+    // bare display — ":0.0" -> ":0" — under
     // $XDG_RUNTIME_DIR/clip-store/). This process's own $DISPLAY IS the
     // session qs-clip.sh already resolved `list`'s ids against, so no
     // separate derivation is needed — only used to build an ".img" row's
     // thumbnail path, never to re-decide which store `list`/`set` read.
     readonly property string storeDir: {
-        var d = Quickshell.env("DISPLAY") ?? ""
+        var d = Quickshell.env("DISPLAY") || Quickshell.env("WAYLAND_DISPLAY") || ""
         var bare = d.replace(/\.\d+$/, "")
         return (Quickshell.env("XDG_RUNTIME_DIR") ?? "") + "/clip-store/" + bare
     }
