@@ -49,14 +49,17 @@ qs_target_pid() {
             [ "$_t" -gt "$_main_t" ] && { _main="$_pid"; _main_t="$_t"; }
         fi
     done
-    # A dedicated overlay process wins over the main instance.
-    [ -n "$_ovl" ] && { echo "$_ovl"; return 0; }
+    # A dedicated overlay process wins over the main instance - unless the
+    # caller asked for the main one ($1 = main: the region picker lives there).
+    [ -n "$_ovl" ] && [ "${1:-}" != main ] && { echo "$_ovl"; return 0; }
     [ -n "$_main" ] || return 1
     echo "$_main"
 }
 
 qs_call() {
-    _tpid="$(qs_target_pid)" || {
+    _want=""
+    [ "$1" = --main ] && { _want=main; shift; }
+    _tpid="$(qs_target_pid $_want)" || {
         echo "qs-overlay: no quickshell instance for $QS_DPY_VAR=$QS_DPY_VAL" >&2
         exit 1
     }
@@ -85,5 +88,7 @@ case "$1" in
     switcher-cancel)  qs_call switcher cancel ;;
     switcher-search)  qs_call switcher search ;;
     projects)         qs_call projects toggle ;;
-    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects}" ;;
+    # KWin (Wayland) only: config/RegionShot.qml, in the main instance.
+    region)           qs_call --main regionshot open ;;
+    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects|region}" ;;
 esac

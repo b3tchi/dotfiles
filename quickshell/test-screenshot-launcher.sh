@@ -203,5 +203,26 @@ else
 fi
 teardown
 
+# KWin (Wayland) session: no DISPLAY, so the launcher must hand off to the
+# picker in the main quickshell. main once lacked this branch, and $mod+Shift+s
+# then did nothing on kwi3-kwin while it worked on the phone. A DISPLAY (X11,
+# or Xwayland next to a Wayland socket) must not take this path.
+wl=$(mktemp -d)
+cp "$(dirname "$0")/qs-screenshot.sh" "$wl/"
+printf '#!/bin/sh\necho "overlay $*"\nexit 0\n' >"$wl/qs-overlay.sh"
+chmod +x "$wl/qs-screenshot.sh" "$wl/qs-overlay.sh"
+got=$(env -u DISPLAY WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1)
+if [ "$got" = "overlay region" ]; then
+    ok "wayland: hands off to qs-overlay.sh region"
+else
+    no "wayland: hands off to qs-overlay.sh region" "got '$got'"
+fi
+got=$(DISPLAY=:99 WAYLAND_DISPLAY=kwi3-kwin sh "$wl/qs-screenshot.sh" 2>&1)
+case "$got" in
+    *"overlay region"*) no "wayland: DISPLAY set stays on the X11 path" "got '$got'" ;;
+    *) ok "wayland: DISPLAY set stays on the X11 path" ;;
+esac
+rm -rf "$wl"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

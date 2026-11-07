@@ -40,6 +40,13 @@ set -eu
 QS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 QS_SESSION_SH="$QS_DIR/qs-session.sh"
 
+# A KWin (Wayland) session - the phone, the KRdp session: no X display for
+# qs-region.py. The main quickshell hosts the same gesture there
+# (config/RegionShot.qml) and raises and clears the layers itself.
+if [ -z "${DISPLAY:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    exec "$QS_DIR/qs-overlay.sh" region
+fi
+
 # Validate DISPLAY BEFORE sourcing the helper, not after: qs-session.sh probes
 # `i3 --get-socketpath`, which fails without a display and — under `set -e` —
 # kills this script silently, so a later check would never be reached. The
