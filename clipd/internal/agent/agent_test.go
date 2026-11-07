@@ -752,7 +752,7 @@ func TestPickHashSharedWithWindows(t *testing.T) {
 	if got, want := keyedHash(key, entry.MimeText, []byte("p")), WinHash(key, entry.MimeText, []byte("p")); got != want {
 		t.Fatalf("hash %s != WinHash %s", got, want)
 	}
-	if err := writeState(e.state, WinPickedFile, WinHash(key, entry.MimeText, []byte("win-pick"))); err != nil {
+	if err := os.WriteFile(filepath.Join(e.state, WinPickedFile), []byte(WinHash(key, entry.MimeText, []byte("win-pick"))+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.a.Offer(entry.MimeText, []byte("win-pick")); got != Echo {

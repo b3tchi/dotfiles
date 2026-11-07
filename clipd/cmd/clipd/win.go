@@ -117,7 +117,7 @@ func listCmd(args []string, out io.Writer, fail func(error) int, bad func() int)
 	if err != nil {
 		return fail(err)
 	}
-	if err := agent.WinList(s, out); err != nil {
+	if err := agent.List(s, out); err != nil {
 		return fail(err)
 	}
 	return 0
@@ -143,14 +143,14 @@ func pickCmd(args []string, errOut io.Writer, fail func(error) int, bad func() i
 	if err != nil {
 		return fail(err)
 	}
-	_, err = agent.WinPick(s, id, state, winclip.Publish)
+	_, err = agent.Pick(s, id, state, winclip.Publish)
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, agent.ErrWinPublish):
+	case errors.Is(err, agent.ErrPublish):
 		fmt.Fprintln(errOut, "clipd:", err)
 		return exitUsage // 2 = publish failed (clip-set.sh contract)
-	case errors.Is(err, agent.ErrWinNotFound):
+	case errors.Is(err, agent.ErrNotFound):
 		fmt.Fprintln(errOut, "clipd:", err)
 		return exitFail
 	default:
