@@ -1,0 +1,90 @@
+# clipd — cross-host clipboard over an age-encrypted Syncthing folder ([[ft018]],
+# sp039, adr0039).
+#
+# What this installs on Linux (sp039 Task 9):
+#   ~/.local/bin/clipd                 the Go binary, built here from ./cmd/clipd
+#   clipd-syncthing.service            clipd's OWN Syncthing, a user service
+#   ~/.local/bin/clipd.nu              the wrapper (linked by nushell/dot.yaml)
+# The i3 configs (i3/config.d/native.conf, wsl.conf) and the kwi3 launcher run
+# `clipd.nu start <display>`, which runs setup and becomes the agent.
+#
+# A DEDICATED SYNCTHING, not the user's (decision 2026-11-07): the LAN-only
+# settings sp039 needs (no discovery, relays or NAT) are per instance, and the
+# user's own Syncthing reaches a NAS through exactly those. clipd's instance
+# lives in ~/.local/state/clipd/syncthing, serves its GUI on 127.0.0.1:8385
+# and syncs on port 22100. That home is fixed: the unit hardcodes
+# %h/.local/state, and clipd and clipd.nu derive it from $XDG_STATE_HOME, so
+# a non-default XDG_STATE_HOME is not supported.
+#
+# The instance is LAN-only from its first start: clipd.nu writes the options
+# into config.xml when it generates the home, before the unit can run, and
+# listens on loopback until setup finds the LAN address.
+#
+# After install, on each host: `clipd.nu setup` (it starts the unit itself),
+# then exchange with every peer its Syncthing device id (`syncthing device-id
+# --home ~/.local/state/clipd/syncthing`) and age recipient (printed by setup
+# on first run), and run `clipd.nu peer add <name> <device-id> <recipient>`.
+#
+# The Go build is GUARDED, hotkeyd's pattern: built to a temp file beside the
+# target and renamed over it only on success, so a failed build never leaves a
+# half-written binary where the agent will exec it. No Go toolchain is a
+# warning naming the fix, not a failed install: clipd is optional, and every
+# consumer (qs-clip.sh, clipd.nu start) degrades to "no clipd" on its own.
+linux:
+  links:
+    clipd-syncthing.service: ~/.config/systemd/user/clipd-syncthing.service
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm syncthing age
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm syncthing age
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm syncthing age
+      {{/if}}
+
+      if command -v go >/dev/null 2>&1; then
+        SRC="$HOME/.dotfiles/clipd"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/clipd" ]; then
+            SRC="$ROOT/clipd"
+          fi
+        fi
+        mkdir -p "$HOME/.local/bin"
+        TMP="$(mktemp "$HOME/.local/bin/.clipd.build.XXXXXX")"
+        if CGO_ENABLED=0 go build -C "$SRC" -o "$TMP" ./cmd/clipd; then
+          mv -f "$TMP" "$HOME/.local/bin/clipd"
+          echo "clipd: built ~/.local/bin/clipd from $SRC/cmd/clipd"
+        else
+          rm -f "$TMP"
+          if [ -f "$HOME/.local/bin/clipd" ]; then
+            echo "clipd: WARNING -- go build FAILED; ~/.local/bin/clipd is the \
+      PREVIOUS binary and is now stale. Re-run 'rotz install clipd' once the \
+      build error is fixed." >&2
+          else
+            echo "clipd: go build FAILED and clipd was never built -- no host \
+      clipboard sync until it is. Fix the error, then re-run 'rotz install \
+      clipd'." >&2
+            exit 1
+          fi
+        fi
+      else
+        echo "clipd: no Go toolchain on PATH -- skipping the build. Install go \
+      (sudo pacman -S go), then re-run 'rotz install clipd'. Until then this \
+      host has no clipd: the picker shows local history only." >&2
+      fi
+
+      # The dedicated Syncthing starts with the user session. Skipped where
+      # there is no user systemd (some WSL setups): `clipd.nu start` then
+      # reports it cannot start the unit, and Syncthing can be run by hand.
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+        systemctl --user daemon-reload
+        systemctl --user enable clipd-syncthing.service
+      else
+        echo "clipd: no user systemd -- clipd-syncthing.service not enabled; \
+      start Syncthing yourself: syncthing serve --home \
+      ~/.local/state/clipd/syncthing --no-browser" >&2
+      fi

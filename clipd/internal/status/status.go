@@ -345,8 +345,11 @@ func ReadConfig(path string) (Syncthing, error) {
 	return Syncthing{BaseURL: scheme + "://" + net.JoinHostPort(host, port), APIKey: key}, nil
 }
 
-// ConfigPaths lists where Syncthing keeps config.xml on this OS, most
-// recent layout first ($XDG_STATE_HOME since Syncthing 1.27).
+// ConfigPaths lists where the Syncthing that carries clipd's folder keeps
+// config.xml. On Linux that is clipd's own instance (sp039 T9,
+// nushell/actions/clipd.nu): its LAN-only settings are per instance, so it
+// runs beside any Syncthing the user already has, and the user's instance is
+// deliberately not a fallback — its link state says nothing about clipd.
 func ConfigPaths() []string {
 	var ps []string
 	if runtime.GOOS == "windows" {
@@ -355,18 +358,15 @@ func ConfigPaths() []string {
 		}
 		return ps
 	}
-	home, _ := os.UserHomeDir()
 	state := os.Getenv("XDG_STATE_HOME")
-	if state == "" && home != "" {
+	if state == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
 		state = filepath.Join(home, ".local", "state")
 	}
-	if state != "" {
-		ps = append(ps, filepath.Join(state, "syncthing", "config.xml"))
-	}
-	if d, err := os.UserConfigDir(); err == nil {
-		ps = append(ps, filepath.Join(d, "syncthing", "config.xml"))
-	}
-	return ps
+	return append(ps, filepath.Join(state, "clipd", "syncthing", "config.xml"))
 }
 
 // FindConfig reads the first config.xml in paths that exists.
