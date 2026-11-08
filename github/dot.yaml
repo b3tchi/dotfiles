@@ -25,7 +25,7 @@ linux:
       if command -v apk >/dev/null 2>&1; then
         missing=""
         command -v gh >/dev/null 2>&1 || missing="$missing github-cli"
-        command -v ssh-keygen >/dev/null 2>&1 || missing="$missing openssh-client-default"
+        command -v ssh >/dev/null 2>&1 || missing="$missing openssh-client-default"
         [ -z "$missing" ] || doas apk add $missing
       fi
       sh "$HOME/.dotfiles/github/setup.sh"

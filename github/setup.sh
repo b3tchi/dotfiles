@@ -40,8 +40,15 @@ fi
 
 if ! gh auth status --hostname github.com >/dev/null 2>&1; then
   echo "github: one-time login - approve the code at https://github.com/login/device on another device"
-  gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web \
-    --scopes admin:public_key || { echo "github: gh login failed" >&2; exit 1; }
+  # On the terminal itself: rotz captures a dot's output, which hid the code.
+  # GH_BROWSER=true: Enter must not start a text browser (w3m) on the phone.
+  if [ -r /dev/tty ] && [ -w /dev/tty ] && (: </dev/tty) 2>/dev/null; then
+    GH_BROWSER=true gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web \
+      --scopes admin:public_key </dev/tty >/dev/tty 2>&1
+  else
+    GH_BROWSER=true gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web \
+      --scopes admin:public_key
+  fi || { echo "github: gh login failed" >&2; exit 1; }
 fi
 
 pub=$(cut -d' ' -f1,2 "$KEY.pub")
