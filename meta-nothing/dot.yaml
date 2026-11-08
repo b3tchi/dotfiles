@@ -25,6 +25,7 @@ depends:
   - nvim
   - lazygit
   - gopass
+  - logseq
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the

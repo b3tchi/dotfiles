@@ -1,3 +1,10 @@
+# logseq — the Logseq app. No graphs: those are opened in the app itself.
+#
+# Alpine (the phone, postmarketOS/Nura, aarch64 musl): upstream's Linux
+# builds are glibc-only, so it comes from Flathub (com.logseq.Logseq, has an
+# aarch64 build and its own runtime; the classic file-graph 0.10 line). The
+# phone's KWin runs without Xwayland, so the app is told to use Wayland.
+# ~/.local/bin/logseq starts it, as on Manjaro.
 windows:
   installs: scoop install logseq
 
@@ -9,3 +16,17 @@ linux:
         chmod +x logseq
         mv -f logseq ~/.local/bin/
       {{/if}}
+      if command -v apk >/dev/null 2>&1; then
+        set -e
+        # --no-interactive: under rotz an apk [Y/n] question would not show
+        command -v flatpak >/dev/null 2>&1 || doas apk add --no-interactive flatpak
+        flatpak remote-add --user --if-not-exists flathub \
+          https://dl.flathub.org/repo/flathub.flatpakrepo
+        flatpak install --user --noninteractive flathub com.logseq.Logseq
+        flatpak override --user --socket=wayland \
+          --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.logseq.Logseq
+        mkdir -p "$HOME/.local/bin"
+        printf '%s\n' '#!/bin/sh' 'exec flatpak run com.logseq.Logseq "$@"' >"$HOME/.local/bin/logseq"
+        chmod 755 "$HOME/.local/bin/logseq"
+        echo "logseq: $(flatpak info --user com.logseq.Logseq | sed -n 's/^ *Version: //p') installed (Flathub)"
+      fi
