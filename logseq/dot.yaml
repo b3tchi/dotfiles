@@ -36,5 +36,19 @@ linux:
         # and falls back to X11 ("Missing X server or $DISPLAY").
         printf '%s\n' '#!/bin/sh' 'exec setpriv --ambient-caps -all flatpak run com.logseq.Logseq --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland "$@"' >"$HOME/.local/bin/logseq"
         chmod 755 "$HOME/.local/bin/logseq"
+        # The window's Wayland app_id is "Logseq" (Electron's app name), so
+        # KWin looks for Logseq.desktop for its icon; Flathub's entry is
+        # com.logseq.Logseq.desktop, and tinydm never sources the
+        # /etc/profile.d/flatpak.sh that would put its exports dir on
+        # XDG_DATA_DIRS. This entry matches the app_id, names the exported
+        # icon by path and starts the launcher above.
+        mkdir -p "$HOME/.local/share/applications"
+        printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Logseq' \
+          'Comment=A privacy-first, open-source platform for knowledge management and collaboration.' \
+          "Exec=$HOME/.local/bin/logseq %U" \
+          "Icon=$HOME/.local/share/flatpak/exports/share/icons/hicolor/scalable/apps/com.logseq.Logseq.svg" \
+          'StartupWMClass=Logseq' 'Categories=Utility;Office;' \
+          'MimeType=x-scheme-handler/logseq;' 'Terminal=false' \
+          >"$HOME/.local/share/applications/Logseq.desktop"
         echo "logseq: $(flatpak info --user com.logseq.Logseq | sed -n 's/^ *Version: //p') installed (Flathub)"
       fi
