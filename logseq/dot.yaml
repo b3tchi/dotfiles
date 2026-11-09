@@ -3,8 +3,10 @@
 # Alpine (the phone, postmarketOS/Nura, aarch64 musl): upstream's Linux
 # builds are glibc-only, so it comes from Flathub (com.logseq.Logseq, has an
 # aarch64 build and its own runtime; the classic file-graph 0.10 line). The
-# phone's KWin runs without Xwayland, so the app is told to use Wayland.
-# ~/.local/bin/logseq starts it, as on Manjaro.
+# phone's KWin runs without Xwayland, so the app is told to use Wayland
+# (socket override + explicit Ozone flags in the launcher).
+# ~/.local/bin/logseq starts it, as on Manjaro, with ambient caps dropped
+# first (see the setpriv note below).
 windows:
   installs: scoop install logseq
 
@@ -26,7 +28,13 @@ linux:
         flatpak override --user --socket=wayland \
           --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.logseq.Logseq
         mkdir -p "$HOME/.local/bin"
-        printf '%s\n' '#!/bin/sh' 'exec flatpak run com.logseq.Logseq "$@"' >"$HOME/.local/bin/logseq"
+        # setpriv: the phone's KWin session hands its children an ambient
+        # CAP_WAKE_ALARM (started from ~/.profile, before tinydm's own
+        # `setpriv --ambient-caps -all`), and bwrap refuses any caller holding
+        # a capability ("Unexpected capabilities but not setuid").
+        # The Ozone flags: this Electron ignores ELECTRON_OZONE_PLATFORM_HINT
+        # and falls back to X11 ("Missing X server or $DISPLAY").
+        printf '%s\n' '#!/bin/sh' 'exec setpriv --ambient-caps -all flatpak run com.logseq.Logseq --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland "$@"' >"$HOME/.local/bin/logseq"
         chmod 755 "$HOME/.local/bin/logseq"
         echo "logseq: $(flatpak info --user com.logseq.Logseq | sed -n 's/^ *Version: //p') installed (Flathub)"
       fi
