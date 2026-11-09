@@ -38,10 +38,10 @@ linux:
         chmod 755 "$HOME/.local/bin/logseq"
         # The window's Wayland app_id is "Logseq" (Electron's app name), so
         # KWin looks for Logseq.desktop for its icon; Flathub's entry is
-        # com.logseq.Logseq.desktop, and tinydm never sources the
-        # /etc/profile.d/flatpak.sh that would put its exports dir on
-        # XDG_DATA_DIRS. This entry matches the app_id, names the exported
-        # icon by path and starts the launcher above.
+        # com.logseq.Logseq.desktop, which no app_id lookup finds even with
+        # the Flatpak exports on XDG_DATA_DIRS (kwi3-phone-session sources
+        # /etc/profile.d/flatpak.sh). This entry matches the app_id, names
+        # the exported icon by path and starts the launcher above.
         mkdir -p "$HOME/.local/share/applications"
         printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Logseq' \
           'Comment=A privacy-first, open-source platform for knowledge management and collaboration.' \
