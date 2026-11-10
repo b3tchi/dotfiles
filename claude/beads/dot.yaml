@@ -23,8 +23,20 @@ linux:
         fi
       fi
 
-      # bd (beads) — always reinstall to track upstream version
-      curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+      # bd (beads) — always reinstall to track upstream version.
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone) is musl: the
+      # release binaries are glibc and fail with "cannot execute: required
+      # file not found", so build from source there (needs go, gcc, musl-dev).
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e go gcc musl-dev >/dev/null 2>&1 ||
+          doas apk add go gcc musl-dev
+        CGO_ENABLED=1 GOFLAGS="-tags=gms_pure_go" \
+          go install github.com/steveyegge/beads/cmd/bd@latest
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
+      else
+        curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+      fi
       if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
         mkdir -p "$HOME/.local/bin"
         ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
