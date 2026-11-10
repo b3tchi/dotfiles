@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp[cli]>=1.0"]
+# dependencies = ["mcp[cli]>=1.0,<2"]  # 2.x renamed FastMCP -> MCPServer
 # ///
 """
 wiki-oxide MCP server.

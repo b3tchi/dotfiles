@@ -32,7 +32,9 @@ linux:
       echo "=== rotz install claude started: $(date) ==="
       # dolt + bd + perles installed via installs.depends → ./beads/dot.yaml
 
-      curl -fsSL https://claude.ai/install.sh | sh
+      # bash, not sh: install.sh is bash-only ([[ =~ ]]); on Alpine/pmOS
+      # sh is busybox ash and dies with 'syntax error: unexpected "("'.
+      curl -fsSL https://claude.ai/install.sh | bash
       chmod +x ~/.dotfiles/claude/akm/akm ~/.dotfiles/claude/akm/akm-root
 
       # Mirror slash commands + settings.json to personal claude account dir.

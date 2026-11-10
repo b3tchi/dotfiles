@@ -9,6 +9,9 @@ linux:
       if ! command -v markdown-oxide >/dev/null 2>&1; then
         if command -v pacman >/dev/null 2>&1; then
           sudo pacman -Sy --needed --noconfirm markdown-oxide
+        elif command -v apk >/dev/null 2>&1; then
+          # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+          doas apk add markdown-oxide
         elif command -v cargo >/dev/null 2>&1; then
           cargo install --locked --git https://github.com/Feel-ix-343/markdown-oxide.git markdown-oxide
         else
