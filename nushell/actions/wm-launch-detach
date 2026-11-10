@@ -16,6 +16,10 @@
 #              show-environment` ok: systemd-run --user --slice=app.slice
 #              --collect --quiet -- <argv>. NEVER on an X11 display: the
 #              manager's env (no DISPLAY, short PATH) is not the session's.
+#              The caller's WAYLAND_DISPLAY (Wayland's display selector, as
+#              DISPLAY is X11's) is passed as --setenv: nothing imports it
+#              into the manager on the phone's KWin, and a Wayland client
+#              started without it finds no compositor.
 #   4 none     exit 78 naming the display and the snapshot path
 # --dry-run prints `<backend> <argv>` on one line and starts nothing.
 # Exit 0 once the child is started; never waits for it.
@@ -161,7 +165,10 @@ def --wrapped main [...args] {
             ^env -i ...$senv ...$sets $setsid -f /bin/sh -c $closer sh ...$argv
         }
         "systemd" => {
-            let setenvs = ($sets | each {|kv| ["--setenv" $kv] } | flatten)
+            let wl = ($env | get -o WAYLAND_DISPLAY | default "")
+            let named = ($sets | any {|kv| $kv | str starts-with "WAYLAND_DISPLAY=" })
+            let all = if $wl != "" and not $named { $sets | append $"WAYLAND_DISPLAY=($wl)" } else { $sets }
+            let setenvs = ($all | each {|kv| ["--setenv" $kv] } | flatten)
             ^systemd-run --user --slice=app.slice --collect --quiet ...$setenvs -- ...$argv
         }
         "windows" => {

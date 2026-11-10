@@ -378,6 +378,14 @@ def main [] {
         $oks = ($oks | append (check ($e4.exit_code == 0 and ($called | str contains "--collect") and not ($called =~ '(--pipe|--pty|--wait|--scope| -P| -t| -S)') and ($e4.stdout | str trim) == "") $"2e systemd-stdio: systemd-run is not asked to attach the caller's stdio \(args '($called | str trim)'\)"))
         ^rm -f $"($sb_e)/systemd-run-called"
 
+        # 2e (wayland): the caller's WAYLAND_DISPLAY reaches the unit; the
+        # manager's own env has none on the phone's KWin (foot: "failed to
+        # connect to wayland").
+        let e5 = (^env -i ...$env_e "WAYLAND_DISPLAY=wl-test" $nu.current-exe $det -- sleep 1 | complete)
+        let called5 = if ($"($sb_e)/systemd-run-called" | path exists) { open --raw $"($sb_e)/systemd-run-called" } else { "" }
+        $oks = ($oks | append (check ($e5.exit_code == 0 and ($called5 | str contains "--setenv WAYLAND_DISPLAY=wl-test")) $"2e systemd-wayland: caller's WAYLAND_DISPLAY is passed as --setenv \(args '($called5 | str trim)'\)"))
+        ^rm -f $"($sb_e)/systemd-run-called"
+
         # 2m: an X11 display with no snapshot never falls through to systemd
         let m = (run-detach $s m1 [...$env_e "DISPLAY=:977"] [])
         let mmsg = $"wm-launch-detach: no launch backend for display :977 \(no snapshot at ($sb_e)/run/wm-session-env-_977; systemd is only used when DISPLAY is unset\)"
