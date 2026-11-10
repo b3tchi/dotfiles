@@ -75,3 +75,11 @@ export-state.json
 
 # bd hook templates — hook-free model; never track (clone re-infection vector).
 hooks/
+
+# Added by bd (missing required patterns)
+*.gate.lock*
+last_pull
+embeddeddolt/
+proxieddb/
+dolt-server-config.yaml
+proxied_server_client_info.json
