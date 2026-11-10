@@ -19,6 +19,7 @@ package main
 // session's grab set -- fails here without needing Xvfb or a real daemon.
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -177,7 +178,8 @@ func TestKwi3OnlyBinds_OwnershipFlipsWithSession(t *testing.T) {
 }
 
 // TestKwi3OnlyBinds_Chords is a small named-table guard: exactly two chords
-// today, $mod+Shift+q -> kill and $mod+Shift+c -> kwi3-restart (kwi3-tusy.1).
+// today, $mod+Shift+q -> kill, $mod+Shift+c -> kwi3-restart (kwi3-tusy.1)
+// and $mod+c -> the controls layer.
 // A future addition to Kwi3OnlyBinds should
 // make this test fail by name (forcing a deliberate update) rather than
 // silently pass a bigger table.
@@ -187,7 +189,7 @@ func TestKwi3OnlyBinds_Chords(t *testing.T) {
 		got = append(got, b.Chord)
 	}
 	sort.Strings(got)
-	want := []string{"$mod+Shift+c", "$mod+Shift+q"}
+	want := []string{"$mod+Shift+c", "$mod+Shift+q", "$mod+c"}
 	if len(got) != len(want) {
 		t.Fatalf("Kwi3OnlyBinds chords = %v, want %v", got, want)
 	}
@@ -217,4 +219,47 @@ func TestKwi3OnlyBinds_RestartRunsTheWrapper(t *testing.T) {
 		return
 	}
 	t.Fatal("Kwi3OnlyBinds has no $mod+Shift+c")
+}
+
+// Held Shift reverses every control, the same table as held Alt: the phone's
+// keyboard reaches Shift more easily, and $mod+c is entered with Alt down.
+func TestControlsShiftReversesLikeAlt(t *testing.T) {
+	mods := Layers["controls"].Mods
+	alt, ok := mods["reverse"]
+	if !ok || alt.Modifier != "Mod1" {
+		t.Fatalf("controls reverse = %+v, want Mod1", alt)
+	}
+	shift, ok := mods["reverse-shift"]
+	if !ok || shift.Modifier != "Shift" {
+		t.Fatalf("controls reverse-shift = %+v, want Shift", shift)
+	}
+	if !reflect.DeepEqual(shift.Binds, alt.Binds) {
+		t.Errorf("Shift binds differ from Alt's:\n%+v\n%+v", shift.Binds, alt.Binds)
+	}
+	var found bool
+	for _, b := range shift.Binds {
+		if b.Chord == "s" {
+			found = true
+			if want := runAction("$HOME/.local/bin/hwctl autosuspend -"); !reflect.DeepEqual(b.Actions, want) {
+				t.Errorf("Shift+s = %+v, want %+v", b.Actions, want)
+			}
+		}
+	}
+	if !found {
+		t.Error("no s in the Shift table")
+	}
+}
+
+// Holding the brightness key keeps stepping; every other control is one step
+// per press, since a held rotation or radio toggle would just flap.
+func TestControlsOnlyBrightnessRepeats(t *testing.T) {
+	l := Layers["controls"]
+	tables := map[string][]bind.Bind{"+": l.Binds, "alt": l.Mods["reverse"].Binds, "shift": l.Mods["reverse-shift"].Binds}
+	for name, binds := range tables {
+		for _, b := range binds {
+			if want := b.Chord == "b"; b.Repeat != want {
+				t.Errorf("%s table: %s Repeat = %v, want %v", name, b.Chord, b.Repeat, want)
+			}
+		}
+	}
 }

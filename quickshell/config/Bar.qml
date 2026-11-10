@@ -119,7 +119,9 @@ PanelWindow {
 
     // Per-session + per-screen widget density (Session.qml): gates the wide
     // stats block so a narrow xrdp viewport / small monitor stays uncluttered.
-    readonly property string density: Session.densityFor(screen ? screen.width : 1920)
+    // The bar's screen, by name: the machine file's "screens" key.
+    readonly property string screenName: screen ? screen.name : ""
+    readonly property string density: Session.densityFor(screenName, screen ? screen.width : 1920)
     readonly property bool showNet:  density === "full"
     readonly property bool netShown: !tickerActive && (netDown || (showNet && netVal !== ""))
     readonly property bool showDisk: density === "full"
@@ -157,18 +159,41 @@ PanelWindow {
     // the inset engages only while the viewport is phone-shaped (taller than
     // 2:1) — reactive to screen size, so an xrdp reconnect from a monitor
     // client flattens everything without a restart.
-    readonly property bool insetOn: Session.insetActive(
+    readonly property bool insetOn: Session.insetActive(screenName,
         screen ? screen.width : 1920, screen ? screen.height : 1080)
-    readonly property int insetSide:   insetOn ? Session.insetSide : 0
-    readonly property int insetTop:    insetOn ? Session.insetTop : 0
+    readonly property int insetSide:   insetOn ? Session.insetFor(screenName, "Side") : 0
+    readonly property int insetTop:    insetOn ? Session.insetFor(screenName, "Top") : 0
     readonly property bool inset: insetSide > 0 || insetTop > 0
+
+    // A cutout in the top half of the screen (the machine file's "panel":
+    // a front camera hole) is hidden in the top bar: the row moves down
+    // until it ends level with the hole's bottom (topShift), black above
+    // it, so no tile is under the hole and the row keeps the desktop's
+    // spacing to the tiles below.
+    readonly property var cutouts: Session.cutoutsFor(screenName, screen ? screen.width : 0)
+    readonly property var topHole: {
+        var sh = screen ? screen.height : 0
+        var h = null
+        for (var i = 0; i < cutouts.length; i++) {
+            var c = cutouts[i]
+            if (c.y + c.h / 2 > sh / 2) continue
+            if (!h) { h = { x0: c.x, y0: c.y, x1: c.x + c.w, y1: c.y + c.h }; continue }
+            h = { x0: Math.min(h.x0, c.x), y0: Math.min(h.y0, c.y),
+                  x1: Math.max(h.x1, c.x + c.w), y1: Math.max(h.y1, c.y + c.h) }
+        }
+        return h
+    }
+    readonly property int topRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
+    readonly property int topShift: topHole
+        ? Math.max(0, Math.ceil(topHole.y1) - topRowH - margins.top - insetTop) : 0
 
     // sp004 Task 13 (kwi3-234.13; ft008 kwi3-grid-feed): under kwi3 the bar's
     // own height, band and exclusive zone come off Kwi3Grid instead of
     // Session's literals — Kwi3Grid.active stays false for every session
-    // this spec does not touch (no $KWI3SOCK), so Session.barHeight is still
+    // this spec does not touch (no $KWI3SOCK), so Session's height is still
     // exactly what renders there (AC3).
-    implicitHeight: (Kwi3Grid.active ? Kwi3Grid.rowHeight : Session.barHeight) + insetTop
+    readonly property int barHeight: Session.heightFor(screenName)
+    implicitHeight: topRowH + insetTop + topShift
 
     // Phone (sxmo, sway/Wayland): floating pill at the top via real
     // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
@@ -185,6 +210,47 @@ PanelWindow {
     // from the screen edge, so the tiles do not move; the bottom half is
     // simply what is left between the bar and kwi3's own top margin.
     readonly property bool isPhone: Session.isPhone
+    // QS_BAR_SPLIT / the machine file's "split" (the phone): the left part - workspace tabs and the mode
+    // strip - lives in a second bar at the bottom of the screen (bottomBar
+    // below). Its tab row is one titlebar row; above it, like above the top
+    // bar, a band of edgeMargin px holds the focused tab's ring.
+    readonly property bool split: Session.splitFor(screenName)
+    readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
+    readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
+    // Tiles end above the rounded bottom corners: the bottom bar reaches up
+    // the corner's radius at least. Its row stays right under the tiles, as
+    // on the desktop, with black below it down to the screen's edge.
+    readonly property int bottomBarH: Math.max(bottomBandH + bottomRowH, corner)
+    readonly property int bottomBelow: bottomBarH - bottomBandH - bottomRowH
+
+    // Rounded screen corners (the machine file's "corner": the radius in
+    // logical px). A row whose outer edge is `d` px in from the screen's
+    // top or bottom edge keeps its ends this far in from the sides, so
+    // nothing is drawn under the curve; whole cells on the grid.
+    readonly property int corner: Session.cornerFor(screenName)
+    function cornerClear(d) {
+        if (corner <= 0 || d >= corner) return 0
+        var dy = corner - d
+        var c = corner - Math.sqrt(corner * corner - dy * dy)
+        return onGrid ? Math.ceil(c / cellW - 0.001) * cellW : Math.ceil(c)
+    }
+    // The top bar's row starts margins.top + insetTop + topShift below the screen's
+    // top edge; the bottom bar's row ends bottomBelow above the bottom edge.
+    readonly property int topClear: cornerClear(margins.top + insetTop + topShift)
+    // A top-bar end that would run into the hole stops short of it.
+    function holeClear(fromLeft) {
+        if (!topHole || !screen) return 0
+        var w = screen.width
+        var c = fromLeft ? topHole.x1 : w - topHole.x0
+        if ((fromLeft ? topHole.x0 : w - topHole.x1) > w / 2) return 0
+        c += onGrid ? cellW : 8
+        return onGrid ? Math.ceil(c / cellW - 0.001) * cellW : Math.ceil(c)
+    }
+    readonly property int bottomClear: cornerClear(bottomBelow)
+    // The left part (tabs, mode strip) and the clock's right edge.
+    readonly property int leftPad: Math.max(Kwi3Grid.active ? Kwi3Grid.contentLeft : 8,
+                                            split ? bottomClear : Math.max(topClear, holeClear(true)))
+    readonly property int rightPad: Math.max(onGrid ? cellW : 8, topClear, holeClear(false))
     margins {
         top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         left:  isPhone ? 40 : 0
@@ -198,13 +264,14 @@ PanelWindow {
     // implicitHeight), which is what every non-kwi3 session already got
     // before this property existed.
     //
-    // `reserve` is measured from the screen edge. On Wayland, layer-shell adds
-    // the surface's margin to its exclusive zone, so margins.top comes off
-    // here or every tile on a kwi3 KWin session sits edgeMargin too low.
+    // Layer-shell (Wayland - kwi3 on KWin) counts the zone from the anchored
+    // edge AFTER the margin, so `reserve` there would reserve the margin
+    // twice (24 px for a 16 px reserve with an 8 px band); X11's strut is
+    // measured from the screen edge and takes `reserve` as it is.
     exclusiveZone: Kwi3Grid.active
         ? (Qt.platform.pluginName === "wayland"
-            ? Kwi3Grid.reserve - margins.top
-            : Kwi3Grid.reserve)
+            ? Math.max(0, Kwi3Grid.reserve - margins.top) : Kwi3Grid.reserve)
+          + topShift
         : -1
 
     readonly property color barColor: "#000000"
@@ -213,7 +280,7 @@ PanelWindow {
     color: inset ? "#000000" : barColor
 
     readonly property string fontFamily: Kwi3Grid.active ? Kwi3Grid.fontFamily : "Iosevka Nerd Font"
-    readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontSize
+    readonly property int fontSize: Kwi3Grid.active ? Kwi3Grid.fontPixelSize : Session.fontFor(screenName)
     // kwi3-55l.18: was Text.NativeRendering. Jan (3392, real use): "the
     // bar's font looks slightly bigger than the other fonts (kwi3 window
     // titlebars, terminal)". Both sides already share font.family/
@@ -578,7 +645,13 @@ PanelWindow {
         var screenY = (root.screen && root.screen.geometry) ? root.screen.geometry.y : 0
         var contentX = root.inset ? (root.insetSide + 10) : 0
         var marginsTop = root.isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
-        return { x: screenX + contentX, y: screenY + marginsTop + root.insetTop }
+        if (root.split) {
+            // The tabs' row sits bottomBelow above the screen's bottom; its band (the
+            // bottom bar's first edgeMargin px) holds the ring.
+            var screenH = (root.screen && root.screen.geometry) ? root.screen.geometry.height : 0
+            return { x: screenX + contentX, y: screenY + screenH - root.bottomRowH - root.bottomBelow }
+        }
+        return { x: screenX + contentX, y: screenY + marginsTop + root.insetTop + root.topShift }
     }
 
     readonly property var focusedTabScreenRect: {
@@ -602,7 +675,7 @@ PanelWindow {
         // would not re-run when the tab layout changes under it.
         var origin = root._ringOrigin()
         return {
-            x: origin.x + Kwi3Grid.contentLeft + xOff,
+            x: origin.x + root.leftPad + xOff,
             y: origin.y,
             w: plan.cells[idx] * Kwi3Grid.moduleW
         }
@@ -968,11 +1041,38 @@ PanelWindow {
     Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
     Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
 
+    // The controls layer's live values (ModeBarTheme.controlValues, shown
+    // by the controls panel below): polled while the layer is up, so a step
+    // shows within half a second.
+    Process {
+        id: ctlProc
+        command: [Quickshell.env("HOME") + "/.local/bin/hwctl", "show"]
+        stdout: SplitParser {
+            // one line of KEY=VALUE pairs
+            onRead: data => {
+                var v = {}, f = data.trim().split(" ")
+                for (var i = 0; i < f.length; i++) {
+                    var eq = f[i].indexOf("=")
+                    if (eq > 0) v[f[i].slice(0, eq)] = f[i].slice(eq + 1)
+                }
+                ModeBarTheme.controlValues = v
+            }
+        }
+    }
+    Timer {
+        interval: 500; repeat: true; triggeredOnStart: true
+        running: root.currentMode === "controls"
+        onTriggered: if (!ctlProc.running) ctlProc.running = true
+    }
+
     Process {
         id: batProc
         running: !root.daemonMode
         command: ["sh", "-c",
-            "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null; cat /sys/class/power_supply/BAT0/status 2>/dev/null"]
+            // the first supply of type Battery: BAT0 on laptops,
+            // qcom-battmgr-bat on the phone
+            "for d in /sys/class/power_supply/*; do " +
+            "[ \"$(cat $d/type 2>/dev/null)\" = Battery ] && { cat $d/capacity $d/status; break; }; done"]
         stdout: SplitParser {
             property int lineNum: 0
             onRead: data => {
@@ -1095,7 +1195,7 @@ PanelWindow {
         anchors.fill: parent
         anchors.leftMargin: root.insetSide
         anchors.rightMargin: root.insetSide
-        anchors.topMargin: root.insetTop
+        anchors.topMargin: root.insetTop + root.topShift
         // Pill look only when inset from the sides; otherwise a flat top bar.
         radius: root.insetSide > 0 ? 12 : 0
         color: root.barColor
@@ -1103,20 +1203,23 @@ PanelWindow {
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
+        id: topContent
         anchors.fill: parent
         anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
         anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
-        anchors.topMargin: root.insetTop
+        anchors.topMargin: root.insetTop + root.topShift
 
         // Left: workspaces + mode
         Row {
             id: leftSide
             objectName: "leftSide"
+            parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             visible: root.currentMode === "default"
             // kwi3-2zj (carried from i3kwin/bar/shell.qml): the first tab
-            // starts where the tiles' own titlebars do.
+            // starts where the tiles' own titlebars do, or clear of a
+            // rounded corner (leftPad).
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
+                      leftMargin: root.leftPad }
             spacing: 0
 
             Repeater {
@@ -1311,9 +1414,12 @@ PanelWindow {
             // to know exactly where this renders, the same way the tab
             // Repeater's own geometry feeds focusedTabScreenRect.
             id: mb
+            parent: root.split && bottomBar.item ? bottomBar.item.content : topContent
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom
-                      leftMargin: Kwi3Grid.active ? Kwi3Grid.contentLeft : 8 }
-            mode: root.inNavMode ? root.navLayerSticky : root.currentMode
+                      leftMargin: root.leftPad }
+            mode: root.inNavMode ? root.navLayerSticky
+                : root.currentMode === "controls" && (root.daemonMod === "reverse" || root.daemonMod === "reverse-shift") ? "controls-reverse"
+                : root.currentMode
             fontSize: root.fontSize
         }
 
@@ -1328,7 +1434,7 @@ PanelWindow {
             id: tickerArea
             objectName: "tickerArea"
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? root.cellW : 8; rightMargin: root.onGrid ? root.cellW : 4 }
+            anchors { left: root.split ? parent.left : leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: root.onGrid ? root.cellW : 8; rightMargin: root.onGrid ? root.cellW : 4 }
             clip: true
             height: parent.height
             z: -1
@@ -1542,7 +1648,7 @@ PanelWindow {
             id: clockDate
             objectName: "clockDate"
             anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1
-                      rightMargin: root.onGrid ? root.cellW : 8 }
+                      rightMargin: root.rightPad }
             spacing: 0
 
             Text { width: root.gsep(1, implicitWidth); text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
@@ -1585,6 +1691,104 @@ PanelWindow {
         }
     }
 
+    // The bottom bar (QS_BAR_SPLIT). leftSide and mb reparent into its
+    // `content` when it exists. Its exclusive zone is its whole height, so
+    // windows tile above it.
+    Loader {
+        id: bottomBar
+        active: root.split
+        sourceComponent: PanelWindow {
+            property alias content: bottomContent
+            screen: root.screen
+            anchors { left: true; right: true; bottom: true }
+            implicitHeight: root.bottomBarH
+            exclusiveZone: implicitHeight
+            color: root.barColor
+            Item {
+                id: bottomContent
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                anchors.bottomMargin: root.bottomBelow
+                height: root.bottomRowH
+            }
+        }
+    }
+
+    // The controls panel: while the controls layer is up, a list like the
+    // $mod+Tab switcher's - one control per row, its key highlighted in the
+    // word, its current value beside it. Laid out as a river: the words
+    // right-aligned and the values left-aligned on either side of one
+    // gutter. Display only: hotkeyd owns the keys, so the window takes no
+    // focus. A plain top-level window titled qs-controls, like the
+    // switcher's qs-switcher: kwi3's config.js floats it and centres it on
+    // the tile grid, and on kwi3 its size is whole cells, so it sits on the
+    // grid like every other dialog.
+    Window {
+        id: controlsPanel
+        // column widths: the longest word, and the longest value a control
+        // can show ("inverted"), so the gutter does not move as values change
+        readonly property int labelW: {
+            var rows = ModeBarTheme.controlRows || [], w = 0
+            for (var i = 0; i < rows.length; i++)
+                w = Math.max(w, ctlLabelFm.advanceWidth(rows[i].text))
+            return Math.ceil(w)
+        }
+        readonly property int valueW: Math.ceil(ctlValueFm.advanceWidth("inverted"))
+        readonly property int gap: DialogTheme.textLeftMargin
+        // the space around the list: two cells at the sides, one row above
+        // and below on kwi3
+        readonly property int border: 2 * DialogTheme.textLeftMargin
+        readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
+        readonly property int contentW: labelW + gap + valueW + 2 * border
+        FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
+        FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
+        transientParent: null
+        visible: root.currentMode === "controls"
+        title: "qs-controls"
+        flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
+        width: Kwi3Grid.active ? Math.ceil(contentW / Kwi3Grid.moduleW) * Kwi3Grid.moduleW : contentW
+        height: (ModeBarTheme.controlRows || []).length * DialogTheme.rowHeight + 2 * borderV
+        color: DialogTheme.bodyBg
+        Column {
+            anchors { fill: parent; topMargin: controlsPanel.borderV }
+            Repeater {
+                model: ModeBarTheme.controlRows
+                Row {
+                    required property var modelData
+                    x: controlsPanel.border
+                    height: DialogTheme.rowHeight
+                    spacing: controlsPanel.gap
+                    Text {
+                        width: controlsPanel.labelW
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignRight
+                        // the key is the highlighted letter of the word, as in the mode strip
+                        text: {
+                            var t = modelData.text, i = t.indexOf(modelData.key)
+                            return i < 0 ? t : t.slice(0, i) + "<b><font color=\"" + ModeBarTheme.highlight
+                                + "\">" + modelData.key + "</font></b>" + t.slice(i + 1)
+                        }
+                        textFormat: Text.StyledText
+                        color: DialogTheme.fg
+                        font.family: DialogTheme.font
+                        font.pixelSize: DialogTheme.fontSize
+                        renderType: Text.NativeRendering
+                    }
+                    Text {
+                        width: controlsPanel.valueW
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignLeft
+                        text: modelData.value
+                        color: DialogTheme.fg
+                        font.family: DialogTheme.font
+                        font.pixelSize: DialogTheme.fontSize
+                        font.bold: true
+                        renderType: Text.NativeRendering
+                    }
+                }
+            }
+        }
+    }
+
     // kwi3-55l.20 (extended kwi3-55l.24): the focused-tab / mode-segment ring
     // itself. A DIRECT child of this PanelWindow (a second top-level window,
     // not an Item in the tree above) because it must occupy the gap ABOVE
@@ -1602,98 +1806,101 @@ PanelWindow {
     // which already picked the workspace tab or the mode segment above, so
     // this Window neither knows nor cares which one it is currently over.
     //
-    // The hint above only means something on X11. On Wayland Qt ignores it and
-    // the Window becomes an ordinary xdg_toplevel, which KWin reports as a
-    // normalWindow, so i3kwin tiles it as half a screen of empty client - and
-    // a toplevel cannot place itself anyway. ringUsesLayerShell swaps in the
-    // layer-shell Loader below, only on this socket: kwi3-kwin-session's own.
-    // Not root.isPhone: kwi3-phone-session does not set QS_PHONE, so the phone
-    // would take this branch too, and its layout must stay as it is.
-    readonly property bool ringUsesLayerShell: Quickshell.env("WAYLAND_DISPLAY") === "kwi3-kwin"
-
+    // Wayland (kwi3 on KWin, the phone's krdp-kwin session) has no
+    // override_redirect: BypassWindowManagerHint is ignored and a plain
+    // Window cannot place itself, so KWin hands it to kwi3 as an ordinary
+    // toplevel and it gets TILED. There the ring is a layer-shell surface
+    // instead - overlay layer, no exclusive zone, no focus, click-through -
+    // placed by margins from the output's top-left.
     Loader {
-        active: Kwi3Grid.active && root.ringUsesLayerShell
-        sourceComponent: Component {
-            PanelWindow {
-                readonly property var rect: root.ringScreenRect
-                readonly property int thickness: Kwi3Grid.frameThickness
-                readonly property var origin: (root.screen && root.screen.geometry) ? root.screen.geometry : ({ x: 0, y: 0 })
-
-                screen: root.screen
-                // Same condition as the X11 Window's own `visible` below.
-                visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
-                         && rect !== null && thickness > 0
-                anchors { top: true; left: true }
-                margins {
-                    left: rect ? rect.x - origin.x : 0
-                    top: rect ? rect.y - thickness - origin.y : 0
-                }
-                implicitWidth: rect ? Math.max(1, rect.w) : 1
-                implicitHeight: Math.max(1, thickness)
-                aboveWindows: true
-                // -1, not 0: at 0 the compositor measures these margins from
-                // the work area, which drops the ring 24px below the bar.
-                exclusiveZone: -1
-                focusable: false
-                color: "transparent"
-                mask: Region {}   // empty = fully click-through
-
-                Rectangle {
-                    anchors.fill: parent
-                    color: root.ringColor
-                }
+        active: Kwi3Grid.active
+        sourceComponent: Qt.platform.pluginName === "wayland" ? wsFocusLayer : wsFocusX11
+    }
+    Component {
+        id: wsFocusLayer
+        PanelWindow {
+            readonly property var rect: root.ringScreenRect
+            readonly property int thickness: Kwi3Grid.frameThickness
+            // Layer-shell margins count from the output's own top-left, while
+            // ringScreenRect is in global coords: off by the output's origin on
+            // any monitor but the first.
+            readonly property var origin: (root.screen && root.screen.geometry) ? root.screen.geometry : ({ x: 0, y: 0 })
+            screen: root.screen
+            visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                     && rect !== null && thickness > 0
+            // Split bar: the ring sits right above the bottom bar's tab row,
+            // placed from the screen's bottom edge (exclusive zone -1: the
+            // bottom bar's own zone must not push it up again).
+            anchors { top: !root.split; bottom: root.split; left: true }
+            margins {
+                left: rect ? rect.x - origin.x : 0
+                top: rect && !root.split ? Math.max(0, rect.y - thickness - origin.y) : 0
+                bottom: root.split ? root.bottomRowH + root.bottomBelow : 0
+            }
+            implicitWidth: rect ? Math.max(1, rect.w) : 1
+            implicitHeight: Math.max(1, thickness)
+            aboveWindows: true
+            // -1 on the top bar too, never 0: a zero zone is still MOVED
+            // out of other surfaces' exclusive zones, so the top bar's own
+            // zone pushed the strip down onto the tab's bottom edge (an
+            // underline, where X11 draws it above the tab). -1 is "do not
+            // move me": the margins above count from the screen edge.
+            exclusiveZone: -1
+            focusable: false
+            mask: Region {}
+            color: "transparent"
+            Rectangle {
+                anchors.fill: parent
+                color: root.ringColor
             }
         }
     }
+    Component {
+        id: wsFocusX11
+        Window {
+            id: wsFocusHighlight
+            readonly property var rect: root.ringScreenRect
+            readonly property int thickness: Kwi3Grid.frameThickness
+            // Off entirely when the window ring itself is off
+            // (focusFrame: false) or there is nothing to mark (no focused
+            // tab at rest, no visible mode segment while a layer is up) -
+            // "unfocused tabs have none" generalised to "none at all
+            // fires none".
+            //
+            // kwi3-55l.30: frameEnabled gates the AT-REST (workspace)
+            // ring only. grid.get's frame.enabled is now EFFECTIVE - false
+            // while kwi3's modeFrame hides the window ring for the current
+            // mode (Jan's config.js: '*': 'none' for system/switcher/...)
+            // - and the stripe over the mode pill is the pill's own
+            // accent, independent of the window ring (kwi3-55l.27), so a
+            // mode that hides the window ring must not also take the
+            // pill's highlight away.
+            visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
+                     && rect !== null && thickness > 0
+            x: rect ? rect.x : 0
+            y: rect ? rect.y - thickness : 0
+            width: rect ? Math.max(1, rect.w) : 1
+            height: Math.max(1, thickness)
+            flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
+            title: "kwi3-bar-focus-ring"
+            color: "transparent"
 
-    Loader {
-        active: Kwi3Grid.active && !root.ringUsesLayerShell
-        sourceComponent: Component {
-            Window {
-                id: wsFocusHighlight
-                readonly property var rect: root.ringScreenRect
-                readonly property int thickness: Kwi3Grid.frameThickness
-                // Off entirely when the window ring itself is off
-                // (focusFrame: false) or there is nothing to mark (no focused
-                // tab at rest, no visible mode segment while a layer is up) -
-                // "unfocused tabs have none" generalised to "none at all
-                // fires none".
-                //
-                // kwi3-55l.30: frameEnabled gates the AT-REST (workspace)
-                // ring only. grid.get's frame.enabled is now EFFECTIVE - false
-                // while kwi3's modeFrame hides the window ring for the current
-                // mode (Jan's config.js: '*': 'none' for system/switcher/...)
-                // - and the stripe over the mode pill is the pill's own
-                // accent, independent of the window ring (kwi3-55l.27), so a
-                // mode that hides the window ring must not also take the
-                // pill's highlight away.
-                visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
-                         && rect !== null && thickness > 0
-                x: rect ? rect.x : 0
-                y: rect ? rect.y - thickness : 0
-                width: rect ? Math.max(1, rect.w) : 1
-                height: Math.max(1, thickness)
-                flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
-                title: "kwi3-bar-focus-ring"
-                color: "transparent"
-
-                // An opaque fill Rectangle, not this Window's own `color`:
-                // Overlay.qml's own note applies here too - a Window's
-                // `color` is not always honoured as the opaque clear colour
-                // under X11/FramelessWindowHint, which would leave this
-                // strip showing through to whatever the compositor-less
-                // "transparent" actually renders as. Square ends (no
-                // radius): a single top line has no corners to round.
-                //
-                // kwi3-55l.27: root.ringColor, not Kwi3Grid.frameColor
-                // directly - the workspace ring's own green at rest, the
-                // mode pill's own accent while a mode is up (see
-                // ringColor's own comment above for why it is not
-                // Kwi3Grid.frameColor unconditionally).
-                Rectangle {
-                    anchors.fill: parent
-                    color: root.ringColor
-                }
+            // An opaque fill Rectangle, not this Window's own `color`:
+            // Overlay.qml's own note applies here too - a Window's
+            // `color` is not always honoured as the opaque clear colour
+            // under X11/FramelessWindowHint, which would leave this
+            // strip showing through to whatever the compositor-less
+            // "transparent" actually renders as. Square ends (no
+            // radius): a single top line has no corners to round.
+            //
+            // kwi3-55l.27: root.ringColor, not Kwi3Grid.frameColor
+            // directly - the workspace ring's own green at rest, the
+            // mode pill's own accent while a mode is up (see
+            // ringColor's own comment above for why it is not
+            // Kwi3Grid.frameColor unconditionally).
+            Rectangle {
+                anchors.fill: parent
+                color: root.ringColor
             }
         }
     }

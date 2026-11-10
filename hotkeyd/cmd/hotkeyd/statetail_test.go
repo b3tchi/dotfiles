@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -188,5 +189,42 @@ func TestStateTail_ResolvesDisplayLikePythonsArgvContract(t *testing.T) {
 
 	if code := runStateTailCmd([]string{":42"}); code != 0 {
 		t.Fatalf("runStateTailCmd([:42]) = %d, want 0 (argv display should have been used, not $DISPLAY=:1)", code)
+	}
+}
+
+// A bar inside a KWin session has $WAYLAND_DISPLAY and no $DISPLAY: with no
+// display argument, state-tail must dial the socket the `--input kwin` daemon
+// of THAT KWin publishes (kwinDisplay()), not ":0"'s.
+func TestStateTail_NoDisplay_DialsTheKwinDaemonOfThisWaylandSocket(t *testing.T) {
+	// Short: t.TempDir()'s name pushes the socket past sun_path's 108 bytes.
+	dir, err := os.MkdirTemp("", "st")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	t.Setenv("XDG_RUNTIME_DIR", dir)
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "kwi3-phone")
+
+	ln, err := net.Listen("unix", layer.SocketPath("kwin-kwi3-phone"))
+	if err != nil {
+		t.Fatalf("listen: %s", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		conn.Write([]byte("{\"layer\":\"default\"}\n"))
+		conn.Close()
+	}()
+
+	var out, errOut bytes.Buffer
+	if rc := stateTail("", &out, &errOut); rc != 0 {
+		t.Fatalf("stateTail rc=%d, stderr=%q", rc, errOut.String())
+	}
+	if out.String() != "{\"layer\":\"default\"}\n" {
+		t.Fatalf("stdout = %q", out.String())
 	}
 }

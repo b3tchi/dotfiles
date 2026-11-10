@@ -20,6 +20,21 @@ Singleton {
     readonly property string muted: "#707880"       // reserved (bar-muted tone)
     readonly property string font: "Iosevka Nerd Font"
 
+    // The controls panel's rows: the word, its key (hotkeyd's controls
+    // layer) and the current value, set by Bar.qml from `hwctl show`.
+    property var controlValues: ({})
+    readonly property var controlRows: [
+        {text: "volume", key: "v", value: controlValues.volume || ""},
+        {text: "brightness", key: "b", value: controlValues.brightness || ""},
+        {text: "rotation", key: "r", value: controlValues.rotation || ""},
+        {text: "auto-rotate", key: "a", value: controlValues.autorotate || ""},
+        {text: "auto-suspend", key: "s", value: controlValues.autosuspend || ""},
+        {text: "wifi", key: "w", value: controlValues.wifi || ""},
+        {text: "bluetooth", key: "t", value: controlValues.bluetooth || ""},
+        {text: "nfc", key: "n", value: controlValues.nfc || ""},
+        {text: "gps", key: "g", value: controlValues.gps || ""}
+    ]
+
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.
     //     `text` is the full hint word; `key` is the trigger. ModeBar renders
     //     the first occurrence of `key` inside `text` in `highlight` (i3's own
@@ -81,6 +96,17 @@ Singleton {
             {text: "resizing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
+        // controls ($mod+c, kwi3): the controls themselves are a list
+        // panel (controlRows, drawn by Bar.qml); the strip keeps only the
+        // pill (+ / -, by held Alt) and the layer's own keys.
+        "controls": [
+            {text: "alt-to-reverse", key: "⎇"},
+            {text: "quit", key: "q"}
+        ],
+        "controls-reverse": [
+            {text: "reversing", key: "⎇"},
+            {text: "quit", key: "q"}
+        ],
         "system": [
             {text: "lock", key: "l"},
             {text: "exit", key: "e"},
@@ -119,6 +145,8 @@ Singleton {
         if (mode === "nav") return "nav"
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic
+        if (mode === "controls") return "controls"
+        if (mode === "controls-reverse") return "controls-reverse" // synthetic
         // The system surface reaches this function under TWO names, and both
         // have to keep working:
         //   "system"  — the daemon's layer name, published on the state socket
@@ -156,6 +184,8 @@ Singleton {
     function displayName(mode) {
         if (mode === "nav-move") return "nav MOVE"
         if (mode === "nav-resize") return "nav RESIZE"
+        if (mode === "controls") return "controls +"
+        if (mode === "controls-reverse") return "controls -"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }

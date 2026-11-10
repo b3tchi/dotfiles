@@ -860,3 +860,83 @@ func TestAFreshEnginePublishesNothingAtAllBeforeTheFirstKey(t *testing.T) {
 		t.Fatalf("state = %+v", got)
 	}
 }
+
+func repeatEngine() (*Engine, *fakeClock) {
+	binds := []bind.Bind{
+		{Chord: "b", Actions: []bind.Action{bind.Command("step")}, Repeat: true},
+		{Chord: "c", Actions: []bind.Action{bind.Command("once")}},
+	}
+	e, _, clock := buildEngine(engineOpts{binds: binds, layers: map[string]bind.Layer{}})
+	return e, clock
+}
+
+func TestARepeatBindFiresAgainWhileHeld(t *testing.T) {
+	e, clock := repeatEngine()
+	actionsEqual(t, e.Handle(press("b")), cmd("step"))
+	clock.Advance(RepeatEveryMS)
+	actionsEqual(t, e.Handle(press("b")), cmd("step"))
+	clock.Advance(RepeatEveryMS)
+	actionsEqual(t, e.Handle(press("b")), cmd("step"))
+}
+
+func TestARepeatBindIsThrottled(t *testing.T) {
+	e, clock := repeatEngine()
+	e.Handle(press("b"))
+	fired := 0
+	// 25 repeats a second, the compositor's usual rate, for one second.
+	for i := 0; i < 25; i++ {
+		clock.Advance(40)
+		fired += len(e.Handle(press("b")))
+	}
+	if want := 1000 / RepeatEveryMS; fired != want {
+		t.Fatalf("fired %d times in a second of repeats, want %d", fired, want)
+	}
+}
+
+func TestARepeatBindStopsAtRelease(t *testing.T) {
+	e, clock := repeatEngine()
+	e.Handle(press("b"))
+	e.Handle(release("b"))
+	clock.Advance(RepeatEveryMS)
+	actionsEqual(t, e.Handle(press("b")), cmd("step")) // a fresh press fires
+	if out := e.Handle(press("b")); len(out) != 0 {
+		t.Fatalf("a repeat right after the fresh press fired: %+v", out)
+	}
+}
+
+func TestAFreshPressIsNotThrottled(t *testing.T) {
+	e, _ := repeatEngine()
+	for i := 0; i < 3; i++ {
+		actionsEqual(t, e.Handle(press("b")), cmd("step"))
+		e.Handle(release("b"))
+	}
+}
+
+func TestABindWithoutRepeatStillFiresOncePerPress(t *testing.T) {
+	e, clock := repeatEngine()
+	actionsEqual(t, e.Handle(press("c")), cmd("once"))
+	for i := 0; i < 10; i++ {
+		clock.Advance(RepeatEveryMS)
+		if out := e.Handle(press("c")); len(out) != 0 {
+			t.Fatalf("repeat %d fired: %+v", i, out)
+		}
+	}
+}
+
+func TestARepeatBindInASublayerRepeats(t *testing.T) {
+	step := []bind.Bind{{Chord: "b", Actions: []bind.Action{bind.Command("up")}, Repeat: true}}
+	back := []bind.Bind{{Chord: "b", Actions: []bind.Action{bind.Command("down")}, Repeat: true}}
+	layers := map[string]bind.Layer{"controls": {
+		Binds:    step,
+		Mods:     map[string]bind.Mod{"reverse-shift": {Modifier: "Shift", Binds: back}},
+		ExitKeys: []string{"q"},
+	}}
+	binds := []bind.Bind{{Chord: "Mod4+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}}}
+	e, _, clock := buildEngine(engineOpts{binds: binds, layers: layers})
+	e.Handle(press("c", "Mod4"))
+	e.Handle(release("c", "Mod4"))
+	e.Handle(press("Shift_L"))
+	actionsEqual(t, e.Handle(press("b", "Shift")), cmd("down"))
+	clock.Advance(RepeatEveryMS)
+	actionsEqual(t, e.Handle(press("b", "Shift")), cmd("down"))
+}

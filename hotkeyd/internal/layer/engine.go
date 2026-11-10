@@ -224,6 +224,11 @@ const ReleaseGuardMS = 120
 // dead; 1 s is orders of magnitude above any real repeat interval.
 const KeyWedgeMS = 1000
 
+// RepeatEveryMS is the shortest gap between two firings of a held bind.Repeat
+// bind. Compositors repeat at about 25 a second, which would cross a 10-step
+// control in under half a second and spawn a process for each.
+const RepeatEveryMS = 200
+
 // DefaultLayer is what a fresh engine starts in, and what every exit route
 // returns to.
 const DefaultLayer = "default"
@@ -342,6 +347,7 @@ type Engine struct {
 	layerName string
 	held      map[string]time.Time // canonical modifier -> last corroborated at
 	down      map[string]time.Time // non-modifier keys down -> last seen
+	fired     map[string]time.Time // key -> when its bind last fired, for bind.Repeat
 
 	// Seeded with the STARTING state in NewEngine, never nil: the contract
 	// is "publish on change", and the state a fresh engine is already in is
@@ -367,6 +373,7 @@ func NewEngine(binds_ []bind.Bind, layers map[string]bind.Layer, cfg Config) *En
 		layerName: DefaultLayer,
 		held:      map[string]time.Time{},
 		down:      map[string]time.Time{},
+		fired:     map[string]time.Time{},
 	}
 	if e.clock == nil {
 		e.clock = time.Now
@@ -510,6 +517,25 @@ func (e *Engine) ShutdownActions() []bind.Action {
 		return nil
 	}
 	return e.exitActions(e.layerName)
+}
+
+// Reset returns the engine to the default layer with no held modifiers or
+// keys down, for an input source that lost its grabs (the KWin plugin
+// connection dropped): nothing the engine believed about a layer or a held
+// key can be trusted once the grabs behind it are gone. Returns the layer's
+// on_exit actions for the caller to dispatch (the overlay must not stay up)
+// and publishes the change. A no-op on a fresh default-layer engine apart
+// from clearing held/down.
+func (e *Engine) Reset() []bind.Action {
+	var out []bind.Action
+	if e.layerName != "" && e.layerName != DefaultLayer {
+		out = e.exitActions(e.layerName)
+	}
+	e.layerName = DefaultLayer
+	e.held = map[string]time.Time{}
+	e.down = map[string]time.Time{}
+	e.publish(nil, "reset")
+	return out
 }
 
 // ReconcileHoldLayer ends the current hold layer when down is false — i.e.
@@ -824,10 +850,12 @@ func (e *Engine) Handle(ev Event) []bind.Action {
 			// Publish before returning: expiry above may have changed the
 			// state, and swallowing it here would show a layer the engine
 			// had already left until the key was finally released.
+			out := e.runRepeat(ev, now)
 			e.publish(&ev, "")
-			return nil // auto-repeat: one action per press
+			return out // auto-repeat: one action per press, but for bind.Repeat
 		}
 		e.down[ev.Key] = now
+		e.fired[ev.Key] = now
 		actions, matched = e.match(ev, false)
 	}
 
@@ -836,6 +864,19 @@ func (e *Engine) Handle(ev Event) []bind.Action {
 	// layer costs one line, not two.
 	e.publish(&ev, "")
 	return out
+}
+
+// runRepeat fires a held key's bind again if it asks for that and its gap is up.
+func (e *Engine) runRepeat(ev Event, now time.Time) []bind.Action {
+	actions, matched := e.match(ev, false)
+	if matched == nil || !matched.Repeat {
+		return nil
+	}
+	if now.Sub(e.fired[ev.Key]) < time.Duration(RepeatEveryMS)*time.Millisecond {
+		return nil
+	}
+	e.fired[ev.Key] = now
+	return e.run(actions, matched)
 }
 
 // isRepeat reports whether key looks like an X auto-repeat press: same key,

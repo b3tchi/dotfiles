@@ -207,6 +207,17 @@ ShellRoot {
       ModeBarTheme.displayName("nav-resize")
     ]))
 
+    // ---- controls: each word carries its live value; pill says + / - ----
+    ModeBarTheme.controlValues = {volume: "50%", brightness: "40%", rotation: "right",
+                                  autorotate: "off", autosuspend: "10min", wifi: "on", bluetooth: "off", nfc: "on", gps: "in-use"}
+    emit("controls-rows", j(ModeBarTheme.controlRows))
+    emit("hints-controls", j(ModeBarTheme.hintsFor("controls")))
+    emit("hints-controls-reverse", j(ModeBarTheme.hintsFor("controls-reverse")))
+    emit("controls-display-names", JSON.stringify([
+      ModeBarTheme.displayName("controls"),
+      ModeBarTheme.displayName("controls-reverse")
+    ]))
+
     // ---- empty-string mode -> fallback row with empty label ----
     emit("empty-mode-fallback", j(ModeBarTheme.hintsFor("")))
 
@@ -311,6 +322,15 @@ assert_case "hints-nav-resize" \
 assert_case "nav-resolves" '["nav","nav-move","nav-resize"]'
 # the pill is the held-Shift tell: the two labels MUST NOT be equal.
 assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
+
+scenario "controls — panel rows carry live values, strip keeps + / - pill"
+assert_case "controls-rows" \
+  '[{"text":"volume","key":"v","value":"50%"},{"text":"brightness","key":"b","value":"40%"},{"text":"rotation","key":"r","value":"right"},{"text":"auto-rotate","key":"a","value":"off"},{"text":"auto-suspend","key":"s","value":"10min"},{"text":"wifi","key":"w","value":"on"},{"text":"bluetooth","key":"t","value":"off"},{"text":"nfc","key":"n","value":"on"},{"text":"gps","key":"g","value":"in-use"}]'
+assert_case "hints-controls" \
+  '[{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
+assert_case "hints-controls-reverse" \
+  '[{"text":"reversing","key":"⎇"},{"text":"quit","key":"q"}]'
+assert_case "controls-display-names" '["controls +","controls -"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,

@@ -52,6 +52,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
 	"hotkeyd/internal/bind"
 )
@@ -155,6 +156,27 @@ func navBinds(kind string) []bind.Bind {
 	return out
 }
 
+// controlsBinds is the controls layer's table: one hwctl step per letter,
+// dir "+" or "-". Holding b keeps stepping brightness; everything else is one
+// step per press.
+func controlsBinds(dir string) []bind.Bind {
+	var out []bind.Bind
+	for _, c := range []struct{ key, control string }{
+		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
+		// s steps through the idle delays; the rest are toggles, which + and -
+		// both flip
+		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
+		{"n", "nfc"}, {"g", "gps"},
+	} {
+		out = append(out, bind.Bind{
+			Chord:   c.key,
+			Actions: runAction("$HOME/.local/bin/hwctl " + c.control + " " + dir),
+			Repeat:  c.control == "brightness",
+		})
+	}
+	return out
+}
+
 // resizeLayerBinds is binds.py's _resize_layer_binds(): the standalone
 // resize mode's table. NOT navBinds("resize") — see binds.py's comment on
 // why the coarse/fine (5px letters / 10px arrows) split is carried
@@ -244,6 +266,19 @@ var Layers = map[string]bind.Layer{
 		},
 		ExitKeys: []string{"q", "Escape", "Return"},
 		OneShot:  true,
+	},
+
+	// Phone controls (kwi3 only, entered by $mod+c): a letter steps one
+	// control up, held Alt or Shift steps it down, or flips a toggle (auto-rotate,
+	// radios, GPS); persistent like nav, left with q / Escape / Return.
+	// hwctl does the work.
+	"controls": {
+		Binds: controlsBinds("+"),
+		Mods: map[string]bind.Mod{
+			"reverse":       {Modifier: "Mod1", Binds: controlsBinds("-")},
+			"reverse-shift": {Modifier: "Shift", Binds: controlsBinds("-")},
+		},
+		ExitKeys: []string{"q", "Escape", "Return"},
 	},
 
 	// was quickshell/qs-keymon.py + four `nop` grabs in i3 (dotfiles-hwds.40).
@@ -345,7 +380,14 @@ var Layers = map[string]bind.Layer{
 // Binds is the daemon's global bind table.
 var Binds = buildBinds()
 
+// buildBinds is the shared table with this machine's overrides laid over it.
 func buildBinds() []bind.Bind {
+	shared, _ := splitHostOverrides(hostOverrides(), Kwi3OnlyBinds)
+	return applyHostOverrides(buildSharedBinds(), shared)
+}
+
+// buildSharedBinds is the table every machine starts from.
+func buildSharedBinds() []bind.Bind {
 	out := []bind.Bind{
 		// SCOPED TO THE T6 CUTOVER (dotfiles-hwds.16): only the nav entry
 		// chord, because nav is the group T6 migrates.
@@ -455,6 +497,64 @@ func buildBinds() []bind.Bind {
 	return out
 }
 
+// splitHostOverrides parts this machine's overrides into those for the
+// shared table and those for a chord of kwi3Only, which effectiveBinds
+// appends after it - so each chord is overridden in one place only and a
+// kwi3-only chord is never added a second time as an extra.
+func splitHostOverrides(over map[string][]bind.Action, kwi3Only []bind.Bind) (shared, kwi3 map[string][]bind.Action) {
+	only := map[string]bool{}
+	for _, b := range kwi3Only {
+		only[b.Chord] = true
+	}
+	shared, kwi3 = map[string][]bind.Action{}, map[string][]bind.Action{}
+	for chord, acts := range over {
+		if only[chord] {
+			kwi3[chord] = acts
+		} else {
+			shared[chord] = acts
+		}
+	}
+	return shared, kwi3
+}
+
+// applyHostOverrides lays this machine's overrides (host_*.go, picked by
+// build tag) over the shared table: a chord already in it keeps its place
+// and takes the override's actions, a nil override drops the chord, and a
+// chord the table lacks is appended, in sorted order so the build is
+// reproducible. The shared table stays the one source for every chord a
+// machine does not name.
+func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind.Bind {
+	if len(over) == 0 {
+		return binds
+	}
+	out := make([]bind.Bind, 0, len(binds)+len(over))
+	seen := map[string]bool{}
+	for _, b := range binds {
+		acts, ok := over[b.Chord]
+		if !ok {
+			out = append(out, b)
+			continue
+		}
+		seen[b.Chord] = true
+		if acts == nil {
+			continue
+		}
+		b.Actions = acts
+		out = append(out, b)
+	}
+	extra := make([]string, 0, len(over))
+	for chord, acts := range over {
+		if !seen[chord] && acts != nil {
+			extra = append(extra, chord)
+		}
+	}
+	sort.Strings(extra)
+	for _, chord := range extra {
+		out = append(out, bind.Bind{Chord: chord, Actions: over[chord]})
+	}
+	return out
+}
+
 // Kwi3OnlyBinds is grabbed ONLY on a kwi3 session (main.go merges it into
 // the active table whenever $KWI3SOCK is set, never for a plain i3/sway
 // session) — bd kwi3-55l.1.
@@ -495,4 +595,7 @@ func buildBinds() []bind.Bind {
 var Kwi3OnlyBinds = []bind.Bind{
 	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
 	{Chord: "$mod+Shift+c", Actions: runAction("$HOME/.local/bin/kwi3-restart")},
+	// the controls layer (volume, brightness, rotation, radios, GPS): a kwi3 session's
+	// own, as hwctl's rotation is KWin's kscreen-doctor
+	{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}},
 }

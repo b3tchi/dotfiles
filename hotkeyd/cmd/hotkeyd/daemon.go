@@ -39,6 +39,7 @@ import (
 	"hotkeyd/internal/bind"
 	"hotkeyd/internal/i3"
 	"hotkeyd/internal/kwi3rpc"
+	"hotkeyd/internal/kwin"
 	"hotkeyd/internal/layer"
 	"hotkeyd/internal/proc"
 	"hotkeyd/internal/x11"
@@ -390,6 +391,12 @@ type DaemonConfig struct {
 	// frames.
 	Events <-chan x11.Event
 
+	// KeyEvents is the `--input kwin` source (sp011 Task 10): the kwi3keys
+	// plugin's decoded stream, read beside (and instead of) Events. Grabs
+	// must then be the kwinGrabs adapter. nil on the X11 path - a nil channel
+	// is never ready, so the select case is inert.
+	KeyEvents <-chan kwin.Event
+
 	I3      i3.Client
 	Grabs   grabSyncer
 	Devices deviceAttributor
@@ -478,13 +485,15 @@ type kwi3Dispatcher interface {
 }
 
 type Daemon struct {
-	events  <-chan x11.Event
-	i3      i3.Client
-	kwi3    kwi3Dispatcher
-	grabs   grabSyncer
-	devices deviceAttributor
-	engine  *layer.Engine
-	lock    lockBeater
+	events    <-chan x11.Event
+	keyEvents <-chan kwin.Event
+	kwinMods  uint32 // last modifier state the plugin reported
+	i3        i3.Client
+	kwi3      kwi3Dispatcher
+	grabs     grabSyncer
+	devices   deviceAttributor
+	engine    *layer.Engine
+	lock      lockBeater
 
 	pub    io.Closer
 	xConn  io.Closer
@@ -517,6 +526,7 @@ type Daemon struct {
 func NewDaemon(cfg DaemonConfig) *Daemon {
 	d := &Daemon{
 		events:    cfg.Events,
+		keyEvents: cfg.KeyEvents,
 		i3:        cfg.I3,
 		kwi3:      cfg.Kwi3,
 		grabs:     cfg.Grabs,
@@ -542,6 +552,9 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 	}
 	if d.run == nil {
 		d.run = proc.Run
+	}
+	if d.newMod == nil && d.keyEvents != nil {
+		d.newMod = d.kwinModQuery
 	}
 	if d.idleTick == 0 {
 		d.idleTick = IdleTick
@@ -954,6 +967,14 @@ runLoop:
 			d.lock.Beat()
 			d.pumpI3()
 			d.handleXEvent(ev)
+		case ev, ok := <-d.keyEvents:
+			if !ok {
+				d.log("kwi3keys event stream closed, exiting")
+				code = exitXConnLost
+				break runLoop
+			}
+			d.lock.Beat()
+			d.handleKwinEvent(ev)
 		case cmd, ok := <-d.control:
 			if ok {
 				d.handleControl(cmd)

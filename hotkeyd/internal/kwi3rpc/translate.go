@@ -207,7 +207,10 @@ func translateStatement(stmt string) (*Call, error) {
 		if arg == "scratchpad" {
 			return unsupported(stmt, KnownUnsupportedVerbs["scratchpad"])
 		}
-		return unsupported(stmt, "move "+arg+" is not translated (only left, right, up, down, scratchpad are recognised)")
+		if call, ok, err := translateMoveToWorkspace(stmt, words); ok {
+			return call, err
+		}
+		return unsupported(stmt, "move "+arg+" is not translated (only left, right, up, down, scratchpad and to workspace are recognised)")
 
 	case "scratchpad":
 		return unsupported(stmt, KnownUnsupportedVerbs["scratchpad"])
@@ -365,6 +368,41 @@ func translateWorkspace(stmt string, words []string) (*Call, error) {
 		return &Call{Method: "workspace.focus", Params: map[string]interface{}{"num": n}}, nil
 	}
 	return &Call{Method: "workspace.focus", Params: map[string]interface{}{"name": name}}, nil
+}
+
+// translateMoveToWorkspace handles i3's "move [container|window] [to]
+// workspace [number] <ref>" as ft010's workspace.move: a bare integer is a
+// POSITION (num), the same reading translateWorkspace gives "workspace 3",
+// anything else a name. ok is false when the statement is not a
+// move-to-workspace at all, so the caller can refuse it its own way.
+func translateMoveToWorkspace(stmt string, words []string) (*Call, bool, error) {
+	i := 1
+	if i < len(words) && (strings.EqualFold(words[i], "container") || strings.EqualFold(words[i], "window")) {
+		i++
+	}
+	if i < len(words) && strings.EqualFold(words[i], "to") {
+		i++
+	}
+	if i >= len(words) || !strings.EqualFold(words[i], "workspace") {
+		return nil, false, nil
+	}
+	ref := words[i+1:]
+	if len(ref) > 0 && strings.EqualFold(ref[0], "number") {
+		ref = ref[1:]
+	}
+	if len(ref) == 0 {
+		call, err := unsupported(stmt, "move to workspace needs a number or a name")
+		return call, true, err
+	}
+	switch strings.ToLower(ref[0]) {
+	case "next", "prev", "previous", "next_on_output", "prev_on_output", "back_and_forth", "current":
+		call, err := unsupported(stmt, "ft010's workspace.move takes num or name, not a relative workspace")
+		return call, true, err
+	}
+	if n, err := strconv.Atoi(ref[0]); err == nil && len(ref) == 1 {
+		return &Call{Method: "workspace.move", Params: map[string]interface{}{"num": n}}, true, nil
+	}
+	return &Call{Method: "workspace.move", Params: map[string]interface{}{"name": strings.Join(ref, " ")}}, true, nil
 }
 
 func translateExec(stmt string, words []string) (*Call, error) {

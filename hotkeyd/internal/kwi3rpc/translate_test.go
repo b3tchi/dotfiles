@@ -137,6 +137,26 @@ func TestTranslateWorkspaceByNumberAndName(t *testing.T) {
 	wantCalls(t, "workspace dotfiles", []Call{{Method: "workspace.focus", Params: map[string]interface{}{"name": "dotfiles"}}})
 }
 
+func TestTranslateMoveToWorkspace(t *testing.T) {
+	// i3's spellings of "send the focused container to workspace X" -> ft010
+	// workspace.move, a bare integer a POSITION (num) exactly as
+	// translateWorkspace reads one, anything else a name.
+	num3 := []Call{{Method: "workspace.move", Params: map[string]interface{}{"num": 3}}}
+	wantCalls(t, "move container to workspace 3", num3)
+	wantCalls(t, "move window to workspace 3", num3)
+	wantCalls(t, "move to workspace 3", num3)
+	wantCalls(t, "move container to workspace number 3", num3)
+	wantCalls(t, "move container to workspace dot files",
+		[]Call{{Method: "workspace.move", Params: map[string]interface{}{"name": "dot files"}}})
+	// move-and-follow is two statements, run in order.
+	wantCalls(t, "move container to workspace 3; workspace 3", []Call{
+		num3[0], {Method: "workspace.focus", Params: map[string]interface{}{"num": 3}}})
+	// no target, or a relative one ft010 has no method for
+	wantUnsupported(t, "move container to workspace")
+	wantUnsupported(t, "move container to workspace next")
+	wantUnsupported(t, "move container to output left")
+}
+
 func TestTranslateWorkspaceNextPrev(t *testing.T) {
 	// ft010's workspace.focus takes num|id|name only - no direction - so
 	// this is the one pseudo-method Client resolves itself (workspace.list

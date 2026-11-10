@@ -2,10 +2,13 @@
 # device customization, Clicks keyboard case included.
 # Usage (on the phone): rotz install meta-nothing
 #
+# `github` comes first: ssh access to GitHub (one-time login, code approved
+# on another device), so the dots below can fetch the private repos.
 # `nothing-pmos` runs the nothing-pmos repo's install.sh from
-# ~/.local/src/nothing-pmos (pushed from the dev box; see its dot.yaml):
-# usb/Clicks charger-plug recovery, suspend, gps, dtb, kernel modules,
-# sensors, bluetooth, UCM. `clicks` is the Clicks key mapping (hwdb + keyd).
+# ~/.local/src/nothing-pmos (fetched from GitHub, or pushed from the dev box;
+# see its dot.yaml): usb/Clicks charger-plug recovery, suspend, gps, dtb,
+# kernel modules, sensors, bluetooth, UCM, lock screen, hardening. `clicks`
+# is the Clicks key mapping (hwdb + keyd).
 # The rest is Core UX: `distro` (yazi, lazygit, bat, rg, fd, fzf, bottom,
 # ... plus bashrc), `nushell` + `tmux` (shell layer), `nvim`, `lazygit`
 # config, `gopass` (password store) - apk installs on Alpine.
@@ -13,6 +16,7 @@
 #
 # FLAT, like every meta: lists dots only, never another meta.
 depends:
+  - github
   - nothing-pmos
   - clicks
   - distro
@@ -21,6 +25,7 @@ depends:
   - nvim
   - lazygit
   - gopass
+  - logseq
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the

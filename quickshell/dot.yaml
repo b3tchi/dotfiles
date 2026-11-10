@@ -43,6 +43,16 @@ linux:
         scrot imagemagick xclip libnotify
       {{/if}}
       rotz link quickshell --force
+      # This machine's bar settings (Common/Session.qml's machine file):
+      # machines/<hostname>.json when there is one, else none - a link
+      # left from an earlier install is removed, a real file is kept.
+      m="$HOME/.dotfiles/quickshell/machines/$(uname -n).json"
+      t="$HOME/.config/quickshell-machine.json"
+      if [ -e "$m" ]; then
+        ln -sfn "$m" "$t"
+      elif [ -L "$t" ]; then
+        rm -f "$t"
+      fi
       # stats daemon: one per machine as a user unit (binary built by
       # qs-start.sh, which starts the unit; enable = up from login on)
       if [ -d /run/systemd/system ]; then

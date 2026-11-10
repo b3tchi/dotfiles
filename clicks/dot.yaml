@@ -1,8 +1,9 @@
 # clicks — key mapping for the Clicks Creator Keyboard case (USB 352e:2306)
 # on the phone (postmarketOS, systemd). Part of meta-nothing.
 #
-# - 90-clicks-keyboard.hwdb: Globe = Ctrl, Show/Hide = Alt (evdev keymap,
-#   no daemon needed)
+# - 90-clicks-keyboard.hwdb: Globe = Ctrl, Show/Hide = Alt, and the key
+#   that sends Super (Left GUI) = Alt too: Alt is $mod on the phone, and
+#   held Alt is nav's resize sublayer (evdev keymap, no daemon needed)
 # - keyd-clicks.conf: Tab hold = nav layer (hjkl arrows, Space = Esc);
 #   keyd matches only the Clicks ([ids])
 # - 90-clicks-keyd.rules: keyd runs only while the Clicks is attached

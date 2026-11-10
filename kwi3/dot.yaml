@@ -86,12 +86,22 @@
 # even fix the original bug: quickshell 0.3.x stops looking at subdirectories
 # the moment a top-level shell.qml exists in a search path, so `qs -c kwi3`
 # still failed. See kwi3/test-bar-symlink-safe.sh.
+#
+# ON THE PHONE (any apk system): kwi3/install-nura.sh instead of all of the
+# below - see its header.
 linux:
   links:
     config.js: ~/.config/kwi3/config.js
 
   installs:
     cmd: |
+      # The phone (postmarketOS/Nura, apk) runs kwi3 on KWin, not the X11
+      # host below: kwi3/install-nura.sh, and nothing else in this script.
+      if command -v apk >/dev/null 2>&1; then
+        sh "$HOME/.dotfiles/kwi3/install-nura.sh"
+        exit $?
+      fi
+
       REPO="${KWI3_REPO:-https://github.com/b3tchi/kwi3}"
       SRC="$HOME/.local/src/kwi3"
 

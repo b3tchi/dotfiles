@@ -74,6 +74,12 @@ type Bind struct {
 	// same with --release).
 	OnRelease bool
 
+	// Repeat fires this bind again while its key is held, at most every
+	// layer.RepeatEveryMS. Off by default: one action per press is what almost
+	// every chord wants. Meant for press binds that step a value. Not part of
+	// the duplicate-detection identity.
+	Repeat bool
+
 	// Device restricts this bind to one source device, by name as XI2
 	// reports it (`xinput list`). "" — the zero value — means "any source".
 	// Core X11 KeyPress carries no device identity at all, which is why the

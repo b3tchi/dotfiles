@@ -52,6 +52,7 @@ linux:
   links:
     # session-aware i3exit (kwi3 logout) - shadows /usr/bin/i3exit via PATH
     i3exit: ~/.local/bin/i3exit
+    hwctl: ~/.local/bin/hwctl
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
