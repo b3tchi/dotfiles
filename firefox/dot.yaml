@@ -14,6 +14,7 @@
 linux:
   links:
     ff: ~/.local/bin/ff
+    focus: ~/.local/bin/focus
     ff.desktop: ~/.local/share/applications/ff.desktop
     user.js:
       - ~/.mozilla/firefox/home/user.js
@@ -30,7 +31,7 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm firefox
       {{/if}}
-      chmod +x ~/.local/bin/ff
+      chmod +x ~/.local/bin/ff ~/.local/bin/focus
 
       # Refresh the MIME cache so ff.desktop is offered as a handler.
       update-desktop-database ~/.local/share/applications 2>/dev/null || true
