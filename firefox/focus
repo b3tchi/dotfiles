@@ -1,7 +1,11 @@
 #!/bin/sh
 # focus — open a Firefox private window ($mod+d launcher entry).
 #
-# Goes through ff so the window lands in the profile (and so the display)
-# of the current session. A running instance gets the private window as a
-# new window over DBus remoting instead of a second process.
-exec ff --private-window "$@"
+# Prefers ff so the window lands in the profile (and so the display) of the
+# current session. Falls back to plain firefox where ff is not linked (e.g.
+# the phone, which runs Firefox on its default profile). A running instance
+# gets the private window as a new window over remoting, not a new process.
+if command -v ff >/dev/null 2>&1; then
+  exec ff --private-window "$@"
+fi
+exec firefox --private-window "$@"
