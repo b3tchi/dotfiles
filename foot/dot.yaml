@@ -1,3 +1,10 @@
 linux:
   links:
+    # The phone (postmarketOS/Nura, apk) gets its own file: it includes
+    # foot.ini for the shared styling and overrides font/cell size and the
+    # shell (bash, so $mod+Return's TMUX_TARGET is honoured).
+    {{#if (eval "command -v apk >/dev/null 2>&1 && echo phone || true")}}
+    foot-phone.ini: ~/.config/foot/foot.ini
+    {{else}}
     foot.ini: ~/.config/foot/foot.ini
+    {{/if}}
