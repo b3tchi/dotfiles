@@ -24,8 +24,8 @@ func phoneBind(t *testing.T, chord string) bind.Bind {
 }
 
 func TestPhoneTable(t *testing.T) {
-	if got := phoneBind(t, "$mod+Return"); !reflect.DeepEqual(got.Actions, runAction("foot")) {
-		t.Fatalf("$mod+Return on the phone = %+v, want run foot", got)
+	if got := phoneBind(t, "$mod+Return"); !reflect.DeepEqual(got.Actions, runAction("~/.local/bin/wm-launch-terminal foot")) {
+		t.Fatalf("$mod+Return on the phone = %+v, want run wm-launch-terminal foot", got)
 	}
 	// Kwi3OnlyBinds is appended after the shared table; the override must
 	// still reach it.

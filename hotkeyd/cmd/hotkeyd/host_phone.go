@@ -8,17 +8,19 @@ import (
 	"hotkeyd/internal/bind"
 )
 
-// hostOverrides for the phone (`go build -tags phone`): the headless KWin
-// session reached over RDP. It has no dotfiles, nushell or st, so a chord
-// that runs one of this machine's own programs is pointed at what the phone
-// does have. Chords that talk to kwi3 over $KWI3SOCK need nothing here.
+// hostOverrides for the phone (`go build -tags phone`): the phone's KWin
+// session. It has no st, so a chord that runs one of the desktop's programs
+// is pointed at what the phone does have. Chords that talk to kwi3 over
+// $KWI3SOCK need nothing here.
 // kwinMod is $mod on a kwin session: Alt on the phone, as on the desktop
 // (the Clicks keyboard's Alt key is mapped to leftalt by the clicks dot).
 const kwinMod = "Mod1"
 
 func hostOverrides() map[string][]bind.Action {
 	over := map[string][]bind.Action{
-		"$mod+Return": runAction("foot"),
+		// wm-launch-terminal, as on the desktop, so the terminal opens in the
+		// focused workspace's project (its tmux session) and not in $HOME.
+		"$mod+Return": runAction("~/.local/bin/wm-launch-terminal foot"),
 		// KWin has no restart in place; reloading the script is its way.
 		"$mod+Shift+c": runAction("$HOME/.local/bin/i3reload"),
 		// i3-scrot is X11-only, and KWin has no wlr-screencopy for grim:
