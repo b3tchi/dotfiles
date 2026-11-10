@@ -157,7 +157,11 @@ def --wrapped main [...args] {
             # a log: keeps "identical processes" across callers. Errors before
             # this point (127/78) were already printed to the caller's stderr.
             let closer = if $nofdclose { 'exec </dev/null >/dev/null 2>&1; exec "$@"' } else {
-                'for f in /proc/self/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] && eval "exec $n>&-"; done 2>/dev/null; exec </dev/null >/dev/null 2>&1; exec "$@"'
+                # stdio first, then close fds > 2 with NO redirect on the
+                # loop: `done 2>/dev/null` makes busybox ash save fd 2 to a
+                # high fd the loop then closes, and restoring fd 2 from it
+                # spins at 100% CPU forever (seen on the phone, pmOS).
+                'exec </dev/null >/dev/null 2>&1; for f in /proc/self/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] && eval "exec $n>&-"; done; exec "$@"'
             }
             let setsid = (which setsid | get -o 0.path | default "")
             if $setsid == "" { die "setsid (util-linux) not found" 127 }
