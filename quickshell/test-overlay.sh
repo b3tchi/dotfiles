@@ -138,7 +138,7 @@ chmod 700 "$RUN"
 # pathScanner therefore sees exactly $PBIN.
 SLEEP_BIN="$(command -v sleep)"
 # cat is needed by the i3-msg stub's get_tree case (serves $I3DIR/tree.json).
-for t in sh tr xargs find sed sort grep setsid cat; do
+for t in sh tr xargs find sed sort grep setsid cat mkdir date wc tail mv; do
   src="$(command -v "$t")" || { echo "FATAL: $t not found for the sandbox PATH" >&2; exit 1; }
   ln -sf "$src" "$PBIN/$t"
 done
@@ -146,8 +146,8 @@ done
 # --- launcher test bins -------------------------------------------------------
 # Three real scripts whose names all end in "-mark"... actually "mark" so a
 # fuzzy "mark" narrows to exactly these three (no coreutil is a supersequence of
-# m-a-r-k). Equal fuzzy score => deterministic localeCompare order:
-# alphamark, betamark, zzmark. Each writes a distinct marker when launched.
+# m-a-r-k). Equal fzf score, no history => fzf --tiebreak=length order:
+# zzmark, betamark, alphamark. Each writes a distinct marker when launched.
 mk_mark_bin() { # <name>
   cat > "$PBIN/$1" <<EOF
 #!/bin/sh
@@ -434,7 +434,7 @@ fi
 scenario "fuzzy-launch-non-first: a fuzzy subsequence + Down + Enter launches the SELECTED (non-first) bin"
 clear_marks
 if open_launcher fuzzy-launch-non-first; then
-  typ "mark"              # narrows to alphamark(0), betamark(1), zzmark(2)
+  typ "mark"              # narrows to zzmark(0), betamark(1), alphamark(2)
   key Down                # select betamark — the SECOND filtered row
   key Return
   if marker_wait betamark; then
@@ -442,10 +442,48 @@ if open_launcher fuzzy-launch-non-first; then
   else
     fail "the second filtered row (betamark) launched" "marker betamark" "none"
   fi
-  assert_eq "the FIRST filtered row (alphamark) did NOT launch — not a first-row publish" \
-    "" "$(cat "$MARKS/alphamark" 2>/dev/null)"
-  assert_eq "the third row (zzmark) did NOT launch either" \
+  assert_eq "the FIRST filtered row (zzmark) did NOT launch — not a first-row publish" \
     "" "$(cat "$MARKS/zzmark" 2>/dev/null)"
+  assert_eq "the third row (alphamark) did NOT launch either" \
+    "" "$(cat "$MARKS/alphamark" 2>/dev/null)"
+  gone_on qs-launcher
+fi
+
+# ---- recency-boost (dotfiles-gu4i) ------------------------------------------
+# betamark was just launched, so its frecency lifts it over zzmark (which wins
+# the plain fzf length tiebreak). A mutant ignoring history launches zzmark.
+HIST="$HOME_S/.local/state/quickshell/launcher-history.tsv"
+scenario "recency-boost: a recently launched bin outranks an equal fuzzy match"
+sleep 0.3
+assert_eq "launch was logged to the history TSV" \
+  "betamark" "$(tail -n 1 "$HIST" 2>/dev/null | cut -f2)"
+clear_marks
+if open_launcher recency-boost; then
+  typ "mark"
+  key Return              # first row must now be betamark
+  if marker_wait betamark; then
+    pass "Enter on 'mark' launched the recent bin (betamark)"
+  else
+    fail "Enter on 'mark' launched the recent bin (betamark)" "marker betamark" \
+      "$(ls -1 "$MARKS" 2>/dev/null | tr '\n' ' ')"
+  fi
+  assert_eq "zzmark (length-tiebreak winner) did NOT launch" \
+    "" "$(cat "$MARKS/zzmark" 2>/dev/null)"
+  gone_on qs-launcher
+fi
+
+# ---- recent-first-empty-query (dotfiles-gu4i) -------------------------------
+scenario "recent-first-empty-query: with no query, the most frecent bin is row 0"
+clear_marks
+if open_launcher recent-first-empty-query; then
+  sleep 0.3
+  key Return
+  if marker_wait betamark; then
+    pass "Enter on an empty query launched the most frecent bin (betamark)"
+  else
+    fail "Enter on an empty query launched the most frecent bin (betamark)" "marker betamark" \
+      "$(ls -1 "$MARKS" 2>/dev/null | tr '\n' ' ')"
+  fi
   gone_on qs-launcher
 fi
 

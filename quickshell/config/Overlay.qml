@@ -38,6 +38,72 @@ Scope {
     property var launcherAllApps: []
     property var _appBuffer: []
 
+    // ── Launcher history (frecency) ──
+    // Append-only TSV log `<epoch>\t<bin>` under $XDG_STATE_HOME; one line
+    // per launch, trimmed to the newest 2000 lines on write. Read on every
+    // launcherShow into launcherFrecency {bin: weight}: each launch counts
+    // 4 (<1h), 2 (<1d), 1 (<1w), 0.5 (<30d), 0.25 (older) — zoxide-style.
+    readonly property string _histSh:
+        "f=\"${XDG_STATE_HOME:-$HOME/.local/state}/quickshell/launcher-history.tsv\"; "
+    property var launcherFrecency: ({})
+    property var _histBuffer: []
+
+    Process {
+        id: historyReader
+        running: true
+        command: ["sh", "-c", root._histSh + "[ -r \"$f\" ] && tail -n 2000 \"$f\""]
+        stdout: SplitParser {
+            onRead: data => root._histBuffer.push(data)
+        }
+        onExited: {
+            var now = Date.now() / 1000
+            var fr = {}
+            for (var i = 0; i < root._histBuffer.length; i++) {
+                var parts = root._histBuffer[i].split("\t")
+                if (parts.length < 2) continue
+                var ts = parseInt(parts[0], 10)
+                var name = parts[1].trim()
+                if (!name || isNaN(ts)) continue
+                var age = now - ts
+                var w = age < 3600 ? 4 : age < 86400 ? 2 : age < 604800 ? 1
+                      : age < 2592000 ? 0.5 : 0.25
+                fr[name] = (fr[name] || 0) + w
+            }
+            root.launcherFrecency = fr
+            root._histBuffer = []
+        }
+    }
+
+    // fzf-style ranking + frecency. Empty query: most frecent first, then
+    // alphabetical. With a query: Fuzzy.fzf score + a capped frecency boost
+    // (<= 24, i.e. ~1.5 matched chars, so a clearly better match still wins),
+    // ties broken by shorter name (fzf --tiebreak=length), then alphabetical.
+    readonly property string launcherSearch: launcherCombo.search
+    property var launcherFiltered: {
+        var q = launcherSearch
+        var fr = launcherFrecency
+        var out = []
+        for (var i = 0; i < launcherAllApps.length; i++) {
+            var name = launcherAllApps[i]
+            var m = Fuzzy.fzf(name, q)
+            if (!m.matched) continue
+            var f = fr[name] || 0
+            out.push({ name: name, indices: m.indices, f: f,
+                       score: q ? m.score + Math.min(Math.round(f * 3), 24) : 0 })
+        }
+        out.sort(function(a, b) {
+            if (q) {
+                if (b.score !== a.score) return b.score - a.score
+                if (b.f !== a.f) return b.f - a.f
+                if (a.name.length !== b.name.length) return a.name.length - b.name.length
+            } else if (b.f !== a.f) {
+                return b.f - a.f
+            }
+            return a.name.localeCompare(b.name)
+        })
+        return out
+    }
+
     Process {
         id: pathScanner
         running: true
@@ -72,14 +138,29 @@ Scope {
             root._appBuffer = []
             pathScanner.running = true
         }
+        if (!historyReader.running) {
+            root._histBuffer = []
+            historyReader.running = true
+        }
     }
 
     // Confirm handler — receives the selected ROW OBJECT from Combo, which for
     // the launcher is the bin-name string itself (adr0010: never a position).
     function launcherLaunch(name) {
         if (name) {
-            execProc.command = ["sh", "-c", "setsid -f " + name + " >/dev/null 2>&1 </dev/null"]
+            // Record the launch (frecency log, trimmed to 2000 lines), then
+            // detach the bin. Name passed as $1, never spliced into the script.
+            execProc.command = ["sh", "-c",
+                root._histSh +
+                "mkdir -p \"${f%/*}\" && printf '%s\\t%s\\n' \"$(date +%s)\" \"$1\" >> \"$f\"; " +
+                "[ \"$(wc -l < \"$f\")\" -gt 2500 ] && tail -n 2000 \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"; " +
+                "setsid -f \"$1\" >/dev/null 2>&1 </dev/null",
+                "sh", name]
             execProc.running = true
+            // optimistic in-memory bump so a quick reopen already reflects it
+            var fr = Object.assign({}, root.launcherFrecency)
+            fr[name] = (fr[name] || 0) + 4
+            root.launcherFrecency = fr
         }
         hide()
     }
@@ -875,11 +956,12 @@ Scope {
             id: launcherCombo
             anchors.fill: parent
             visible: root.mode === "launcher"
-            model: root.launcherAllApps
-            textOf: (function(r) { return r })   // rows are bare bin-name strings
+            filterMode: "external"          // caller ranks; see launcherFiltered
+            model: root.launcherFiltered
+            textOf: (function(r) { return r.name })
             placeholder: "run"
 
-            onConfirm: (row) => root.launcherLaunch(row)
+            onConfirm: (row) => root.launcherLaunch(row.name)
             onCancel: () => root.hide()
 
             delegate: Component {
@@ -897,7 +979,7 @@ Scope {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.leftMargin: DialogTheme.textLeftMargin
-                        text: Fuzzy.highlight(row, matchIndices)
+                        text: Fuzzy.highlight(row.name, row.indices)
                         textFormat: Text.RichText
                         color: DialogTheme.fg
                         font.family: DialogTheme.font
@@ -908,7 +990,7 @@ Scope {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: root.launcherLaunch(row)
+                        onClicked: root.launcherLaunch(row.name)
                     }
                 }
             }

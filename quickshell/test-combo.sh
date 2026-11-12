@@ -134,6 +134,15 @@ ShellRoot {
     emit("case-fold-upper-text", j(Fuzzy.match("ABC", "abc")))
     emit("case-fold-upper-pattern", j(Fuzzy.match("abc", "ABC")))
 
+    // ---- Fuzzy.fzf: fzf-style best alignment (launcher ranking) ----
+    // greedy would take a@1 b@2 c@6; fzf tightens to the boundary run 4..6
+    emit("fzf-best-alignment", j(Fuzzy.fzf("xab-abc", "abc")))
+    // both word starts: start bonus (doubled) + after-'-' bonus, gap 3
+    emit("fzf-word-starts", j(Fuzzy.fzf("git-graph", "gg")))
+    emit("fzf-camel", j(Fuzzy.fzf("openFile", "f")))
+    emit("fzf-no-match", j(Fuzzy.fzf("abc", "x")))
+    emit("fzf-empty-pattern", j(Fuzzy.fzf("abc", "")))
+
     // ---- Fuzzy.highlight: HTML-escape BEFORE wrapping ----
     // no indices -> escaped literal round-trip (the injection round-trip pin)
     emit("escape-richtext", j(Fuzzy.highlight("<b>x</b>", [])))
@@ -224,6 +233,13 @@ assert_case "empty-text-not-matched"     '{"matched":false,"score":0,"indices":[
 assert_case "pattern-longer-not-matched" '{"matched":false,"score":17,"indices":[0,1]}'
 assert_case "case-fold-upper-text"       '{"matched":true,"score":23,"indices":[0,1,2]}'
 assert_case "case-fold-upper-pattern"    '{"matched":true,"score":23,"indices":[0,1,2]}'
+
+scenario "Fuzzy.fzf — fzf-style best alignment (launcher)"
+assert_case "fzf-best-alignment" '{"matched":true,"score":80,"indices":[4,5,6]}'
+assert_case "fzf-word-starts"    '{"matched":true,"score":55,"indices":[0,4]}'
+assert_case "fzf-camel"          '{"matched":true,"score":30,"indices":[4]}'
+assert_case "fzf-no-match"       '{"matched":false,"score":0,"indices":[]}'
+assert_case "fzf-empty-pattern"  '{"matched":true,"score":0,"indices":[]}'
 
 scenario "Fuzzy.highlight — HTML-escape before wrapping (RichText injection guard)"
 assert_case "escape-richtext"      '"&lt;b&gt;x&lt;/b&gt;"'
