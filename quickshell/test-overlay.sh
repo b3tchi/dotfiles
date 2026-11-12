@@ -158,6 +158,9 @@ EOF
 mk_mark_bin alphamark
 mk_mark_bin betamark
 mk_mark_bin zzmark
+# A $PATH bin named after a bash builtin (dotfiles launcher filter): it is a
+# real executable, but the launcher must hide it like /usr/bin/kill, echo, [.
+mk_mark_bin pushd
 
 # A SYMLINK to a real binary that lives OUTSIDE $PBIN. With `find -L` this is
 # followed and listed as `symlinkbin`; launching it writes its marker. This is
@@ -397,7 +400,7 @@ open_switcher_search() {
 close_switcher() { ipc call switcher cancel >/dev/null 2>&1; gone_on qs-switcher; }
 
 # expected launcher list size (same scan the QML runs), for the geometry formula
-SCAN_N="$(echo "$PBIN" | tr ':' '\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u | wc -l | tr -d ' ')"
+SCAN_N="$(echo "$PBIN" | tr ':' '\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u | grep -vx pushd | wc -l | tr -d ' ')"
 
 echo "overlay: $OVERLAY_QML"
 echo "sandbox PATH: $PBIN  (scan lists $SCAN_N bins)"
@@ -427,6 +430,21 @@ if open_launcher broken-symlink-hidden; then
   sleep 0.3
   assert_eq "no row matches 'brokenbin' -> launcher collapses to the empty floor (32+0+8)" \
     "40" "$(geom_h "$WID")"
+  close_launcher
+fi
+
+# ---- shell-builtin-hidden --------------------------------------------------
+scenario "shell-builtin-hidden: a \$PATH bin named like a bash builtin (pushd) is NOT listed"
+clear_marks
+if open_launcher shell-builtin-hidden; then
+  typ "pushd"             # listed -> one row (72); filtered -> empty floor (40)
+  sleep 0.3
+  assert_eq "no row for 'pushd' -> launcher collapses to the empty floor (32+0+8)" \
+    "40" "$(geom_h "$WID")"
+  key Return
+  sleep 0.4
+  assert_eq "Enter launched nothing (pushd stub never ran)" \
+    "" "$(cat "$MARKS/pushd" 2>/dev/null)"
   close_launcher
 fi
 

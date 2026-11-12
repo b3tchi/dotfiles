@@ -36,6 +36,21 @@ Scope {
     // this scope only feeds the model and handles confirm (exec) / cancel.
 
     property var launcherAllApps: []
+    // Bash builtins + reserved words (`compgen -b; compgen -k`). Some have a
+    // standalone $PATH twin (/usr/bin/[, echo, kill, test, true, ...) that is
+    // useless from a GUI launcher, so the scan drops them by name.
+    readonly property var _shellBuiltins: (function() {
+        var names = (". : [ [[ ]] { } ! alias bg bind break builtin caller cd command " +
+            "compgen complete compopt continue coproc declare dirs disown echo enable " +
+            "eval exec exit export false fc fg getopts hash help history jobs kill let " +
+            "local logout mapfile popd printf pushd pwd read readarray readonly return " +
+            "set shift shopt source suspend test time times trap true type typeset " +
+            "ulimit umask unalias unset wait if then else elif fi case esac for select " +
+            "while until do done in function").split(" ")
+        var set = {}
+        for (var i = 0; i < names.length; i++) set[names[i]] = true
+        return set
+    })()
     property var _appBuffer: []
 
     // ── Launcher history (frecency) ──
@@ -123,7 +138,10 @@ Scope {
             }
         }
         onExited: {
-            root.launcherAllApps = root._appBuffer
+            var kept = []
+            for (var i = 0; i < root._appBuffer.length; i++)
+                if (!root._shellBuiltins[root._appBuffer[i]]) kept.push(root._appBuffer[i])
+            root.launcherAllApps = kept
             root._appBuffer = []
         }
     }
