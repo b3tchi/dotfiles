@@ -161,6 +161,19 @@ mk_mark_bin zzmark
 # A $PATH bin named after a bash builtin (dotfiles launcher filter): it is a
 # real executable, but the launcher must hide it like /usr/bin/kill, echo, [.
 mk_mark_bin pushd
+# Noise-name bins the scan drops: *.sh helpers and *-config build-flag helpers.
+mk_mark_bin qqfilter.sh
+mk_mark_bin qqfilter-config
+# .desktop boost: three bins all matching "dsktool". Plain fzf + length
+# tiebreak would pick dsktool; dsktool-long has a visible .desktop (Exec via
+# env + quotes + %U, exercising the parser), dsktool-hid's is NoDisplay=true.
+mk_mark_bin dsktool
+mk_mark_bin dsktool-long
+mk_mark_bin dsktool-hid
+APPS="$HOME_S/.local/share/applications"
+mkdir -p "$APPS"
+printf '[Desktop Entry]\nType=Application\nName=Long\nExec=env FOO=1 "%s/dsktool-long" %%U\n' "$PBIN" > "$APPS/long.desktop"
+printf '[Desktop Entry]\nType=Application\nName=Hid\nNoDisplay=true\nExec=dsktool-hid\n' > "$APPS/hid.desktop"
 
 # A SYMLINK to a real binary that lives OUTSIDE $PBIN. With `find -L` this is
 # followed and listed as `symlinkbin`; launching it writes its marker. This is
@@ -299,9 +312,9 @@ dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 # fontSize is the deterministic i3 value; QS_RDP=1 mirrors the main-instance
 # host. (QS_NO_KEYMON is gone with qs-keymon.py — dotfiles-hwds.40 moved the
 # switcher gesture into hotkeyd, so nothing respawns on this display any more.)
-setsid env -u SWAYSOCK -u KWI3SOCK \
+setsid env -u SWAYSOCK -u KWI3SOCK -u XDG_DATA_HOME \
     DISPLAY="$DPY" HOME="$HOME_S" PATH="$PBIN" \
-    QS_RDP=1 \
+    QS_RDP=1 XDG_DATA_DIRS="$TMP/nodata" \
     XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
     "$QS_BIN" -p "$ENTRY" >"$TMP/qs.out" 2>&1 &
 QS_PID=$!
@@ -400,7 +413,7 @@ open_switcher_search() {
 close_switcher() { ipc call switcher cancel >/dev/null 2>&1; gone_on qs-switcher; }
 
 # expected launcher list size (same scan the QML runs), for the geometry formula
-SCAN_N="$(echo "$PBIN" | tr ':' '\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u | grep -vx pushd | wc -l | tr -d ' ')"
+SCAN_N="$(echo "$PBIN" | tr ':' '\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u | grep -vxE 'pushd|.*\.sh|.*-config' | wc -l | tr -d ' ')"
 
 echo "overlay: $OVERLAY_QML"
 echo "sandbox PATH: $PBIN  (scan lists $SCAN_N bins)"
@@ -446,6 +459,31 @@ if open_launcher shell-builtin-hidden; then
   assert_eq "Enter launched nothing (pushd stub never ran)" \
     "" "$(cat "$MARKS/pushd" 2>/dev/null)"
   close_launcher
+fi
+
+# ---- noise-names-hidden ------------------------------------------------------
+scenario "noise-names-hidden: *.sh and *-config bins are NOT listed"
+if open_launcher noise-names-hidden; then
+  typ "qqfilter"          # matches only qqfilter.sh / qqfilter-config
+  sleep 0.3
+  assert_eq "no row for 'qqfilter' -> launcher collapses to the empty floor (32+0+8)" \
+    "40" "$(geom_h "$WID")"
+  close_launcher
+fi
+
+# ---- desktop-app-boost ------------------------------------------------------
+scenario "desktop-app-boost: a bin with a visible .desktop outranks shorter equal matches; NoDisplay gets no boost"
+clear_marks
+if open_launcher desktop-app-boost; then
+  typ "dsktool"
+  key Return              # boosted dsktool-long, not length-winner dsktool / NoDisplay dsktool-hid
+  if marker_wait dsktool-long; then
+    pass "Enter on 'dsktool' launched the .desktop app (dsktool-long)"
+  else
+    fail "Enter on 'dsktool' launched the .desktop app (dsktool-long)" "marker dsktool-long" \
+      "$(ls -1 "$MARKS" 2>/dev/null | tr '\n' ' ')"
+  fi
+  gone_on qs-launcher
 fi
 
 # ---- fuzzy-launch-non-first (adr0010 id-stability analog) -------------------

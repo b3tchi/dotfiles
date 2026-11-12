@@ -36,6 +36,13 @@ Scope {
     // this scope only feeds the model and handles confirm (exec) / cancel.
 
     property var launcherAllApps: []
+    // Scan-time noise filter: bash builtin/keyword twins (below), `*.sh`
+    // helper scripts and `*-config` build-flag helpers (aalib-config, ...).
+    function _launcherVisible(name) {
+        if (root._shellBuiltins[name]) return false
+        if (/\.sh$/.test(name) || /-config$/.test(name)) return false
+        return true
+    }
     // Bash builtins + reserved words (`compgen -b; compgen -k`). Some have a
     // standalone $PATH twin (/usr/bin/[, echo, kill, test, true, ...) that is
     // useless from a GUI launcher, so the scan drops them by name.
@@ -89,30 +96,87 @@ Scope {
         }
     }
 
+    // ── Desktop apps (ranking boost) ──
+    // Bin basenames named by a visible .desktop entry's Exec= (NoDisplay/
+    // Hidden=true skipped) across $XDG_DATA_HOME + $XDG_DATA_DIRS. One grep
+    // per dir; the JS side groups by file and takes each file's FIRST Exec.
+    property var launcherDesktopApps: ({})
+    property var _desktopBuffer: []
+
+    Process {
+        id: desktopScanner
+        running: true
+        command: ["sh", "-c",
+            "IFS=:; for d in \"${XDG_DATA_HOME:-$HOME/.local/share}\" " +
+            "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do " +
+            "grep -H -E '^(Exec|NoDisplay|Hidden)=' \"$d\"/applications/*.desktop 2>/dev/null; done"]
+        stdout: SplitParser {
+            onRead: data => root._desktopBuffer.push(data)
+        }
+        onExited: {
+            var files = {}
+            for (var i = 0; i < root._desktopBuffer.length; i++) {
+                var line = root._desktopBuffer[i]
+                var cut = line.indexOf(".desktop:")
+                if (cut < 0) continue
+                var file = line.slice(0, cut)
+                var kv = line.slice(cut + 9)
+                var e = files[file] || (files[file] = { exec: "", hidden: false })
+                if (/^(NoDisplay|Hidden)=true/.test(kv)) e.hidden = true
+                else if (kv.indexOf("Exec=") === 0 && !e.exec) e.exec = kv.slice(5)
+            }
+            var apps = {}
+            for (var f in files) {
+                if (files[f].hidden) continue
+                var bin = root._execBin(files[f].exec)
+                if (bin) apps[bin] = true
+            }
+            root.launcherDesktopApps = apps
+            root._desktopBuffer = []
+        }
+    }
+
+    // Exec= line -> bin basename: skip `env` and VAR=val prefixes, strip
+    // quotes, drop the dir. `env FOO=1 "/opt/x/foo" %U` -> "foo".
+    function _execBin(exec) {
+        var toks = (exec || "").trim().split(/\s+/)
+        for (var i = 0; i < toks.length; i++) {
+            var t = toks[i].replace(/^["']|["']$/g, "")
+            if (!t || t === "env" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue
+            return t.replace(/.*\//, "")
+        }
+        return ""
+    }
+
     // fzf-style ranking + frecency. Empty query: most frecent first, then
     // alphabetical. With a query: Fuzzy.fzf score + a capped frecency boost
     // (<= 24, i.e. ~1.5 matched chars, so a clearly better match still wins),
     // ties broken by shorter name (fzf --tiebreak=length), then alphabetical.
+    // Desktop apps (launcherDesktopApps) get +10 with a query; with no query
+    // they sort right after the frecent ones.
     readonly property string launcherSearch: launcherCombo.search
     property var launcherFiltered: {
         var q = launcherSearch
         var fr = launcherFrecency
+        var apps = launcherDesktopApps
         var out = []
         for (var i = 0; i < launcherAllApps.length; i++) {
             var name = launcherAllApps[i]
             var m = Fuzzy.fzf(name, q)
             if (!m.matched) continue
             var f = fr[name] || 0
-            out.push({ name: name, indices: m.indices, f: f,
-                       score: q ? m.score + Math.min(Math.round(f * 3), 24) : 0 })
+            var app = apps[name] ? 1 : 0
+            out.push({ name: name, indices: m.indices, f: f, app: app,
+                       score: q ? m.score + Math.min(Math.round(f * 3), 24) + app * 10 : 0 })
         }
         out.sort(function(a, b) {
             if (q) {
                 if (b.score !== a.score) return b.score - a.score
                 if (b.f !== a.f) return b.f - a.f
                 if (a.name.length !== b.name.length) return a.name.length - b.name.length
-            } else if (b.f !== a.f) {
-                return b.f - a.f
+            } else {
+                if (b.f !== a.f) return b.f - a.f
+                if (b.app !== a.app) return b.app - a.app
             }
             return a.name.localeCompare(b.name)
         })
@@ -140,7 +204,7 @@ Scope {
         onExited: {
             var kept = []
             for (var i = 0; i < root._appBuffer.length; i++)
-                if (!root._shellBuiltins[root._appBuffer[i]]) kept.push(root._appBuffer[i])
+                if (root._launcherVisible(root._appBuffer[i])) kept.push(root._appBuffer[i])
             root.launcherAllApps = kept
             root._appBuffer = []
         }
@@ -155,6 +219,10 @@ Scope {
         if (!pathScanner.running) {
             root._appBuffer = []
             pathScanner.running = true
+        }
+        if (!desktopScanner.running) {
+            root._desktopBuffer = []
+            desktopScanner.running = true
         }
         if (!historyReader.running) {
             root._histBuffer = []
