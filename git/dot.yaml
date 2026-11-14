@@ -1,7 +1,36 @@
+# Git: global config (~/.gitconfig, delta pager, difftastic diffs) and the
+# global ignore. gitconfig sets diff.external = difft, so `git diff` fails
+# without difftastic: the installs bring delta and difftastic.
 windows:
   links:
+    gitconfig: ~/.gitconfig
     ignore: ~/.config/git/ignore
+
+  installs:
+    cmd: |
+      scoop install delta difftastic
 
 linux:
   links:
+    gitconfig: ~/.gitconfig
     ignore: ~/.config/git/ignore
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm git-delta difftastic
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm git-delta difftastic
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm git-delta difftastic
+      {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install -y git-delta difftastic
+      {{/if}}
+      # Alpine-based (postmarketOS / Nura on the Nothing Phone)
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e delta difftastic >/dev/null 2>&1 ||
+          doas apk add delta difftastic
+      fi
+      rotz link git --force
