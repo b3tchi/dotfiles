@@ -3,29 +3,33 @@ windows:
     config.yml: ~/AppData/local/lazygit/config.yml
 
   installs:
+    depends:
+      - difftastic
     cmd: |
-      scoop install lazygit difftastic
+      scoop install lazygit
 
 linux:
   links:
     config.yml: ~/.config/lazygit/config.yml
   installs:
+    depends:
+      - difftastic
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -Syu --needed --noconfirm lazygit difftastic
+      sudo pacman -Syu --needed --noconfirm lazygit
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -Syu --needed --noconfirm lazygit difftastic
+      sudo pacman -Syu --needed --noconfirm lazygit
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -Syu --needed --noconfirm lazygit difftastic
+      sudo pacman -Syu --needed --noconfirm lazygit
       {{/if}}
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-      pkg install -y lazygit difftastic
+      pkg install -y lazygit
       {{/if}}
       # Alpine-based (postmarketOS / Nura on the Nothing Phone)
       if command -v apk >/dev/null 2>&1; then
-        apk info -e lazygit difftastic >/dev/null 2>&1 ||
-          doas apk add lazygit difftastic
+        apk info -e lazygit >/dev/null 2>&1 ||
+          doas apk add lazygit
       fi
       rotz link lazygit --force
