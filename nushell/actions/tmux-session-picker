@@ -38,7 +38,7 @@ def main [mode: string = "sessions", client_tty?: string] {
             let wid = ($id | split row ":" | get 1)
             let attached = if ($wid in $attached_wids) { $" ($gray)\(attached\)($rst)" } else { "" }
             let colored = ($title | str replace --regex ' - ([^-]*@[^ ]*)$' $"($gray) - $1($rst)")
-            $"($id)||($colored)($attached)"
+            $"($id)||($gray)($wid)($rst) ($colored)($attached)"
         }
     )
 
@@ -46,7 +46,11 @@ def main [mode: string = "sessions", client_tty?: string] {
         exit 0
     }
 
-    let selected = ($windows | str join "\n" | fzf --ansi --color='hl:#cc0000,hl+:#cc0000' --preview='tmux capture-pane -ep -t {1}' --preview-window=top:70%:border-bottom --delimiter='\|\|' --with-nth=2 | str trim)
+    # Preview: pane tail (scrollback + screen), trailing blank lines trimmed,
+    # `follow` keeps the preview scrolled to the bottom.
+    let preview = r#'tmux capture-pane -ep -S -500 -t {1} | awk 'NF{for(;n>0;n--)print "";print;next}{n++}''#
+
+    let selected = ($windows | str join "\n" | fzf --ansi --color='hl:#cc0000,hl+:#cc0000' --with-shell='bash -c' --preview=$preview --preview-window=top:70%:border-bottom:follow --delimiter='\|\|' --with-nth=2 | str trim)
 
     if ($selected | is-empty) {
         exit 0
