@@ -12,8 +12,12 @@
 # from source, the bar's stats daemon.
 # Core UX as on the phone: `distro`, `nushell`, `tmux`, `nvim`, `lazygit`,
 # `gopass`, `logseq` - apk installs on Alpine.
-# Session: `foot` (the phone foot.ini on apk systems), `quickshell` (the bar
-# config links), `kwi3` (install-nura.sh: kwi3 on KWin, kwi3 at every start).
+# Session: `quickshell` (the bar config links), `kwi3` (install-nura.sh: kwi3
+# on KWin, kwi3 at every start), and `foot` (the phone foot.ini on apk
+# systems), linked by the cmd below.
+#
+# Before the first run the tablet needs `bash`: rotz's eval template helper
+# runs through it, and every dot using eval fails to render without it.
 # No `clicks`: that is the phone's Clicks keyboard case.
 #
 # FLAT, like every meta: lists dots only, never another meta.
@@ -27,7 +31,6 @@ depends:
   - lazygit
   - gopass
   - logseq
-  - foot
   - quickshell
   - kwi3
 
@@ -40,5 +43,8 @@ installs:
     - quickshell
     - kwi3
   cmd: |
+    # foot is links only (no installs), so it cannot be a `depends` entry
+    # (rotz: dependency::not_found); link it here, as quickshell's dot does
+    rotz link foot
     sh "$HOME/.local/src/nothing-pmos/pipa/install.sh" --user
     echo "meta-pipa: done. Scale (needs the running session): see nothing-pmos pipa/README.md."
