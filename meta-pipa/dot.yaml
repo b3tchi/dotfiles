@@ -51,5 +51,9 @@ installs:
     # its install: that builds a desktop hotkeyd over ~/.dotfiles/hotkeyd/
     # hotkeyd; the tablet runs kwi3's phone build in ~/.local/bin.
     rotz link hotkeyd
+    # firefox's install neither links (ff, profiles) nor can make ff the
+    # default before ff.desktop exists: link it, then run its install again
+    rotz link firefox
+    rotz install firefox
     sh "$HOME/.local/src/nothing-pmos/pipa/install.sh" --user
     echo "meta-pipa: done. Scale (needs the running session): see nothing-pmos pipa/README.md."
