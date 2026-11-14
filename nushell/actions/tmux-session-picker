@@ -36,9 +36,11 @@ def main [mode: string = "sessions", client_tty?: string] {
             let id = ($parts | get 0)
             let title = ($parts | get 1)
             let wid = ($id | split row ":" | get 1)
-            let attached = if ($wid in $attached_wids) { $" ($gray)\(attached\)($rst)" } else { "" }
+            # Window id without "@"; "@" prefix marks a window a client is viewing
+            let num = ($wid | str trim --left --char "@")
+            let tag = if ($wid in $attached_wids) { $"@($num)" } else { $num }
             let colored = ($title | str replace --regex ' - ([^-]*@[^ ]*)$' $"($gray) - $1($rst)")
-            $"($id)||($colored)($attached) ($gray)($wid)($rst)"
+            $"($id)||($colored) ($gray)($tag)($rst)"
         }
     )
 
