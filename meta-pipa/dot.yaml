@@ -46,5 +46,9 @@ installs:
     # foot is links only (no installs), so it cannot be a `depends` entry
     # (rotz: dependency::not_found); link it here, as quickshell's dot does
     rotz link foot
+    # hotkeyd: links only (hwctl for the $mod+c controls panel, i3exit). Not
+    # its install: that builds a desktop hotkeyd over ~/.dotfiles/hotkeyd/
+    # hotkeyd; the tablet runs kwi3's phone build in ~/.local/bin.
+    rotz link hotkeyd
     sh "$HOME/.local/src/nothing-pmos/pipa/install.sh" --user
     echo "meta-pipa: done. Scale (needs the running session): see nothing-pmos pipa/README.md."
