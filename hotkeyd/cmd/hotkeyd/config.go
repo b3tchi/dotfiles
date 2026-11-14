@@ -268,7 +268,7 @@ var Layers = map[string]bind.Layer{
 		OneShot:  true,
 	},
 
-	// Phone controls (kwi3 only, entered by $mod+c): a letter steps one
+	// Device controls (entered by $mod+c): a letter steps one
 	// control up, held Alt or Shift steps it down, or flips a toggle (auto-rotate,
 	// radios, GPS); persistent like nav, left with q / Escape / Return.
 	// hwctl does the work.
@@ -457,6 +457,12 @@ func buildSharedBinds() []bind.Bind {
 	// One chord: the seven session actions live in Layers["system"].
 	out = append(out, bind.Bind{Chord: "$mod+0", Actions: []bind.Action{bind.EnterLayer{Layer: "system"}}})
 
+	// ---- THE CONTROLS MODE (dotfiles-m1re) ---------------------------------
+	// One chord: volume, brightness, rotation, radios, GPS live in
+	// Layers["controls"]. Was kwi3-only while hwctl's rotation was KWin's
+	// kscreen-doctor alone; hwctl now drives xrandr under X11, so i3 gets it too.
+	out = append(out, bind.Bind{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}})
+
 	// ---- THE ALT-TAB SWITCHER (dotfiles-hwds.40) --------------------------
 	// One chord (the second, $mod+w, was removed — dotfiles-hwds.50 — and
 	// stays removed here; see the package doc for why us020 does not bring
@@ -595,7 +601,4 @@ func applyHostOverrides(binds []bind.Bind, over map[string][]bind.Action) []bind
 var Kwi3OnlyBinds = []bind.Bind{
 	{Chord: "$mod+Shift+q", Actions: cmdAction("kill")},
 	{Chord: "$mod+Shift+c", Actions: runAction("$HOME/.local/bin/kwi3-restart")},
-	// the controls layer (volume, brightness, rotation, radios, GPS): a kwi3 session's
-	// own, as hwctl's rotation is KWin's kscreen-doctor
-	{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}},
 }

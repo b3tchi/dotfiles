@@ -1,14 +1,16 @@
 #!/bin/sh
 # hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
-# layer ($mod+c on kwi3: a letter steps up, held Alt or Shift steps down).
+# layer ($mod+c: a letter steps up, held Alt or Shift steps down).
 # hwctl show : one line of KEY=VALUE pairs, for the bar's controls panel.
 #
 #   volume      default sink, 5 %, 0..100
 #   brightness  every /sys/class/backlight device, to the next round 10 %, floor
 #               10 % so it is never off (needs the video group). Percent, not raw
 #               units: a step of max/10 truncates and drifts off the round numbers
-#   rotation    the first enabled KWin output, + clockwise, - counter
-#               (kscreen-doctor; $WAYLAND_DISPLAY must be the session's)
+#   rotation    + clockwise, - counter. Wayland (kwi3 on KWin): the first
+#               enabled output, via kscreen-doctor ($WAYLAND_DISPLAY must be the
+#               session's). X11 (i3): the primary output, else the first active
+#               one, via xrandr ($DISPLAY)
 #
 #   autosuspend idle delay before the phone suspends: 30s, 1min, 10min, 1hr, off,
 #               wrapping; default 1min. ~/.config/spacewar/autosuspend, which
@@ -54,6 +56,42 @@ percent() { # <device dir>
 	echo $((($(cat "$1/brightness") * 100 + _m / 2) / _m))
 }
 
+# The rotation backend: kscreen-doctor on a Wayland session that has it, xrandr
+# otherwise. An i3 session has no $WAYLAND_DISPLAY.
+kscreen() { [ -n "${WAYLAND_DISPLAY:-}" ] && command -v kscreen-doctor >/dev/null 2>&1; }
+
+# "<output> <normal|left|inverted|right>" for the output rotation acts on;
+# nothing when there is none.
+rot_get() {
+	if kscreen; then
+		# kscreen-doctor -j: rotation 1 none, 2 left, 4 inverted, 8 right
+		kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0] | "\(.name) \(.rotation)"' 2>/dev/null |
+			awk 'NF == 2 { r = $2 == 2 ? "left" : $2 == 4 ? "inverted" : $2 == 8 ? "right" : "normal"; print $1, r }'
+	else
+		# xrandr: "NAME connected [primary] WxH+X+Y [left|inverted|right] (..."
+		xrandr --query 2>/dev/null | awk '
+			$2 == "connected" {
+				for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+/) {
+					r = $(i + 1)
+					if (r !~ /^(left|inverted|right)$/) r = "normal"
+					if ($3 == "primary" && !p) p = $1 " " r
+					if (!f) f = $1 " " r
+					break
+				}
+			}
+			END { if (p) print p; else if (f) print f }'
+	fi
+}
+
+rot_set() { # <output> <normal|left|inverted|right>
+	if kscreen; then
+		[ "$2" = normal ] && set -- "$1" none
+		kscreen-doctor "output.$1.rotation.$2" >/dev/null
+	else
+		xrandr --output "$1" --rotate "$2"
+	fi
+}
+
 control=$1 dir=$2
 if [ "$control" = show ]; then
 	vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]*%' | head -n 1)
@@ -63,15 +101,14 @@ if [ "$control" = show ]; then
 		bri="$(percent "$d")%"
 		break
 	done
-	rot=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | select(.enabled)][0].rotation' 2>/dev/null)
-	case "$rot" in 1) rot=normal ;; 2) rot=left ;; 4) rot=inverted ;; 8) rot=right ;; *) rot=- ;; esac
+	rot=$(rot_get | cut -d' ' -f2)
 	if [ -e "$AUTOROTATE" ]; then auto=on; else auto=off; fi
 	gps=off
 	if systemctl is-active -q qmi-gnss.socket 2>/dev/null; then
 		gps=on
 		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
 	fi
-	echo "volume=${vol:--} brightness=${bri:--} rotation=$rot autorotate=$auto autosuspend=$(suspend_delay)" \
+	echo "volume=${vol:--} brightness=${bri:--} rotation=${rot:--} autorotate=$auto autosuspend=$(suspend_delay)" \
 		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps"
 	exit 0
 fi
@@ -107,15 +144,18 @@ brightness)
 	done
 	;;
 rotation)
-	# kscreen-doctor -j: rotation 1 none, 2 left, 4 inverted, 8 right
-	set -- $(kscreen-doctor -j | jq -r '[.outputs[] | select(.enabled)][0] | "\(.name) \(.rotation)"')
+	set -- $(rot_get)
+	[ $# -eq 2 ] || {
+		echo "hwctl: no output to rotate" >&2
+		exit 1
+	}
 	out=$1 rot=$2
 	if [ "$dir" = + ]; then
-		case "$rot" in 1) to=right ;; 8) to=inverted ;; 4) to=left ;; *) to=none ;; esac
+		case "$rot" in normal) to=right ;; right) to=inverted ;; inverted) to=left ;; *) to=normal ;; esac
 	else
-		case "$rot" in 1) to=left ;; 2) to=inverted ;; 4) to=right ;; *) to=none ;; esac
+		case "$rot" in normal) to=left ;; left) to=inverted ;; inverted) to=right ;; *) to=normal ;; esac
 	fi
-	kscreen-doctor "output.$out.rotation.$to" >/dev/null
+	rot_set "$out" "$to"
 	;;
 autorotate)
 	if [ -e "$AUTOROTATE" ]; then

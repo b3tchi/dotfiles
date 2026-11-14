@@ -330,6 +330,64 @@ var intentionalDivergences = map[string]string{
 	"$mod+Shift+s": "OnRelease: fires once per gesture instead of per repeat",
 }
 
+// postPythonBinds records every GLOBAL bind added to the go table after the
+// golden dump was frozen, with the reason and the issue that added it. Same
+// argument as intentionalDivergences: the fixture stays a truthful record, and
+// an addition has to be named here to pass. TestGoldenDumpParity drops these
+// chords from the go side before comparing; TestPostPythonBindsAreLive keeps
+// every entry honest (in go, never in python).
+var postPythonBinds = map[string]string{
+	// dotfiles-m1re: was kwi3-only (Kwi3OnlyBinds, outside this table) while
+	// hwctl's rotation was kscreen-doctor alone; hwctl now drives xrandr under
+	// X11, so i3 sessions enter the controls layer too. The layer itself is
+	// in the dump already.
+	"$mod+c": "controls layer entry on every session, not just kwi3",
+}
+
+// dropPostPythonBinds removes postPythonBinds' chords from the GO dump, so
+// the comparison covers exactly the table python had.
+func dropPostPythonBinds(d *dumpTable) {
+	kept := d.Binds[:0]
+	for _, b := range d.Binds {
+		if _, ok := postPythonBinds[b.Chord]; !ok {
+			kept = append(kept, b)
+		}
+	}
+	d.Binds = kept
+}
+
+// TestPostPythonBindsAreLive: an entry naming a chord python had would mask a
+// real parity break; one naming a chord go no longer declares masks nothing.
+func TestPostPythonBindsAreLive(t *testing.T) {
+	raw, err := os.ReadFile(goldenDumpFixture)
+	if err != nil {
+		t.Fatalf("cannot read the golden dump at %s: %v", goldenDumpFixture, err)
+	}
+	var pyDump dumpTable
+	if err := json.Unmarshal(raw, &pyDump); err != nil {
+		t.Fatalf("could not parse golden-dump JSON at %s: %v", goldenDumpFixture, err)
+	}
+	goDump := goldenDumpFromGoTable()
+	has := func(d dumpTable, chord string) bool {
+		for _, b := range d.Binds {
+			if b.Chord == chord {
+				return true
+			}
+		}
+		return false
+	}
+	for chord, reason := range postPythonBinds {
+		if has(pyDump, chord) {
+			t.Errorf("postPythonBinds names %q (%s), but python already had it — "+
+				"the entry hides a parity check; drop it", chord, reason)
+		}
+		if !has(goDump, chord) {
+			t.Errorf("postPythonBinds names %q (%s), but the go table no longer "+
+				"declares it; drop the entry", chord, reason)
+		}
+	}
+}
+
 // applyIntentionalDivergences rewrites the PYTHON side to the behavior we
 // deliberately chose afterwards, so the comparison still covers chord, device
 // and actions for those binds — only the named field stops being asserted.
@@ -440,6 +498,7 @@ func TestGoldenDumpParity(t *testing.T) {
 		t.Fatalf("could not parse golden-dump JSON at %s: %v", goldenDumpFixture, err)
 	}
 	goDump := goldenDumpFromGoTable()
+	dropPostPythonBinds(&goDump)
 
 	applyIntentionalDivergences(&pyDump)
 	normalizeDumpTable(&pyDump)
@@ -670,9 +729,13 @@ func TestRealTable_NoChordEntersAnExternalLayer(t *testing.T) {
 // Both resolutions carry the same count because no shipped bind is
 // DisplayMod-qualified yet (see config.go's package doc on us020); if that
 // changes, this map is where the divergence gets recorded deliberately.
+//
+// 70 -> 71: dotfiles-m1re moved $mod+c (the controls layer) out of
+// Kwi3OnlyBinds into the shared table — a deliberate new owned chord, not an
+// external layer leaking one.
 var daemonOwnedChordCount = map[string]int{
-	"Mod4": 70,
-	"Mod1": 70,
+	"Mod4": 71,
+	"Mod1": 71,
 }
 
 // TestOwnershipRowCount_UnmovedByTheExternalLayer is the ownership row-count
