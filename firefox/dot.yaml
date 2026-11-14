@@ -31,6 +31,10 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm firefox
       {{/if}}
+      # Alpine-based (postmarketOS / Nura: the tablet, the phone)
+      if command -v apk >/dev/null 2>&1; then
+        apk info -e firefox >/dev/null 2>&1 || doas apk add firefox
+      fi
       chmod +x ~/.local/bin/ff ~/.local/bin/focus
 
       # Refresh the MIME cache so ff.desktop is offered as a handler.
