@@ -38,7 +38,7 @@ def main [mode: string = "sessions", client_tty?: string] {
             let wid = ($id | split row ":" | get 1)
             let attached = if ($wid in $attached_wids) { $" ($gray)\(attached\)($rst)" } else { "" }
             let colored = ($title | str replace --regex ' - ([^-]*@[^ ]*)$' $"($gray) - $1($rst)")
-            $"($id)||($gray)($wid)($rst) ($colored)($attached)"
+            $"($id)||($colored)($attached) ($gray)($wid)($rst)"
         }
     )
 
