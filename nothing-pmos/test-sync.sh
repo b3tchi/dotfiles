@@ -97,5 +97,22 @@ commit four
 git -C "$T/work" push -q "$SRC" HEAD:main 2>/dev/null
 [ "$(head_of "$SRC")" = "$(head_of "$T/work")" ] && ok "push from the dev box lands" || no "push from the dev box lands"
 
+# --- a Xiaomi Pad 6 runs pipa/install.sh, never the phone's install.sh
+mkdir -p "$T/work/pipa"
+cat >"$T/work/pipa/install.sh" <<STUB
+#!/bin/sh
+echo pipa >>"$T/pipa-installs"
+STUB
+git -C "$T/work" add pipa/install.sh
+git -C "$T/work" commit -q -m pipa
+git -C "$T/work" push -q origin HEAD:main
+printf 'xiaomi,pipa\0qcom,sm8250\0' >"$T/compatible"
+n=$(installs)
+NOTHING_PMOS_DT="$T/compatible" run
+rc=$?
+[ "$rc" = 0 ] && ok "pipa -> succeeds" || no "pipa -> succeeds (rc $rc: $(cat "$T/out"))"
+[ "$(cat "$T/pipa-installs" 2>/dev/null)" = pipa ] && ok "pipa -> pipa/install.sh run" || no "pipa -> pipa/install.sh run"
+[ "$(installs)" = "$n" ] && ok "pipa -> phone install.sh not run" || no "pipa -> phone install.sh not run"
+
 echo
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

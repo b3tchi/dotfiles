@@ -1,6 +1,7 @@
 #!/bin/sh
-# nothing-pmos/sync.sh - bring the phone's clone of the nothing-pmos repo up to
-# date and run its install.sh (see nothing-pmos/dot.yaml).
+# nothing-pmos/sync.sh - bring the device's clone of the nothing-pmos repo up
+# to date and run its installer (see nothing-pmos/dot.yaml): install.sh on the
+# phone (spacewar), pipa/install.sh on the Xiaomi Pad 6 (picked by device tree).
 #
 # The clone ~/.local/src/nothing-pmos (branch main) is fetched from
 # $NOTHING_PMOS_REPO (GitHub over ssh, set up by the `github` dot) and only
@@ -52,4 +53,12 @@ if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
 fi
 echo "nothing-pmos: $BRANCH at $(git -C "$SRC" rev-parse --short HEAD)"
 
-sh "$SRC/install.sh"
+# One installer per device, picked by the device tree: the Xiaomi Pad 6 has
+# pipa/install.sh, everything else (the phone) the top-level install.sh,
+# which itself refuses anything that is not a spacewar.
+if tr '\0' '\n' <"${NOTHING_PMOS_DT:-/proc/device-tree/compatible}" 2>/dev/null |
+  grep -qx 'xiaomi,pipa'; then
+  sh "$SRC/pipa/install.sh"
+else
+  sh "$SRC/install.sh"
+fi

@@ -1,0 +1,44 @@
+# Meta-package: the Xiaomi Pad 6 "pipa" tablet on postmarketOS - its device
+# fixes, Core UX and the kwi3 desktop session.
+# Usage (on the tablet): rotz install meta-pipa
+#
+# `github` comes first: ssh access to GitHub (one-time login, code approved
+# on another device), so the dots below can fetch the private repos. Without
+# it, push nothing-pmos and kwi3 from the dev box instead (see their scripts).
+# `nothing-pmos` fetches the nothing-pmos repo into ~/.local/src/nothing-pmos;
+# its sync.sh sees xiaomi,pipa in the device tree and runs pipa/install.sh
+# (not the phone's install.sh): apk packages for kwi3 and quickshell, the
+# logind lid fix (case magnet), the lock screen greeter stub, quickshell built
+# from source, the bar's stats daemon.
+# Core UX as on the phone: `distro`, `nushell`, `tmux`, `nvim`, `lazygit`,
+# `gopass`, `logseq` - apk installs on Alpine.
+# Session: `foot` (the phone foot.ini on apk systems), `quickshell` (the bar
+# config links), `kwi3` (install-nura.sh: kwi3 on KWin, kwi3 at every start).
+# No `clicks`: that is the phone's Clicks keyboard case.
+#
+# FLAT, like every meta: lists dots only, never another meta.
+depends:
+  - github
+  - nothing-pmos
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - gopass
+  - logseq
+  - foot
+  - quickshell
+  - kwi3
+
+installs:
+  # After kwi3: its install-nura.sh reinstalls kwi3-phone-session with
+  # --lockscreen and only then puts hotkeyd in ~/.local/bin, so the tablet's
+  # user part runs again (no root): no lock screen, the bar's hotkeyd path.
+  depends:
+    - nothing-pmos
+    - quickshell
+    - kwi3
+  cmd: |
+    sh "$HOME/.local/src/nothing-pmos/pipa/install.sh" --user
+    echo "meta-pipa: done. Scale (needs the running session): see nothing-pmos pipa/README.md."
