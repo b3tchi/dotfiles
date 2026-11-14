@@ -1,17 +1,17 @@
-# preview tig with delta
+# preview tig with difftastic (git show --ext-diff runs difft)
 bind generic @ @sh -c "\
   ( \
     tmux has-session -t '.{last}' \
-    && tmux respawn-pane -t '.{last}' -k 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)' \
+    && tmux respawn-pane -t '.{last}' -k 'LESS=R git show --ext-diff %(commit)' \
   ) \
-  || tmux split-window -l 80% 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)'"
+  || tmux split-window -l 80% 'LESS=R git show --ext-diff %(commit)'"
 
 # bind generic $ @sh -c "\
 #   ( \
 #     tmux has-session -t '.{last}' \
-#     && tmux respawn-pane -t '.{last}' -k 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)' \
+#     && tmux respawn-pane -t '.{last}' -k 'LESS=R git show --ext-diff %(commit)' \
 #   ) \
-#   || tmux split-window -l 80% 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)'"
+#   || tmux split-window -l 80% 'LESS=R git show --ext-diff %(commit)'"
 
 bind generic $ @sh -c "\
   tmux split-window -l 80% 'git show %(commit)'"

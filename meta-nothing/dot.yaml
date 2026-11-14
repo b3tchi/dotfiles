@@ -4,7 +4,7 @@
 #
 # `github` comes first: ssh access to GitHub (one-time login, code approved
 # on another device), so the dots below can fetch the private repos.
-# `git` is the global gitconfig (identity, delta, difftastic).
+# `git` is the global gitconfig (identity, difftastic).
 # `nothing-pmos` runs the nothing-pmos repo's install.sh from
 # ~/.local/src/nothing-pmos (fetched from GitHub, or pushed from the dev box;
 # see its dot.yaml): usb/Clicks charger-plug recovery, suspend, gps, dtb,
