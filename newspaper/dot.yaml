@@ -6,6 +6,7 @@
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
+# mpv + yt-dlp play HLS (Bluesky) and YouTube videos the app hands off.
 linux:
   installs:
     depends:
@@ -13,19 +14,23 @@ linux:
       - gopass
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats qt6-multimedia qt6-multimedia-ffmpeg jq mpv yt-dlp inotify-tools
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats qt6-multimedia qt6-multimedia-ffmpeg jq mpv yt-dlp inotify-tools
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats qt6-multimedia qt6-multimedia-ffmpeg jq mpv yt-dlp inotify-tools
       {{/if}}
       if command -v apk >/dev/null 2>&1; then
         missing=""
         apk info -e qt6-qtdeclarative >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative"
         apk info -e qt6-qtimageformats >/dev/null 2>&1 || missing="$missing qt6-qtimageformats"
+        apk info -e qt6-qtmultimedia >/dev/null 2>&1 || missing="$missing qt6-qtmultimedia"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
+        command -v mpv >/dev/null 2>&1 || missing="$missing mpv"
+        command -v yt-dlp >/dev/null 2>&1 || missing="$missing yt-dlp"
+        command -v inotifywait >/dev/null 2>&1 || missing="$missing inotify-tools"
         [ -z "$missing" ] || doas apk add $missing
       fi
 
