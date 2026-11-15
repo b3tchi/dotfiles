@@ -1,0 +1,49 @@
+# newspaper: keyboard-driven Inoreader reader in pure QML (qml6).
+# The app lives in a separate private repo (git@github.com:b3tchi/newspaper,
+# or $NEWSPAPER_REPO for a local clone). This dot clones it to
+# ~/.local/src/newspaper, fast-forwards it to origin/main on each install,
+# and links the launcher to ~/.local/bin/newspaper. No build step.
+#
+# depends: github (ssh access to the private repo), gopass (the launcher
+# reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
+linux:
+  installs:
+    depends:
+      - github
+      - gopass
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      {{/if}}
+      if command -v apk >/dev/null 2>&1; then
+        missing=""
+        apk info -e qt6-qtdeclarative >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative"
+        command -v jq >/dev/null 2>&1 || missing="$missing jq"
+        [ -z "$missing" ] || doas apk add $missing
+      fi
+
+      REPO="${NEWSPAPER_REPO:-git@github.com:b3tchi/newspaper.git}"
+      SRC="$HOME/.local/src/newspaper"
+      if [ -d "$SRC/.git" ]; then
+        if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+          echo "newspaper: $SRC has local changes -- not updating it." >&2
+        elif ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" pull --quiet --ff-only 2>/dev/null; then
+          echo "newspaper: WARNING -- could not update $SRC; keeping the current checkout." >&2
+        fi
+      else
+        mkdir -p "$(dirname "$SRC")"
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet "$REPO" "$SRC"; then
+          echo "newspaper: git clone of $REPO failed -- nothing to link." >&2
+          exit 1
+        fi
+      fi
+
+      mkdir -p "$HOME/.local/bin"
+      ln -sfn "$SRC/newspaper" "$HOME/.local/bin/newspaper"
+      echo "newspaper: $(git -C "$SRC" rev-parse --short HEAD) linked to ~/.local/bin/newspaper"
