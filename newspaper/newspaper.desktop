@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=newspaper
+GenericName=Feed Reader
+Comment=Keyboard-driven Inoreader reader
+Categories=Network;News;Feed;
+Keywords=RSS;Inoreader;News;
+Icon=applications-internet
+Terminal=false
+# The shim on PATH (newspaper/newspaper in the dotfiles) sets the gopass
+# prefix, so menus and the quickshell overlay start it the same way.
+Exec=newspaper

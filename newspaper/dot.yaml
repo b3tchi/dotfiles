@@ -3,14 +3,18 @@
 # The app lives in a separate private repo (git@github.com:b3tchi/newspaper,
 # or $NEWSPAPER_REPO for a local clone). This dot clones it to
 # ~/.local/src/newspaper, checks out the highest release tag (vX.Y.Z; never
-# main), builds the Mpv video plugin and links the launcher to
-# ~/.local/bin/newspaper.
+# main) and builds the Mpv video plugin. The links put a shim
+# (newspaper/newspaper: sets NEWSPAPER_GOPASS, default "nextcloud", then runs
+# the checkout's launcher) on PATH and a .desktop entry in the app menu.
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
 # mpv + yt-dlp play HLS (Bluesky) and YouTube; the Mpv QML plugin (built here
 # from mpvqml/ with cmake) embeds them in the app, else external mpv.
 linux:
+  links:
+    newspaper: ~/.local/bin/newspaper
+    newspaper.desktop: ~/.local/share/applications/newspaper.desktop
   installs:
     depends:
       - github
@@ -94,6 +98,4 @@ linux:
         echo "newspaper: WARNING -- cmake, a C++ compiler, libmpv or Qt 6 dev files missing; videos fall back to external mpv." >&2
       fi
 
-      mkdir -p "$HOME/.local/bin"
-      ln -sfn "$SRC/newspaper" "$HOME/.local/bin/newspaper"
-      echo "newspaper: $TAG linked to ~/.local/bin/newspaper"
+      echo "newspaper: $TAG installed in $SRC (on PATH via the newspaper shim link)"
