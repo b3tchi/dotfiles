@@ -1,8 +1,10 @@
-# newspaper: keyboard-driven Inoreader reader in pure QML (qml6).
+# newspaper: keyboard-driven Inoreader reader in QML (qml6) plus a small
+# C++ libmpv plugin for embedded video.
 # The app lives in a separate private repo (git@github.com:b3tchi/newspaper,
 # or $NEWSPAPER_REPO for a local clone). This dot clones it to
-# ~/.local/src/newspaper, fast-forwards it to origin/main on each install,
-# and links the launcher to ~/.local/bin/newspaper. No build step.
+# ~/.local/src/newspaper, checks out the highest release tag (vX.Y.Z; never
+# main), builds the Mpv video plugin and links the launcher to
+# ~/.local/bin/newspaper.
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
@@ -42,18 +44,35 @@ linux:
       REPO="${NEWSPAPER_REPO:-git@github.com:b3tchi/newspaper.git}"
       SRC="$HOME/.local/src/newspaper"
       if [ -d "$SRC/.git" ]; then
-        if [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
-          echo "newspaper: $SRC has local changes -- not updating it." >&2
-        elif ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" pull --quiet --ff-only 2>/dev/null; then
-          echo "newspaper: WARNING -- could not update $SRC; keeping the current checkout." >&2
+        if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+          echo "newspaper: $SRC has local changes -- refusing to touch it." >&2
+          echo "newspaper: resolve by hand (commit, stash or reset inside $SRC) and re-run 'rotz install newspaper'." >&2
+          exit 1
         fi
       else
         mkdir -p "$(dirname "$SRC")"
-        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet "$REPO" "$SRC"; then
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$REPO" "$SRC"; then
           echo "newspaper: git clone of $REPO failed -- nothing to link." >&2
           exit 1
         fi
       fi
+
+      # RELEASES ONLY (kwi3 precedent): check out the highest vX.Y.Z tag,
+      # detached -- never a branch. A commit on main reaches this box once it
+      # is tagged and the tag is pushed. Prerelease tags (v1.0.0-rc1) ignored.
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" fetch --quiet --force "$REPO" '+refs/tags/*:refs/tags/*' 2>/dev/null; then
+        echo "newspaper: WARNING -- could not reach $REPO for release tags; using the newest tag already in $SRC." >&2
+      fi
+      TAG=$(git -C "$SRC" tag -l 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+      if [ -z "$TAG" ]; then
+        echo "newspaper: no release tag (vX.Y.Z) in $REPO -- refusing to install an unreleased commit." >&2
+        exit 1
+      fi
+      if ! git -C "$SRC" -c advice.detachedHead=false checkout --quiet --detach "$TAG" 2>/dev/null; then
+        echo "newspaper: could not check out $TAG in $SRC -- resolve by hand and re-run 'rotz install newspaper'." >&2
+        exit 1
+      fi
+      echo "newspaper: release $TAG"
 
       # Embedded video player: the Mpv QML plugin (mpvqml/) into $SRC/build/qml.
       # Rebuilt only when the mpvqml tree changes. A failed or impossible build
@@ -77,4 +96,4 @@ linux:
 
       mkdir -p "$HOME/.local/bin"
       ln -sfn "$SRC/newspaper" "$HOME/.local/bin/newspaper"
-      echo "newspaper: $(git -C "$SRC" rev-parse --short HEAD) linked to ~/.local/bin/newspaper"
+      echo "newspaper: $TAG linked to ~/.local/bin/newspaper"
