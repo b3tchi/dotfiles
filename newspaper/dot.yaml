@@ -13,17 +13,18 @@ linux:
       - gopass
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq
+      sudo pacman -S --needed --noconfirm qt6-declarative qt6-imageformats jq
       {{/if}}
       if command -v apk >/dev/null 2>&1; then
         missing=""
         apk info -e qt6-qtdeclarative >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative"
+        apk info -e qt6-qtimageformats >/dev/null 2>&1 || missing="$missing qt6-qtimageformats"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
         [ -z "$missing" ] || doas apk add $missing
       fi
