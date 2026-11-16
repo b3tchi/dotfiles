@@ -5,7 +5,9 @@
 # ~/.local/src/newspaper, checks out the highest release tag (vX.Y.Z; never
 # main) and builds the Mpv video plugin. The links put a shim
 # (newspaper/newspaper: sets NEWSPAPER_GOPASS, default "nextcloud", then runs
-# the checkout's launcher) on PATH and a .desktop entry in the app menu.
+# the checkout's launcher) on PATH, a .desktop entry in the app menu and
+# keys.json (key rebinds: action -> key, see the app's README) in
+# ~/.config/newspaper.
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
@@ -15,6 +17,7 @@ linux:
   links:
     newspaper: ~/.local/bin/newspaper
     newspaper.desktop: ~/.local/share/applications/newspaper.desktop
+    keys.json: ~/.config/newspaper/keys.json
   installs:
     depends:
       - github
