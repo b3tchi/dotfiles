@@ -2,6 +2,9 @@
 # provider so libsecret/MSAL clients get a real keyring on WSL (ft015).
 linux:
   links:
+    # manual Key Vault backup / restore of gopass entries (see the script header)
+    gopass-kv: ~/.local/bin/gopass-kv
+    kv.conf: ~/.config/gopass-kv/config
     # WSL-only. Runtime path check, not env.WSL_DISTRO_NAME — that var is
     # unset in sessions spawned outside wsl.exe (tmux server, WSLg, ssh).
     {{#if (eval "test -d /mnt/c && echo wsl || true")}}

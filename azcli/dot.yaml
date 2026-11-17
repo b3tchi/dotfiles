@@ -16,4 +16,13 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm azure-cli
       {{/if}}
+      # Alpine (postmarketOS) has no azure-cli package: install it as a uv
+      # tool (~/.local/bin/az). Runtime check: os-release reads "Nura edge".
+      if command -v apk >/dev/null 2>&1 && ! command -v az >/dev/null 2>&1; then
+        if ! command -v uv >/dev/null 2>&1; then
+          apk info -e uv >/dev/null 2>&1 || doas apk add uv ||
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+        fi
+        uv tool install azure-cli
+      fi
       az extension add --name azure-devops
