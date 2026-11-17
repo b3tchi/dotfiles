@@ -6,8 +6,10 @@
 # main) and builds the Mpv video plugin. The links put a shim
 # (newspaper/newspaper: sets NEWSPAPER_GOPASS, default "nextcloud", then runs
 # the checkout's launcher) on PATH, a .desktop entry in the app menu and
-# keys.json (key rebinds: action -> key, see the app's README) in
-# ~/.config/newspaper.
+# keys.json (key rebinds: action -> key, see the app's README) and
+# order.json (folder order, {"folders": [names]}) in ~/.config/newspaper.
+# The app rewrites order.json when folders are moved (zk / zj), through the
+# link into this repo: commit it to share the order between machines.
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads newspaper/client-id, client-secret, redirect-uri, refresh-token).
@@ -18,6 +20,7 @@ linux:
     newspaper: ~/.local/bin/newspaper
     newspaper.desktop: ~/.local/share/applications/newspaper.desktop
     keys.json: ~/.config/newspaper/keys.json
+    order.json: ~/.config/newspaper/order.json
   installs:
     depends:
       - github
