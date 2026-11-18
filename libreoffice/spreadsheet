@@ -16,6 +16,12 @@ fi
 if [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/kwi3-libreoffice/gtk-3.0/gtk.css" ]; then
     export GTK_THEME=kwi3-libreoffice
 fi
+# kwi3 text-size env (SAL_FORCEDPI: 10pt document text = kwi3 px, same as
+# the UI) written by kwi3-theme.
+lo_env="${XDG_CONFIG_HOME:-$HOME/.config}/libreoffice/kwi3.env"
+if [ -f "$lo_env" ]; then
+    set -a; . "$lo_env"; set +a
+fi
 # Absolute path: ~/.local/bin/libreoffice is a shim back to this script.
 if [ $# -eq 0 ]; then
     exec /usr/bin/libreoffice --calc
