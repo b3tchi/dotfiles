@@ -1,0 +1,11 @@
+#!/bin/sh
+# spreadsheet - LibreOffice Calc, launcher entry ($mod+d lists $PATH bins).
+# WSL: force X11 so GTK does not auto-connect to WSLg's wayland-0 symlink in
+# $XDG_RUNTIME_DIR and open on the Windows desktop instead of the xrdp
+# session (same fix as xrdp/xinitrc; repeated here because the launcher runs
+# bins with quickshell's env, which may predate that export).
+if [ -d /mnt/wslg ] && [ -n "$DISPLAY" ]; then
+    unset WAYLAND_DISPLAY
+    export GDK_BACKEND=x11
+fi
+exec libreoffice --calc "$@"

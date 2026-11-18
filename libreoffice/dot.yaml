@@ -1,4 +1,6 @@
 linux:
+  links:
+    spreadsheet: ~/.local/bin/spreadsheet
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -7,3 +9,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm libreoffice-fresh
       {{/if}}
+      rotz link libreoffice --force
