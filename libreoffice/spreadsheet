@@ -8,4 +8,8 @@ if [ -d /mnt/wslg ] && [ -n "$DISPLAY" ]; then
     unset WAYLAND_DISPLAY
     export GDK_BACKEND=x11
 fi
+# LibreOffice-only GTK theme (dark, kwi3 font) written by kwi3-theme.
+if [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/kwi3-libreoffice/gtk-3.0/gtk.css" ]; then
+    export GTK_THEME=kwi3-libreoffice
+fi
 exec libreoffice --calc "$@"
