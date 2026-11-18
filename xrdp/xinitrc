@@ -1,6 +1,15 @@
 # xrdp session entry (see poc002) — sourced by /etc/xrdp/startwm.sh
 # NOTE: do NOT set GALLIUM_DRIVER=d3d12 here — poisons /dev/dxg (poc002)
 unset SWAYSOCK I3SOCK
+# WSL: WSLg symlinks $XDG_RUNTIME_DIR/wayland-0 -> /mnt/wslg, and GTK
+# auto-connects to it even with WAYLAND_DISPLAY unset — GTK apps (LibreOffice,
+# Firefox, ...) launched here would open on the Windows desktop via WSLg
+# instead of in this xrdp session. Exported before the env snapshot below so
+# every wm-launch-detach child inherits it. Sway/WSLg never runs this file.
+if [ -d /mnt/wslg ]; then
+    unset WAYLAND_DISPLAY
+    export GDK_BACKEND=x11
+fi
 # Alt as i3 modifier in any xrdp session (Win key captured by client
 # host: Windows windowed RDP, Android RDP apps) — base config reads this
 # via set_from_resource, fallback Mod4. Guard keeps local startx on Mod4.
