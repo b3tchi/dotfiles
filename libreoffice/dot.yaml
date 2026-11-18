@@ -10,3 +10,5 @@ linux:
       sudo pacman -Syu --needed --noconfirm libreoffice-fresh
       {{/if}}
       rotz link libreoffice --force
+      # dark kwi3 scheme + Iosevka/module-sized Calc template (see script)
+      ~/.dotfiles/libreoffice/kwi3-theme || true

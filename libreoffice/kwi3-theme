@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""kwi3-theme - make LibreOffice match the kwi3 grid: dark, Iosevka, cell-sized.
+
+Reads the live grid from kwi3 (`kwi3-msg grid.get`: font family + px size,
+titlebar colors, frame accent) and falls back to kwi3's shipped values when no
+kwi3 session answers. Merges the result into the LibreOffice USER registry
+(~/.config/libreoffice/4/user/registrymodifications.xcu), replacing only the
+items it owns - every other user setting is kept. Idempotent; re-run after a
+kwi3 color/font change.
+
+  - Appearance: dark, LibreOffice Theme ON (UI chrome takes the scheme's
+    Window/Menu/Button colors), doc background not forced white.
+  - Color scheme "kwi3" (selected): document, Calc grid/cursor, UI chrome.
+  - Calc default template (kwi3.ots, generated with a throwaway headless
+    profile): Default cell style in the kwi3 font at the kwi3 px size, rows
+    one module tall, columns 12 modules wide - the sheet is the kwi3 grid.
+    (VCL DefaultFonts and Calc/Layout/Zoom would be simpler, but LibreOffice
+    26.8 resets both in the user registry on every start.)
+  - UI font comes from GTK (gtk dot's settings.ini), not from here.
+
+LibreOffice rewrites the registry on exit, so this refuses while soffice.bin
+runs (an edit would be lost).
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from xml.sax.saxutils import escape
+
+USER = os.path.expanduser("~/.config/libreoffice/4/user")
+REG = os.path.join(USER, "registrymodifications.xcu")
+TEMPLATE = os.path.join(USER, "template", "kwi3.ots")
+COL_MODULES = 12  # default column width, in kwi3 modules
+
+FALLBACK = {
+    "font": {"family": "Iosevka", "pixelSize": 16},
+    "module": {"w": 8, "h": 21},
+    "colors": {
+        "focused": {"background": "#152024", "text": "#FDF6E3"},
+        "unfocused": {"background": "#222D31", "text": "#707880"},
+        "urgent": {"border": "#CB4B16", "indicator": "#268BD2"},
+    },
+    "frame": {"color": "#16a085"},
+}
+
+
+def kwi3_grid():
+    cmd = ["kwi3-msg"]
+    # tmux shells lack $KWI3SOCK; kwi3 serves $XDG_RUNTIME_DIR/kwi3-<N>.rpc.sock
+    # for DISPLAY :N[.S].
+    m = re.match(r"^:(\d+)", os.environ.get("DISPLAY", ""))
+    if not os.environ.get("KWI3SOCK") and m:
+        sock = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""),
+                            f"kwi3-{m.group(1)}.rpc.sock")
+        if os.path.exists(sock):
+            cmd += ["-s", sock]
+    try:
+        out = subprocess.run(cmd + ["grid.get"], capture_output=True,
+                             text=True, timeout=3)
+        if out.returncode == 0:
+            return json.loads(out.stdout), "kwi3"
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return FALLBACK, "fallback"
+
+
+def rgb(h):
+    return str(int(h.lstrip("#"), 16))
+
+
+def lighten(h, amount):
+    v = [int(h.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join(f"{min(255, c + amount):02x}" for c in v)
+
+
+def prop(name, value):
+    return (f'<prop oor:name="{name}" oor:op="fuse">'
+            f'<value>{escape(str(value))}</value></prop>')
+
+
+def build(grid):
+    c = grid["colors"]
+    dark = c["focused"]["background"]      # titlebar / input bg (#152024)
+    body = c["unfocused"]["background"]    # tile body bg (#222D31)
+    fg = c["focused"]["text"]              # #FDF6E3
+    muted = c["unfocused"]["text"]         # #707880
+    accent = grid.get("frame", FALLBACK["frame"])["color"]  # #16a085
+    warn = c["urgent"]["border"]           # #CB4B16
+    link = c["urgent"]["indicator"]        # #268BD2
+
+    scheme = {
+        # document
+        "DocColor": body, "AppBackground": dark, "FontColor": fg,
+        "DocBoundaries": muted, "TableBoundaries": muted,
+        "Links": link, "LinksVisited": muted, "Shadow": dark,
+        "Spell": warn, "Grammar": link, "WriterNonPrintChars": muted,
+        "WriterTextGrid": lighten(body, 0x18), "DrawGrid": muted,
+        "WriterFieldShadings": lighten(body, 0x10),
+        "WriterIdxShadings": lighten(body, 0x10),
+        "WriterDirectCursor": accent,
+        # calc
+        "CalcGrid": lighten(body, 0x18), "CalcCellFocus": accent,
+        "CalcDBFocus": accent, "CalcReference": accent,
+        "CalcPageBreak": warn, "CalcPageBreakManual": warn,
+        "CalcPageBreakAutomatic": muted, "CalcHiddenColRow": muted,
+        "CalcTextOverflow": warn, "CalcComments": warn,
+        "CalcNotesBackground": dark, "CalcValue": link,
+        "CalcFormula": accent, "CalcText": fg,
+        "CalcProtectedBackground": dark,
+        # UI chrome (LibreOffice Theme)
+        "WindowColor": body, "WindowTextColor": fg,
+        "BaseColor": dark, "ButtonColor": dark, "ButtonTextColor": fg,
+        "AccentColor": accent, "DisabledColor": body,
+        "DisabledTextColor": muted, "ShadowColor": "#000000",
+        "SeparatorColor": dark, "FaceColor": body,
+        "ActiveColor": accent, "ActiveTextColor": fg,
+        "ActiveBorderColor": accent, "FieldColor": dark,
+        "MenuBarColor": dark, "MenuBarTextColor": fg,
+        "MenuBarHighlightColor": accent, "MenuBarHighlightTextColor": fg,
+        "MenuColor": body, "MenuTextColor": fg,
+        "MenuHighlightColor": accent, "MenuHighlightTextColor": fg,
+        "MenuBorderColor": dark, "InactiveColor": body,
+        "InactiveTextColor": muted, "InactiveBorderColor": dark,
+    }
+    # Entries with an IsVisible flag: the "replace" node starts from the
+    # template, where it is false - set it or links/overflow marks vanish.
+    visible = {"Links": True, "LinksVisited": True, "Shadow": False,
+               "CalcHiddenColRow": True, "CalcTextOverflow": True,
+               "DrawGrid": True, "WriterFieldShadings": True,
+               "WriterIdxShadings": True, "WriterDirectCursor": True}
+    nodes = "".join(
+        f'<node oor:name="{k}" oor:op="fuse">{prop("Color", rgb(v))}'
+        + (prop("IsVisible", str(visible[k]).lower()) if k in visible else "")
+        + "</node>"
+        for k, v in scheme.items())
+
+
+    # (item path, child name, child xml) - one registry <item> each.
+    appearance = "/org.openoffice.Office.Common/Appearance"
+    calc_factory = ("/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:"
+                    "Factory['com.sun.star.sheet.SpreadsheetDocument']")
+    return [
+        (appearance, "ApplicationAppearance", prop("ApplicationAppearance", 2)),  # dark
+        (appearance, "LibreOfficeTheme", prop("LibreOfficeTheme", 1)),            # theme colors ON
+        (appearance, "UseOnlyWhiteDocBackground", prop("UseOnlyWhiteDocBackground", "false")),
+        ("/org.openoffice.Office.UI/ColorScheme", "CurrentColorScheme",
+         prop("CurrentColorScheme", "kwi3")),
+        ("/org.openoffice.Office.UI/ColorScheme/ColorSchemes", "kwi3",
+         f'<node oor:name="kwi3" oor:op="replace">{nodes}</node>'),
+        (calc_factory, "ooSetupFactoryTemplateFile",
+         prop("ooSetupFactoryTemplateFile", "file://" + TEMPLATE)),
+    ]
+
+
+def px_to_hmm(px):
+    """Screen px (96 dpi) -> 1/100 mm, LibreOffice's API length unit."""
+    return round(px * 2540 / 96)
+
+
+def make_template(grid):
+    """Write TEMPLATE via a headless soffice on a throwaway profile."""
+    import shutil
+    import tempfile
+    import time
+    sys.path.append("/usr/lib/libreoffice/program")
+    import uno
+    from com.sun.star.beans import PropertyValue
+
+    font = grid["font"]["family"]
+    px = grid["font"]["pixelSize"]
+    mod = grid.get("module", FALLBACK["module"])
+    os.makedirs(os.path.dirname(TEMPLATE), exist_ok=True)
+
+    prof = tempfile.mkdtemp(prefix="kwi3-theme-")
+    pipe = "kwi3theme" + str(os.getpid())
+    proc = subprocess.Popen(
+        ["soffice", "--headless", "--invisible", "--norestore",
+         "--nolockcheck", f"-env:UserInstallation=file://{prof}",
+         f"--accept=pipe,name={pipe};urp;"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        local = uno.getComponentContext()
+        resolver = local.ServiceManager.createInstanceWithContext(
+            "com.sun.star.bridge.UnoUrlResolver", local)
+        for _ in range(60):
+            try:
+                ctx = resolver.resolve(
+                    f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
+                break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("headless soffice did not answer")
+        desktop = ctx.ServiceManager.createInstanceWithContext(
+            "com.sun.star.frame.Desktop", ctx)
+        hidden = PropertyValue(Name="Hidden", Value=True)
+        doc = desktop.loadComponentFromURL(
+            "private:factory/scalc", "_blank", 0, (hidden,))
+
+        style = doc.StyleFamilies.getByName("CellStyles").getByName("Default")
+        for p in ("CharFontName", "CharFontNameAsian", "CharFontNameComplex"):
+            style.setPropertyValue(p, font)
+        for p in ("CharHeight", "CharHeightAsian", "CharHeightComplex"):
+            style.setPropertyValue(p, px * 72 / 96)  # px -> pt
+
+        sheet = doc.Sheets.getByIndex(0)
+        sheet.Columns.Width = px_to_hmm(COL_MODULES * mod["w"])
+        sheet.Rows.Height = px_to_hmm(mod["h"])
+
+        flt = PropertyValue(Name="FilterName", Value="calc8_template")
+        doc.storeToURL("file://" + TEMPLATE, (flt,))
+        doc.close(True)
+        try:
+            desktop.terminate()
+        except Exception:
+            pass  # bridge drops as soffice exits
+    finally:
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        shutil.rmtree(prof, ignore_errors=True)
+
+
+def item_keys(line):
+    """(path, child-name) pairs an existing <item> line sets."""
+    m = re.match(r'<item oor:path="([^"]+)">', line)
+    if not m:
+        return set()
+    names = re.findall(r'^<(?:prop|node) oor:name="([^"]+)"',
+                       line[m.end():])
+    return {(m.group(1), n) for n in names}
+
+
+def main():
+    if subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "soffice.bin"],
+                      capture_output=True).returncode == 0:
+        sys.exit("kwi3-theme: LibreOffice is running - close it first "
+                 "(it rewrites its registry on exit)")
+
+    grid, source = kwi3_grid()
+    make_template(grid)
+    items = build(grid)
+
+    # One <item> per child so each owned key replaces exactly one line.
+    owned = {(path, name) for path, name, _ in items}
+    new_lines = [f'<item oor:path="{path}">{xml}</item>'
+                 for path, _, xml in items]
+
+    if os.path.exists(REG):
+        with open(REG, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    else:
+        os.makedirs(os.path.dirname(REG), exist_ok=True)
+        lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+                 'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+                 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+                 '</oor:items>']
+
+    kept = [l for l in lines if not (item_keys(l) & owned)]
+    end = max(i for i, l in enumerate(kept) if l.strip() == "</oor:items>")
+    out = kept[:end] + new_lines + kept[end:]
+
+    tmp = REG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    os.replace(tmp, REG)
+    print(f"kwi3-theme: {len(new_lines)} items from {source} "
+          f"({grid['font']['family']} {grid['font']['pixelSize']}px) -> {REG}, "
+          f"{TEMPLATE}")
+
+
+if __name__ == "__main__":
+    main()
