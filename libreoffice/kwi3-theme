@@ -16,6 +16,9 @@ kwi3 color/font change.
     one module tall, columns 12 modules wide - the sheet is the kwi3 grid.
     (VCL DefaultFonts and Calc/Layout/Zoom would be simpler, but LibreOffice
     26.8 resets both in the user registry on every start.)
+  - Font replacement table, screen only: common document fonts (Roboto,
+    Arial, Calibri, Liberation, ...) DISPLAY in the kwi3 font, so existing
+    files read in Iosevka too. Files, print and PDF keep their real fonts.
   - GTK theme "kwi3-libreoffice" ($XDG_DATA_HOME/themes): Adwaita dark +
     the kwi3 font/px for LibreOffice's own menus and toolbars. Selected by
     GTK_THEME in the `spreadsheet` wrapper only - no other GTK app changes.
@@ -35,6 +38,13 @@ REG = os.path.join(USER, "registrymodifications.xcu")
 TEMPLATE = os.path.join(USER, "template", "kwi3.ots")
 COL_MODULES = 12  # default column width, in kwi3 modules
 GTK_THEME = "kwi3-libreoffice"
+# Fonts shown as the kwi3 font on screen (Tools > Options > Fonts table).
+REPLACE_FONTS = (
+    "Roboto", "Arial", "Helvetica", "Calibri", "Carlito", "Aptos", "Cambria",
+    "Caladea", "Times New Roman", "Verdana", "Tahoma", "Segoe UI",
+    "Liberation Sans", "Liberation Serif", "Liberation Sans Narrow",
+    "DejaVu Sans", "DejaVu Serif", "Noto Sans", "Noto Serif", "Open Sans",
+    "Source Sans Pro", "Courier New", "Liberation Mono", "Consolas")
 GTK_CSS = os.path.join(
     os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
     "themes", GTK_THEME, "gtk-3.0", "gtk.css")
@@ -144,6 +154,13 @@ def build(grid):
 
     # (item path, child name, child xml) - one registry <item> each.
     appearance = "/org.openoffice.Office.Common/Appearance"
+    subst = "/org.openoffice.Office.Common/Font/Substitution"
+    pairs = [
+        (subst + "/FontPairs", "kwi3_" + re.sub(r"\W", "_", f),
+         f'<node oor:name="kwi3_{re.sub(r"\W", "_", f)}" oor:op="replace">'
+         + prop("ReplaceFont", f) + prop("SubstituteFont", grid["font"]["family"])
+         + prop("Always", "true") + prop("OnScreenOnly", "true") + "</node>")
+        for f in REPLACE_FONTS]
     calc_factory = ("/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:"
                     "Factory['com.sun.star.sheet.SpreadsheetDocument']")
     return [
@@ -154,6 +171,8 @@ def build(grid):
          prop("CurrentColorScheme", "kwi3")),
         ("/org.openoffice.Office.UI/ColorScheme/ColorSchemes", "kwi3",
          f'<node oor:name="kwi3" oor:op="replace">{nodes}</node>'),
+        (subst, "Replacement", prop("Replacement", "true")),
+        *pairs,
         (calc_factory, "ooSetupFactoryTemplateFile",
          prop("ooSetupFactoryTemplateFile", "file://" + TEMPLATE)),
     ]
