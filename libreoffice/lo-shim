@@ -1,0 +1,5 @@
+#!/bin/sh
+# libreoffice / soffice shim (~/.local/bin, ahead of /usr/bin on PATH):
+# route every LibreOffice start - .desktop entries, launcher, scripts -
+# through `spreadsheet`, which sets the session env and theme.
+exec "$HOME/.local/bin/spreadsheet" "$@"

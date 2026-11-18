@@ -1,5 +1,9 @@
 #!/bin/sh
-# spreadsheet - LibreOffice Calc, launcher entry ($mod+d lists $PATH bins).
+# spreadsheet - THE LibreOffice entry point: no args opens Calc ($mod+d lists
+# $PATH bins), args (files, --writer, ...) go to LibreOffice as given.
+# Everything funnels here: ~/.local/bin/{libreoffice,soffice} shims,
+# spreadsheet.desktop (default app for every LibreOffice MIME type) and the
+# WSL xdg-open bridge - so every document gets the env below.
 # WSL: force X11 so GTK does not auto-connect to WSLg's wayland-0 symlink in
 # $XDG_RUNTIME_DIR and open on the Windows desktop instead of the xrdp
 # session (same fix as xrdp/xinitrc; repeated here because the launcher runs
@@ -12,4 +16,8 @@ fi
 if [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/themes/kwi3-libreoffice/gtk-3.0/gtk.css" ]; then
     export GTK_THEME=kwi3-libreoffice
 fi
-exec libreoffice --calc "$@"
+# Absolute path: ~/.local/bin/libreoffice is a shim back to this script.
+if [ $# -eq 0 ]; then
+    exec /usr/bin/libreoffice --calc
+fi
+exec /usr/bin/libreoffice "$@"

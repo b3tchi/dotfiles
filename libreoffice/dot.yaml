@@ -1,6 +1,11 @@
 linux:
   links:
     spreadsheet: ~/.local/bin/spreadsheet
+    # every LibreOffice start funnels through `spreadsheet` (env + theme)
+    lo-shim:
+      - ~/.local/bin/libreoffice
+      - ~/.local/bin/soffice
+    spreadsheet.desktop: ~/.local/share/applications/spreadsheet.desktop
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -10,5 +15,7 @@ linux:
       sudo pacman -Syu --needed --noconfirm libreoffice-fresh
       {{/if}}
       rotz link libreoffice --force
+      # spreadsheet.desktop = default app for every LibreOffice MIME type
+      xdg-mime default spreadsheet.desktop $(sed -n 's/^MimeType=//p' ~/.dotfiles/libreoffice/spreadsheet.desktop | tr ';' ' ')
       # dark kwi3 scheme + Iosevka/module-sized Calc template (see script)
       ~/.dotfiles/libreoffice/kwi3-theme || true

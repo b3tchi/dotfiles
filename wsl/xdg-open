@@ -1,2 +1,14 @@
 #!/bin/bash
+# WSL xdg-open bridge: hand the target to Windows (Start-Process).
+# Exception: a local file whose default app is spreadsheet.desktop (every
+# LibreOffice document type - libreoffice dot) opens in LibreOffice in the
+# current X session via the `spreadsheet` wrapper, not in a Windows app.
+target="${1#file://}"
+if [ -n "$DISPLAY" ] && [ -f "$target" ] && command -v spreadsheet >/dev/null; then
+    mime=$(/usr/bin/xdg-mime query filetype "$target" 2>/dev/null)
+    if [ -n "$mime" ] && [ "$(/usr/bin/xdg-mime query default "$mime" 2>/dev/null)" = spreadsheet.desktop ]; then
+        setsid -f spreadsheet "$target" >/dev/null 2>&1 </dev/null
+        exit 0
+    fi
+fi
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command "Start-Process '$1'"
