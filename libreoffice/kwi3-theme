@@ -16,6 +16,8 @@ kwi3 color/font change.
     one module tall, columns 12 modules wide - the sheet is the kwi3 grid.
     (VCL DefaultFonts and Calc/Layout/Zoom would be simpler, but LibreOffice
     26.8 resets both in the user registry on every start.)
+  - Writer default fonts (Standard/Heading/List/Caption/Index) = the kwi3
+    font, Standard size = the kwi3 px size.
   - Font replacement table, screen only: common document fonts (Roboto,
     Arial, Calibri, Liberation, ...) DISPLAY in the kwi3 font, so existing
     files read in Iosevka too. Files, print and PDF keep their real fonts.
@@ -161,6 +163,13 @@ def build(grid):
          + prop("ReplaceFont", f) + prop("SubstituteFont", grid["font"]["family"])
          + prop("Always", "true") + prop("OnScreenOnly", "true") + "</node>")
         for f in REPLACE_FONTS]
+    writer_font = "/org.openoffice.Office.Writer/DefaultFont"
+    font = grid["font"]["family"]
+    writer = [(writer_font, k, prop(k, font))
+              for k in ("Standard", "Heading", "List", "Caption", "Index")]
+    # px -> 1/100 mm (Writer's unit for these heights)
+    writer.append((writer_font, "StandardHeight",
+                   prop("StandardHeight", px_to_hmm(grid["font"]["pixelSize"]))))
     calc_factory = ("/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:"
                     "Factory['com.sun.star.sheet.SpreadsheetDocument']")
     return [
@@ -173,6 +182,7 @@ def build(grid):
          f'<node oor:name="kwi3" oor:op="replace">{nodes}</node>'),
         (subst, "Replacement", prop("Replacement", "true")),
         *pairs,
+        *writer,
         (calc_factory, "ooSetupFactoryTemplateFile",
          prop("ooSetupFactoryTemplateFile", "file://" + TEMPLATE)),
     ]
