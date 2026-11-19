@@ -313,8 +313,21 @@ menubar, statusbar {{ background-color: {body}; color: {fg}; }}
 notebook > header {{ background-color: {dark}; border-color: {dark}; box-shadow: none; }}
 notebook > header > tabs > tab {{ color: {muted}; background: none; box-shadow: none; }}
 notebook > header > tabs > tab:hover {{ color: {fg}; background-color: {hover}; }}
-notebook > header > tabs > tab:checked {{ color: {fg}; background-color: {body};
-    box-shadow: inset 0 -2px {accent}; }}
+notebook > header > tabs > tab:checked {{ color: {fg}; background-color: {body}; }}
+/* Adwaita underlines the current tab in blue with header.<side> selectors;
+   same specificity + later = kwi3 frame green wins. */
+notebook > header.top > tabs > tab:checked,
+notebook > header.top > tabs > tab:checked:hover {{ box-shadow: inset 0 -3px {accent}; }}
+notebook > header.bottom > tabs > tab:checked,
+notebook > header.bottom > tabs > tab:checked:hover {{ box-shadow: inset 0 3px {accent}; }}
+notebook > header.left > tabs > tab:checked,
+notebook > header.left > tabs > tab:checked:hover {{ box-shadow: inset -3px 0 {accent}; }}
+notebook > header.right > tabs > tab:checked,
+notebook > header.right > tabs > tab:checked:hover {{ box-shadow: inset 3px 0 {accent}; }}
+notebook > header.top > tabs > tab:hover:not(:checked),
+notebook > header.bottom > tabs > tab:hover:not(:checked),
+notebook > header.left > tabs > tab:hover:not(:checked),
+notebook > header.right > tabs > tab:hover:not(:checked) {{ box-shadow: none; }}
 button, toolbutton > button, menubutton > button {{ background-image: none;
     background-color: transparent; border-color: transparent; color: {fg};
     box-shadow: none; text-shadow: none; -gtk-icon-shadow: none; }}
