@@ -140,7 +140,9 @@ def build(grid):
         # UI chrome (LibreOffice Theme)
         "WindowColor": body, "WindowTextColor": fg,
         "BaseColor": dark, "ButtonColor": dark, "ButtonTextColor": fg,
-        "AccentColor": accent, "DisabledColor": body,
+        # AccentColor tints the Tabbed Compact tab strip: window bg, not green
+        # (the green stays on the selected-tab underline, set in the GTK css).
+        "AccentColor": body, "DisabledColor": body,
         "DisabledTextColor": muted, "ShadowColor": "#000000",
         "SeparatorColor": dark, "FaceColor": body,
         # Active* paints the Tabbed Compact ribbon background: the window
