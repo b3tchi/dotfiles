@@ -140,9 +140,7 @@ def build(grid):
         # UI chrome (LibreOffice Theme)
         "WindowColor": body, "WindowTextColor": fg,
         "BaseColor": dark, "ButtonColor": dark, "ButtonTextColor": fg,
-        # AccentColor tints the Tabbed Compact tab strip: window bg, not green
-        # (the green stays on the selected-tab underline, set in the GTK css).
-        "AccentColor": body, "DisabledColor": body,
+        "AccentColor": accent, "DisabledColor": body,
         "DisabledTextColor": muted, "ShadowColor": "#000000",
         "SeparatorColor": dark, "FaceColor": body,
         # Active* paints the Tabbed Compact ribbon background: the window
@@ -187,7 +185,12 @@ def build(grid):
                    prop("StandardHeight", round(DOC_PT * 2540 / 72))))  # pt -> 1/100 mm
     tbmode = "/org.openoffice.Office.UI.ToolbarMode"
     ribbon = "notebookbar_compact.ui"   # View > User Interface > Tabbed Compact
-    layout = []
+    layout = [
+        # The ribbon mixes a per-app module color (Calc green, Writer blue)
+        # into the dialog color; 255 = dialog (window) color only.
+        ("/org.openoffice.Office.Common/Misc", "NotebookbarColorTransparency",
+         prop("NotebookbarColorTransparency", 255)),
+    ]
     for app in ("Writer", "Calc", "Impress", "Draw"):
         layout.append((tbmode, "Active" + app, prop("Active" + app, ribbon)))
         layout.append((tbmode + "/Applications/org.openoffice.Office.UI."
