@@ -23,6 +23,8 @@
 #   live-window-kept  group alive, saved window alive -> new session selects
 #                     that window, no new window, id unchanged
 #   dry-run           prints the plan, starts no server, resumes nothing
+#   already-running   a saved Claude session that is running elsewhere opens
+#                     its window but is not resumed a second time
 #   save-no-wm        `save` with no reachable WM exits 1 and leaves the
 #                     cache byte-identical (it used to write 0 workspaces)
 #
@@ -233,6 +235,24 @@ for c in [
     ["no server started" ((txc list-sessions).exit_code != 0) ((sessions) | to nuon)]
     ["nothing resumed" (claude-log | is-empty) (claude-log | to nuon)]
 ] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+
+# ── 5b. a Claude session already running is not resumed twice ────────────────
+print "already-running"
+tx new-session -d -s other -c $cdir
+tx respawn-pane -k -t "=other:" -c $cdir "CLAUDE_STUB_SID=aaaa-1111 claude"
+let up2 = (wait-for { (claude-log | length) >= 1 })
+let rb5 = (ws tmux-rebuild)
+sleep 300ms
+let g0b = (sessions | where name == grp_0 | get -o 0 | default {})
+for c in [
+    ["running stub up" $up2 (claude-log | to nuon)]
+    ["grp_0 still rebuilt" (($g0b | get -o group) == "grp") ((sessions) | to nuon)]
+    ["aaaa-1111 not resumed a second time" ((claude-log | length) == 1) (claude-log | to nuon)]
+    ["says why" ($rb5.stderr | str contains "already running") $rb5.stderr]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+kill-server
+rm -f ...(glob $"($home)/.claude/sessions/*.json")
+rm -f $"($tmp)/claude.log"
 
 # ── 6. save with no WM reachable leaves the cache alone ──────────────────────
 print "save-no-wm"

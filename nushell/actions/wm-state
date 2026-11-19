@@ -623,6 +623,10 @@ def rebuild-tmux-sessions [workspaces: list<record>, dry_run: bool] {
     let lw = (do { ^tmux list-windows -a -F "#{window_id}" } | complete)
     let live_wids = if $lw.exit_code == 0 { $lw.stdout | lines | where $it != "" | each {|w| $w | str replace -r '^@' '' } | uniq } else { [] }
     let live_names = ($live | get -o name | default [])
+    # A Claude session already running somewhere (e.g. resumed by hand after
+    # the reboot) is not resumed a second time: two processes on one session
+    # interleave its transcript. Its window still opens, in its cwd.
+    let running_claude = (claude-sessions | get -o session | default [])
     mut groups = ($live | each {|r| if ($r.group | is-empty) { $r.name } else { $r.group } } | uniq)
     mut made = []
     mut remap = {}
@@ -646,7 +650,9 @@ def rebuild-tmux-sessions [workspaces: list<record>, dry_run: bool] {
             let cs = ($e | get -o claude_session | default "")
             let wd = if ($cs | is-not-empty) { $e | get -o claude_cwd | default ($e | get -o cwd | default "") } else { $e | get -o cwd | default "" }
             let cwd_args = if ($wd | is-not-empty) and ($wd | path exists) { ["-c" $wd] } else { [] }
-            let cmd_args = if ($cs =~ '^[0-9A-Za-z-]+$') { [$"nu -e 'claude --resume ($cs)'"] } else { [] }
+            let already = ($cs | is-not-empty) and ($cs in $running_claude)
+            if $already { print -e $"  tmux: ($s): claude session ($cs) is already running - window opened without it" }
+            let cmd_args = if ($cs =~ '^[0-9A-Za-z-]+$') and not $already { [$"nu -e 'claude --resume ($cs)'"] } else { [] }
             let group_up = ($g in $groups)
             let reuse = if $group_up and ($old | is-not-empty) and ($old in $live_wids) { $old } else if $group_up { $remap | get -o $key } else { null }
             if $dry_run {
