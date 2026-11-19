@@ -490,6 +490,223 @@ def enrich-state-entry [entry: record, local_clients: list<record>, thin_clients
     $found | upsert tmux_window_id $wid
 }
 
+# ── tmux window snapshot: cwd + Claude session (dotfiles-g5g4) ───────────────
+#
+# After a reboot the tmux server is new: every saved session is gone, and a
+# restored terminal would attach to nothing. So save also records, per local
+# session, its group, its current window's cwd and the Claude Code session
+# running in that window; restore rebuilds a dead group from it
+# (rebuild-tmux-sessions) and resumes Claude there.
+#
+# Claude Code writes ~/.claude/sessions/<pid>.json ({pid, sessionId, cwd, kind,
+# procStart}) for every running process. procStart is /proc/<pid>/stat field
+# 22 (start time): a file whose pid now names another process is skipped.
+
+# { ppid, start } from /proc/<pid>/stat, or null when the pid is gone. comm
+# (field 2) may hold spaces and parens: split after the LAST ") ".
+def proc-stat [pid: int] {
+    let raw = (try { open --raw $"/proc/($pid)/stat" } catch { return null })
+    let rest = ($raw | str trim | str replace -r '^.*\) ' '' | split row ' ')
+    if ($rest | length) < 20 { return null }
+    { ppid: (try { $rest.1 | into int } catch { 0 }), start: ($rest | get 19) }
+}
+
+# Live interactive Claude sessions: { session, cwd, chain } where chain is the
+# claude pid plus up to 4 ancestors (claude may sit under a wrapper script).
+def claude-sessions [] {
+    let dir = ($env.HOME | path join ".claude/sessions")
+    if not ($dir | path exists) { return [] }
+    glob ($dir | path join "*.json") | each {|f|
+        let j = (try { open --raw $f | from json } catch { null })
+        if $j == null { return null }
+        if ($j | get -o kind | default "interactive") != "interactive" { return null }
+        let pid = (try { $j | get -o pid | default 0 | into int } catch { 0 })
+        let sid = ($j | get -o sessionId | default "" | into string)
+        if $pid <= 0 or not ($sid =~ '^[0-9A-Za-z-]+$') { return null }
+        let st = (proc-stat $pid)
+        if $st == null { return null }
+        let ps = ($j | get -o procStart | default "" | into string)
+        if ($ps | is-not-empty) and $ps != $st.start { return null }
+        mut chain = [$pid]
+        mut p = $st.ppid
+        mut n = 0
+        while $p > 1 and $n < 4 {
+            $chain = ($chain | append $p)
+            let s = (proc-stat $p)
+            if $s == null { break }
+            $p = $s.ppid
+            $n += 1
+        }
+        { session: $sid, cwd: ($j | get -o cwd | default "" | into string), chain: $chain }
+    } | compact
+}
+
+# Per local tmux session: { group, wid, cwd, claude_session?, claude_cwd? } for
+# its current window. cwd is the active pane's; the Claude session is the one
+# whose process (or an ancestor) is a pane of that window, active pane first.
+# Any tmux failure -> {} (save then simply records no snapshot).
+def tmux-session-snapshot [] {
+    # ':' separates: tmux allows none in a session (or group) name, and
+    # renders a tab as '_' outside a UTF-8 locale. The path is last and
+    # takes the rest, colons included.
+    let fmt = "#{session_name}:#{session_group}:#{window_id}:#{window_active}:#{pane_active}:#{pane_pid}:#{pane_current_path}"
+    let r = (do { ^tmux list-panes -a -F $fmt } | complete)
+    if $r.exit_code != 0 { return {} }
+    let rows = ($r.stdout | lines | where $it != "" | each {|l|
+        let p = ($l | split row ":")
+        { name: $p.0, group: $p.1, wid: $p.2, wactive: $p.3, pactive: $p.4, ppid: $p.5, cwd: ($p | skip 6 | str join ":") }
+    } | where wactive == "1")
+    let claude = (claude-sessions)
+    mut out = {}
+    for s in ($rows | get -o name | default [] | uniq) {
+        let panes = ($rows | where name == $s)
+        let act = ($panes | where pactive == "1" | get -o 0 | default ($panes | first))
+        let ordered = ([$act] | append ($panes | where ppid != $act.ppid))
+        let hits = ($ordered | each {|p|
+            let pp = (try { $p.ppid | into int } catch { 0 })
+            $claude | where {|c| $pp in $c.chain }
+        } | flatten)
+        let group = if ($act.group | is-empty) { $s } else { $act.group }
+        mut rec = { group: $group, wid: ($act.wid | str replace -r '^@' ''), cwd: $act.cwd }
+        if ($hits | is-not-empty) {
+            let h = ($hits | first)
+            $rec = ($rec | upsert claude_session $h.session)
+            if ($h.cwd | is-not-empty) { $rec = ($rec | upsert claude_cwd $h.cwd) }
+        }
+        $out = ($out | upsert $s $rec)
+    }
+    $out
+}
+
+# Fold a snapshot into a saved terminal entry on the local server. Stale
+# fields from an earlier save (inherit-slot-session copies none) are dropped
+# first, so a window whose Claude exited no longer resumes it.
+def add-tmux-snapshot [entry: record, snap: record] {
+    let session = ($entry | get -o session | default "")
+    if ($session | is-empty) or (($entry | get -o session_type | default "local") != "local") { return $entry }
+    let s = ($snap | get -o $session)
+    if $s == null { return $entry }
+    mut e = ($entry | reject -o tmux_group cwd claude_session claude_cwd | upsert tmux_group $s.group)
+    if ($s.cwd | is-not-empty) { $e = ($e | upsert cwd $s.cwd) }
+    let cs = ($s | get -o claude_session | default "")
+    if ($cs | is-not-empty) {
+        $e = ($e | upsert claude_session $cs)
+        let cc = ($s | get -o claude_cwd | default "")
+        if ($cc | is-not-empty) { $e = ($e | upsert claude_cwd $cc) }
+    }
+    $e
+}
+
+# Restore side: recreate every saved local session that is gone, BEFORE any
+# terminal is launched (a terminal attaches by session name). A group's windows
+# are shown by several terminals - often on different workspaces - each through
+# its own session of the group, so the rebuild works per entry, sharing one map
+# "<group>:<old window id>" -> new window id across all workspaces:
+#   - the saved session is alive                 -> untouched
+#   - its window still exists in a live group    -> new session, select it
+#   - another entry already rebuilt that window  -> new session, select it
+#   - the group is gone                          -> new session creates the group
+#   - otherwise                                  -> new session + new window
+# A fresh window opens in the saved cwd, and with a saved Claude session it
+# runs `nu -e 'claude --resume <id>'` (Claude's own cwd): Claude comes back,
+# and its exit leaves the usual nu prompt. Each created session gets the
+# restore-pending mark at once so tmux-cleanup spares it and its window until
+# the terminal attaches. An entry with no tmux_group (saved before this
+# existed) is never touched. Returns the workspaces with tmux_window_id
+# rewritten to the new ids, so the i3 title swallow (`.* <wid>$`) still fits.
+def rebuild-tmux-sessions [workspaces: list<record>, dry_run: bool] {
+    let wanted = ($workspaces | each {|w| $w | get -o state | default {} | values } | flatten
+        | where {|e| (($e | get -o tmux_group | default "") | is-not-empty) and (($e | get -o session | default "") | is-not-empty) and (($e | get -o session_type | default "local") == "local") })
+    if ($wanted | is-empty) { return $workspaces }
+    let ls = (do { ^tmux list-sessions -F "#{session_name}:#{session_group}" } | complete)
+    let live = if $ls.exit_code == 0 { $ls.stdout | lines | where $it != "" | each {|l| let p = ($l | split row ":"); { name: $p.0, group: ($p | get -o 1 | default "") } } } else { [] }
+    let lw = (do { ^tmux list-windows -a -F "#{window_id}" } | complete)
+    let live_wids = if $lw.exit_code == 0 { $lw.stdout | lines | where $it != "" | each {|w| $w | str replace -r '^@' '' } | uniq } else { [] }
+    let live_names = ($live | get -o name | default [])
+    mut groups = ($live | each {|r| if ($r.group | is-empty) { $r.name } else { $r.group } } | uniq)
+    mut made = []
+    mut remap = {}
+    mut out = []
+    for ws in $workspaces {
+        mut st = ($ws | get -o state | default {})
+        for k in ($st | columns) {
+            let e = ($st | get $k)
+            let g = ($e | get -o tmux_group | default "")
+            let s = ($e | get -o session | default "")
+            if ($g | is-empty) or ($s | is-empty) or (($e | get -o session_type | default "local") != "local") { continue }
+            if $s in $live_names { continue }
+            let old = ($e | get -o tmux_window_id | default "" | into string)
+            let key = $"($g):($old)"
+            if $s in $made {
+                # Two terminals on one session: same window, nothing to create.
+                let nw = ($remap | get -o $key)
+                if $nw != null { $st = ($st | upsert $k ($e | upsert tmux_window_id $nw)) }
+                continue
+            }
+            let cs = ($e | get -o claude_session | default "")
+            let wd = if ($cs | is-not-empty) { $e | get -o claude_cwd | default ($e | get -o cwd | default "") } else { $e | get -o cwd | default "" }
+            let cwd_args = if ($wd | is-not-empty) and ($wd | path exists) { ["-c" $wd] } else { [] }
+            let cmd_args = if ($cs =~ '^[0-9A-Za-z-]+$') { [$"nu -e 'claude --resume ($cs)'"] } else { [] }
+            let group_up = ($g in $groups)
+            let reuse = if $group_up and ($old | is-not-empty) and ($old in $live_wids) { $old } else if $group_up { $remap | get -o $key } else { null }
+            if $dry_run {
+                let tail = if $reuse != null { $"select-window @($reuse)" } else if $group_up { $"new-window ($cwd_args ++ $cmd_args | each {|a| shq $a } | str join ' ')" } else { $"\(creates group) ($cwd_args ++ $cmd_args | each {|a| shq $a } | str join ' ')" }
+                print $"  DRY: tmux new-session -d -t (shq $g) -s (shq $s); ($tail)"
+                $made = ($made | append $s)
+                $groups = ($groups | append $g)
+                continue
+            }
+            # tmux refuses a command together with -t (group): a group-creating
+            # session gets its Claude through respawn-pane below.
+            let first_args = if $group_up { [] } else { $cwd_args }
+            let ns = (do { ^tmux new-session -d -t $g -s $s ...$first_args } | complete)
+            if $ns.exit_code != 0 {
+                print -e $"  warn: tmux session ($s) in group ($g) could not be created: ($ns.stderr | str trim)"
+                continue
+            }
+            $made = ($made | append $s)
+            $groups = ($groups | append $g)
+            mark-restore-pending [$s] false
+            let nw = if $reuse != null {
+                let r = (do { ^tmux select-window -t $"=($s):@($reuse)" } | complete)
+                if $r.exit_code != 0 { print -e $"  warn: tmux session ($s): window @($reuse) could not be selected: ($r.stderr | str trim)" }
+                $reuse
+            } else if $group_up {
+                let r = (do { ^tmux new-window -t $"=($s):" -P -F "#{window_id}" ...$cwd_args ...$cmd_args } | complete)
+                if $r.exit_code != 0 { print -e $"  warn: tmux session ($s): window could not be created: ($r.stderr | str trim)" }
+                $r.stdout | str trim | str replace -r '^@' ''
+            } else {
+                if ($cmd_args | is-not-empty) {
+                    let r = (do { ^tmux respawn-pane -k -t $"=($s):" ...$cwd_args ...$cmd_args } | complete)
+                    if $r.exit_code != 0 { print -e $"  warn: tmux session ($s): claude could not be started: ($r.stderr | str trim)" }
+                }
+                do { ^tmux display-message -t $"=($s):" -p "#{window_id}" } | complete | get stdout | str trim | str replace -r '^@' ''
+            }
+            if ($nw | is-empty) { continue }
+            if ($old | is-not-empty) { $remap = ($remap | upsert $key $nw) }
+            let how = if $reuse != null { "window kept" } else if ($cmd_args | is-not-empty) { "claude resumed" } else { "new window" }
+            print -e $"  tmux: rebuilt ($s) in group ($g): @($nw) \(($how))"
+            $st = ($st | upsert $k ($e | upsert tmux_window_id $nw))
+        }
+        $out = ($out | append ($ws | upsert state $st))
+    }
+    $out
+}
+
+# Rebuild the saved tmux sessions that are gone, without touching the WM
+# (`restore` does this itself first). Prints the remapped workspaces as JSON.
+def "main tmux-rebuild" [--dry-run] {
+    let state_file = ("~/.cache/sway-state.yaml" | path expand)
+    if not ($state_file | path exists) { print -e "No saved state found"; exit 1 }
+    let ws = (open $state_file | get -o workspaces | default [])
+    { workspaces: (rebuild-tmux-sessions $ws $dry_run) } | to json
+}
+
+# Print the snapshot save would record (debugging / tests).
+def "main tmux-snapshot" [] {
+    tmux-session-snapshot | to json
+}
+
 # Save current WM state (layout tree + state list) to cache.
 # Without flags: capture all workspaces, overwrite cache.
 # With --workspace <name> or --current: merge that single workspace into existing cache.
@@ -517,6 +734,7 @@ def "main save" [
     } else { [] }
 
     let tmux_cache = (build-tmux-window-cache $local_clients $thin_clients)
+    let tmux_snap = (tmux-session-snapshot)
     let prev_cache_path = ("~/.cache/sway-state.yaml" | path expand)
     # A missing or corrupt cache means "no history" - a full save overwrites it.
     let prev_ws = if ($prev_cache_path | path exists) {
@@ -526,7 +744,7 @@ def "main save" [
     let fresh = ($workspaces_raw | each { |ws|
         # state is a record keyed by id; enrich each value
         let enriched = ($ws.state | transpose k v
-            | each { |it| { k: $it.k, v: (inherit-slot-session (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) $ws.workspace $prev_ws) } }
+            | each { |it| { k: $it.k, v: (add-tmux-snapshot (inherit-slot-session (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) $ws.workspace $prev_ws) $tmux_snap) } }
             | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
         { name: $ws.workspace, ws_layout: $ws.ws_layout, layout: $ws.layout, state: $enriched }
     })
@@ -816,6 +1034,10 @@ def "main restore" [
         exit 1
     }
     let term = ($default_term_by_wm | get -o $wm | default "kitty")
+
+    # After a reboot the saved sessions are gone: recreate them (and resume
+    # their Claude sessions) before any terminal tries to attach.
+    let workspaces = (rebuild-tmux-sessions $workspaces $dry_run)
 
     # kwi3 has no append_layout / marks: its restore is one workspace.build
     # (ft011, sp007 T6). Everything below this point is the i3/sway path.

@@ -1,0 +1,239 @@
+#!/usr/bin/env nu
+# wm-state-tmux-test - the tmux snapshot `wm-state save` records and the
+# rebuild `wm-state restore` runs first (dotfiles-g5g4): after a reboot every
+# saved tmux session is gone; restore recreates them, one group's windows
+# shared by terminals across workspaces, and resumes Claude where it ran.
+#
+# Cases:
+#   snapshot          per session: group, current window id, active pane cwd,
+#                     the Claude session running in that window (stub claude
+#                     registered in ~/.claude/sessions/<pid>.json); a window
+#                     without Claude carries none; a dead pid's file, a
+#                     pid-reused file (wrong procStart) and a non-interactive
+#                     one are ignored
+#   rebuild           dead group -> every saved session recreated in the group,
+#                     a window per distinct saved window in its cwd, Claude
+#                     resumed by id in Claude's cwd, one window shared by two
+#                     terminals on two workspaces stays ONE window, each
+#                     session's current window is its own, tmux_window_id
+#                     rewritten to the new ids, every created session marked
+#                     @wm-restore-pending, a legacy entry (no tmux_group) and
+#                     a thin entry untouched
+#   idempotent        a second rebuild creates nothing and resumes nothing
+#   live-window-kept  group alive, saved window alive -> new session selects
+#                     that window, no new window, id unchanged
+#   dry-run           prints the plan, starts no server, resumes nothing
+#
+# Safety: a throwaway tmux server; every run is `env -i` with HOME and
+# TMUX_TMPDIR in a mktemp sandbox under /tmp (socket path asserted before
+# anything runs), so Jan's server is unreachable. `claude` on PATH is a stub.
+#
+# Run:  nu nushell/actions/wm-state-tmux-test
+# Pass: exits 0 and prints "wm-state-tmux-test: N passed, 0 failed"
+
+const here = (path self | path dirname)
+
+let tmp = (^mktemp -d /tmp/wmtmux.XXXXXX | str trim)
+let home = $"($tmp)/home"
+let bin = $"($tmp)/bin"
+let ttd = $"($tmp)/tt"
+mkdir $home $bin $ttd $"($home)/.cache" $"($home)/.claude/sessions"
+mkdir $"($home)/.local/bin"
+^ln -s ($here | path join "wm-ipc.nu") $"($home)/.local/bin/wm-ipc.nu"
+let dir1 = $"($tmp)/proj one"
+let dir2 = $"($tmp)/proj-two"
+let cdir = $"($tmp)/claude-cwd"
+mkdir $dir1 $dir2 $cdir
+let nu_bin = (which nu | get 0.path)
+let path = ([$bin ($nu_bin | path dirname) "/usr/local/bin" "/usr/bin" "/bin"] | uniq | str join ":")
+let wm_state = ($here | path join "wm-state")
+
+# Stub claude: logs "<cwd>|<argv>", registers like Claude Code (pid,
+# sessionId, cwd, kind, procStart = /proc/<pid>/stat field 22), stays alive
+# as the same pid (exec keeps pid and start time).
+$"#!/bin/bash
+echo \"$PWD|$*\" >> ($tmp)/claude.log
+sid=\"${CLAUDE_STUB_SID:-}\"
+[ \"$1\" = --resume ] && sid=\"$2\"
+start=$\(awk '{print $22}' /proc/$$/stat)
+printf '{\"pid\":%d,\"sessionId\":\"%s\",\"cwd\":\"%s\",\"kind\":\"interactive\",\"procStart\":\"%s\"}' $$ \"$sid\" \"$PWD\" \"$start\" > \"$HOME/.claude/sessions/$$.json\"
+exec sleep 3600
+" | save -f $"($bin)/claude"
+^chmod +x $"($bin)/claude"
+
+$env.T_HOME = $home
+$env.T_PATH = $path
+$env.T_TTD = $ttd
+$env.T_NU = $nu_bin
+$env.T_WMS = $wm_state
+$env.T_TMP = $tmp
+
+def --wrapped tx [...args] {
+    ^env -i $"HOME=($env.T_HOME)" $"PATH=($env.T_PATH)" $"TMUX_TMPDIR=($env.T_TTD)" tmux ...$args
+}
+def --wrapped txc [...args] {
+    do { ^env -i $"HOME=($env.T_HOME)" $"PATH=($env.T_PATH)" $"TMUX_TMPDIR=($env.T_TTD)" tmux ...$args } | complete
+}
+def --wrapped ws [...args] {
+    do { ^env -i $"HOME=($env.T_HOME)" $"PATH=($env.T_PATH)" $"TMUX_TMPDIR=($env.T_TTD)" $env.T_NU -n $env.T_WMS ...$args } | complete
+}
+def claude-log [] {
+    let f = $"($env.T_TMP)/claude.log"
+    if ($f | path exists) { open --raw $f | lines | where $it != "" } else { [] }
+}
+# Poll until `cond` holds (closure) or ~5s pass.
+def wait-for [cond: closure] {
+    for _ in 1..50 { if (do $cond) { return true }; sleep 100ms }
+    false
+}
+def sessions [] {
+    let r = (txc list-sessions -F "#{session_name}:#{session_group}:#{window_id}:#{@wm-restore-pending}")
+    if $r.exit_code != 0 { return [] }
+    $r.stdout | lines | where $it != "" | split column ":" name group wid mark
+}
+def window-cwd [wid: string] {
+    txc display-message -t $wid -p "#{pane_current_path}" | get stdout | str trim
+}
+def kill-server [] { txc kill-server | ignore; sleep 200ms }
+
+mut passed = 0
+mut failed = 0
+def check [name: string, cond: bool, detail: string] {
+    if $cond { print $"  ok   ($name)" } else { print $"  FAIL ($name): ($detail)" }
+    $cond
+}
+
+# ── safety: the server we drive lives in the sandbox ─────────────────────────
+tx new-session -d -s probe
+let sock = (tx display-message -p "#{socket_path}" | str trim)
+kill-server
+if not ($sock | str starts-with $ttd) {
+    print -e $"FATAL: tmux socket ($sock) is outside the sandbox"
+    exit 2
+}
+
+# ── 1. snapshot ──────────────────────────────────────────────────────────────
+print "snapshot"
+tx new-session -d -t grp -s grp_0 -c $dir1
+tx respawn-pane -k -t "=grp_0:" -c $dir1 "CLAUDE_STUB_SID=aaaa-1111 claude"
+tx new-session -d -t grp -s grp_1
+tx new-window -t "=grp_1:" -c $dir2 "sleep 3600"
+let up = (wait-for { (glob $"($home)/.claude/sessions/*.json" | length) >= 1 })
+# Noise the snapshot must ignore: a dead pid, a live pid with the wrong
+# procStart (pid reuse), a background (non-interactive) session.
+let sleeper = (tx display-message -t "=grp_1:" -p "#{pane_pid}" | str trim)
+'{"pid":999999,"sessionId":"dead-0000","kind":"interactive"}' | save -f $"($home)/.claude/sessions/999999.json"
+$'{"pid":($sleeper),"sessionId":"reused-0000","kind":"interactive","procStart":"1"}' | save -f $"($home)/.claude/sessions/($sleeper).json"
+let snap_r = (ws tmux-snapshot)
+let snap = (try { $snap_r.stdout | from json } catch { {} })
+let s0 = ($snap | get -o grp_0 | default {})
+let s1 = ($snap | get -o grp_1 | default {})
+let wid0 = (tx display-message -t "=grp_0:" -p "#{window_id}" | str trim | str replace '@' '')
+let wid1 = (tx display-message -t "=grp_1:" -p "#{window_id}" | str trim | str replace '@' '')
+for c in [
+    ["stub claude registered" $up "no sessions json appeared"]
+    ["snapshot exits 0" ($snap_r.exit_code == 0) $snap_r.stderr]
+    ["grp_0: group, window, cwd" (($s0 | get -o group) == "grp" and ($s0 | get -o wid) == $wid0 and ($s0 | get -o cwd) == $dir1) ($s0 | to nuon)]
+    ["grp_0: claude session + cwd" (($s0 | get -o claude_session) == "aaaa-1111" and ($s0 | get -o claude_cwd) == $dir1) ($s0 | to nuon)]
+    ["grp_1: own window + cwd, no claude" (($s1 | get -o wid) == $wid1 and ($s1 | get -o cwd) == $dir2 and ($s1 | get -o claude_session) == null) ($s1 | to nuon)]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+kill-server
+rm -f ...(glob $"($home)/.claude/sessions/*.json")
+rm -f $"($tmp)/claude.log"
+
+# ── 2. rebuild a dead group ──────────────────────────────────────────────────
+print "rebuild"
+let entry = {|s, wid, extra| { wid: 1, pid: 1, class: "st-256color", title: $"x - nu@grp ($wid)", session_type: "local", session: $s, tmux_window_id: $wid } | merge $extra }
+let state = { workspaces: [
+    { name: "alpha", ws_layout: "splith", layout: { "1": "st-256color", "2": "st-256color", "3": "st-256color", "4": "st-256color" }, state: {
+        "1": (do $entry "grp_0" "5" { tmux_group: "grp", cwd: $dir1, claude_session: "aaaa-1111", claude_cwd: $cdir })
+        "2": (do $entry "grp_1" "6" { tmux_group: "grp", cwd: $dir2 })
+        "3": (do $entry "legacy_0" "9" {})
+        "4": ({ class: "st-256color", session_type: "thin", session: "thin_x", tmux_window_id: "4", tmux_group: "thin" })
+    } }
+    { name: "beta", ws_layout: "splith", layout: { "1": "st-256color" }, state: {
+        "1": (do $entry "grp_2" "5" { tmux_group: "grp", cwd: $dir1, claude_session: "aaaa-1111", claude_cwd: $cdir })
+    } }
+] }
+$state | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+let rb = (ws tmux-rebuild)
+let out = (try { $rb.stdout | from json | get workspaces } catch { [] })
+let ss = (sessions)
+let by = {|n| $ss | where name == $n | get -o 0 | default {} }
+let g0 = (do $by "grp_0")
+let g1 = (do $by "grp_1")
+let g2 = (do $by "grp_2")
+let resumed = (wait-for { (claude-log | length) >= 1 })
+sleep 300ms
+let log = (claude-log)
+let wins = (txc list-windows -t "=grp_0:" -F "#{window_id}" | get stdout | lines | where $it != "")
+let o_alpha = ($out | where name == alpha | get -o 0.state | default {})
+let o_beta = ($out | where name == beta | get -o 0.state | default {})
+let new0 = ($g0 | get -o wid | default "" | str replace '@' '')
+let new1 = ($g1 | get -o wid | default "" | str replace '@' '')
+for c in [
+    ["rebuild exits 0" ($rb.exit_code == 0) $rb.stderr]
+    ["grp_0/1/2 recreated in group grp" (([$g0 $g1 $g2] | all {|g| ($g | get -o group) == "grp" })) ($ss | to nuon)]
+    ["legacy + thin sessions not created" (($ss | where name in [legacy_0 thin_x] | is-empty)) ($ss | to nuon)]
+    ["one window per distinct saved window (2)" (($wins | length) == 2) ($wins | to nuon)]
+    ["grp_2 shares grp_0's window" (($g2 | get -o wid) == ($g0 | get -o wid)) $"($g0) vs ($g2)"]
+    ["grp_1 has its own window" (($new1 | is-not-empty) and $new1 != $new0) $"($new0) vs ($new1)"]
+    ["claude resumed once, by id, in its cwd" ($resumed and $log == [$"($cdir)|--resume aaaa-1111"]) ($log | to nuon)]
+    ["grp_1 window opened in saved cwd" ((window-cwd $"@($new1)") == $dir2) (window-cwd $"@($new1)")]
+    ["created sessions marked pending" (([$g0 $g1 $g2] | all {|g| ($g | get -o mark | default "") =~ '^[0-9]+$' })) ($ss | to nuon)]
+    ["alpha ids rewritten" (($o_alpha | get -o "1" | default {} | get -o tmux_window_id) == $new0 and ($o_alpha | get -o "2" | default {} | get -o tmux_window_id) == $new1) ($o_alpha | to nuon)]
+    ["beta id rewritten to the shared window" (($o_beta | get -o "1" | default {} | get -o tmux_window_id) == $new0) ($o_beta | to nuon)]
+    ["legacy + thin ids untouched" (($o_alpha | get -o "3" | default {} | get -o tmux_window_id) == "9" and ($o_alpha | get -o "4" | default {} | get -o tmux_window_id) == "4") ($o_alpha | to nuon)]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+
+# ── 3. idempotent ────────────────────────────────────────────────────────────
+print "idempotent"
+let before = (txc list-windows -a -F "#{window_id}" | get stdout | lines | uniq | length)
+let rb2 = (ws tmux-rebuild)
+sleep 300ms
+let after = (txc list-windows -a -F "#{window_id}" | get stdout | lines | uniq | length)
+for c in [
+    ["second rebuild exits 0" ($rb2.exit_code == 0) $rb2.stderr]
+    ["no new window" ($before == $after) $"($before) -> ($after)"]
+    ["no new session" (((sessions) | length) == ($ss | length)) ((sessions) | to nuon)]
+    ["claude not resumed again" ((claude-log | length) == 1) (claude-log | to nuon)]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+kill-server
+rm -f $"($tmp)/claude.log"
+
+# ── 4. live window kept ──────────────────────────────────────────────────────
+print "live-window-kept"
+tx new-session -d -t grp -s grp_0 -c $dir1
+let live_wid = (tx display-message -t "=grp_0:" -p "#{window_id}" | str trim | str replace '@' '')
+{ workspaces: [{ name: "alpha", ws_layout: "splith", layout: { "1": "st-256color" }, state: {
+    "1": (do $entry "grp_5" $live_wid { tmux_group: "grp", cwd: $dir2, claude_session: "bbbb-2222" })
+} }] } | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+let rb3 = (ws tmux-rebuild)
+sleep 300ms
+let g5 = (sessions | where name == grp_5 | get -o 0 | default {})
+let out3 = (try { $rb3.stdout | from json | get workspaces.0.state."1".tmux_window_id } catch { "" })
+for c in [
+    ["grp_5 joins group grp" (($g5 | get -o group) == "grp") ((sessions) | to nuon)]
+    ["grp_5 selects the live window" (($g5 | get -o wid) == $"@($live_wid)") ($g5 | to nuon)]
+    ["no window created, claude not started" ((txc list-windows -a -F "#{window_id}" | get stdout | lines | uniq | length) == 1 and (claude-log | is-empty)) (claude-log | to nuon)]
+    ["id unchanged" ($out3 == $live_wid) $out3]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+kill-server
+
+# ── 5. dry run ───────────────────────────────────────────────────────────────
+print "dry-run"
+$state | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+let rb4 = (ws tmux-rebuild --dry-run)
+for c in [
+    ["dry run exits 0" ($rb4.exit_code == 0) $rb4.stderr]
+    ["plan printed for the three sessions" (($rb4.stdout | lines | where {|l| $l | str contains "DRY: tmux new-session" } | length) == 3) $rb4.stdout]
+    ["claude --resume in the plan" ($rb4.stdout | str contains "claude --resume aaaa-1111") $rb4.stdout]
+    ["no server started" ((txc list-sessions).exit_code != 0) ((sessions) | to nuon)]
+    ["nothing resumed" (claude-log | is-empty) (claude-log | to nuon)]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+
+# ── cleanup ──────────────────────────────────────────────────────────────────
+kill-server
+rm -rf $tmp
+print $"wm-state-tmux-test: ($passed) passed, ($failed) failed"
+if $failed > 0 { exit 1 }

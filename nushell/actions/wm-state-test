@@ -1090,8 +1090,8 @@ let stub_calls = (if ($i3_log | path exists) { open $i3_log | str trim } else { 
 let verbs = ["append_layout" "get_marks" "con_mark" "mark "]
 let seen = ($verbs | where {|v| $rig_text | str contains $v })
 if (check "no-i3-verbs: no i3 verb in the rig's request log, no i3-msg/swaymsg call at all" (($seen | is-empty) and ($stub_calls | is-empty)) $"seen=($seen | to json -r) i3-msg log=($stub_calls)") { $passed += 1 } else { $failed += 1 }
-let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") and not ($l =~ '(^| )list-clients ') and not ($l =~ '^set-option (-u )?-t =.*: @wm-restore-pending( [0-9]+)?$') })
-if (check "sandbox: the stub tmux was only asked list-sessions / list-clients / the @wm-restore-pending mark" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
+let tmux_used = (open $tmux_log | lines | where {|l| not ($l | str starts-with "list-sessions") and not ($l | str starts-with "list-panes -a ") and not ($l =~ '(^| )list-clients ') and not ($l =~ '^set-option (-u )?-t =.*: @wm-restore-pending( [0-9]+)?$') })
+if (check "sandbox: the stub tmux was only asked list-sessions / list-clients / list-panes (save's snapshot, dotfiles-g5g4) / the @wm-restore-pending mark" ($tmux_used | is-empty) $"tmux=($tmux_used | to json -r)") { $passed += 1 } else { $failed += 1 }
 
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
