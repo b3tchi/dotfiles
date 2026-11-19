@@ -714,6 +714,13 @@ def "main save" [
     --workspace: string = ""  # Save only this workspace, merge into cache
     --current                 # Save only the focused workspace, merge into cache
 ] {
+    # Guard: with no reachable WM (e.g. a shell without KWI3SOCK/I3SOCK),
+    # get-wm-workspaces is [] and a full save would overwrite the cache with
+    # nothing. Refuse before reading anything else; the cache stays as it is.
+    if (wm-name) == null {
+        print -e "wm-state save: no window manager reachable (KWI3SOCK / I3SOCK / SWAYSOCK unset or dead) - cache left untouched"
+        exit 1
+    }
     let targets = (resolve-target-ws $workspace $current)
     let workspaces_raw = get-wm-workspaces
 
@@ -752,6 +759,13 @@ def "main save" [
     let cache_path = ("~/.cache/sway-state.yaml" | path expand)
 
     if ($targets | is-empty) {
+        # A WM that answers with no terminal-bearing workspace at all is far
+        # likelier the wrong display (or a session still starting) than a
+        # deliberate wipe: never replace a non-empty cache with an empty one.
+        if ($fresh | is-empty) and ($prev_ws | is-not-empty) {
+            print -e $"wm-state save: captured 0 workspaces - keeping the ($prev_ws | length) saved in ($cache_path) \(delete it to start over)"
+            exit 1
+        }
         # Default: overwrite cache with all captured workspaces.
         { workspaces: $fresh } | to yaml | save -f $cache_path
         print $"Saved ($fresh | length) workspaces"

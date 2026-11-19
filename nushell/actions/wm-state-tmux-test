@@ -23,6 +23,8 @@
 #   live-window-kept  group alive, saved window alive -> new session selects
 #                     that window, no new window, id unchanged
 #   dry-run           prints the plan, starts no server, resumes nothing
+#   save-no-wm        `save` with no reachable WM exits 1 and leaves the
+#                     cache byte-identical (it used to write 0 workspaces)
 #
 # Safety: a throwaway tmux server; every run is `env -i` with HOME and
 # TMUX_TMPDIR in a mktemp sandbox under /tmp (socket path asserted before
@@ -230,6 +232,19 @@ for c in [
     ["claude --resume in the plan" ($rb4.stdout | str contains "claude --resume aaaa-1111") $rb4.stdout]
     ["no server started" ((txc list-sessions).exit_code != 0) ((sessions) | to nuon)]
     ["nothing resumed" (claude-log | is-empty) (claude-log | to nuon)]
+] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
+
+# ── 6. save with no WM reachable leaves the cache alone ──────────────────────
+print "save-no-wm"
+let cache = $"($home)/.cache/sway-state.yaml"
+let cache_before = (open --raw $cache)
+let sv = (ws save)
+let sv2 = (ws save --workspace alpha)
+for c in [
+    ["save exits 1 without a WM" ($sv.exit_code == 1) $"exit=($sv.exit_code) out=($sv.stdout)"]
+    ["says why" ($sv.stderr | str contains "no window manager reachable") $sv.stderr]
+    ["--workspace save exits 1 too" ($sv2.exit_code == 1) $"exit=($sv2.exit_code)"]
+    ["cache byte-identical" ((open --raw $cache) == $cache_before) "cache changed"]
 ] { if (check $c.0 $c.1 $c.2) { $passed += 1 } else { $failed += 1 } }
 
 # ── cleanup ──────────────────────────────────────────────────────────────────
