@@ -94,6 +94,12 @@ def main [] {
     # the old and new session might appear unattached
     sleep 200ms
 
+    # Windows BEFORE sessions: only a window that already existed when the
+    # marks were read may be killed. In the other order a window created
+    # (and marked, atomically) between the two reads was missing from
+    # pending_windows yet present in the window list - killed as unattached
+    # (wm-state restore lost samples_0 and iac_0 this way, 2026-11-19).
+    let all_windows = (get_windows)
     let all_sessions = (get_sessions)
 
     # Stale marks protect nothing: unset them (by session id, never a name).
@@ -150,7 +156,7 @@ def main [] {
 
     # Process unattached windows (a pending session's current window counts
     # as viewed: it is what the new client will show)
-    let windows = (get_windows | where {|w| $w.clients == 0 and not ($w.id in $pending_windows) })
+    let windows = ($all_windows | where {|w| $w.clients == 0 and not ($w.id in $pending_windows) })
 
     for window in $windows {
         let panes = (get_panes $window.id)

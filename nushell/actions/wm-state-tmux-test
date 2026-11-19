@@ -23,6 +23,8 @@
 #   live-window-kept  group alive, saved window alive -> new session selects
 #                     that window, no new window, id unchanged
 #   dry-run           prints the plan, starts no server, resumes nothing
+#   cleanup-hooks     the real tmux-cleanup hooked on window/session changes
+#                     (as tmux.conf has it) never kills a rebuilt session
 #   already-running   a saved Claude session that is running elsewhere opens
 #                     its window but is not resumed a second time
 #   save-no-wm        `save` with no reachable WM exits 1 and leaves the
@@ -253,6 +255,42 @@ for c in [
 kill-server
 rm -f ...(glob $"($home)/.claude/sessions/*.json")
 rm -f $"($tmp)/claude.log"
+
+# ── 5c. the real tmux-cleanup hooked in, as tmux.conf has it ─────────────────
+# Live restore 2026-11-19 lost samples_0 and iac_0: every window change ran
+# tmux-cleanup, which read the marks, then (ms later) the windows, and killed
+# a window created and marked in between. Many groups, many window changes.
+print "cleanup-hooks"
+# Live, cleanup is slow between its reads (a tmux call per group); here a
+# wrapper makes that gap a fixed 300ms after list-sessions, so a session
+# rebuilt meanwhile reliably lands inside it.
+let slow = $"($tmp)/slowbin"
+mkdir $slow
+let real_tmux = (which tmux | get 0.path)
+$"#!/bin/bash\nif [ \"$1\" = list-sessions ]; then '($real_tmux)' \"$@\"; rc=$?; sleep 0.3; exit $rc; fi\nexec '($real_tmux)' \"$@\"\n" | save -f $"($slow)/tmux"
+^chmod +x $"($slow)/tmux"
+let hook = $"run-shell 'PATH=($slow):$PATH ($here | path join "tmux-cleanup")'"
+tx new-session -d -s keeper
+tx set-hook -g session-window-changed $hook
+tx set-hook -g client-session-changed $hook
+let many = { workspaces: (1..6 | each {|i| { name: $"w($i)", ws_layout: "splith", layout: { "1": "st-256color", "2": "st-256color", "3": "st-256color" }, state: {
+    "1": (do $entry $"g($i)_0" "1" { tmux_group: $"g($i)", cwd: $dir1 })
+    "2": (do $entry $"g($i)_1" "2" { tmux_group: $"g($i)", cwd: $dir2 })
+    "3": (do $entry $"g($i)_2" "3" { tmux_group: $"g($i)", cwd: $dir1 })
+} } }) }
+$many | to yaml | save -f $"($home)/.cache/sway-state.yaml"
+mut lost = []
+for round in 1..3 {
+    let r = (ws tmux-rebuild)
+    sleep 1500ms
+    let names = (sessions | get name)
+    let want = (1..6 | each {|i| [$"g($i)_0" $"g($i)_1" $"g($i)_2"] } | flatten)
+    $lost = ($lost | append ($want | where {|n| not ($n in $names) } | each {|n| $"round ($round): ($n)" }))
+    for n in ($want | where {|n| $n in $names }) { txc kill-session -t $"=($n)" | ignore }
+    sleep 500ms
+}
+if (check "18 sessions x3 rounds all survive the hooked tmux-cleanup" ($lost | is-empty) ($lost | to nuon)) { $passed += 1 } else { $failed += 1 }
+kill-server
 
 # ── 6. save with no WM reachable leaves the cache alone ──────────────────────
 print "save-no-wm"

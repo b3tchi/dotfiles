@@ -665,14 +665,19 @@ def rebuild-tmux-sessions [workspaces: list<record>, dry_run: bool] {
             # tmux refuses a command together with -t (group): a group-creating
             # session gets its Claude through respawn-pane below.
             let first_args = if $group_up { [] } else { $cwd_args }
-            let ns = (do { ^tmux new-session -d -t $g -s $s ...$first_args } | complete)
+            # Create AND mark in one command list: the server runs it without
+            # interleaving another client, so no tmux-cleanup (hooks fire it
+            # on every window change) can see the session unmarked and kill
+            # its window - which lost samples_0 and iac_0 on the first live
+            # restore (2026-11-19).
+            let now = (date now | format date '%s')
+            let ns = (do { ^tmux new-session -d -t $g -s $s ...$first_args ';' set-option -t $"=($s):" "@wm-restore-pending" $now } | complete)
             if $ns.exit_code != 0 {
                 print -e $"  warn: tmux session ($s) in group ($g) could not be created: ($ns.stderr | str trim)"
                 continue
             }
             $made = ($made | append $s)
             $groups = ($groups | append $g)
-            mark-restore-pending [$s] false
             let nw = if $reuse != null {
                 let r = (do { ^tmux select-window -t $"=($s):@($reuse)" } | complete)
                 if $r.exit_code != 0 { print -e $"  warn: tmux session ($s): window @($reuse) could not be selected: ($r.stderr | str trim)" }
