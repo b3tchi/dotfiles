@@ -1845,14 +1845,17 @@ PanelWindow {
             screen: root.screen
             visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
                      && rect !== null && thickness > 0
-            // Split bar: the ring sits right above the bottom bar's tab row,
-            // placed from the screen's bottom edge (exclusive zone -1: the
-            // bottom bar's own zone must not push it up again).
+            // Split bar: the ring sits right BELOW the bottom bar's tab row -
+            // the top bar's mirror, on the row's screen-edge side (Jan,
+            // 2026-11-21: "if workspace bar is on the bottom then highlight
+            // row should be on the bottom") - placed from the screen's
+            // bottom edge (exclusive zone -1: the bottom bar's own zone must
+            // not push it up again).
             anchors { top: !root.split; bottom: root.split; left: true }
             margins {
                 left: rect ? rect.x - origin.x : 0
                 top: rect && !root.split ? Math.max(0, rect.y - thickness - origin.y) : 0
-                bottom: root.split ? root.bottomRowH + root.bottomBelow : 0
+                bottom: root.split ? Math.max(0, root.bottomBelow - thickness) : 0
             }
             implicitWidth: rect ? Math.max(1, rect.w) : 1
             implicitHeight: Math.max(1, thickness)
@@ -1895,7 +1898,8 @@ PanelWindow {
             visible: (root.currentMode === "default" ? Kwi3Grid.frameEnabled : true)
                      && rect !== null && thickness > 0
             x: rect ? rect.x : 0
-            y: rect ? rect.y - thickness : 0
+            // split: below the bottom tab row (see wsFocusLayer)
+            y: rect ? (root.split ? rect.y + root.bottomRowH : rect.y - thickness) : 0
             width: rect ? Math.max(1, rect.w) : 1
             height: Math.max(1, thickness)
             flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
