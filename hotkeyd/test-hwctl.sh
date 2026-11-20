@@ -160,19 +160,18 @@ if command -v jq >/dev/null 2>&1; then
     check "wayland: normal is kscreen's none" "$(tail -n 1 "$KS/log")" "output.DSI-2.rotation.none"
     check "wayland: xrandr never asked" "$([ -e "$KS/xrandr-called" ] && echo yes || echo no)" "no"
 
-    # --- scale (font size): 1.5, 1.75, 2, so the kwi3 module (8x20) stays
+    # --- scale (font size): 1.5 and 2, so the kwi3 module (8x20) stays
     # whole device pixels
     sstep() { sh "$H" scale "$1"; field scale; }
     check "wayland show: scale" "$(field scale)" "1.5"
-    check "scale + a quarter" "$(sstep +)" "1.75"
-    check "scale: the enabled output, kscreen's verb" "$(tail -n 1 "$KS/log")" "output.DSI-2.scale.1.75"
+    check "scale + to 2" "$(sstep +)" "2"
+    check "scale: the enabled output, kscreen's verb" "$(tail -n 1 "$KS/log")" "output.DSI-2.scale.2"
     check "scale - back" "$(sstep -)" "1.5"
     echo 1.6 >"$KS/scale"
-    check "scale + from off-grid 1.6 lands on 1.75" "$(sstep +)" "1.75"
+    check "scale + from off-grid 1.6 lands on 2" "$(sstep +)" "2"
     echo 1.6 >"$KS/scale"
     check "scale - from off-grid 1.6 lands on 1.5" "$(sstep -)" "1.5"
-    check "scale + to the biggest" "$(sstep +; sstep +)" "1.75
-2"
+    check "scale + to the biggest" "$(sstep +)" "2"
     : >"$KS/log"
     check "scale + capped at 2" "$(sstep +)" "2"
     check "scale at the cap: kscreen not called" "$(wc -l <"$KS/log" | tr -d ' ')" "0"

@@ -12,12 +12,12 @@
 #               session's). X11 (i3): the primary output, else the first active
 #               one, via xrandr ($DISPLAY)
 #   scale       the session's size (fonts, titlebars, bar, every window): the
-#               output scale of the first enabled output, three steps:
-#               1.5 (the phone's own, the smallest), 1.75, 2; no wrap.
+#               output scale of the first enabled output, two steps:
+#               1.5 (the phone's own) and 2; no wrap.
 #               Wayland (kwi3 on KWin) only, via kscreen-doctor. The kwi3
 #               module (kwi3/config.js, 8x20 logical) is kept as it is: at
 #               each step a cell is still a whole number of device pixels
-#               (1.5 12x30, 1.75 14x35, 2 16x40), so foot's pinned
+#               (1.5 12x30, 2 16x40), so foot's pinned
 #               line-height and the grid stay in step
 #
 #   autosuspend idle delay before the phone suspends: 30s, 1min, 10min, 1hr, off,
@@ -188,9 +188,9 @@ scale)
 	# the next step in that direction, so an odd scale set elsewhere (1.6)
 	# lands back on a grid-safe one; clamped at both ends
 	if [ "$dir" = + ]; then
-		if [ "$cur" -lt 150 ]; then new=150; elif [ "$cur" -lt 175 ]; then new=175; else new=200; fi
+		if [ "$cur" -lt 150 ]; then new=150; else new=200; fi
 	else
-		if [ "$cur" -gt 200 ]; then new=200; elif [ "$cur" -gt 175 ]; then new=175; else new=150; fi
+		if [ "$cur" -gt 200 ]; then new=200; else new=150; fi
 	fi
 	[ "$new" -eq "$cur" ] && exit 0
 	kscreen-doctor "output.$out.scale.$(scale_fmt "$new")" >/dev/null
