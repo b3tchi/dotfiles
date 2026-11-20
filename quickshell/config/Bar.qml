@@ -217,10 +217,13 @@ PanelWindow {
     readonly property bool split: Session.splitFor(screenName)
     readonly property int bottomRowH: Kwi3Grid.active ? Kwi3Grid.rowHeight : barHeight
     readonly property int bottomBandH: Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0
-    // Tiles end above the rounded bottom corners: the bottom bar reaches up
-    // the corner's radius at least. Its row stays right under the tiles, as
-    // on the desktop, with black below it down to the screen's edge.
-    readonly property int bottomBarH: Math.max(bottomBandH + bottomRowH, corner)
+    // Tiles end above the rounded bottom corners: the bottom bar plus the
+    // margin kwi3 keeps above it (edgeMargin) reach up the corner's radius
+    // at least - counting the bar alone wasted up to a row. Its row stays
+    // right under the tiles, as on the desktop, with black below it down to
+    // the screen's edge.
+    readonly property int bottomBarH: Math.max(bottomBandH + bottomRowH,
+        corner - (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0))
     readonly property int bottomBelow: bottomBarH - bottomBandH - bottomRowH
 
     // Rounded screen corners (Session.cornerFor: the radius in logical px,
