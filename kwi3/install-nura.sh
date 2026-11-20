@@ -11,14 +11,15 @@
 # helpers, all under ~/.local. It never restarts a session: install.sh prints
 # the `i3reload` / `systemctl --user restart krdp-kwin` it would take.
 #
-# SOURCE: the `kwin-host` branch of kwi3, not a release tag (Jan,
-# 2026-10-30) - nothing on kwin-host is tagged until it merges. The clone is
+# SOURCE: the `main` branch of kwi3, not a release tag (Jan, 2026-11-21;
+# it was `kwin-host` from 2026-10-30 until that branch merged into main
+# for v0.2.16). The clone is
 # ~/.local/src/kwi3-kwin, apart from `kwi3`'s tag checkout in
 # ~/.local/src/kwi3. It is fetched from $KWI3_REPO, GitHub over ssh (the
 # `github` dot sets that up; kwi3 is private, so the https URL never
 # worked), and only fast-forwarded. A push from the dev box still works:
 #
-#   git -C <kwi3 kwin-host worktree> push phone:.local/src/kwi3-kwin kwin-host
+#   git -C <kwi3 main worktree> push phone:.local/src/kwi3-kwin main
 #
 # (the clone accepts a push into its checked-out branch,
 # receive.denyCurrentBranch=updateInstead, like ~/.dotfiles on the phone).
@@ -45,7 +46,7 @@
 set -u
 
 SRC="$HOME/.local/src/kwi3-kwin"
-BRANCH=kwin-host
+BRANCH=main
 REPO="${KWI3_REPO:-git@github.com:b3tchi/kwi3.git}"
 DOTS="$HOME/.dotfiles"
 
@@ -77,7 +78,7 @@ else
 fi
 if ! git -C "$SRC" rev-parse -q --verify HEAD >/dev/null; then
   echo "kwi3: $SRC has no commit yet. From the dev box:" >&2
-  echo "kwi3:   git -C <kwi3 kwin-host worktree> push phone:.local/src/kwi3-kwin $BRANCH" >&2
+  echo "kwi3:   git -C <kwi3 main worktree> push phone:.local/src/kwi3-kwin $BRANCH" >&2
   exit 1
 fi
 echo "kwi3: $BRANCH at $(git -C "$SRC" rev-parse --short HEAD)"
