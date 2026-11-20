@@ -163,8 +163,8 @@ func controlsBinds(dir string) []bind.Bind {
 	var out []bind.Bind
 	for _, c := range []struct{ key, control string }{
 		{"v", "volume"}, {"b", "brightness"}, {"r", "rotation"},
-		// f: the session's font size, as the output scale (hwctl keeps it
-		// on quarter steps so the kwi3 module grid holds)
+		// f: the session's font size, as the output scale (hwctl toggles
+		// 1.5/2, both keep the kwi3 module grid whole device pixels)
 		{"f", "scale"},
 		// s steps through the idle delays; the rest are toggles, which + and -
 		// both flip

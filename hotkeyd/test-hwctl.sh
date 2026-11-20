@@ -164,21 +164,15 @@ if command -v jq >/dev/null 2>&1; then
     # whole device pixels
     sstep() { sh "$H" scale "$1"; field scale; }
     check "wayland show: scale" "$(field scale)" "1.5"
-    check "scale + to 2" "$(sstep +)" "2"
+    check "scale + toggles to 2" "$(sstep +)" "2"
     check "scale: the enabled output, kscreen's verb" "$(tail -n 1 "$KS/log")" "output.DSI-2.scale.2"
-    check "scale - back" "$(sstep -)" "1.5"
+    check "scale + toggles back to 1.5" "$(sstep +)" "1.5"
+    check "scale - toggles too" "$(sstep -)" "2"
+    check "scale - and back" "$(sstep -)" "1.5"
     echo 1.6 >"$KS/scale"
-    check "scale + from off-grid 1.6 lands on 2" "$(sstep +)" "2"
-    echo 1.6 >"$KS/scale"
-    check "scale - from off-grid 1.6 lands on 1.5" "$(sstep -)" "1.5"
-    check "scale + to the biggest" "$(sstep +)" "2"
-    : >"$KS/log"
-    check "scale + capped at 2" "$(sstep +)" "2"
-    check "scale at the cap: kscreen not called" "$(wc -l <"$KS/log" | tr -d ' ')" "0"
-    echo 1.5 >"$KS/scale"
-    check "scale - floored at 1.5" "$(sstep -)" "1.5"
-    echo 1 >"$KS/scale"
-    check "scale - from below the floor goes to 1.5" "$(sstep -)" "1.5"
+    check "off-grid 1.6 toggles to 2" "$(sstep +)" "2"
+    echo 2.5 >"$KS/scale"
+    check "off-grid 2.5 toggles to 1.5" "$(sstep -)" "1.5"
     unset WAYLAND_DISPLAY
     sh "$H" scale + 2>/dev/null
     check "x11: scale fails" "$?" "1"
