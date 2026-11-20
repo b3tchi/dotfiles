@@ -250,7 +250,21 @@ PanelWindow {
     // The left part (tabs, mode strip) and the clock's right edge.
     readonly property int leftPad: Math.max(Kwi3Grid.active ? Kwi3Grid.contentLeft : 8,
                                             split ? bottomClear : Math.max(topClear, holeClear(true)))
-    readonly property int rightPad: Math.max(onGrid ? cellW : 8, topClear, holeClear(false))
+    // On kwi3 the clock ends where the tiles' columns do: kwi3 fits whole
+    // cells between contentLeft and the same margin on the right, and a
+    // screen that is not whole cells wide (540 at scale 2: 67.5) leaves the
+    // rest at the right. A corner or hole clearance moves it whole cells in.
+    readonly property int gridRightPad: {
+        if (!Kwi3Grid.active || !onGrid || !screen) return 0
+        var l = Kwi3Grid.contentLeft
+        return screen.width - (l + Math.floor((screen.width - 2 * l) / cellW) * cellW)
+    }
+    readonly property int rightPad: {
+        var clear = Math.max(topClear, holeClear(false))
+        if (gridRightPad > 0)
+            return gridRightPad + Math.ceil(Math.max(0, clear - gridRightPad) / cellW) * cellW
+        return Math.max(onGrid ? cellW : 8, clear)
+    }
     margins {
         top:   isPhone ? 20 : (Kwi3Grid.active ? Kwi3Grid.edgeMargin : 0)
         left:  isPhone ? 40 : 0
