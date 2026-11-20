@@ -2,7 +2,6 @@
   "screens": {
     "DSI-1": {
       "split": true,
-      "corner": 75,
       "panel": {
         "source": "gmobile data/devices/display-panels/nothing,spacewar.json",
         "x-res": 1080,
@@ -14,7 +13,8 @@
             "w": 65,
             "h": 65
           }
-        ]
+        ],
+        "border-radius": 112
       }
     }
   }

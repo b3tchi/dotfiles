@@ -32,6 +32,7 @@ import QtQuick
 //                                // stay clear of them
 //     "panel": {                 // the display's cutouts, in PHYSICAL px
 //       "x-res": 1080,           // as phosh's gmobile data gives them
+//       "border-radius": 112,    // corner radius, physical px; beats "corner"
 //       "cutouts": [ { "name": "camera", "x": 83, "y": 35, "w": 65, "h": 65 } ]
 //     },                         // (a camera hole at the top is hidden in
 //                                // the top bar)
@@ -124,7 +125,18 @@ Singleton {
     function splitFor(screenName)  { return optBool(screenName, "QS_BAR_SPLIT", "split") }
     function heightFor(screenName) { return optInt(screenName, "QS_BAR_HEIGHT", "height", isSway ? 24 : 27) }
     function fontFor(screenName)   { return optInt(screenName, "QS_BAR_FONT", "font", isSway ? 14 : 16) }
-    function cornerFor(screenName) { return optInt(screenName, "QS_BAR_CORNER", "corner", 0) }
+    // Rounded screen corners, logical px. The panel's "border-radius"
+    // (physical px, with its "x-res", like the cutouts) scales with the
+    // screen, so it stays right at any output scale (hwctl scale); a plain
+    // "corner" is logical px, right at one scale only. QS_BAR_CORNER wins.
+    function cornerFor(screenName, screenWidth) {
+        var v = parseInt(Quickshell.env("QS_BAR_CORNER") ?? "")
+        if (!isNaN(v)) return v
+        var p = machineOpt(screenName, "panel")
+        if (p && p["border-radius"] > 0 && p["x-res"] > 0 && screenWidth > 0)
+            return Math.round(p["border-radius"] * screenWidth / p["x-res"])
+        return optInt(screenName, "QS_BAR_CORNER", "corner", 0)
+    }
     // The panel's cutouts as logical rects {x, y, w, h}: the machine file's
     // "panel" holds them in physical px with the panel's "x-res", so the
     // scale is x-res over the screen's logical width.

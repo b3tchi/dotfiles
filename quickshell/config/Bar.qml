@@ -223,11 +223,11 @@ PanelWindow {
     readonly property int bottomBarH: Math.max(bottomBandH + bottomRowH, corner)
     readonly property int bottomBelow: bottomBarH - bottomBandH - bottomRowH
 
-    // Rounded screen corners (the machine file's "corner": the radius in
-    // logical px). A row whose outer edge is `d` px in from the screen's
+    // Rounded screen corners (Session.cornerFor: the radius in logical px,
+    // from the panel's physical border-radius at the current scale). A row whose outer edge is `d` px in from the screen's
     // top or bottom edge keeps its ends this far in from the sides, so
     // nothing is drawn under the curve; whole cells on the grid.
-    readonly property int corner: Session.cornerFor(screenName)
+    readonly property int corner: Session.cornerFor(screenName, screen ? screen.width : 0)
     function cornerClear(d) {
         if (corner <= 0 || d >= corner) return 0
         var dy = corner - d
