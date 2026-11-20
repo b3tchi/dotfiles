@@ -591,6 +591,14 @@
         },
         {
           "actions": [
+            "run:$HOME/.local/bin/hwctl scale +"
+          ],
+          "chord": "f",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
             "run:$HOME/.local/bin/hwctl autorotate +"
           ],
           "chord": "a",
@@ -673,6 +681,14 @@
             },
             {
               "actions": [
+                "run:$HOME/.local/bin/hwctl scale -"
+              ],
+              "chord": "f",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
                 "run:$HOME/.local/bin/hwctl autorotate -"
               ],
               "chord": "a",
@@ -745,6 +761,14 @@
                 "run:$HOME/.local/bin/hwctl rotation -"
               ],
               "chord": "r",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl scale -"
+              ],
+              "chord": "f",
               "device": "",
               "on_release": false
             },

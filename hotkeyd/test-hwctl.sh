@@ -132,14 +132,18 @@ check "x11 no active output: rotation fails" "$?" "1"
 KS="$T/kscreen"
 mkdir -p "$KS"
 echo 1 >"$KS/rot"
+echo 1.5 >"$KS/scale"
 cat >"$T/bin/kscreen-doctor" <<'STUB'
 #!/bin/sh
 d=$HWCTL_TEST_KS
 if [ "$1" = -j ]; then
-    echo '{"outputs":[{"name":"DSI-1","enabled":false,"rotation":1},{"name":"DSI-2","enabled":true,"rotation":'"$(cat "$d/rot")"'}]}'
+    echo '{"outputs":[{"name":"DSI-1","enabled":false,"rotation":1},{"name":"DSI-2","enabled":true,"rotation":'"$(cat "$d/rot")"',"scale":'"$(cat "$d/scale")"'}]}'
     exit 0
 fi
 echo "$1" >>"$d/log"
+case "$1" in
+*.scale.*) echo "${1##*.scale.}" >"$d/scale"; exit 0 ;;
+esac
 case "$1" in
 *.none) echo 1 ;; *.left) echo 2 ;; *.inverted) echo 4 ;; *.right) echo 8 ;;
 esac >"$d/rot"
@@ -155,7 +159,28 @@ if command -v jq >/dev/null 2>&1; then
     check "wayland - back" "$(rstep -)" "normal"
     check "wayland: normal is kscreen's none" "$(tail -n 1 "$KS/log")" "output.DSI-2.rotation.none"
     check "wayland: xrandr never asked" "$([ -e "$KS/xrandr-called" ] && echo yes || echo no)" "no"
+
+    # --- scale (font size): quarter steps, 1..2.5, so the kwi3 module (8x20)
+    # stays whole device pixels
+    sstep() { sh "$H" scale "$1"; field scale; }
+    check "wayland show: scale" "$(field scale)" "1.5"
+    check "scale + a quarter" "$(sstep +)" "1.75"
+    check "scale: the enabled output, kscreen's verb" "$(tail -n 1 "$KS/log")" "output.DSI-2.scale.1.75"
+    check "scale - back" "$(sstep -)" "1.5"
+    echo 1.6 >"$KS/scale"
+    check "scale + from off-grid 1.6 lands on 1.75" "$(sstep +)" "1.75"
+    echo 1.6 >"$KS/scale"
+    check "scale - from off-grid 1.6 lands on 1.5" "$(sstep -)" "1.5"
+    echo 2.5 >"$KS/scale"
+    : >"$KS/log"
+    check "scale + capped at 2.5" "$(sstep +)" "2.5"
+    check "scale at the cap: kscreen not called" "$(wc -l <"$KS/log" | tr -d ' ')" "0"
+    echo 1 >"$KS/scale"
+    check "scale - floored at 1" "$(sstep -)" "1"
     unset WAYLAND_DISPLAY
+    sh "$H" scale + 2>/dev/null
+    check "x11: scale fails" "$?" "1"
+    check "x11 show: scale reads -" "$(field scale)" "-"
 else
     echo "skip - wayland rotation: no jq on PATH"
 fi

@@ -27,6 +27,7 @@ Singleton {
         {text: "volume", key: "v", value: controlValues.volume || ""},
         {text: "brightness", key: "b", value: controlValues.brightness || ""},
         {text: "rotation", key: "r", value: controlValues.rotation || ""},
+        {text: "font-size", key: "f", value: controlValues.scale || ""},
         {text: "auto-rotate", key: "a", value: controlValues.autorotate || ""},
         {text: "auto-suspend", key: "s", value: controlValues.autosuspend || ""},
         {text: "wifi", key: "w", value: controlValues.wifi || ""},
