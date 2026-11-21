@@ -1828,21 +1828,16 @@ PanelWindow {
                             font.bold: true
                             renderType: Text.NativeRendering
                         }
-                        // what the volume keys step: the mode strip's pill
+                        // what the volume keys step: ModeBar's name-pill (pillBg, fg label)
                         Rectangle {
                             width: controlsPanel.pillW
                             height: parent.height
                             color: ModeBarTheme.pillBg
                             visible: ctlRow.picked
-                            Rectangle {
-                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                                height: 2
-                                color: ModeBarTheme.highlight
-                            }
                             Text {
                                 anchors.centerIn: parent
                                 text: "+/-"
-                                color: ModeBarTheme.highlight
+                                color: DialogTheme.fg
                                 font.family: DialogTheme.font
                                 font.pixelSize: DialogTheme.fontSize
                                 font.bold: true
