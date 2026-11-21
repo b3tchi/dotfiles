@@ -113,6 +113,26 @@ linux:
         echo "radio: WARNING -- go missing; no helpers (Glyph LEDs, login catcher, Soloist install)." >&2
       fi
 
+      # Window icon on KWin (kwi3): qml6 windows all report the class
+      # org.qt-project.qml, so a KWin rule gives radio's window (title
+      # "radio v...") the desktop file radio, and with it radio.svg. Other
+      # qml6 apps (newspaper) are untouched. Idempotent; no KWin, no rule.
+      if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kreadconfig6 >/dev/null 2>&1; then
+        F=kwinrulesrc; G=radio-window-icon
+        kwriteconfig6 --file $F --group $G --key Description "radio: window icon (qml6 window -> radio.desktop)"
+        kwriteconfig6 --file $F --group $G --key wmclass "org.qt-project.qml"
+        kwriteconfig6 --file $F --group $G --key wmclassmatch 1
+        kwriteconfig6 --file $F --group $G --key title '^radio( v.*)?$'
+        kwriteconfig6 --file $F --group $G --key titlematch 3
+        kwriteconfig6 --file $F --group $G --key desktopfile radio
+        kwriteconfig6 --file $F --group $G --key desktopfilerule 2
+        RULES=$(kreadconfig6 --file $F --group General --key rules)
+        case ",$RULES," in *",$G,"*) ;; *) RULES="${RULES:+$RULES,}$G" ;; esac
+        kwriteconfig6 --file $F --group General --key rules "$RULES"
+        kwriteconfig6 --file $F --group General --key count "$(echo "$RULES" | tr ',' '\n' | grep -c .)"
+        qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+      fi
+
       # Spotify Soloist (+ glibc libraries on musl). A failure is a warning:
       # the app still runs and plays on other Connect devices.
       if [ -x "$SRC/build/radio-soloist" ]; then
