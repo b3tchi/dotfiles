@@ -16,6 +16,8 @@
 # linked and installed from installs.cmd (as meta-pipa does: its install
 # needs its links first); on this XDG-only phone it links user.js and
 # userChrome.css into Firefox's own profile(s), never ~/.mozilla.
+# `radio` is the Spotify player (librespot audio); on this phone its launcher
+# also plays the music on the Glyph LEDs (back of the phone).
 # The desktop session is the `kwi3` dot, installed on its own.
 #
 # FLAT, like every meta: lists dots only, never another meta.
@@ -31,6 +33,7 @@ depends:
   - lazygit
   - gopass
   - logseq
+  - radio
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the

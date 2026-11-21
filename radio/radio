@@ -1,0 +1,15 @@
+#!/bin/sh
+# radio: launcher shim on PATH (~/.local/bin/radio, linked by rotz).
+# Sets the gopass prefix of the Spotify app credentials, then runs the app's
+# own launcher from the release checkout the dot installs. Any launcher (WM
+# key, quickshell overlay, .desktop entry, shell) gets the same environment.
+#   RADIO_GOPASS  gopass dir holding client-id, client-secret, redirect-uri,
+#                 refresh-token (default: radio)
+: "${RADIO_GOPASS:=radio}"
+export RADIO_GOPASS
+app="$HOME/.local/src/radio/radio"
+if [ ! -x "$app" ]; then
+    echo "radio: $app missing -- run 'rotz install radio'." >&2
+    exit 1
+fi
+exec "$app" "$@"

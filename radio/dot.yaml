@@ -1,0 +1,82 @@
+# radio: keyboard-driven Spotify player in QML (qml6). Audio comes from a
+# local librespot Spotify Connect device the app's launcher starts; on the
+# Nothing Phone (1) it also shows the music on the Glyph LEDs
+# (glyph/radio-glyph, started when /sys/class/leds/glyph:* is writable).
+# The app lives in a separate private repo (git@github.com:b3tchi/radio, or
+# $RADIO_REPO for a local clone). This dot clones it to ~/.local/src/radio
+# and checks out the highest release tag (vX.Y.Z; never main). The links put
+# a shim (radio/radio: sets RADIO_GOPASS, default "radio", then runs the
+# checkout's launcher) on PATH, a .desktop entry in the app menu and keys.json
+# (key rebinds: action -> key, see the app's README) in ~/.config/radio.
+#
+# depends: github (ssh access to the private repo), gopass (the launcher
+# reads radio/client-id, client-secret, redirect-uri, refresh-token).
+# One-time after install: `radio --login-device` (librespot OAuth).
+linux:
+  links:
+    radio: ~/.local/bin/radio
+    radio.desktop: ~/.local/share/applications/radio.desktop
+    keys.json: ~/.config/radio/keys.json
+  installs:
+    depends:
+      - github
+      - gopass
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
+      {{/if}}
+      if command -v apk >/dev/null 2>&1; then
+        missing=""
+        # qml6 ships in the -dev package on Alpine
+        command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
+        command -v jq >/dev/null 2>&1 || missing="$missing jq"
+        command -v librespot >/dev/null 2>&1 || missing="$missing librespot"
+        # Glyph visualizer: parec (monitor capture) + python3
+        command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
+        command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+        [ -z "$missing" ] || doas apk add $missing
+      fi
+
+      REPO="${RADIO_REPO:-git@github.com:b3tchi/radio.git}"
+      SRC="$HOME/.local/src/radio"
+      if [ -d "$SRC/.git" ]; then
+        if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+          echo "radio: $SRC has local changes -- refusing to touch it." >&2
+          echo "radio: resolve by hand (commit, stash or reset inside $SRC) and re-run 'rotz install radio'." >&2
+          exit 1
+        fi
+      else
+        mkdir -p "$(dirname "$SRC")"
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$REPO" "$SRC"; then
+          echo "radio: git clone of $REPO failed -- nothing to link." >&2
+          exit 1
+        fi
+      fi
+
+      # RELEASES ONLY (newspaper/kwi3 precedent): check out the highest
+      # vX.Y.Z tag, detached -- never a branch. Prerelease tags ignored.
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" fetch --quiet --force "$REPO" '+refs/tags/*:refs/tags/*' 2>/dev/null; then
+        echo "radio: WARNING -- could not reach $REPO for release tags; using the newest tag already in $SRC." >&2
+      fi
+      TAG=$(git -C "$SRC" tag -l 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+      if [ -z "$TAG" ]; then
+        echo "radio: no release tag (vX.Y.Z) in $REPO -- refusing to install an unreleased commit." >&2
+        exit 1
+      fi
+      if ! git -C "$SRC" -c advice.detachedHead=false checkout --quiet --detach "$TAG" 2>/dev/null; then
+        echo "radio: could not check out $TAG in $SRC -- resolve by hand and re-run 'rotz install radio'." >&2
+        exit 1
+      fi
+
+      [ -s "${XDG_CACHE_HOME:-$HOME/.cache}/radio/librespot/credentials.json" ] ||
+        echo "radio: log the playback device in once: radio --login-device"
+      echo "radio: $TAG installed in $SRC (on PATH via the radio shim link)"
