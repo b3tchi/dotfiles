@@ -198,6 +198,26 @@ check "...and keeps the previous pick" "$(field selected)" "autosuspend"
 echo bogus >"$XDG_RUNTIME_DIR/hwctl-selected"
 check "a bad stored pick reads as volume" "$(field selected)" "volume"
 
+# --- torch: the flash LED's brightness, 0 or its max; - when there is none
+export HWCTL_LEDS="$T/leds"
+mkdir -p "$HWCTL_LEDS"
+check "no flash LED: torch reads -" "$(field torch)" "-"
+sh "$H" torch + 2>/dev/null
+check "no flash LED: torch fails" "$?" "1"
+TL="$HWCTL_LEDS/white:flash"
+mkdir -p "$TL" "$HWCTL_LEDS/red:recording"
+echo 255 >"$TL/max_brightness"; echo 0 >"$TL/brightness"
+echo 0 >"$HWCTL_LEDS/red:recording/brightness"
+check "torch off" "$(field torch)" "off"
+sh "$H" torch +
+check "torch + turns it on" "$(field torch)" "on"
+check "torch on is the LED's max" "$(cat "$TL/brightness")" "255"
+check "torch leaves other LEDs alone" "$(cat "$HWCTL_LEDS/red:recording/brightness")" "0"
+sh "$H" torch +
+check "torch + again turns it off" "$(cat "$TL/brightness")" "0"
+sh "$H" torch -
+check "torch - flips too" "$(field torch)" "on"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

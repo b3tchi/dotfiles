@@ -36,7 +36,8 @@ Singleton {
         {text: "wifi", key: "w", control: "wifi", value: controlValues.wifi || ""},
         {text: "bluetooth", key: "t", control: "bluetooth", value: controlValues.bluetooth || ""},
         {text: "nfc", key: "n", control: "nfc", value: controlValues.nfc || ""},
-        {text: "gps", key: "g", control: "gps", value: controlValues.gps || ""}
+        {text: "gps", key: "g", control: "gps", value: controlValues.gps || ""},
+        {text: "torchlight", key: "l", control: "torch", value: controlValues.torch || ""}
     ]
 
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.

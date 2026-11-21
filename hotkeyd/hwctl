@@ -35,13 +35,17 @@
 #   gps         qmi-gnss.socket, geoclue's NMEA source (a polkit rule in
 #               nothing-pmos controls/ allows start/stop); "in-use" while a
 #               client holds a GNSS session
+#   torch       the camera flash LED held on as a torchlight: the first
+#               /sys/class/leds/*:flash or *:torch, brightness 0 or its max
+#               (the LED's torch mode; needs the video group)
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
 BACKLIGHT=${HWCTL_BACKLIGHT:-/sys/class/backlight}
+LEDS=${HWCTL_LEDS:-/sys/class/leds}
 SELECTED=${XDG_RUNTIME_DIR:-/tmp}/hwctl-selected
-CONTROLS="volume brightness rotation scale autorotate autosuspend wifi bluetooth nfc gps"
-USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|autosuspend|wifi|bluetooth|nfc|gps|selected +|- | hwctl select CONTROL | hwctl show"
+CONTROLS="volume brightness rotation scale autorotate autosuspend wifi bluetooth nfc gps torch"
+USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|autosuspend|wifi|bluetooth|nfc|gps|torch|selected +|- | hwctl select CONTROL | hwctl show"
 
 # The control `selected` steps: what `select` stored, volume for none or a bad one.
 selected_get() {
@@ -59,6 +63,20 @@ radio() {
 	"") echo - ;;
 	*) echo off ;;
 	esac
+}
+
+# The torch LED's directory: the first flash or torch LED; nothing for none.
+torch_led() {
+	for _d in "$LEDS"/*:flash "$LEDS"/*:torch; do
+		[ -r "$_d/brightness" ] && { echo "$_d"; return 0; }
+	done
+}
+
+# torch -> on|off|- (no LED)
+torch_get() {
+	_t=$(torch_led)
+	[ -n "$_t" ] || { echo -; return 0; }
+	[ "$(cat "$_t/brightness")" -gt 0 ] && echo on || echo off
 }
 
 # The auto-suspend delay in effect: the default for no setting, or a bad one.
@@ -170,7 +188,7 @@ if [ "$control" = show ]; then
 		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
 	fi
 	echo "volume=${vol:--} brightness=${bri:--} rotation=${rot:--} scale=${sc:--} autorotate=$auto autosuspend=$(suspend_delay)" \
-		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps selected=$(selected_get)"
+		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps torch=$(torch_get) selected=$(selected_get)"
 	exit 0
 fi
 case "$dir" in
@@ -253,6 +271,18 @@ gps)
 		systemctl --no-ask-password stop qmi-gnss.socket
 	else
 		systemctl --no-ask-password start qmi-gnss.socket
+	fi
+	;;
+torch)
+	t=$(torch_led)
+	[ -n "$t" ] || {
+		echo "hwctl: no flash LED for the torch" >&2
+		exit 1
+	}
+	if [ "$(cat "$t/brightness")" -gt 0 ]; then
+		echo 0 >"$t/brightness"
+	else
+		cat "$t/max_brightness" >"$t/brightness"
 	fi
 	;;
 *)

@@ -644,6 +644,14 @@
           "chord": "g",
           "device": "",
           "on_release": false
+        },
+        {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl torch +"
+          ],
+          "chord": "l",
+          "device": "",
+          "on_release": false
         }
       ],
       "exit_keys": [
@@ -734,6 +742,14 @@
               "chord": "g",
               "device": "",
               "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl torch -"
+              ],
+              "chord": "l",
+              "device": "",
+              "on_release": false
             }
           ],
           "modifier": "Mod1"
@@ -817,6 +833,14 @@
                 "run:$HOME/.local/bin/hwctl gps -"
               ],
               "chord": "g",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl torch -"
+              ],
+              "chord": "l",
               "device": "",
               "on_release": false
             }

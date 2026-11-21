@@ -170,6 +170,8 @@ func controlsBinds(dir string) []bind.Bind {
 		// both flip
 		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
 		{"n", "nfc"}, {"g", "gps"},
+		// l: the flash LED as a torchlight (the panel's torch(l)ight)
+		{"l", "torch"},
 	} {
 		out = append(out, bind.Bind{
 			Chord:   c.key,
