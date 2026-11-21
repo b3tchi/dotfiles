@@ -1736,22 +1736,23 @@ PanelWindow {
     // right-aligned and the values left-aligned on either side of one
     // gutter. hotkeyd owns the keys, so the window takes no focus; a tap
     // on a row picks that control for the volume keys (hwctl select), and
-    // the picked row carries a v|^ marker after its value. A plain top-level window titled qs-controls, like the
+    // the picked row carries ↓↑ right after its value. A plain top-level window titled qs-controls, like the
     // switcher's qs-switcher: kwi3's config.js floats it and centres it on
     // the tile grid, and on kwi3 its size is whole cells, so it sits on the
     // grid like every other dialog.
     Window {
         id: controlsPanel
         // column widths: the longest word, and the longest value a control
-        // can show ("inverted"), so the gutter does not move as values change
+        // can show ("inverted", with the picked row's ↓↑), so the gutter does
+        // not move as values change
         readonly property int labelW: {
             var rows = ModeBarTheme.controlRows || [], w = 0
             for (var i = 0; i < rows.length; i++)
                 w = Math.max(w, ctlLabelFm.advanceWidth(rows[i].text))
             return cells(w)
         }
-        readonly property int valueW: cells(ctlValueFm.advanceWidth("inverted"))
-        // on kwi3 every column is whole cells, so each one (and the pill)
+        readonly property int valueW: cells(ctlValueFm.advanceWidth("inverted ↓↑"))
+        // on kwi3 every column is whole cells, so each one
         // starts and ends on the module grid
         readonly property int cellW: Kwi3Grid.active ? Kwi3Grid.moduleW : 0
         function cells(w) { return cellW > 0 ? Math.ceil(w / cellW) * cellW : Math.ceil(w) }
@@ -1760,12 +1761,7 @@ PanelWindow {
         // and below on kwi3
         readonly property int border: 2 * DialogTheme.textLeftMargin
         readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
-        // the v|^ marker on the picked row, sized as ModeBar's name-pill: the
-        // text in whole cells plus one cell each side on kwi3
-        readonly property int pillW: cellW > 0
-            ? cells(ctlValueFm.advanceWidth("v|^")) + 2 * cellW
-            : Math.ceil(ctlValueFm.advanceWidth("v|^")) + 14
-        readonly property int contentW: labelW + gap + valueW + gap + pillW + 2 * border
+        readonly property int contentW: labelW + gap + valueW + 2 * border
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
         transientParent: null
@@ -1821,37 +1817,23 @@ PanelWindow {
                             width: controlsPanel.valueW
                             anchors.verticalCenter: parent.verticalCenter
                             horizontalAlignment: Text.AlignLeft
-                            text: modelData.value
+                            // the picked row: ↓↑ right after the value, an arrow
+                            // highlighted while it can step and muted at the end
+                            // of its range: volume 0..100 %, brightness 10..100 %
+                            // (hwctl's limits); the rest wrap or toggle, so never
+                            text: {
+                                if (!ctlRow.picked) return modelData.value
+                                var c = modelData.control, n = parseInt(modelData.value)
+                                var lo = c === "volume" ? 0 : c === "brightness" ? 10 : NaN
+                                var paint = (s, on) => "<font color=\"" + (on ? ModeBarTheme.highlight : DialogTheme.muted) + "\">" + s + "</font>"
+                                return modelData.value + " " + paint("↓", !(n <= lo)) + paint("↑", !(n >= 100 && !isNaN(lo)))
+                            }
+                            textFormat: Text.StyledText
                             color: DialogTheme.fg
                             font.family: DialogTheme.font
                             font.pixelSize: DialogTheme.fontSize
                             font.bold: true
                             renderType: Text.NativeRendering
-                        }
-                        // what the volume keys step: v|^, no background
-                        Rectangle {
-                            width: controlsPanel.pillW
-                            height: parent.height
-                            color: "transparent"
-                            visible: ctlRow.picked
-                            Text {
-                                anchors.centerIn: parent
-                                // a side is highlighted while it can step, dimmed at the end of its range:
-                                // volume 0..100 %, brightness 10..100 % (hwctl's
-                                // limits); the rest wrap or toggle, so never
-                                text: {
-                                    var c = ctlRow.modelData.control, n = parseInt(ctlRow.modelData.value)
-                                    var lo = c === "volume" ? 0 : c === "brightness" ? 10 : NaN
-                                    var paint = (s, on) => "<font color=\"" + (on ? ModeBarTheme.highlight : DialogTheme.muted) + "\">" + s + "</font>"
-                                    return paint("v", !(n <= lo)) + "|" + paint("^", !(n >= 100 && !isNaN(lo)))
-                                }
-                                textFormat: Text.StyledText
-                                color: DialogTheme.fg
-                                font.family: DialogTheme.font
-                                font.pixelSize: DialogTheme.fontSize
-                                font.bold: true
-                                renderType: Text.NativeRendering
-                            }
                         }
                     }
                 }
