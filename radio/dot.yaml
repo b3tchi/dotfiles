@@ -126,10 +126,11 @@ linux:
         kwriteconfig6 --file $F --group $G --key titlematch 3
         kwriteconfig6 --file $F --group $G --key desktopfile radio
         kwriteconfig6 --file $F --group $G --key desktopfilerule 2
-        RULES=$(kreadconfig6 --file $F --group General --key rules)
+        # KWin 6 lists the rules in General/Order (older: rules + count)
+        RULES=$(kreadconfig6 --file $F --group General --key Order)
+        [ -n "$RULES" ] || RULES=$(kreadconfig6 --file $F --group General --key rules)
         case ",$RULES," in *",$G,"*) ;; *) RULES="${RULES:+$RULES,}$G" ;; esac
-        kwriteconfig6 --file $F --group General --key rules "$RULES"
-        kwriteconfig6 --file $F --group General --key count "$(echo "$RULES" | tr ',' '\n' | grep -c .)"
+        kwriteconfig6 --file $F --group General --key Order "$RULES"
         qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
       fi
 
