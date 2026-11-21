@@ -21,26 +21,7 @@
     min-width: 0 !important;
 }
 
-/* The urlbar's result list spans the window, not the narrow bar: on a
-   narrow tile the bar is too short to read a suggestion. Firefox 159's list
-   is a popover anchored under the bar (urlbar.css .urlbarView:popover-open,
-   position-area: block-end center); span-all widens its area to the whole
-   window, the inset keeps it off the window's edges. */
-.urlbarView:popover-open {
-    position-area: block-end span-all !important;
-    inset-inline: 4px !important;
-}
 
-/* The urlbar fills the toolbar: no flexible spaces around it (they kept a
-   gap each side on a narrow tile), and it grows into the room they had. */
-#nav-bar toolbarspring {
-    display: none !important;
-}
-#urlbar-container {
-    flex: 1 1 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-}
 
 /* Only the urlbar's text shrinks: toolbar buttons and the urlbar's own
    icons (translate, star, ...) keep their size. Without this the min-width
@@ -52,4 +33,30 @@
 #page-action-buttons > *,
 .urlbar-page-action {
     flex-shrink: 0 !important;
+}
+
+/* NARROW WINDOWS ONLY (portrait: the phone's 520px / 712px tiles). Wider -
+   rotated, a desktop - keeps Firefox's own urlbar, its spacers and its
+   result list as wide as the bar. */
+@media (max-width: 800px) {
+    /* The urlbar's result list spans the window, not the narrow bar: on a
+       narrow tile the bar is too short to read a suggestion. Firefox 159's list
+       is a popover anchored under the bar (urlbar.css .urlbarView:popover-open,
+       position-area: block-end center); span-all widens its area to the whole
+       window, the inset keeps it off the window's edges. */
+    .urlbarView:popover-open {
+        position-area: block-end span-all !important;
+        inset-inline: 4px !important;
+    }
+
+    /* The urlbar fills the toolbar: no flexible spaces around it (they kept a
+       gap each side on a narrow tile), and it grows into the room they had. */
+    #nav-bar toolbarspring {
+        display: none !important;
+    }
+    #urlbar-container {
+        flex: 1 1 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+    }
 }
