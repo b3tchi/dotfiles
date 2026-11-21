@@ -342,6 +342,29 @@ var postPythonBinds = map[string]string{
 	// X11, so i3 sessions enter the controls layer too. The layer itself is
 	// in the dump already.
 	"$mod+c": "controls layer entry on every session, not just kwi3",
+	// The hardware volume keys step volume AND enter the controls layer, so a
+	// tablet/phone reaches the layer from its side buttons.
+	"XF86AudioRaiseVolume": "volume + then controls layer entry",
+	"XF86AudioLowerVolume": "volume - then controls layer entry",
+}
+
+// postPythonLayerBinds: the same record for chords added to a LAYER's table
+// (its Binds and every Mod's) after the dump was frozen.
+var postPythonLayerBinds = map[string]map[string]string{
+	"controls": {
+		"XF86AudioRaiseVolume": "volume keys keep stepping volume inside the layer",
+		"XF86AudioLowerVolume": "volume keys keep stepping volume inside the layer",
+	},
+}
+
+func dropChords(bs []dumpBind, drop map[string]string) []dumpBind {
+	var kept []dumpBind
+	for _, b := range bs {
+		if _, ok := drop[b.Chord]; !ok {
+			kept = append(kept, b)
+		}
+	}
+	return kept
 }
 
 // dropPostPythonBinds removes postPythonBinds' chords from the GO dump, so
@@ -354,6 +377,18 @@ func dropPostPythonBinds(d *dumpTable) {
 		}
 	}
 	d.Binds = kept
+	for name, drop := range postPythonLayerBinds {
+		l, ok := d.Layers[name]
+		if !ok {
+			continue
+		}
+		l.Binds = dropChords(l.Binds, drop)
+		for mn, m := range l.Mods {
+			m.Binds = dropChords(m.Binds, drop)
+			l.Mods[mn] = m
+		}
+		d.Layers[name] = l
+	}
 }
 
 // TestPostPythonBindsAreLive: an entry naming a chord python had would mask a
@@ -733,9 +768,12 @@ func TestRealTable_NoChordEntersAnExternalLayer(t *testing.T) {
 // 70 -> 71: dotfiles-m1re moved $mod+c (the controls layer) out of
 // Kwi3OnlyBinds into the shared table — a deliberate new owned chord, not an
 // external layer leaking one.
+//
+// 71 -> 73: XF86AudioRaiseVolume / XF86AudioLowerVolume step volume and enter
+// the controls layer (a second way in, from a tablet's side buttons).
 var daemonOwnedChordCount = map[string]int{
-	"Mod4": 71,
-	"Mod1": 71,
+	"Mod4": 73,
+	"Mod1": 73,
 }
 
 // TestOwnershipRowCount_UnmovedByTheExternalLayer is the ownership row-count
