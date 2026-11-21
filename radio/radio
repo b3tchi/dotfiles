@@ -4,8 +4,9 @@
 # own launcher from the release checkout the dot installs. Any launcher (WM
 # key, quickshell overlay, .desktop entry, shell) gets the same environment.
 #   RADIO_GOPASS  gopass dir holding client-id, client-secret, redirect-uri,
-#                 refresh-token (default: radio)
-: "${RADIO_GOPASS:=radio}"
+#                 refresh-token (default: spotify; backed up in Key Vault
+#                 apps-kv by gopass-kv)
+: "${RADIO_GOPASS:=spotify}"
 export RADIO_GOPASS
 app="$HOME/.local/src/radio/radio"
 if [ ! -x "$app" ]; then
