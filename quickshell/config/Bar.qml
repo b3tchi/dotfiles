@@ -1736,7 +1736,7 @@ PanelWindow {
     // right-aligned and the values left-aligned on either side of one
     // gutter. hotkeyd owns the keys, so the window takes no focus; a tap
     // on a row picks that control for the volume keys (hwctl select), and
-    // the picked row carries a -|+ pill after its value. A plain top-level window titled qs-controls, like the
+    // the picked row carries a ↓|↑ marker after its value. A plain top-level window titled qs-controls, like the
     // switcher's qs-switcher: kwi3's config.js floats it and centres it on
     // the tile grid, and on kwi3 its size is whole cells, so it sits on the
     // grid like every other dialog.
@@ -1760,11 +1760,11 @@ PanelWindow {
         // and below on kwi3
         readonly property int border: 2 * DialogTheme.textLeftMargin
         readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
-        // the -|+ pill on the picked row, sized as ModeBar's name-pill: the
+        // the ↓|↑ marker on the picked row, sized as ModeBar's name-pill: the
         // text in whole cells plus one cell each side on kwi3
         readonly property int pillW: cellW > 0
-            ? cells(ctlValueFm.advanceWidth("-|+")) + 2 * cellW
-            : Math.ceil(ctlValueFm.advanceWidth("-|+")) + 14
+            ? cells(ctlValueFm.advanceWidth("↓|↑")) + 2 * cellW
+            : Math.ceil(ctlValueFm.advanceWidth("↓|↑")) + 14
         readonly property int contentW: labelW + gap + valueW + gap + pillW + 2 * border
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
@@ -1828,22 +1828,22 @@ PanelWindow {
                             font.bold: true
                             renderType: Text.NativeRendering
                         }
-                        // what the volume keys step: ModeBar's name-pill (pillBg, fg label)
+                        // what the volume keys step: ↓|↑, no background
                         Rectangle {
                             width: controlsPanel.pillW
                             height: parent.height
-                            color: ModeBarTheme.pillBg
+                            color: "transparent"
                             visible: ctlRow.picked
                             Text {
                                 anchors.centerIn: parent
-                                // a side is dimmed at the end of its range:
+                                // a side is highlighted while it can step, dimmed at the end of its range:
                                 // volume 0..100 %, brightness 10..100 % (hwctl's
                                 // limits); the rest wrap or toggle, so never
                                 text: {
                                     var c = ctlRow.modelData.control, n = parseInt(ctlRow.modelData.value)
                                     var lo = c === "volume" ? 0 : c === "brightness" ? 10 : NaN
-                                    var dim = s => "<font color=\"" + DialogTheme.muted + "\">" + s + "</font>"
-                                    return (n <= lo ? dim("-") : "-") + "|" + (n >= 100 && !isNaN(lo) ? dim("+") : "+")
+                                    var paint = (s, on) => "<font color=\"" + (on ? ModeBarTheme.highlight : DialogTheme.muted) + "\">" + s + "</font>"
+                                    return paint("↓", !(n <= lo)) + "|" + paint("↑", !(n >= 100 && !isNaN(lo)))
                                 }
                                 textFormat: Text.StyledText
                                 color: DialogTheme.fg
