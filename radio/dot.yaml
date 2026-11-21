@@ -7,7 +7,8 @@
 # $RADIO_REPO for a local clone). This dot clones it to ~/.local/src/radio
 # and checks out the highest release tag (vX.Y.Z; never main). The links put
 # a shim (radio/radio: sets RADIO_GOPASS, default "spotify", then runs the
-# checkout's launcher) on PATH, a .desktop entry in the app menu and keys.json
+# checkout's launcher) on PATH, a .desktop entry in the app menu with its
+# icon (radio.svg, hicolor scalable) and keys.json
 # (key rebinds: action -> key, see the app's README) in ~/.config/radio.
 #
 # depends: github (ssh access to the private repo), gopass (the launcher
@@ -26,6 +27,7 @@ linux:
   links:
     radio: ~/.local/bin/radio
     radio.desktop: ~/.local/share/applications/radio.desktop
+    radio.svg: ~/.local/share/icons/hicolor/scalable/apps/radio.svg
     keys.json: ~/.config/radio/keys.json
   installs:
     depends:

@@ -5,7 +5,7 @@ GenericName=Music Player
 Comment=Keyboard-driven Spotify player
 Categories=AudioVideo;Audio;Player;
 Keywords=Spotify;Music;librespot;
-Icon=multimedia-audio-player
+Icon=radio
 Terminal=false
 # The shim on PATH (radio/radio in the dotfiles) sets the gopass prefix, so
 # menus and the quickshell overlay start it the same way.
