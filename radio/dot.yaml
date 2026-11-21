@@ -14,11 +14,9 @@
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads spotify/client-id, client-secret, redirect-uri, refresh-token;
 # restore them from Key Vault with `gopass-kv restore spotify`).
-# Soloist: the app's radio-soloist (soloist/, Go) puts Spotify's build in
-# ~/.local/share/radio/soloist (refreshed when older than 30 days; builds stop
-# 90 days after they were built, so re-run `rotz install radio` monthly) and,
-# on musl (postmarketOS), the ~14 MB of glibc libraries it needs (Debian
-# trixie over HTTPS, SHA256-checked). Needs gopass spotify/soloist-api.
+# Soloist (the player) comes from the soloist dot (installs.depends):
+# `soloist` on PATH; it needs re-running monthly (90-day builds). Needs
+# gopass spotify/soloist-api.
 # One-time after install: `radio --login-device`, then pick the device in a
 # Spotify app on the same network (firewall: udp 5353 + Soloist's tcp port
 # from the LAN while pairing). librespot is no longer used: Spotify refuses
@@ -33,6 +31,7 @@ linux:
     depends:
       - github
       - gopass
+      - soloist
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -S --needed --noconfirm qt6-declarative jq libpulse go
@@ -48,10 +47,8 @@ linux:
         # qml6 ships in the -dev package on Alpine
         command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
-        # helpers (visualizer, login catcher, Soloist installer): go to build;
-        # xz unpacks the Debian glibc libraries; parec captures for the Glyph
+        # helpers (visualizer, login catcher): go to build; parec captures for the Glyph
         command -v go >/dev/null 2>&1 || missing="$missing go"
-        command -v xz >/dev/null 2>&1 || missing="$missing xz"
         command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
         [ -z "$missing" ] || doas apk add $missing
       fi
@@ -88,18 +85,18 @@ linux:
       fi
 
       # Go helpers -> $SRC/build: radio-glyph (glyph/, the Glyph visualizer),
-      # radio-callback (auth/, OAuth redirect catcher), radio-soloist
-      # (soloist/, Soloist installer). Rebuilt when the release changes; each
+      # radio-callback (auth/, OAuth redirect catcher). Rebuilt when the
+      # release changes; each
       # built to a temp file and renamed, so a failed build never leaves a
       # half-written binary.
       TREE=$(git -C "$SRC" rev-parse 'HEAD^{tree}' 2>/dev/null || echo none)
-      if [ -x "$SRC/build/radio-glyph" ] && [ -x "$SRC/build/radio-callback" ] && [ -x "$SRC/build/radio-soloist" ] &&
+      if [ -x "$SRC/build/radio-glyph" ] && [ -x "$SRC/build/radio-callback" ] &&
          [ "$(cat "$SRC/build/.tree" 2>/dev/null)" = "$TREE" ]; then
         echo "radio: helpers up to date"
       elif command -v go >/dev/null 2>&1; then
         mkdir -p "$SRC/build"
         ok=1
-        for h in glyph:radio-glyph auth:radio-callback soloist:radio-soloist; do
+        for h in glyph:radio-glyph auth:radio-callback; do
           GTMP="$(mktemp "$SRC/build/.${h#*:}.XXXXXX")"
           if CGO_ENABLED=0 go build -C "$SRC" -o "$GTMP" "./${h%%:*}"; then
             mv -f "$GTMP" "$SRC/build/${h#*:}"
@@ -110,7 +107,7 @@ linux:
         done
         [ "$ok" = 1 ] && echo "$TREE" > "$SRC/build/.tree" && echo "radio: helpers built"
       else
-        echo "radio: WARNING -- go missing; no helpers (Glyph LEDs, login catcher, Soloist install)." >&2
+        echo "radio: WARNING -- go missing; no helpers (Glyph LEDs, login catcher)." >&2
       fi
 
       # Window icon on KWin (kwi3): qml6 windows all report the class
@@ -134,12 +131,6 @@ linux:
         qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
       fi
 
-      # Spotify Soloist (+ glibc libraries on musl). A failure is a warning:
-      # the app still runs and plays on other Connect devices.
-      if [ -x "$SRC/build/radio-soloist" ]; then
-        "$SRC/build/radio-soloist" ||
-          echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
-      fi
       gopass show -o spotify/soloist-api >/dev/null 2>&1 ||
         echo "radio: no Soloist API key -- gopass insert spotify/soloist-api (or gopass-kv restore spotify)"
       echo "radio: first install? pair the player once: radio --login-device"
