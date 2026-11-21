@@ -106,4 +106,25 @@ linux:
         echo "newspaper: WARNING -- cmake, a C++ compiler, libmpv or Qt 6 dev files missing; videos fall back to external mpv." >&2
       fi
 
+      # Window icon on KWin (kwi3): qml6 windows all report the class
+      # org.qt-project.qml, so a KWin rule gives newspaper's window (title
+      # "newspaper v...") the desktop file newspaper, and with it
+      # newspaper.svg (same as the radio dot). Idempotent; no KWin, no rule.
+      if command -v kwriteconfig6 >/dev/null 2>&1 && command -v kreadconfig6 >/dev/null 2>&1; then
+        F=kwinrulesrc; G=newspaper-window-icon
+        kwriteconfig6 --file $F --group $G --key Description "newspaper: window icon (qml6 window -> newspaper.desktop)"
+        kwriteconfig6 --file $F --group $G --key wmclass "org.qt-project.qml"
+        kwriteconfig6 --file $F --group $G --key wmclassmatch 1
+        kwriteconfig6 --file $F --group $G --key title '^newspaper( v.*)?$'
+        kwriteconfig6 --file $F --group $G --key titlematch 3
+        kwriteconfig6 --file $F --group $G --key desktopfile newspaper
+        kwriteconfig6 --file $F --group $G --key desktopfilerule 2
+        # KWin 6 lists the rules in General/Order (older: rules + count)
+        RULES=$(kreadconfig6 --file $F --group General --key Order)
+        [ -n "$RULES" ] || RULES=$(kreadconfig6 --file $F --group General --key rules)
+        case ",$RULES," in *",$G,"*) ;; *) RULES="${RULES:+$RULES,}$G" ;; esac
+        kwriteconfig6 --file $F --group General --key Order "$RULES"
+        qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+      fi
+
       echo "newspaper: $TAG installed in $SRC (on PATH via the newspaper shim link)"
