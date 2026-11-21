@@ -13,7 +13,7 @@
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads spotify/client-id, client-secret, redirect-uri, refresh-token;
 # restore them from Key Vault with `gopass-kv restore spotify`).
-# Soloist: the app's soloist/install puts Spotify's build in
+# Soloist: the app's radio-soloist (soloist/, Go) puts Spotify's build in
 # ~/.local/share/radio/soloist (refreshed when older than 30 days; builds stop
 # 90 days after they were built, so re-run `rotz install radio` monthly) and,
 # on musl (postmarketOS), the ~14 MB of glibc libraries it needs (Debian
@@ -33,23 +33,24 @@ linux:
       - gopass
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
+      sudo pacman -S --needed --noconfirm qt6-declarative jq libpulse go
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
+      sudo pacman -S --needed --noconfirm qt6-declarative jq libpulse go
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
+      sudo pacman -S --needed --noconfirm qt6-declarative jq libpulse go
       {{/if}}
       if command -v apk >/dev/null 2>&1; then
         missing=""
         # qml6 ships in the -dev package on Alpine
         command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
-        # Soloist install: python3. Glyph visualizer: go (build), parec (capture)
+        # helpers (visualizer, login catcher, Soloist installer): go to build;
+        # xz unpacks the Debian glibc libraries; parec captures for the Glyph
         command -v go >/dev/null 2>&1 || missing="$missing go"
+        command -v xz >/dev/null 2>&1 || missing="$missing xz"
         command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
-        command -v python3 >/dev/null 2>&1 || missing="$missing python3"
         [ -z "$missing" ] || doas apk add $missing
       fi
 
@@ -84,32 +85,38 @@ linux:
         exit 1
       fi
 
-      # Glyph visualizer (glyph/, Go) -> $SRC/build/radio-glyph. Rebuilt only
-      # when the glyph tree changes; built to a temp file and renamed, so a
-      # failed build never leaves a half-written binary. A failure is a
-      # warning: radio runs without the LEDs.
-      TREE=$(git -C "$SRC" rev-parse HEAD:glyph 2>/dev/null || echo none)
-      if [ -x "$SRC/build/radio-glyph" ] && [ "$(cat "$SRC/build/.glyph-tree" 2>/dev/null)" = "$TREE" ]; then
-        echo "radio: Glyph visualizer up to date"
+      # Go helpers -> $SRC/build: radio-glyph (glyph/, the Glyph visualizer),
+      # radio-callback (auth/, OAuth redirect catcher), radio-soloist
+      # (soloist/, Soloist installer). Rebuilt when the release changes; each
+      # built to a temp file and renamed, so a failed build never leaves a
+      # half-written binary.
+      TREE=$(git -C "$SRC" rev-parse 'HEAD^{tree}' 2>/dev/null || echo none)
+      if [ -x "$SRC/build/radio-glyph" ] && [ -x "$SRC/build/radio-callback" ] && [ -x "$SRC/build/radio-soloist" ] &&
+         [ "$(cat "$SRC/build/.tree" 2>/dev/null)" = "$TREE" ]; then
+        echo "radio: helpers up to date"
       elif command -v go >/dev/null 2>&1; then
         mkdir -p "$SRC/build"
-        GTMP="$(mktemp "$SRC/build/.radio-glyph.XXXXXX")"
-        if CGO_ENABLED=0 go build -C "$SRC/glyph" -o "$GTMP" .; then
-          mv -f "$GTMP" "$SRC/build/radio-glyph"
-          echo "$TREE" > "$SRC/build/.glyph-tree"
-          echo "radio: Glyph visualizer built"
-        else
-          rm -f "$GTMP"
-          echo "radio: WARNING -- go build of glyph/ failed; no Glyph LEDs until it builds." >&2
-        fi
+        ok=1
+        for h in glyph:radio-glyph auth:radio-callback soloist:radio-soloist; do
+          GTMP="$(mktemp "$SRC/build/.${h#*:}.XXXXXX")"
+          if CGO_ENABLED=0 go build -C "$SRC" -o "$GTMP" "./${h%%:*}"; then
+            mv -f "$GTMP" "$SRC/build/${h#*:}"
+          else
+            rm -f "$GTMP"; ok=0
+            echo "radio: WARNING -- go build of ${h%%:*}/ failed." >&2
+          fi
+        done
+        [ "$ok" = 1 ] && echo "$TREE" > "$SRC/build/.tree" && echo "radio: helpers built"
       else
-        echo "radio: WARNING -- go missing; no Glyph visualizer." >&2
+        echo "radio: WARNING -- go missing; no helpers (Glyph LEDs, login catcher, Soloist install)." >&2
       fi
 
       # Spotify Soloist (+ glibc libraries on musl). A failure is a warning:
       # the app still runs and plays on other Connect devices.
-      python3 -I "$SRC/soloist/install" ||
-        echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
+      if [ -x "$SRC/build/radio-soloist" ]; then
+        "$SRC/build/radio-soloist" ||
+          echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
+      fi
       gopass show -o spotify/soloist-api >/dev/null 2>&1 ||
         echo "radio: no Soloist API key -- gopass insert spotify/soloist-api (or gopass-kv restore spotify)"
       echo "radio: first install? pair the player once: radio --login-device"
