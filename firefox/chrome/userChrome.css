@@ -20,3 +20,12 @@
 #sidebar-main {
     min-width: 0 !important;
 }
+
+/* The focused urlbar (breakout) and its result list span the window, not
+   the narrow bar: on a narrow tile the bar is ~120-250px, too short to
+   read a suggestion. Its vertical place is kept (top stays auto). */
+#urlbar[breakout][breakout-extend] {
+    position: fixed !important;
+    left: 4px !important;
+    width: calc(100vw - 8px) !important;
+}

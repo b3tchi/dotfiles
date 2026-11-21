@@ -16,12 +16,19 @@ linux:
     ff: ~/.local/bin/ff
     focus: ~/.local/bin/focus
     ff.desktop: ~/.local/share/applications/ff.desktop
+    # Not on an XDG-only box (Firefox 147+, ~/.config/mozilla and no
+    # ~/.mozilla - the phone): linking here would create ~/.mozilla, and
+    # Firefox then prefers that legacy path and loses the XDG profile. There
+    # the install below links these two into the XDG profiles instead.
+    # Template-time eval, guarded `|| true` (CLAUDE.md); no windows: section.
+    {{#unless (eval "test -d $HOME/.config/mozilla/firefox && test ! -e $HOME/.mozilla && echo xdg || true")}}
     user.js:
       - ~/.mozilla/firefox/home/user.js
       - ~/.mozilla/firefox/rdp/user.js
     chrome/userChrome.css:
       - ~/.mozilla/firefox/home/chrome/userChrome.css
       - ~/.mozilla/firefox/rdp/chrome/userChrome.css
+    {{/unless}}
 
   installs:
     cmd: |
@@ -36,6 +43,26 @@ linux:
         apk info -e firefox >/dev/null 2>&1 || doas apk add firefox
       fi
       chmod +x ~/.local/bin/ff ~/.local/bin/focus
+
+      # XDG-only box (see links above): user.js and userChrome.css into every
+      # profile profiles.ini lists, as links to this repo. A profile's own
+      # regular file is left alone, named.
+      FFX="${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox"
+      if [ ! -e "$HOME/.mozilla" ] && [ -f "$FFX/profiles.ini" ]; then
+        sed -n 's/^Path=//p' "$FFX/profiles.ini" | while IFS= read -r p; do
+          case "$p" in /*) d=$p ;; *) d="$FFX/$p" ;; esac
+          [ -d "$d" ] || continue
+          mkdir -p "$d/chrome"
+          for f in user.js chrome/userChrome.css; do
+            if [ -e "$d/$f" ] && [ ! -L "$d/$f" ]; then
+              echo "firefox: $d/$f is the profile's own file -- not replaced" >&2
+            else
+              ln -sfn "$HOME/.dotfiles/firefox/$f" "$d/$f"
+            fi
+          done
+          echo "firefox: linked user.js + userChrome.css into $d"
+        done
+      fi
 
       # Refresh the MIME cache so ff.desktop is offered as a handler.
       update-desktop-database ~/.local/share/applications 2>/dev/null || true

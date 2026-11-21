@@ -94,7 +94,10 @@ Rotz handles the platform model at two levels:
      (template-time). For `installs.cmd` use runtime `if [ -d /mnt/c ]` instead.
      Do NOT use `env.WSL_DISTRO_NAME` — unset in sessions spawned outside
      wsl.exe (tmux server, sway/WSLg, ssh). `eval` gotchas: errors on nonzero
-     exit (always guard `|| true`; empty output = falsy); avoid template eval
+     exit (always guard `|| true`; empty output = falsy; under `--dry-run`
+     eval is NOT run and returns its own text, so every eval condition reads
+     true there - test eval branches with a real link into a scratch HOME,
+     `HOME=<dir> rotz --dotfiles <copy> link <dot>`); avoid template eval
      in dots that also have a `windows:` section (template renders on the
      Windows host too, where `test` doesn't exist).
 
@@ -159,7 +162,7 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 | `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, d2, ssh, opencode, pi, i3, hotkeyd, quickshell, st, xrdp |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
-| `meta-nothing` | Nothing Phone (1) on postmarketOS: device fixes + shell layer | github (ssh access to GitHub for the private repos), git (gitconfig + global ignore; installs.depends difftastic), nothing-pmos (runs the nothing-pmos repo's install.sh from a clone fetched from GitHub or pushed from the dev box), clicks (Clicks keyboard hwdb + keyd), distro, nushell, tmux, nvim, lazygit, gopass, logseq (apk installs; runtime `command -v apk` check — os-release now reads "Nura edge") |
+| `meta-nothing` | Nothing Phone (1) on postmarketOS: device fixes + shell layer | github (ssh access to GitHub for the private repos), git (gitconfig + global ignore; installs.depends difftastic), nothing-pmos (runs the nothing-pmos repo's install.sh from a clone fetched from GitHub or pushed from the dev box), clicks (Clicks keyboard hwdb + keyd), distro, nushell, tmux, nvim, lazygit, gopass, logseq (apk installs; runtime `command -v apk` check — os-release now reads "Nura edge") + installs.cmd: `rotz link firefox` + `rotz install firefox` (XDG-only profile: user.js + userChrome.css linked into Firefox's own profiles, never ~/.mozilla) |
 | `meta-pipa` | Xiaomi Pad 6 tablet on postmarketOS: device fixes + shell layer + kwi3 session | github, nothing-pmos (its sync.sh sees `xiaomi,pipa` in the device tree and runs the repo's pipa/install.sh: apk packages, logind lid fix, greeter stub, quickshell built from source, bar stats daemon), distro, nushell, tmux, nvim, lazygit, gopass, logseq, firefox, quickshell, kwi3 + installs.cmd: `rotz link foot` + `rotz link hotkeyd` (hwctl for $mod+c; links only) + `rotz link firefox` and its install again (ff as default browser), then `pipa/install.sh --user` after kwi3 (no lock screen, bar's hotkeyd path) |
 
 Metas are FLAT: a meta lists dots only, never another meta.

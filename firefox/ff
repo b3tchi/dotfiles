@@ -22,6 +22,14 @@
 # instead), add --no-remote here and accept that xdg-open then only works for
 # the first window on each display.
 
+# XDG-only box (Firefox 147+ with no legacy ~/.mozilla, e.g. the phone): the
+# profile there is Firefox's own default one, which the firefox dot links its
+# files into. A --profile under ~/.mozilla would create that directory, and
+# Firefox then prefers the legacy path and stops finding the XDG profile.
+if [ ! -e "$HOME/.mozilla/firefox" ] && [ -d "${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox" ]; then
+  exec firefox "$@"
+fi
+
 case "$DISPLAY" in
   :10*) prof=rdp  ;;
   *)    prof=home ;;

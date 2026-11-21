@@ -12,7 +12,10 @@
 # is the Clicks key mapping (hwdb + keyd).
 # The rest is Core UX: `distro` (yazi, lazygit, bat, rg, fd, fzf, bottom,
 # ... plus bashrc), `nushell` + `tmux` (shell layer), `nvim`, `lazygit`
-# config, `gopass` (password store) - apk installs on Alpine.
+# config, `gopass` (password store) - apk installs on Alpine. `firefox` is
+# linked and installed from installs.cmd (as meta-pipa does: its install
+# needs its links first); on this XDG-only phone it links user.js and
+# userChrome.css into Firefox's own profile(s), never ~/.mozilla.
 # The desktop session is the `kwi3` dot, installed on its own.
 #
 # FLAT, like every meta: lists dots only, never another meta.
@@ -36,5 +39,7 @@ installs:
     - nothing-pmos
     - clicks
   cmd: |
+    rotz link firefox
+    rotz install firefox
     echo "meta-nothing: device fixes and Clicks mapping installed;"
     echo "meta-nothing: after 'sh ~/.local/src/nothing-pmos/install.sh --build', reboot."
