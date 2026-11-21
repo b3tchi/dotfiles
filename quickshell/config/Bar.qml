@@ -1813,27 +1813,39 @@ PanelWindow {
                             font.pixelSize: DialogTheme.fontSize
                             renderType: Text.NativeRendering
                         }
-                        Text {
+                        Row {
                             width: controlsPanel.valueW
                             anchors.verticalCenter: parent.verticalCenter
-                            horizontalAlignment: Text.AlignLeft
+                            spacing: ctlValueFm.advanceWidth(" ")
+                            Text {
+                                text: modelData.value
+                                color: DialogTheme.fg
+                                font.family: DialogTheme.font
+                                font.pixelSize: DialogTheme.fontSize
+                                font.bold: true
+                                renderType: Text.NativeRendering
+                            }
                             // the picked row: ↓↑ right after the value, an arrow
                             // highlighted while it can step and muted at the end
                             // of its range: volume 0..100 %, brightness 10..100 %
-                            // (hwctl's limits); the rest wrap or toggle, so never
-                            text: {
-                                if (!ctlRow.picked) return modelData.value
-                                var c = modelData.control, n = parseInt(modelData.value)
-                                var lo = c === "volume" ? 0 : c === "brightness" ? 10 : NaN
-                                var paint = (s, on) => "<font color=\"" + (on ? ModeBarTheme.highlight : DialogTheme.muted) + "\">" + s + "</font>"
-                                return modelData.value + " " + paint("↓", !(n <= lo)) + paint("↑", !(n >= 100 && !isNaN(lo)))
+                            // (hwctl's limits); the rest wrap or toggle, so never.
+                            // Pulled together: a monospace cell leaves a gap
+                            // around each thin arrow.
+                            Text {
+                                visible: ctlRow.picked
+                                text: {
+                                    var c = modelData.control, n = parseInt(modelData.value)
+                                    var lo = c === "volume" ? 0 : c === "brightness" ? 10 : NaN
+                                    var paint = (s, on) => "<font color=\"" + (on ? ModeBarTheme.highlight : DialogTheme.muted) + "\">" + s + "</font>"
+                                    return paint("↓", !(n <= lo)) + paint("↑", !(n >= 100 && !isNaN(lo)))
+                                }
+                                textFormat: Text.StyledText
+                                font.family: DialogTheme.font
+                                font.pixelSize: DialogTheme.fontSize
+                                font.bold: true
+                                font.letterSpacing: -0.4 * ctlValueFm.advanceWidth("↓")
+                                renderType: Text.NativeRendering
                             }
-                            textFormat: Text.StyledText
-                            color: DialogTheme.fg
-                            font.family: DialogTheme.font
-                            font.pixelSize: DialogTheme.fontSize
-                            font.bold: true
-                            renderType: Text.NativeRendering
                         }
                     }
                 }
