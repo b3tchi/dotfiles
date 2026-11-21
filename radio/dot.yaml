@@ -1,5 +1,6 @@
-# radio: keyboard-driven Spotify player in QML (qml6). Audio comes from a
-# local librespot Spotify Connect device the app's launcher starts; on the
+# radio: keyboard-driven Spotify player in QML (qml6). Audio comes from
+# Spotify Soloist (Spotify's official headless Connect player, closed source)
+# that the app's launcher starts; on the
 # Nothing Phone (1) it also shows the music on the Glyph LEDs
 # (glyph/radio-glyph, started when /sys/class/leds/glyph:* is writable).
 # The app lives in a separate private repo (git@github.com:b3tchi/radio, or
@@ -12,7 +13,15 @@
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads spotify/client-id, client-secret, redirect-uri, refresh-token;
 # restore them from Key Vault with `gopass-kv restore spotify`).
-# One-time after install: `radio --login-device` (librespot OAuth).
+# Soloist: the app's soloist/install puts Spotify's build in
+# ~/.local/share/radio/soloist (refreshed when older than 30 days; builds stop
+# 90 days after they were built, so re-run `rotz install radio` monthly) and,
+# on musl (postmarketOS), the ~14 MB of glibc libraries it needs (Debian
+# trixie over HTTPS, SHA256-checked). Needs gopass spotify/soloist-api.
+# One-time after install: `radio --login-device`, then pick the device in a
+# Spotify app on the same network (firewall: udp 5353 + Soloist's tcp port
+# from the LAN while pairing). librespot is no longer used: Spotify refuses
+# it audio keys for newer accounts (librespot#1649).
 linux:
   links:
     radio: ~/.local/bin/radio
@@ -25,23 +34,19 @@ linux:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
-      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
-      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
-      sudo pacman -S --needed --noconfirm librespot || echo "radio: WARNING -- librespot not in the repos; install it from the AUR." >&2
       {{/if}}
       if command -v apk >/dev/null 2>&1; then
         missing=""
         # qml6 ships in the -dev package on Alpine
         command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
-        command -v librespot >/dev/null 2>&1 || missing="$missing librespot"
-        # Glyph visualizer: parec (monitor capture) + python3
+        # Soloist install + Glyph visualizer: python3; parec (monitor capture)
         command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
         command -v python3 >/dev/null 2>&1 || missing="$missing python3"
         [ -z "$missing" ] || doas apk add $missing
@@ -78,6 +83,11 @@ linux:
         exit 1
       fi
 
-      [ -s "${XDG_CACHE_HOME:-$HOME/.cache}/radio/librespot/credentials.json" ] ||
-        echo "radio: log the playback device in once: radio --login-device"
+      # Spotify Soloist (+ glibc libraries on musl). A failure is a warning:
+      # the app still runs and plays on other Connect devices.
+      python3 -I "$SRC/soloist/install" ||
+        echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
+      gopass show -o spotify/soloist-api >/dev/null 2>&1 ||
+        echo "radio: no Soloist API key -- gopass insert spotify/soloist-api (or gopass-kv restore spotify)"
+      echo "radio: first install? pair the player once: radio --login-device"
       echo "radio: $TAG installed in $SRC (on PATH via the radio shim link)"
