@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- radio: app icon. A retro tube radio, all red: red cabinet and front with
-     a darker speaker grille, cream dial window and buttons, dark lower panel with two
+     a yellow speaker grille, cream dial window and buttons, dark lower panel with two
      knobs and a tuning scale, two feet. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <!-- feet -->
@@ -11,7 +11,7 @@
   <rect x="11" y="25" width="106" height="78" rx="15" fill="#e2564a"/>
   <rect x="14" y="28" width="100" height="72" rx="12" fill="#c93a2f"/>
   <!-- speaker grille -->
-  <g stroke="#8e2420" stroke-width="2.2" stroke-linecap="round">
+  <g stroke="#f2c14e" stroke-width="2.2" stroke-linecap="round">
     <line x1="22" y1="36" x2="106" y2="36"/>
     <line x1="22" y1="42" x2="106" y2="42"/>
     <line x1="22" y1="48" x2="106" y2="48"/>
