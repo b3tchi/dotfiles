@@ -1,4 +1,22 @@
 * {
-    font-family: "IosevkaTerm Nerd Font Propo" !important;
+    font-family: "IosevkaTerm Nerd Font Propo", "Iosevka Nerd Font", "Iosevka", monospace !important;
     font-size: 11pt !important;
+}
+
+/* Narrow tiles (the phone at scale 2: a 520px kwi3 tile). The urlbar's own
+   width (urlbar.css: --urlbar-container-min-width, 310px, used as the
+   container's width) kept the window at 638px, so it ran past its tile.
+   Let it shrink - and the window's own min-content with it, which kept
+   638px even after the urlbar did; these together let it take the tile. */
+:root {
+    --urlbar-container-min-width: 120px !important;
+}
+:root,
+#navigator-toolbox,
+#nav-bar,
+#nav-bar-customization-target,
+#browser,
+#tabbrowser-tabbox,
+#sidebar-main {
+    min-width: 0 !important;
 }
