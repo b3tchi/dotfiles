@@ -21,13 +21,14 @@
     min-width: 0 !important;
 }
 
-/* The focused urlbar (breakout) and its result list span the window, not
-   the narrow bar: on a narrow tile the bar is ~120-250px, too short to
-   read a suggestion. Its vertical place is kept (top stays auto). */
-#urlbar[breakout][breakout-extend] {
-    position: fixed !important;
-    left: 4px !important;
-    width: calc(100vw - 8px) !important;
+/* The urlbar's result list spans the window, not the narrow bar: on a
+   narrow tile the bar is too short to read a suggestion. Firefox 159's list
+   is a popover anchored under the bar (urlbar.css .urlbarView:popover-open,
+   position-area: block-end center); span-all widens its area to the whole
+   window, the inset keeps it off the window's edges. */
+.urlbarView:popover-open {
+    position-area: block-end span-all !important;
+    inset-inline: 4px !important;
 }
 
 /* The urlbar fills the toolbar: no flexible spaces around it (they kept a
@@ -38,4 +39,17 @@
 #urlbar-container {
     flex: 1 1 auto !important;
     width: auto !important;
+    min-width: 0 !important;
+}
+
+/* Only the urlbar's text shrinks: toolbar buttons and the urlbar's own
+   icons (translate, star, ...) keep their size. Without this the min-width
+   rules above let them shrink onto each other. */
+#nav-bar toolbarbutton,
+#nav-bar toolbaritem:not(#urlbar-container),
+#nav-bar .toolbarbutton-1,
+#page-action-buttons,
+#page-action-buttons > *,
+.urlbar-page-action {
+    flex-shrink: 0 !important;
 }
