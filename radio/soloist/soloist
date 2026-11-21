@@ -1,0 +1,10 @@
+#!/bin/sh
+# soloist: Spotify Soloist on PATH (~/.local/bin/soloist, linked by the radio dot).
+# Runs the wrapper the radio dot installs: through bundled glibc libraries
+# on musl (postmarketOS), directly elsewhere. Same arguments as soloist.
+run="$HOME/.local/lib/soloist/soloist-run"
+if [ ! -x "$run" ]; then
+    echo "soloist: $run missing -- run 'rotz install radio'." >&2
+    exit 1
+fi
+exec "$run" "$@"

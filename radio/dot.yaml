@@ -14,9 +14,14 @@
 # depends: github (ssh access to the private repo), gopass (the launcher
 # reads spotify/client-id, client-secret, redirect-uri, refresh-token;
 # restore them from Key Vault with `gopass-kv restore spotify`).
-# Soloist (the player) comes from the soloist dot (installs.depends):
-# `soloist` on PATH; it needs re-running monthly (90-day builds). Needs
-# gopass spotify/soloist-api.
+# Soloist (the player, Spotify's official headless Connect player, closed
+# source): radio/soloist/ is its installer (Go, run with `go run`, nothing
+# built into this repo). It puts Spotify's build in ~/.local/lib/soloist and,
+# on musl (postmarketOS), the ~14 MB of glibc libraries it needs (Debian
+# trixie over HTTPS, SHA256-checked, unpacked with xz), plus a soloist-run
+# wrapper; the link puts a `soloist` shim on PATH. Builds stop 90 days after
+# they were built: copies older than 30 days are refreshed, so re-run
+# `rotz install radio` monthly. Needs gopass spotify/soloist-api.
 # One-time after install: `radio --login-device`, then pick the device in a
 # Spotify app on the same network (firewall: udp 5353 + Soloist's tcp port
 # from the LAN while pairing). librespot is no longer used: Spotify refuses
@@ -26,12 +31,12 @@ linux:
     radio: ~/.local/bin/radio
     radio.desktop: ~/.local/share/applications/radio.desktop
     radio.svg: ~/.local/share/icons/hicolor/scalable/apps/radio.svg
+    soloist/soloist: ~/.local/bin/soloist
     keys.json: ~/.config/radio/keys.json
   installs:
     depends:
       - github
       - gopass
-      - soloist
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -S --needed --noconfirm qt6-declarative jq libpulse go
@@ -47,8 +52,10 @@ linux:
         # qml6 ships in the -dev package on Alpine
         command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
-        # helpers (visualizer, login catcher): go to build; parec captures for the Glyph
+        # helpers (visualizer, login catcher) and the Soloist installer: go;
+        # xz unpacks Soloist's glibc libraries; parec captures for the Glyph
         command -v go >/dev/null 2>&1 || missing="$missing go"
+        command -v xz >/dev/null 2>&1 || missing="$missing xz"
         command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
         [ -z "$missing" ] || doas apk add $missing
       fi
@@ -131,6 +138,20 @@ linux:
         qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
       fi
 
+      # Spotify Soloist (radio/soloist/ in the dotfiles; source dir via
+      # akm-root for non-standard clone paths, else ~/.dotfiles). A failure is
+      # a warning: the app still runs and plays on other Connect devices.
+      DOT="$HOME/.dotfiles/radio"
+      if command -v akm-root >/dev/null 2>&1; then
+        ROOT="$(akm-root 2>/dev/null || true)"
+        if [ -n "$ROOT" ] && [ -d "$ROOT/radio/soloist" ]; then
+          DOT="$ROOT/radio"
+        fi
+      fi
+      if command -v go >/dev/null 2>&1; then
+        CGO_ENABLED=0 go run -C "$DOT/soloist" . ||
+          echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
+      fi
       gopass show -o spotify/soloist-api >/dev/null 2>&1 ||
         echo "radio: no Soloist API key -- gopass insert spotify/soloist-api (or gopass-kv restore spotify)"
       echo "radio: first install? pair the player once: radio --login-device"

@@ -1,4 +1,4 @@
-// soloist installer (the dotfiles' soloist dot, `go run .`): fetch Spotify Soloist (the official headless Connect player)
+// soloist installer (part of the dotfiles' radio dot, `go run .`): fetch Spotify Soloist (the official headless Connect player)
 // and, on a musl system (postmarketOS, Alpine), the glibc libraries it needs.
 //
 // usage: go run . [--dest DIR] [--force] [--max-age DAYS]
@@ -138,7 +138,7 @@ func run(args []string) error {
 		runLine = fmt.Sprintf(`exec "$here/lib/%s" --library-path "$here/lib" "$here/soloist" "$@"`+"\n", ar.loader)
 	}
 	wrapper := filepath.Join(dest, "soloist-run")
-	script := "#!/bin/sh\n# soloist through the glibc loader when the system has none (written by the dotfiles soloist dot)\n" +
+	script := "#!/bin/sh\n# soloist through the glibc loader when the system has none (written by the dotfiles radio dot)\n" +
 		`here="$(cd "$(dirname "$0")" && pwd)"` + "\n" + runLine
 	if err := os.WriteFile(wrapper+".new", []byte(script), 0o755); err != nil {
 		return err
