@@ -342,10 +342,10 @@ var postPythonBinds = map[string]string{
 	// X11, so i3 sessions enter the controls layer too. The layer itself is
 	// in the dump already.
 	"$mod+c": "controls layer entry on every session, not just kwi3",
-	// The hardware volume keys step volume AND enter the controls layer, so a
-	// tablet/phone reaches the layer from its side buttons.
-	"XF86AudioRaiseVolume": "volume + then controls layer entry",
-	"XF86AudioLowerVolume": "volume - then controls layer entry",
+	// The hardware volume keys enter the controls layer (no volume step), so
+	// a tablet/phone reaches the layer from its side buttons.
+	"XF86AudioRaiseVolume": "controls layer entry",
+	"XF86AudioLowerVolume": "controls layer entry",
 }
 
 // postPythonLayerBinds: the same record for chords added to a LAYER's table
@@ -769,8 +769,8 @@ func TestRealTable_NoChordEntersAnExternalLayer(t *testing.T) {
 // Kwi3OnlyBinds into the shared table — a deliberate new owned chord, not an
 // external layer leaking one.
 //
-// 71 -> 73: XF86AudioRaiseVolume / XF86AudioLowerVolume step volume and enter
-// the controls layer (a second way in, from a tablet's side buttons).
+// 71 -> 73: XF86AudioRaiseVolume / XF86AudioLowerVolume enter the controls
+// layer (a second way in, from a tablet's side buttons).
 var daemonOwnedChordCount = map[string]int{
 	"Mod4": 73,
 	"Mod1": 73,

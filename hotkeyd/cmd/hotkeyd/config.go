@@ -178,13 +178,14 @@ func controlsBinds(dir string) []bind.Bind {
 		})
 	}
 	// The volume keys keep stepping volume inside the layer, in their own
-	// direction whatever dir is (they are what entered it, see volKeyBinds).
+	// direction whatever dir is (outside it they only enter it, see volKeyBinds).
 	return append(out, volKeyBinds(false)...)
 }
 
-// volKeyBinds: the hardware volume keys step volume (held keeps stepping).
-// enter also raises the controls layer, so a volume press doubles as $mod+c
-// (dotfiles: tablet/phone side keys reach the layer without a keyboard).
+// volKeyBinds: the hardware volume keys. enter (the global table): they only
+// open the controls layer, a second way in beside $mod+c for a tablet's side
+// buttons, and step nothing. Inside the layer (enter false) they step volume,
+// held keeps stepping.
 func volKeyBinds(enter bool) []bind.Bind {
 	var out []bind.Bind
 	for _, k := range []struct{ key, dir string }{
@@ -192,7 +193,7 @@ func volKeyBinds(enter bool) []bind.Bind {
 	} {
 		acts := runAction("$HOME/.local/bin/hwctl volume " + k.dir)
 		if enter {
-			acts = append(acts, bind.EnterLayer{Layer: "controls"})
+			acts = []bind.Action{bind.EnterLayer{Layer: "controls"}}
 		}
 		out = append(out, bind.Bind{Chord: k.key, Actions: acts, Repeat: !enter})
 	}
@@ -484,7 +485,7 @@ func buildSharedBinds() []bind.Bind {
 	// Layers["controls"]. Was kwi3-only while hwctl's rotation was KWin's
 	// kscreen-doctor alone; hwctl now drives xrandr under X11, so i3 gets it too.
 	out = append(out, bind.Bind{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}})
-	// The volume keys enter it too, after one volume step (volKeyBinds).
+	// The volume keys enter it too, and only that (volKeyBinds).
 	out = append(out, volKeyBinds(true)...)
 
 	// ---- THE ALT-TAB SWITCHER (dotfiles-hwds.40) --------------------------
