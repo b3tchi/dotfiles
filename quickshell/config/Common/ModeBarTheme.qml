@@ -21,19 +21,22 @@ Singleton {
     readonly property string font: "Iosevka Nerd Font"
 
     // The controls panel's rows: the word, its key (hotkeyd's controls
-    // layer) and the current value, set by Bar.qml from `hwctl show`.
+    // layer), hwctl's name for it, and the current value, set by Bar.qml from
+    // `hwctl show`. selected is the control the volume keys step (a tap on
+    // a row picks it; `hwctl show` reports it, volume by default).
     property var controlValues: ({})
+    readonly property string controlSelected: controlValues.selected || "volume"
     readonly property var controlRows: [
-        {text: "volume", key: "v", value: controlValues.volume || ""},
-        {text: "brightness", key: "b", value: controlValues.brightness || ""},
-        {text: "rotation", key: "r", value: controlValues.rotation || ""},
-        {text: "font-size", key: "f", value: controlValues.scale || ""},
-        {text: "auto-rotate", key: "a", value: controlValues.autorotate || ""},
-        {text: "auto-suspend", key: "s", value: controlValues.autosuspend || ""},
-        {text: "wifi", key: "w", value: controlValues.wifi || ""},
-        {text: "bluetooth", key: "t", value: controlValues.bluetooth || ""},
-        {text: "nfc", key: "n", value: controlValues.nfc || ""},
-        {text: "gps", key: "g", value: controlValues.gps || ""}
+        {text: "volume", key: "v", control: "volume", value: controlValues.volume || ""},
+        {text: "brightness", key: "b", control: "brightness", value: controlValues.brightness || ""},
+        {text: "rotation", key: "r", control: "rotation", value: controlValues.rotation || ""},
+        {text: "font-size", key: "f", control: "scale", value: controlValues.scale || ""},
+        {text: "auto-rotate", key: "a", control: "autorotate", value: controlValues.autorotate || ""},
+        {text: "auto-suspend", key: "s", control: "autosuspend", value: controlValues.autosuspend || ""},
+        {text: "wifi", key: "w", control: "wifi", value: controlValues.wifi || ""},
+        {text: "bluetooth", key: "t", control: "bluetooth", value: controlValues.bluetooth || ""},
+        {text: "nfc", key: "n", control: "nfc", value: controlValues.nfc || ""},
+        {text: "gps", key: "g", control: "gps", value: controlValues.gps || ""}
     ]
 
     // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.

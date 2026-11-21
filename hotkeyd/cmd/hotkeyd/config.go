@@ -177,23 +177,32 @@ func controlsBinds(dir string) []bind.Bind {
 			Repeat:  c.control == "brightness",
 		})
 	}
-	// The volume keys keep stepping volume inside the layer, in their own
-	// direction whatever dir is (outside it they only enter it, see volKeyBinds).
+	// The volume keys step the picked control inside the layer (volume until a
+	// tap picks another), in their own direction whatever dir is (volKeyBinds).
 	return append(out, volKeyBinds(false)...)
+}
+
+// enterControls opens the controls layer with volume picked again, so the
+// volume keys start on volume whatever a tap picked last time.
+var enterControls = []bind.Action{
+	bind.Run{Cmd: "$HOME/.local/bin/hwctl select volume"},
+	bind.EnterLayer{Layer: "controls"},
 }
 
 // volKeyBinds: the hardware volume keys. enter (the global table): they only
 // open the controls layer, a second way in beside $mod+c for a tablet's side
-// buttons, and step nothing. Inside the layer (enter false) they step volume,
-// held keeps stepping.
+// buttons, and step nothing. Inside the layer (enter false) they step the
+// control picked by a tap on its row in the panel (hwctl select), volume
+// until one is; held keeps stepping (hwctl takes one step per press for a
+// control that would flap).
 func volKeyBinds(enter bool) []bind.Bind {
 	var out []bind.Bind
 	for _, k := range []struct{ key, dir string }{
 		{"XF86AudioRaiseVolume", "+"}, {"XF86AudioLowerVolume", "-"},
 	} {
-		acts := runAction("$HOME/.local/bin/hwctl volume " + k.dir)
+		acts := runAction("$HOME/.local/bin/hwctl selected " + k.dir)
 		if enter {
-			acts = []bind.Action{bind.EnterLayer{Layer: "controls"}}
+			acts = enterControls
 		}
 		out = append(out, bind.Bind{Chord: k.key, Actions: acts, Repeat: !enter})
 	}
@@ -484,7 +493,7 @@ func buildSharedBinds() []bind.Bind {
 	// One chord: volume, brightness, rotation, radios, GPS live in
 	// Layers["controls"]. Was kwi3-only while hwctl's rotation was KWin's
 	// kscreen-doctor alone; hwctl now drives xrandr under X11, so i3 gets it too.
-	out = append(out, bind.Bind{Chord: "$mod+c", Actions: []bind.Action{bind.EnterLayer{Layer: "controls"}}})
+	out = append(out, bind.Bind{Chord: "$mod+c", Actions: enterControls})
 	// The volume keys enter it too, and only that (volKeyBinds).
 	out = append(out, volKeyBinds(true)...)
 

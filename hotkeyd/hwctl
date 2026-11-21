@@ -2,6 +2,9 @@
 # hwctl CONTROL +|- : one step of a device control, for hotkeyd's controls
 # layer ($mod+c: a letter steps up, held Alt or Shift steps down).
 # hwctl show : one line of KEY=VALUE pairs, for the bar's controls panel.
+# hwctl select CONTROL : pick the control the volume keys step in the layer
+#   (a tap on its row in the panel; entering the layer picks volume again).
+# hwctl selected +|- : one step of the picked control (volume when none is).
 #
 #   volume      default sink, 5 %, 0..100
 #   brightness  every /sys/class/backlight device, to the next round 10 %, floor
@@ -36,7 +39,18 @@
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
 BACKLIGHT=${HWCTL_BACKLIGHT:-/sys/class/backlight}
-USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|autosuspend|wifi|bluetooth|nfc|gps +|- | hwctl show"
+SELECTED=${XDG_RUNTIME_DIR:-/tmp}/hwctl-selected
+CONTROLS="volume brightness rotation scale autorotate autosuspend wifi bluetooth nfc gps"
+USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|autosuspend|wifi|bluetooth|nfc|gps|selected +|- | hwctl select CONTROL | hwctl show"
+
+# The control `selected` steps: what `select` stored, volume for none or a bad one.
+selected_get() {
+	_s=$(cat "$SELECTED" 2>/dev/null)
+	case " $CONTROLS " in
+	*" $_s "*) [ -n "$_s" ] && echo "$_s" || echo volume ;;
+	*) echo volume ;;
+	esac
+}
 
 # rfkill TYPE -> on|off|-
 radio() {
@@ -112,6 +126,32 @@ scale_get() {
 scale_fmt() { awk -v s="$1" 'BEGIN { printf "%g\n", s / 100 }'; }
 
 control=$1 dir=$2
+if [ "$control" = select ]; then
+	case " $CONTROLS " in
+	*" $dir "*) [ -n "$dir" ] || { echo "$USAGE" >&2; exit 2; } ;;
+	*)
+		echo "$USAGE" >&2
+		exit 2
+		;;
+	esac
+	echo "$dir" >"$SELECTED.new" && mv -f "$SELECTED.new" "$SELECTED"
+	exit 0
+fi
+if [ "$control" = selected ]; then
+	control=$(selected_get)
+	# The volume keys repeat while held (every 200 ms). Volume and brightness
+	# keep stepping; everything else would flap, so it takes one step per
+	# press: a call under 0.5 s after the previous one is a repeat, skipped.
+	case $control in
+	volume | brightness) ;;
+	*)
+		now=$(cut -d' ' -f1 /proc/uptime | tr -d .)
+		last=$(cat "$SELECTED.last" 2>/dev/null)
+		echo "$now" >"$SELECTED.last"
+		[ -n "$last" ] && [ $((now - last)) -lt 50 ] && exit 0
+		;;
+	esac
+fi
 if [ "$control" = show ]; then
 	vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]*%' | head -n 1)
 	bri=
@@ -130,7 +170,7 @@ if [ "$control" = show ]; then
 		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
 	fi
 	echo "volume=${vol:--} brightness=${bri:--} rotation=${rot:--} scale=${sc:--} autorotate=$auto autosuspend=$(suspend_delay)" \
-		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps"
+		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps selected=$(selected_get)"
 	exit 0
 fi
 case "$dir" in

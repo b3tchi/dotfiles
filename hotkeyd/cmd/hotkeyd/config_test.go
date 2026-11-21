@@ -344,16 +344,16 @@ var postPythonBinds = map[string]string{
 	"$mod+c": "controls layer entry on every session, not just kwi3",
 	// The hardware volume keys enter the controls layer (no volume step), so
 	// a tablet/phone reaches the layer from its side buttons.
-	"XF86AudioRaiseVolume": "controls layer entry",
-	"XF86AudioLowerVolume": "controls layer entry",
+	"XF86AudioRaiseVolume": "controls layer entry (hwctl select volume first)",
+	"XF86AudioLowerVolume": "controls layer entry (hwctl select volume first)",
 }
 
 // postPythonLayerBinds: the same record for chords added to a LAYER's table
 // (its Binds and every Mod's) after the dump was frozen.
 var postPythonLayerBinds = map[string]map[string]string{
 	"controls": {
-		"XF86AudioRaiseVolume": "volume keys keep stepping volume inside the layer",
-		"XF86AudioLowerVolume": "volume keys keep stepping volume inside the layer",
+		"XF86AudioRaiseVolume": "volume keys step the tap-picked control (hwctl selected)",
+		"XF86AudioLowerVolume": "volume keys step the tap-picked control (hwctl selected)",
 	},
 }
 

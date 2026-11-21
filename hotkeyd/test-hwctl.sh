@@ -181,6 +181,23 @@ else
     echo "skip - wayland rotation: no jq on PATH"
 fi
 
+# select / selected: the control the controls layer's volume keys step.
+export XDG_RUNTIME_DIR="$T/run"
+mkdir -p "$XDG_RUNTIME_DIR"
+check "nothing selected: show says volume" "$(field selected)" "volume"
+sh "$H" select autosuspend
+check "select autosuspend: show says it" "$(field selected)" "autosuspend"
+echo 1min >"$CONF"
+sh "$H" selected +
+check "selected + steps the picked control" "$(field autosuspend)" "10min"
+sh "$H" selected +
+check "a repeat under 0.5 s is skipped for a non-stepper" "$(field autosuspend)" "10min"
+sh "$H" select bogus 2>/dev/null
+check "select of an unknown control fails" "$?" "2"
+check "...and keeps the previous pick" "$(field selected)" "autosuspend"
+echo bogus >"$XDG_RUNTIME_DIR/hwctl-selected"
+check "a bad stored pick reads as volume" "$(field selected)" "volume"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

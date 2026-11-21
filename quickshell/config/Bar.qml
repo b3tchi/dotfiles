@@ -1734,8 +1734,9 @@ PanelWindow {
     // $mod+Tab switcher's - one control per row, its key highlighted in the
     // word, its current value beside it. Laid out as a river: the words
     // right-aligned and the values left-aligned on either side of one
-    // gutter. Display only: hotkeyd owns the keys, so the window takes no
-    // focus. A plain top-level window titled qs-controls, like the
+    // gutter. hotkeyd owns the keys, so the window takes no focus; a tap
+    // on a row picks that control for the volume keys (hwctl select), and
+    // the picked row is marked. A plain top-level window titled qs-controls, like the
     // switcher's qs-switcher: kwi3's config.js floats it and centres it on
     // the tile grid, and on kwi3 its size is whole cells, so it sits on the
     // grid like every other dialog.
@@ -1769,37 +1770,60 @@ PanelWindow {
             anchors { fill: parent; topMargin: controlsPanel.borderV }
             Repeater {
                 model: ModeBarTheme.controlRows
-                Row {
+                Item {
+                    id: ctlRow
                     required property var modelData
-                    x: controlsPanel.border
+                    readonly property bool picked: modelData.control === ModeBarTheme.controlSelected
+                    width: controlsPanel.width
                     height: DialogTheme.rowHeight
-                    spacing: controlsPanel.gap
-                    Text {
-                        width: controlsPanel.labelW
-                        anchors.verticalCenter: parent.verticalCenter
-                        horizontalAlignment: Text.AlignRight
-                        // the key is the highlighted letter of the word, as in the mode strip
-                        text: {
-                            var t = modelData.text, i = t.indexOf(modelData.key)
-                            return i < 0 ? t : t.slice(0, i) + "<b><font color=\"" + ModeBarTheme.highlight
-                                + "\">" + modelData.key + "</font></b>" + t.slice(i + 1)
-                        }
-                        textFormat: Text.StyledText
-                        color: DialogTheme.fg
-                        font.family: DialogTheme.font
-                        font.pixelSize: DialogTheme.fontSize
-                        renderType: Text.NativeRendering
+                    Rectangle {
+                        anchors.fill: parent
+                        color: DialogTheme.accent
+                        visible: ctlRow.picked
                     }
-                    Text {
-                        width: controlsPanel.valueW
-                        anchors.verticalCenter: parent.verticalCenter
-                        horizontalAlignment: Text.AlignLeft
-                        text: modelData.value
-                        color: DialogTheme.fg
-                        font.family: DialogTheme.font
-                        font.pixelSize: DialogTheme.fontSize
-                        font.bold: true
-                        renderType: Text.NativeRendering
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            // show at once; the next `hwctl show` poll agrees
+                            var v = Object.assign({}, ModeBarTheme.controlValues)
+                            v.selected = ctlRow.modelData.control
+                            ModeBarTheme.controlValues = v
+                            Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/hwctl",
+                                "select", ctlRow.modelData.control])
+                        }
+                    }
+                    Row {
+                        property var modelData: ctlRow.modelData
+                        x: controlsPanel.border
+                        height: DialogTheme.rowHeight
+                        spacing: controlsPanel.gap
+                        Text {
+                            width: controlsPanel.labelW
+                            anchors.verticalCenter: parent.verticalCenter
+                            horizontalAlignment: Text.AlignRight
+                            // the key is the highlighted letter of the word, as in the mode strip
+                            text: {
+                                var t = modelData.text, i = t.indexOf(modelData.key)
+                                return i < 0 ? t : t.slice(0, i) + "<b><font color=\"" + ModeBarTheme.highlight
+                                    + "\">" + modelData.key + "</font></b>" + t.slice(i + 1)
+                            }
+                            textFormat: Text.StyledText
+                            color: DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
+                            renderType: Text.NativeRendering
+                        }
+                        Text {
+                            width: controlsPanel.valueW
+                            anchors.verticalCenter: parent.verticalCenter
+                            horizontalAlignment: Text.AlignLeft
+                            text: modelData.value
+                            color: DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
+                            font.bold: true
+                            renderType: Text.NativeRendering
+                        }
                     }
                 }
             }
