@@ -37,12 +37,18 @@
 #               client holds a GNSS session
 #   torch       the camera flash LED held on as a torchlight: the first
 #               /sys/class/leds/*:flash or *:torch (the LED's torch mode;
-#               needs the video group). Steps off, low (brightness 1, the
-#               dimmest the LED does), high (its max_brightness), wrapping
-#               both ways, so the one key alone reaches every level and off
+#               needs the video group). Steps off and the levels in
+#               ~/.config/hwctl/torch-levels, wrapping both ways, so the one
+#               key alone reaches every level and off. The file is one line
+#               of levels, dim to bright: min (brightness 1, the dimmest the
+#               LED does), max (its max_brightness) or a percent of max
+#               ("25 50 75 100"). Default, and for no file or nothing usable
+#               in it: "min max". hwctl show names min low, max high, a
+#               percent N%
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
+TORCH_LEVELS=${XDG_CONFIG_HOME:-$HOME/.config}/hwctl/torch-levels
 BACKLIGHT=${HWCTL_BACKLIGHT:-/sys/class/backlight}
 LEDS=${HWCTL_LEDS:-/sys/class/leds}
 SELECTED=${XDG_RUNTIME_DIR:-/tmp}/hwctl-selected
@@ -74,17 +80,37 @@ torch_led() {
 	done
 }
 
-# torch level: off (0), high (the max), low (anything between, so a level
-# set elsewhere still reads as lit).
-torch_level() { # <led dir>
-	_b=$(cat "$1/brightness")
-	if [ "$_b" -le 0 ]; then echo off
-	elif [ "$_b" -ge "$(cat "$1/max_brightness")" ]; then echo high
-	else echo low
-	fi
+# The torch levels as "<brightness>:<name>" lines, dim to bright, from
+# $TORCH_LEVELS (see the header); "min max" for no file or nothing usable.
+torch_levels() { # <led dir>
+	_m=$(cat "$1/max_brightness")
+	_l=$(cat "$TORCH_LEVELS" 2>/dev/null)
+	for _w in ${_l:-min max}; do
+		case $_w in
+		min) echo "1:low" ;;
+		max) echo "$_m:high" ;;
+		*[!0-9]* | "") ;;
+		*) [ "$_w" -ge 1 ] && [ "$_w" -le 100 ] && echo "$(((_m * _w + 50) / 100 < 1 ? 1 : (_m * _w + 50) / 100)):$_w%" ;;
+		esac
+	done | sort -t: -k1,1n -u
 }
 
-# torch -> off|low|high|- (no LED)
+# The torch levels, or "min max" when the file names none usable.
+torch_table() { # <led dir>
+	_tl=$(torch_levels "$1")
+	[ -n "$_tl" ] || _tl=$(TORCH_LEVELS=/dev/null torch_levels "$1")
+	echo "$_tl"
+}
+
+# torch -> off, or the name of the brightest level at or under the LED's
+# brightness (the dimmest for one set elsewhere below them all).
+torch_level() { # <led dir>
+	_b=$(cat "$1/brightness")
+	[ "$_b" -gt 0 ] || { echo off; return 0; }
+	torch_table "$1" | awk -F: -v b="$_b" 'NR == 1 { n = $2 } $1 <= b { n = $2 } END { print n }'
+}
+
+# torch -> off|low|high|N%|- (no LED)
 torch_get() {
 	_t=$(torch_led)
 	[ -n "$_t" ] && torch_level "$_t" || echo -
@@ -290,16 +316,15 @@ torch)
 		echo "hwctl: no flash LED for the torch" >&2
 		exit 1
 	}
-	if [ "$dir" = + ]; then
-		case $(torch_level "$t") in off) to=low ;; low) to=high ;; *) to=off ;; esac
-	else
-		case $(torch_level "$t") in off) to=high ;; high) to=low ;; *) to=off ;; esac
-	fi
-	case $to in
-	off) echo 0 ;;
-	low) echo 1 ;;
-	high) cat "$t/max_brightness" ;;
-	esac >"$t/brightness"
+	# + : the next level above the brightness, off past the brightest;
+	# - : the next one below, off under the dimmest, the brightest from off
+	torch_table "$t" | awk -F: -v b="$(cat "$t/brightness")" -v d="$dir" '
+		{ v[NR] = $1 }
+		END {
+			if (d == "+") { for (i = 1; i <= NR; i++) if (v[i] > b) { print v[i]; exit } print 0 }
+			else if (b <= 0) print v[NR]
+			else { for (i = NR; i >= 1; i--) if (v[i] < b) { print v[i]; exit } print 0 }
+		}' >"$t/brightness"
 	;;
 *)
 	echo "$USAGE" >&2
