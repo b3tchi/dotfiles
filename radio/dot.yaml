@@ -33,20 +33,21 @@ linux:
       - gopass
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse
+      sudo pacman -S --needed --noconfirm qt6-declarative jq python libpulse go
       {{/if}}
       if command -v apk >/dev/null 2>&1; then
         missing=""
         # qml6 ships in the -dev package on Alpine
         command -v qml6 >/dev/null 2>&1 || missing="$missing qt6-qtdeclarative-dev"
         command -v jq >/dev/null 2>&1 || missing="$missing jq"
-        # Soloist install + Glyph visualizer: python3; parec (monitor capture)
+        # Soloist install: python3. Glyph visualizer: go (build), parec (capture)
+        command -v go >/dev/null 2>&1 || missing="$missing go"
         command -v parec >/dev/null 2>&1 || missing="$missing pulseaudio-utils"
         command -v python3 >/dev/null 2>&1 || missing="$missing python3"
         [ -z "$missing" ] || doas apk add $missing
@@ -81,6 +82,28 @@ linux:
       if ! git -C "$SRC" -c advice.detachedHead=false checkout --quiet --detach "$TAG" 2>/dev/null; then
         echo "radio: could not check out $TAG in $SRC -- resolve by hand and re-run 'rotz install radio'." >&2
         exit 1
+      fi
+
+      # Glyph visualizer (glyph/, Go) -> $SRC/build/radio-glyph. Rebuilt only
+      # when the glyph tree changes; built to a temp file and renamed, so a
+      # failed build never leaves a half-written binary. A failure is a
+      # warning: radio runs without the LEDs.
+      TREE=$(git -C "$SRC" rev-parse HEAD:glyph 2>/dev/null || echo none)
+      if [ -x "$SRC/build/radio-glyph" ] && [ "$(cat "$SRC/build/.glyph-tree" 2>/dev/null)" = "$TREE" ]; then
+        echo "radio: Glyph visualizer up to date"
+      elif command -v go >/dev/null 2>&1; then
+        mkdir -p "$SRC/build"
+        GTMP="$(mktemp "$SRC/build/.radio-glyph.XXXXXX")"
+        if CGO_ENABLED=0 go build -C "$SRC/glyph" -o "$GTMP" .; then
+          mv -f "$GTMP" "$SRC/build/radio-glyph"
+          echo "$TREE" > "$SRC/build/.glyph-tree"
+          echo "radio: Glyph visualizer built"
+        else
+          rm -f "$GTMP"
+          echo "radio: WARNING -- go build of glyph/ failed; no Glyph LEDs until it builds." >&2
+        fi
+      else
+        echo "radio: WARNING -- go missing; no Glyph visualizer." >&2
       fi
 
       # Spotify Soloist (+ glibc libraries on musl). A failure is a warning:
