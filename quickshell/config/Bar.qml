@@ -1736,7 +1736,7 @@ PanelWindow {
     // right-aligned and the values left-aligned on either side of one
     // gutter. hotkeyd owns the keys, so the window takes no focus; a tap
     // on a row picks that control for the volume keys (hwctl select), and
-    // the picked row is marked. A plain top-level window titled qs-controls, like the
+    // the picked row carries a +/- pill after its value. A plain top-level window titled qs-controls, like the
     // switcher's qs-switcher: kwi3's config.js floats it and centres it on
     // the tile grid, and on kwi3 its size is whole cells, so it sits on the
     // grid like every other dialog.
@@ -1756,7 +1756,9 @@ PanelWindow {
         // and below on kwi3
         readonly property int border: 2 * DialogTheme.textLeftMargin
         readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
-        readonly property int contentW: labelW + gap + valueW + 2 * border
+        // the +/- pill on the picked row: the text plus one cell of padding
+        readonly property int pillW: Math.ceil(ctlValueFm.advanceWidth("+/-")) + gap
+        readonly property int contentW: labelW + gap + valueW + gap + pillW + 2 * border
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
         transientParent: null
@@ -1776,11 +1778,6 @@ PanelWindow {
                     readonly property bool picked: modelData.control === ModeBarTheme.controlSelected
                     width: controlsPanel.width
                     height: DialogTheme.rowHeight
-                    Rectangle {
-                        anchors.fill: parent
-                        color: DialogTheme.accent
-                        visible: ctlRow.picked
-                    }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
@@ -1823,6 +1820,27 @@ PanelWindow {
                             font.pixelSize: DialogTheme.fontSize
                             font.bold: true
                             renderType: Text.NativeRendering
+                        }
+                        // what the volume keys step: the mode strip's pill
+                        Rectangle {
+                            width: controlsPanel.pillW
+                            height: parent.height
+                            color: ModeBarTheme.pillBg
+                            visible: ctlRow.picked
+                            Rectangle {
+                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                height: 2
+                                color: ModeBarTheme.highlight
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: "+/-"
+                                color: ModeBarTheme.highlight
+                                font.family: DialogTheme.font
+                                font.pixelSize: DialogTheme.fontSize
+                                font.bold: true
+                                renderType: Text.NativeRendering
+                            }
                         }
                     }
                 }
