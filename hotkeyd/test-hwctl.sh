@@ -199,7 +199,7 @@ echo bogus >"$XDG_RUNTIME_DIR/hwctl-selected"
 check "a bad stored pick reads as volume" "$(field selected)" "volume"
 
 # --- torch: the flash LED's brightness, 0 or its max; - when there is none
-export HWCTL_LEDS="$T/leds" HWCTL_TORCH_STEP=0
+export HWCTL_LEDS="$T/leds"
 mkdir -p "$HWCTL_LEDS"
 check "no flash LED: torch reads -" "$(field torch)" "-"
 sh "$H" torch + 2>/dev/null
@@ -208,24 +208,21 @@ TL="$HWCTL_LEDS/white:flash"
 mkdir -p "$TL" "$HWCTL_LEDS/red:recording"
 echo 255 >"$TL/max_brightness"; echo 0 >"$TL/brightness"
 echo 0 >"$HWCTL_LEDS/red:recording/brightness"
+tstep() { sh "$H" torch "$1"; field torch; }
 check "torch off" "$(field torch)" "off"
-sh "$H" torch +
-check "torch + turns it on" "$(field torch)" "on"
-check "torch on is the LED's max" "$(cat "$TL/brightness")" "255"
+check "torch + to 25%" "$(tstep +)" "25%"
+check "torch 25% is a quarter of max" "$(cat "$TL/brightness")" "64"
+check "torch + to 50%" "$(tstep +)" "50%"
+check "torch + to 75%" "$(tstep +)" "75%"
+check "torch + to 100%" "$(tstep +)" "100%"
+check "torch 100% is the LED's max" "$(cat "$TL/brightness")" "255"
+check "torch + wraps to off" "$(tstep +)" "off"
+check "torch - from off wraps to 100%" "$(tstep -)" "100%"
+check "torch - steps down" "$(tstep -)" "75%"
 check "torch leaves other LEDs alone" "$(cat "$HWCTL_LEDS/red:recording/brightness")" "0"
-sh "$H" torch +
-check "torch + again turns it off" "$(cat "$TL/brightness")" "0"
-sh "$H" torch -
-check "torch - flips too" "$(field torch)" "on"
-echo 0 >"$TL/brightness"
-HWCTL_TORCH_STEP=0.1 sh "$H" torch + &
-fade=$!
-sleep 0.15
-mid=$(cat "$TL/brightness")
-check "torch fades in: partway after 0.15 s" "$([ "$mid" -gt 0 ] && [ "$mid" -lt 255 ] && echo yes || echo "no ($mid)")" "yes"
-sh "$H" torch -
-wait "$fade"
-check "torch off mid-fade stays off" "$(cat "$TL/brightness")" "0"
+echo 3 >"$TL/brightness"
+check "torch dim value set elsewhere reads 25%" "$(field torch)" "25%"
+check "torch + from it goes to 50%" "$(tstep +)" "50%"
 
 echo
 echo "$pass passed, $fail failed"

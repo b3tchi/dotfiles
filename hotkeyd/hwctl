@@ -36,9 +36,10 @@
 #               nothing-pmos controls/ allows start/stop); "in-use" while a
 #               client holds a GNSS session
 #   torch       the camera flash LED held on as a torchlight: the first
-#               /sys/class/leds/*:flash or *:torch, brightness 0 or its max,
-#               fading in over ~0.6 s
-#               (the LED's torch mode; needs the video group)
+#               /sys/class/leds/*:flash or *:torch (the LED's torch mode;
+#               needs the video group). Steps off, 25 %, 50 %, 75 %, 100 % of
+#               its max_brightness, wrapping both ways, so the one key alone
+#               reaches every level and off
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
@@ -73,11 +74,22 @@ torch_led() {
 	done
 }
 
-# torch -> on|off|- (no LED)
+# torch level in percent (0, 25, 50, 75, 100): the nearest quarter, but
+# anything lit reads at least 25, so on never shows as off.
+torch_pct() { # <led dir>
+	_m=$(cat "$1/max_brightness") _b=$(cat "$1/brightness")
+	[ "$_b" -gt 0 ] || { echo 0; return 0; }
+	_q=$(((_b * 4 + _m / 2) / _m))
+	[ "$_q" -lt 1 ] && _q=1
+	echo $((_q * 25))
+}
+
+# torch -> off|25%..100%|- (no LED)
 torch_get() {
 	_t=$(torch_led)
 	[ -n "$_t" ] || { echo -; return 0; }
-	[ "$(cat "$_t/brightness")" -gt 0 ] && echo on || echo off
+	_p=$(torch_pct "$_t")
+	[ "$_p" -gt 0 ] && echo "$_p%" || echo off
 }
 
 # The auto-suspend delay in effect: the default for no setting, or a bad one.
@@ -280,24 +292,13 @@ torch)
 		echo "hwctl: no flash LED for the torch" >&2
 		exit 1
 	}
-	if [ "$(cat "$t/brightness")" -gt 0 ]; then
-		echo 0 >"$t/brightness"
+	cur=$(torch_pct "$t")
+	if [ "$dir" = + ]; then
+		new=$(((cur + 25) % 125))
 	else
-		# Fade in: 12 steps on a squared curve (the eye reads light about
-		# logarithmically, so linear steps look like a jump then a crawl),
-		# HWCTL_TORCH_STEP seconds apart. A toggle mid-fade writes 0; the
-		# fade sees a value it did not write and stops, so off wins.
-		max=$(cat "$t/max_brightness")
-		last=0
-		i=1
-		while [ "$i" -le 12 ]; do
-			[ "$(cat "$t/brightness")" = "$last" ] || exit 0
-			last=$(((max * i * i + 143) / 144))
-			echo "$last" >"$t/brightness"
-			[ "$i" -lt 12 ] && sleep "${HWCTL_TORCH_STEP:-0.05}"
-			i=$((i + 1))
-		done
+		new=$(((cur + 100) % 125))
 	fi
+	echo $((($(cat "$t/max_brightness") * new + 50) / 100)) >"$t/brightness"
 	;;
 *)
 	echo "$USAGE" >&2
