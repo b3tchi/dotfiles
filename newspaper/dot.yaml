@@ -5,7 +5,8 @@
 # ~/.local/src/newspaper, checks out the highest release tag (vX.Y.Z; never
 # main) and builds the Mpv video plugin. The links put a shim
 # (newspaper/newspaper: sets NEWSPAPER_GOPASS, default "nextcloud", then runs
-# the checkout's launcher) on PATH, a .desktop entry in the app menu and
+# the checkout's launcher) on PATH, a .desktop entry in the app menu with
+# its icon (newspaper.svg, hicolor scalable) and
 # keys.json (key rebinds: action -> key, see the app's README) and
 # order.json (folder order, {"folders": [names]}) in ~/.config/newspaper.
 # The app rewrites order.json when folders are moved (zk / zj), through the
@@ -19,6 +20,7 @@ linux:
   links:
     newspaper: ~/.local/bin/newspaper
     newspaper.desktop: ~/.local/share/applications/newspaper.desktop
+    newspaper.svg: ~/.local/share/icons/hicolor/scalable/apps/newspaper.svg
     keys.json: ~/.config/newspaper/keys.json
     order.json: ~/.config/newspaper/order.json
   installs:
