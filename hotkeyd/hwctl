@@ -36,7 +36,8 @@
 #               nothing-pmos controls/ allows start/stop); "in-use" while a
 #               client holds a GNSS session
 #   torch       the camera flash LED held on as a torchlight: the first
-#               /sys/class/leds/*:flash or *:torch, brightness 0 or its max
+#               /sys/class/leds/*:flash or *:torch, brightness 0 or its max,
+#               fading in over ~0.6 s
 #               (the LED's torch mode; needs the video group)
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
@@ -282,7 +283,20 @@ torch)
 	if [ "$(cat "$t/brightness")" -gt 0 ]; then
 		echo 0 >"$t/brightness"
 	else
-		cat "$t/max_brightness" >"$t/brightness"
+		# Fade in: 12 steps on a squared curve (the eye reads light about
+		# logarithmically, so linear steps look like a jump then a crawl),
+		# HWCTL_TORCH_STEP seconds apart. A toggle mid-fade writes 0; the
+		# fade sees a value it did not write and stops, so off wins.
+		max=$(cat "$t/max_brightness")
+		last=0
+		i=1
+		while [ "$i" -le 12 ]; do
+			[ "$(cat "$t/brightness")" = "$last" ] || exit 0
+			last=$(((max * i * i + 143) / 144))
+			echo "$last" >"$t/brightness"
+			[ "$i" -lt 12 ] && sleep "${HWCTL_TORCH_STEP:-0.05}"
+			i=$((i + 1))
+		done
 	fi
 	;;
 *)

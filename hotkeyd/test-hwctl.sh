@@ -199,7 +199,7 @@ echo bogus >"$XDG_RUNTIME_DIR/hwctl-selected"
 check "a bad stored pick reads as volume" "$(field selected)" "volume"
 
 # --- torch: the flash LED's brightness, 0 or its max; - when there is none
-export HWCTL_LEDS="$T/leds"
+export HWCTL_LEDS="$T/leds" HWCTL_TORCH_STEP=0
 mkdir -p "$HWCTL_LEDS"
 check "no flash LED: torch reads -" "$(field torch)" "-"
 sh "$H" torch + 2>/dev/null
@@ -217,6 +217,15 @@ sh "$H" torch +
 check "torch + again turns it off" "$(cat "$TL/brightness")" "0"
 sh "$H" torch -
 check "torch - flips too" "$(field torch)" "on"
+echo 0 >"$TL/brightness"
+HWCTL_TORCH_STEP=0.1 sh "$H" torch + &
+fade=$!
+sleep 0.15
+mid=$(cat "$TL/brightness")
+check "torch fades in: partway after 0.15 s" "$([ "$mid" -gt 0 ] && [ "$mid" -lt 255 ] && echo yes || echo "no ($mid)")" "yes"
+sh "$H" torch -
+wait "$fade"
+check "torch off mid-fade stays off" "$(cat "$TL/brightness")" "0"
 
 echo
 echo "$pass passed, $fail failed"
