@@ -1748,16 +1748,23 @@ PanelWindow {
             var rows = ModeBarTheme.controlRows || [], w = 0
             for (var i = 0; i < rows.length; i++)
                 w = Math.max(w, ctlLabelFm.advanceWidth(rows[i].text))
-            return Math.ceil(w)
+            return cells(w)
         }
-        readonly property int valueW: Math.ceil(ctlValueFm.advanceWidth("inverted"))
+        readonly property int valueW: cells(ctlValueFm.advanceWidth("inverted"))
+        // on kwi3 every column is whole cells, so each one (and the pill)
+        // starts and ends on the module grid
+        readonly property int cellW: Kwi3Grid.active ? Kwi3Grid.moduleW : 0
+        function cells(w) { return cellW > 0 ? Math.ceil(w / cellW) * cellW : Math.ceil(w) }
         readonly property int gap: DialogTheme.textLeftMargin
         // the space around the list: two cells at the sides, one row above
         // and below on kwi3
         readonly property int border: 2 * DialogTheme.textLeftMargin
         readonly property int borderV: Kwi3Grid.active ? Kwi3Grid.moduleH : border
-        // the +/- pill on the picked row: the text plus one cell of padding
-        readonly property int pillW: Math.ceil(ctlValueFm.advanceWidth("+/-")) + gap
+        // the +/- pill on the picked row, sized as ModeBar's name-pill: the
+        // text in whole cells plus one cell each side on kwi3
+        readonly property int pillW: cellW > 0
+            ? cells(ctlValueFm.advanceWidth("+/-")) + 2 * cellW
+            : Math.ceil(ctlValueFm.advanceWidth("+/-")) + 14
         readonly property int contentW: labelW + gap + valueW + gap + pillW + 2 * border
         FontMetrics { id: ctlLabelFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         FontMetrics { id: ctlValueFm; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize; font.bold: true }
