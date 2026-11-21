@@ -37,9 +37,9 @@
 #               client holds a GNSS session
 #   torch       the camera flash LED held on as a torchlight: the first
 #               /sys/class/leds/*:flash or *:torch (the LED's torch mode;
-#               needs the video group). Steps off, 25 %, 50 %, 75 %, 100 % of
-#               its max_brightness, wrapping both ways, so the one key alone
-#               reaches every level and off
+#               needs the video group). Steps off, low (brightness 1, the
+#               dimmest the LED does), high (its max_brightness), wrapping
+#               both ways, so the one key alone reaches every level and off
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
 SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
@@ -74,22 +74,20 @@ torch_led() {
 	done
 }
 
-# torch level in percent (0, 25, 50, 75, 100): the nearest quarter, but
-# anything lit reads at least 25, so on never shows as off.
-torch_pct() { # <led dir>
-	_m=$(cat "$1/max_brightness") _b=$(cat "$1/brightness")
-	[ "$_b" -gt 0 ] || { echo 0; return 0; }
-	_q=$(((_b * 4 + _m / 2) / _m))
-	[ "$_q" -lt 1 ] && _q=1
-	echo $((_q * 25))
+# torch level: off (0), high (the max), low (anything between, so a level
+# set elsewhere still reads as lit).
+torch_level() { # <led dir>
+	_b=$(cat "$1/brightness")
+	if [ "$_b" -le 0 ]; then echo off
+	elif [ "$_b" -ge "$(cat "$1/max_brightness")" ]; then echo high
+	else echo low
+	fi
 }
 
-# torch -> off|25%..100%|- (no LED)
+# torch -> off|low|high|- (no LED)
 torch_get() {
 	_t=$(torch_led)
-	[ -n "$_t" ] || { echo -; return 0; }
-	_p=$(torch_pct "$_t")
-	[ "$_p" -gt 0 ] && echo "$_p%" || echo off
+	[ -n "$_t" ] && torch_level "$_t" || echo -
 }
 
 # The auto-suspend delay in effect: the default for no setting, or a bad one.
@@ -292,13 +290,16 @@ torch)
 		echo "hwctl: no flash LED for the torch" >&2
 		exit 1
 	}
-	cur=$(torch_pct "$t")
 	if [ "$dir" = + ]; then
-		new=$(((cur + 25) % 125))
+		case $(torch_level "$t") in off) to=low ;; low) to=high ;; *) to=off ;; esac
 	else
-		new=$(((cur + 100) % 125))
+		case $(torch_level "$t") in off) to=high ;; high) to=low ;; *) to=off ;; esac
 	fi
-	echo $((($(cat "$t/max_brightness") * new + 50) / 100)) >"$t/brightness"
+	case $to in
+	off) echo 0 ;;
+	low) echo 1 ;;
+	high) cat "$t/max_brightness" ;;
+	esac >"$t/brightness"
 	;;
 *)
 	echo "$USAGE" >&2
