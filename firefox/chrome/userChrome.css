@@ -29,3 +29,13 @@
     left: 4px !important;
     width: calc(100vw - 8px) !important;
 }
+
+/* The urlbar fills the toolbar: no flexible spaces around it (they kept a
+   gap each side on a narrow tile), and it grows into the room they had. */
+#nav-bar toolbarspring {
+    display: none !important;
+}
+#urlbar-container {
+    flex: 1 1 auto !important;
+    width: auto !important;
+}
