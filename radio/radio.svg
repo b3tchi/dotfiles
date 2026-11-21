@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- radio: app icon. A retro tube radio: red cabinet, cream front with
-     speaker grille, dial window and buttons, dark lower panel with two
+<!-- radio: app icon. A retro tube radio, all red: red cabinet and front with
+     a darker speaker grille, cream dial window and buttons, dark lower panel with two
      knobs and a tuning scale, two feet. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <!-- feet -->
-  <rect x="24" y="104" width="7" height="12" rx="2" fill="#6e1d1a"/>
-  <rect x="97" y="104" width="7" height="12" rx="2" fill="#6e1d1a"/>
+  <rect x="24" y="104" width="7" height="12" rx="2" fill="#4a1512"/>
+  <rect x="97" y="104" width="7" height="12" rx="2" fill="#4a1512"/>
   <!-- cabinet -->
-  <rect x="6" y="20" width="116" height="88" rx="20" fill="#b3312c"/>
-  <rect x="11" y="25" width="106" height="78" rx="15" fill="#f6edd2"/>
-  <rect x="14" y="28" width="100" height="72" rx="12" fill="#e6d8ad"/>
+  <rect x="6" y="20" width="116" height="88" rx="20" fill="#7a1c18"/>
+  <rect x="11" y="25" width="106" height="78" rx="15" fill="#e2564a"/>
+  <rect x="14" y="28" width="100" height="72" rx="12" fill="#c93a2f"/>
   <!-- speaker grille -->
-  <g stroke="#9a8556" stroke-width="2.2" stroke-linecap="round">
+  <g stroke="#8e2420" stroke-width="2.2" stroke-linecap="round">
     <line x1="22" y1="36" x2="106" y2="36"/>
     <line x1="22" y1="42" x2="106" y2="42"/>
     <line x1="22" y1="48" x2="106" y2="48"/>
@@ -20,8 +20,8 @@
     <line x1="22" y1="66" x2="106" y2="66"/>
   </g>
   <!-- dial window and preset buttons -->
-  <rect x="86" y="37" width="15" height="9" rx="2" fill="#fbf6e6" stroke="#7a5a2a" stroke-width="2"/>
-  <rect x="80" y="53" width="22" height="9" rx="2" fill="#7a5a2a"/>
+  <rect x="86" y="37" width="15" height="9" rx="2" fill="#fbf6e6" stroke="#7a1c18" stroke-width="2"/>
+  <rect x="80" y="53" width="22" height="9" rx="2" fill="#7a1c18"/>
   <g fill="#fbf6e6">
     <rect x="82.5" y="55.5" width="4.5" height="4" rx="1"/>
     <rect x="88.8" y="55.5" width="4.5" height="4" rx="1"/>
@@ -30,7 +30,7 @@
   <!-- divider strip -->
   <rect x="16" y="72" width="96" height="4" rx="2" fill="#fbf6e6"/>
   <!-- lower panel -->
-  <rect x="20" y="78" width="88" height="18" rx="5" fill="#5a1a17"/>
+  <rect x="20" y="78" width="88" height="18" rx="5" fill="#4a1512"/>
   <!-- tuning scale -->
   <g stroke="#8a7f74" stroke-width="1.6">
     <line x1="46" y1="82" x2="82" y2="82"/>
