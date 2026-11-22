@@ -112,6 +112,14 @@ Singleton {
             {text: "reversing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
+        // camera ($mod+f, phone): hotkeyd's camera layer over phone-cam's
+        // viewfinder. space / Return / f take the photo, q / Esc close it
+        // unsaved; BackSpace only leaves the layer (the preview stays).
+        "camera": [
+            {text: "snap", key: "space"},
+            {text: "quit", key: "q"},
+            {text: "keys-off", key: "⌫"}
+        ],
         "system": [
             {text: "lock", key: "l"},
             {text: "exit", key: "e"},
@@ -151,6 +159,7 @@ Singleton {
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic
         if (mode === "controls") return "controls"
+        if (mode === "camera") return "camera"
         if (mode === "controls-reverse") return "controls-reverse" // synthetic
         // The system surface reaches this function under TWO names, and both
         // have to keep working:

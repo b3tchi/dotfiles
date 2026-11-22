@@ -1,14 +1,22 @@
 #!/bin/sh
 # phone-cam: viewfinder-then-snap for the Nothing Phone's back ultrawide
-# (s5kjn1), bound to $mod+f (Alt+f) on the phone by hotkeyd's host_phone.go.
+# (s5kjn1). On the phone $mod+f (Alt+f) runs `phone-cam start` and enters
+# hotkeyd's "camera" layer (host_phone.go), whose keys run the other verbs;
+# the bar shows them in its hint strip.
 #
-#   1st press: fullscreen live preview. The same pipeline tees a few JPEGs a
-#              second into $RUN, so the photo is the frame you were looking
-#              at — the camera is never reopened (no AE re-settle delay).
-#   2nd press: newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg and
-#              the clipboard (wl-copy, as image/png), the
-#              preview closes, notify-send says where it went.
-#   Closing the preview window instead cancels: nothing is saved.
+#   phone-cam start   live preview sized to the focused workspace; kwi3
+#                     floats it frameless over the tabs, so the bar and its
+#                     camera hint strip stay visible. The same pipeline tees a few
+#                     JPEGs a second into $RUN, so the photo is the frame you
+#                     were looking at — the camera is never reopened.
+#   phone-cam snap    newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg
+#                     and the clipboard (wl-copy, as image/png); the preview
+#                     closes, notify-send says where it went.
+#   phone-cam cancel  close the preview, save nothing.
+#   phone-cam         no verb: snap if the preview is up, else start.
+#
+# However the preview ends (snap, cancel, its window closed), the watcher
+# clears hotkeyd's layer, so the camera layer's grabs never outlive it.
 #
 # The main imx766 has no driver; this sensor has no colour tuning yet, so
 # expect a green/cyan cast. The DT says rotation=90; on the phone held
@@ -62,17 +70,39 @@ start() {
   }
   mkdir -p "$RUN"
   rm -f "$RUN"/frame-*.jpg
+  # The preview fills the focused workspace (kwi3 floats it frameless over
+  # the tabs, kwi3/config.js): scale + letterbox to its size. The photo
+  # branch keeps the sensor's full 720x1280. No kwi3 tree: unscaled.
+  fit=""
+  wh=$(i3tree 2>/dev/null | jq -r 'first(.. | objects | select(.type == "workspace")
+        | select([.. | objects | .focused?] | any) | "\(.rect.width) \(.rect.height)")' 2>/dev/null)
+  case "$wh" in
+  [0-9]*" "[0-9]*) fit="videoscale add-borders=true ! video/x-raw,width=${wh% *},height=${wh#* } !" ;;
+  esac
   gst-launch-1.0 -q -e libcamerasrc camera-name="$CAM" ae-exposure-mode=long ! \
     video/x-raw,width=1280,height=720 ! videoconvert ! videoflip method="$FLIP" ! \
     tee name=t \
-    t. ! queue ! videoconvert ! waylandsink fullscreen=true \
+    t. ! queue ! videoconvert ! $fit waylandsink fullscreen=false \
     t. ! queue leaky=downstream max-size-buffers=1 ! videorate max-rate=4 ! \
          jpegenc quality=92 ! multifilesink location="$RUN/frame-%05d.jpg" max-files=3 \
     >"$RUN/log" 2>&1 &
   echo $! >"$PID"
-  # wait in the background so a cancelled preview cleans up after itself
+  # wait in the background so the preview cleans up after itself, however
+  # it ends, and hands the keyboard back (leaves the camera layer).
   ( wait_pid=$(cat "$PID"); while kill -0 "$wait_pid" 2>/dev/null; do sleep 1; done
-    rm -f "$PID" "$RUN"/frame-*.jpg ) >/dev/null 2>&1 &
+    rm -f "$PID" "$RUN"/frame-*.jpg
+    "$HOME/.local/bin/hotkeyd" set-layer default ) >/dev/null 2>&1 &
 }
 
-if running; then snap; else start; fi
+cancel() {
+  running && kill -INT "$(cat "$PID")" 2>/dev/null
+  return 0
+}
+
+case "${1:-}" in
+start) running || start ;;
+snap) if running; then snap; else notify "Camera" "no preview open"; fi ;;
+cancel) cancel ;;
+"") if running; then snap; else start; fi ;;
+*) echo "usage: phone-cam [start|snap|cancel]" >&2; exit 2 ;;
+esac

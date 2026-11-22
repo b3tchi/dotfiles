@@ -357,6 +357,33 @@ var postPythonLayerBinds = map[string]map[string]string{
 	},
 }
 
+// postPythonLayers: whole layers added after the dump was frozen, dropped
+// from the GO dump like postPythonBinds' chords.
+var postPythonLayers = map[string]string{
+	"camera": "phone viewfinder ($mod+f, host_phone.go): snap / cancel keys",
+}
+
+// TestPostPythonLayersAreLive: an entry must name a layer go declares and
+// python never had, or it masks nothing (or a real parity break).
+func TestPostPythonLayersAreLive(t *testing.T) {
+	raw, err := os.ReadFile(goldenDumpFixture)
+	if err != nil {
+		t.Fatalf("cannot read the golden dump at %s: %v", goldenDumpFixture, err)
+	}
+	var pyDump dumpTable
+	if err := json.Unmarshal(raw, &pyDump); err != nil {
+		t.Fatalf("could not parse golden-dump JSON at %s: %v", goldenDumpFixture, err)
+	}
+	for name, reason := range postPythonLayers {
+		if _, ok := pyDump.Layers[name]; ok {
+			t.Errorf("postPythonLayers names %q (%s), but python had it; drop the entry", name, reason)
+		}
+		if _, ok := Layers[name]; !ok {
+			t.Errorf("postPythonLayers names %q (%s), but go no longer declares it; drop the entry", name, reason)
+		}
+	}
+}
+
 func dropChords(bs []dumpBind, drop map[string]string) []dumpBind {
 	var kept []dumpBind
 	for _, b := range bs {
@@ -377,6 +404,9 @@ func dropPostPythonBinds(d *dumpTable) {
 		}
 	}
 	d.Binds = kept
+	for name := range postPythonLayers {
+		delete(d.Layers, name)
+	}
 	for name, drop := range postPythonLayerBinds {
 		l, ok := d.Layers[name]
 		if !ok {
@@ -771,9 +801,32 @@ func TestRealTable_NoChordEntersAnExternalLayer(t *testing.T) {
 //
 // 71 -> 73: XF86AudioRaiseVolume / XF86AudioLowerVolume enter the controls
 // layer (a second way in, from a tablet's side buttons).
+//
+// The count is the SHARED table's. A host build (`-tags phone`) may add
+// chords of its own through hostOverrides (the phone's $mod+f camera), so the
+// test adds hostAddedChords() to it rather than freezing one count per host.
 var daemonOwnedChordCount = map[string]int{
 	"Mod4": 73,
 	"Mod1": 73,
+}
+
+// hostAddedChords: how many chords this build's hostOverrides adds to the
+// shared table (an override of a chord the table already has adds none).
+func hostAddedChords() int {
+	shared := map[string]bool{}
+	for _, b := range buildSharedBinds() {
+		shared[b.Chord] = true
+	}
+	for _, b := range Kwi3OnlyBinds {
+		shared[b.Chord] = true
+	}
+	n := 0
+	for chord, acts := range hostOverrides() {
+		if acts != nil && !shared[chord] {
+			n++
+		}
+	}
+	return n
 }
 
 // TestOwnershipRowCount_UnmovedByTheExternalLayer is the ownership row-count
@@ -812,6 +865,7 @@ func TestOwnershipRowCount_UnmovedByTheExternalLayer(t *testing.T) {
 			t.Fatalf("no frozen row count for $mod=%s — bind.ModResolutions grew and "+
 				"daemonOwnedChordCount did not", mod)
 		}
+		want += hostAddedChords()
 		if rows[mod] != want {
 			t.Errorf("check --ownership printed %d rows for $mod=%s, want %d — "+
 				"declaring an External (signal-only) layer must not add or remove a "+

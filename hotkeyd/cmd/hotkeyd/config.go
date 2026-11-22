@@ -184,6 +184,14 @@ func controlsBinds(dir string) []bind.Bind {
 	return append(out, volKeyBinds(false)...)
 }
 
+// phoneCam is the camera dot's viewfinder script (camera/phone-cam).
+const phoneCam = "$HOME/.local/bin/phone-cam"
+
+// cameraAction runs one phone-cam verb and leaves the camera layer.
+func cameraAction(verb string) []bind.Action {
+	return []bind.Action{bind.Run{Cmd: phoneCam + " " + verb}, bind.ExitLayer{}}
+}
+
 // enterControls opens the controls layer with volume picked again, so the
 // volume keys start on volume whatever a tap picked last time.
 var enterControls = []bind.Action{
@@ -337,6 +345,27 @@ var Layers = map[string]bind.Layer{
 		// dispatched on every INVOLUNTARY exit (dotfiles-hwds.51), so a
 		// stranded overlay never sits on screen holding the keyboard.
 		OnExit: runAction(qsOverlay + " switcher-cancel"),
+	},
+
+	// Camera viewfinder (phone): entered by $mod+f together with
+	// `phone-cam start` (host_phone.go). space / Return / f take the photo,
+	// Escape / q close the preview without one; all leave the layer. The
+	// exit key is BackSpace, not q: exit keys are matched before binds and
+	// skip OnExit, so an exit q could never close the preview. BackSpace
+	// hands the keyboard back and leaves the preview up; $mod+f re-enters.
+	// No chord reaches it on a host without the camera. phone-cam clears it
+	// itself (`hotkeyd set-layer default`) when the preview dies some other
+	// way, so a closed window never strands these grabs.
+	"camera": {
+		Binds: []bind.Bind{
+			{Chord: "space", Actions: cameraAction("snap")},
+			{Chord: "Return", Actions: cameraAction("snap")},
+			{Chord: "f", Actions: cameraAction("snap")},
+			{Chord: "Escape", Actions: cameraAction("cancel")},
+			{Chord: "q", Actions: cameraAction("cancel")},
+		},
+		ExitKeys: []string{"BackSpace"},
+		OnExit:   runAction(phoneCam + " cancel"),
 	},
 
 	// was i3 `mode "screenshot"` (sp024, bd dotfiles-0tv1.2) — the AIMING
