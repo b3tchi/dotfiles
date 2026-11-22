@@ -39,6 +39,13 @@ ShellRoot {
     // session type — desktop and RDP alike — so `qs-clip.sh toggle` finds
     // exactly one picker per session and rapid reopening cannot orphan a
     // window. Idle until its IPC target is called.
+    // Phone camera overlay (sp041): Wayland only, and a Loader so a host
+    // without the LibCamera QML module (camera dot) loses only this - the
+    // import error is logged, the rest of the shell loads.
+    Loader {
+        active: Qt.platform.pluginName === "wayland"
+        source: "CameraOverlay.qml"
+    }
     ClipHistory {}
 
     // Notification-history browser (sp019 task 6). Hosted in the MAIN
