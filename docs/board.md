@@ -21,9 +21,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp042|us026-full-resolution-still]]
 ## ready
 
+- [[sp042|us026-full-resolution-still]]
 - [[sp039|networked-clipboard-hub]]
 - [[sp038|session-launcher]]
 - [[sp037|infinifu-lifecycle-drives-pi-worker]]
