@@ -13,6 +13,7 @@ linux:
       if command -v apk >/dev/null 2>&1; then
         missing=""
         command -v cam >/dev/null 2>&1 || missing="$missing libcamera-tools"
+        command -v wl-copy >/dev/null 2>&1 || missing="$missing wl-clipboard"
         command -v gst-launch-1.0 >/dev/null 2>&1 || missing="$missing gstreamer-tools"
         gst-inspect-1.0 libcamerasrc >/dev/null 2>&1 || missing="$missing libcamera-gstreamer"
         gst-inspect-1.0 jpegenc >/dev/null 2>&1 || missing="$missing gst-plugins-good"

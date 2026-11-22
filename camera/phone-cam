@@ -5,7 +5,8 @@
 #   1st press: fullscreen live preview. The same pipeline tees a few JPEGs a
 #              second into $RUN, so the photo is the frame you were looking
 #              at — the camera is never reopened (no AE re-settle delay).
-#   2nd press: newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg, the
+#   2nd press: newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg and
+#              the clipboard (wl-copy, image/jpeg), the
 #              preview closes, notify-send says where it went.
 #   Closing the preview window instead cancels: nothing is saved.
 #
@@ -39,7 +40,11 @@ snap() {
   dest="$OUT/$(date +%Y%m%d-%H%M%S).jpg"
   cp "$frame" "$dest"
   kill -INT "$(cat "$PID")" 2>/dev/null
-  notify -i "$dest" "Photo saved" "$dest"
+  # also onto the Wayland clipboard, ready to paste as an image
+  if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy --type image/jpeg <"$dest"
+  fi
+  notify -i "$dest" "Photo saved + copied" "$dest"
 }
 
 start() {
