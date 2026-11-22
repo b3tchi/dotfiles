@@ -27,6 +27,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us020|per-display-bind-expression]]
 - [[us022|agent-counts-per-project]] (done) >> [[im011]]
 - [[us023|agent-counts-where-i-already-look]] (draft)
+- [[us027|ultrawide-focus-actuator]] (done) >> [[poc028]]
+- [[us028|ultrawide-lens-focus-control]] (draft)
 
 ## Features
 

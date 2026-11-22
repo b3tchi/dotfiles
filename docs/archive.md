@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp043|us027-ultrawide-focus-actuator]]
+
 - [[sp041|libcamera-qml-camera]]
 
 - [[sp036|agent-monitor-label-neutralise-order-and-glyphs]]

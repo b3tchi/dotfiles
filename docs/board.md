@@ -21,7 +21,6 @@ sections when status flips.
 
 ## spec
 
-- [[sp043|us027-ultrawide-focus-actuator]]
 
 ## ready
 
