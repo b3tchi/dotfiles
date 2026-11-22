@@ -184,10 +184,18 @@ func controlsBinds(dir string) []bind.Bind {
 	return append(out, volKeyBinds(false)...)
 }
 
-// cameraAction runs one qs-overlay.sh camera verb (quickshell's
-// CameraOverlay, sp041) and leaves the camera layer.
-func cameraAction(verb string) []bind.Action {
-	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-" + verb}, bind.ExitLayer{}}
+// cameraSnap / cameraClose drive quickshell's CameraOverlay (sp041) through
+// qs-overlay.sh. A snap deliberately STAYS in the camera layer: leaving it
+// would dispatch the layer's OnExit (camera-close) in the same instant, and
+// that close raced the snap and won (photo not copied or announced, or not
+// taken at all). The overlay ends the layer itself once the photo is saved
+// (`hotkeyd set-layer default`). A close leaves the layer directly.
+func cameraSnap() []bind.Action {
+	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-snap"}}
+}
+
+func cameraClose() []bind.Action {
+	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-close"}, bind.ExitLayer{}}
 }
 
 // enterControls opens the controls layer with volume picked again, so the
@@ -347,8 +355,10 @@ var Layers = map[string]bind.Layer{
 
 	// Camera viewfinder (phone): entered by $mod+f together with
 	// `qs-overlay.sh camera-open` (host_phone.go), which shows quickshell's
-	// CameraOverlay (sp041). space / Return / f take the photo, Escape / q
-	// close the preview without one; all leave the layer. The exit key is
+	// CameraOverlay (sp041). space / Return / f take the photo and stay in
+	// the layer until the overlay ends it after the photo (see cameraSnap:
+	// leaving here would race OnExit's close against the snap); Escape / q
+	// close the preview without one and leave. The exit key is
 	// BackSpace, not q: exit keys are matched before binds and skip OnExit,
 	// so an exit q could never close the preview. BackSpace hands the
 	// keyboard back and leaves the preview up; $mod+f re-enters. No chord
@@ -358,11 +368,11 @@ var Layers = map[string]bind.Layer{
 	// outlive the preview.
 	"camera": {
 		Binds: []bind.Bind{
-			{Chord: "space", Actions: cameraAction("snap")},
-			{Chord: "Return", Actions: cameraAction("snap")},
-			{Chord: "f", Actions: cameraAction("snap")},
-			{Chord: "Escape", Actions: cameraAction("close")},
-			{Chord: "q", Actions: cameraAction("close")},
+			{Chord: "space", Actions: cameraSnap()},
+			{Chord: "Return", Actions: cameraSnap()},
+			{Chord: "f", Actions: cameraSnap()},
+			{Chord: "Escape", Actions: cameraClose()},
+			{Chord: "q", Actions: cameraClose()},
 		},
 		ExitKeys: []string{"BackSpace"},
 		OnExit:   runAction(qsOverlay + " camera-close"),
