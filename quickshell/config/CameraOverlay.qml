@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtMultimedia
 import LibCamera 1.0
+import "./Common"
 
 // Phone camera overlay (dotfiles sp041 Task 6, ft019): the back camera's
 // live preview in a layer-shell panel that fills the space BETWEEN the bars
@@ -96,6 +97,11 @@ Scope {
         // between the top bar and the bottom (hint) bar; reserves nothing.
         exclusionMode: ExclusionMode.Normal
         exclusiveZone: 0
+        // The top bar's exclusive zone is deliberately smaller than the bar
+        // (Bar.qml subtracts its margin band), so the work area starts under
+        // the bar's lower edge; kwi3 starts its tiles `reserve` lower. Start
+        // where the tiles do: the bar stays whole, the tab row is covered.
+        margins.top: Kwi3Grid.active ? Kwi3Grid.reserve : 0
         // Overlay, as RegionShot.qml: KWin stacks a fullscreen window above
         // the Top layer, and the camera layer's keys must never be live
         // behind a hidden preview. Exclusive zones still apply, so the panel
