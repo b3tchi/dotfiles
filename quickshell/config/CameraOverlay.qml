@@ -40,6 +40,8 @@ Scope {
     }
 
     function snap() {
+        // `snapping` covers the whole still (capture -> captured), so a
+        // second snap while the module is `capturing` is a no-op (sp042)
         if (!open || snapping) return
         if (cam.error !== "" || cam.size.width === 0) return // nothing streaming
         snapping = true
@@ -114,6 +116,17 @@ Scope {
             id: preview
             anchors.fill: parent
             orientation: cam.rotation
+        }
+
+        // sp042: a full still pauses the preview for ~1 s.
+        Rectangle {
+            visible: cam.capturing
+            anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 24 }
+            width: capLabel.implicitWidth + 32
+            height: capLabel.implicitHeight + 16
+            radius: 8
+            color: "#c0000000"
+            Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.pixelSize: 18 }
         }
 
         Text {
