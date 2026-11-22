@@ -21,6 +21,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp041|libcamera-qml-camera]]
 
 ## ready
 
