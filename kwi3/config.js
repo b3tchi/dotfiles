@@ -173,18 +173,6 @@ kwi3.onWindowAdded({ title: /^qs-(launcher|projects|switcher|clip|notif)$/ }, w 
     w.focus();
 });
 
-// The camera viewfinder (camera/phone-cam, $mod+f on the phone): its
-// gst-launch waylandsink window floats frameless over the workspace's own
-// tabs, at the work area's top-left. phone-cam sizes the video to that area
-// (letterboxed), so it covers the tabs and leaves the bar and its camera
-// hint strip in view. Focused, so the preview is what the user sees.
-kwi3.onWindowAdded({ class: /^gst-launch-1\.0$/ }, w => {
-    w.float();
-    w.noFrame();
-    w.moveTo({ x: w.areaX, y: w.areaY });
-    w.focus();
-});
-
 // The controls panel (quickshell Bar.qml, hotkeyd's controls layer): placed
 // like the runners, but never focused - it only shows values, hotkeyd owns
 // the keys, and focus must stay on the window the user was in.

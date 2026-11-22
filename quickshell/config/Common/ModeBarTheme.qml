@@ -112,9 +112,9 @@ Singleton {
             {text: "reversing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
-        // camera ($mod+f, phone): hotkeyd's camera layer over phone-cam's
-        // viewfinder. space / Return / f take the photo, q / Esc close it
-        // unsaved; BackSpace only leaves the layer (the preview stays).
+        // camera ($mod+f, phone): hotkeyd's camera layer over quickshell's
+        // CameraOverlay (sp041). space / Return / f take the photo, q / Esc
+        // close it unsaved; BackSpace only leaves the layer (preview stays).
         "camera": [
             {text: "snap", key: "space"},
             {text: "quit", key: "q"},
