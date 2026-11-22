@@ -185,13 +185,15 @@ func controlsBinds(dir string) []bind.Bind {
 }
 
 // cameraSnap / cameraClose drive quickshell's CameraOverlay (sp041) through
-// qs-overlay.sh. A snap deliberately STAYS in the camera layer: leaving it
-// would dispatch the layer's OnExit (camera-close) in the same instant, and
-// that close raced the snap and won (photo not copied or announced, or not
-// taken at all). The overlay ends the layer itself once the photo is saved
-// (`hotkeyd set-layer default`). A close leaves the layer directly.
+// qs-overlay.sh, and both hand the keyboard back at once. The camera layer
+// has NO OnExit on purpose: leaving the layer from a snap key would
+// dispatch it in the same instant, and a close racing the snap killed the
+// photo. (Ending the layer from the overlay instead is refused: a
+// chord-entered layer outranks external set-layer requests, adr0022.) An
+// involuntary exit - hotkeyd killed when the screen locks - is covered by
+// the overlay's own auto-close. User decision 2026-11-22.
 func cameraSnap() []bind.Action {
-	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-snap"}}
+	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-snap"}, bind.ExitLayer{}}
 }
 
 func cameraClose() []bind.Action {
@@ -355,17 +357,15 @@ var Layers = map[string]bind.Layer{
 
 	// Camera viewfinder (phone): entered by $mod+f together with
 	// `qs-overlay.sh camera-open` (host_phone.go), which shows quickshell's
-	// CameraOverlay (sp041). space / Return / f take the photo and stay in
-	// the layer until the overlay ends it after the photo (see cameraSnap:
-	// leaving here would race OnExit's close against the snap); Escape / q
-	// close the preview without one and leave. The exit key is
+	// CameraOverlay (sp041). space / Return / f take the photo, Escape / q
+	// close the preview without one; all leave the layer, and the layer has
+	// no OnExit (see cameraSnap). The exit key is
 	// BackSpace, not q: exit keys are matched before binds and skip OnExit,
 	// so an exit q could never close the preview. BackSpace hands the
 	// keyboard back and leaves the preview up; $mod+f re-enters. No chord
-	// reaches it on a host without the camera. The overlay clears the layer
-	// itself (`hotkeyd set-layer default`) on every close, and
-	// qs-overlay.sh does when camera-open fails, so these grabs never
-	// outlive the preview.
+	// reaches it on a host without the camera. qs-overlay.sh clears the
+	// layer when camera-open fails, so these grabs never sit there with no
+	// preview on screen.
 	"camera": {
 		Binds: []bind.Bind{
 			{Chord: "space", Actions: cameraSnap()},
@@ -375,7 +375,7 @@ var Layers = map[string]bind.Layer{
 			{Chord: "q", Actions: cameraClose()},
 		},
 		ExitKeys: []string{"BackSpace"},
-		OnExit:   runAction(qsOverlay + " camera-close"),
+		// No OnExit: see cameraSnap.
 	},
 
 	// was i3 `mode "screenshot"` (sp024, bd dotfiles-0tv1.2) — the AIMING

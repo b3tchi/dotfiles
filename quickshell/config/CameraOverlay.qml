@@ -70,6 +70,17 @@ Scope {
         }
     }
 
+    // Safety net for an involuntary exit: hotkeyd's camera layer has no
+    // on-exit close (it would race a snap, sp041 T7), so if hotkeyd dies
+    // with the preview up - the session kills it when the screen locks -
+    // nothing else would ever close it. A preview left open this long is
+    // closed and the camera released.
+    Timer {
+        interval: 120000
+        running: root.open
+        onTriggered: root.close()
+    }
+
     IpcHandler {
         target: "camera"
         function open(): void { root.show() }

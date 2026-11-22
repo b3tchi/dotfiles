@@ -76,9 +76,8 @@ func TestPhoneWorkspaceChords(t *testing.T) {
 
 // The camera layer drives quickshell's CameraOverlay (sp041 Task 7): every
 // command it runs is a qs-overlay.sh camera-* verb, and the old gst path
-// (phone-cam) is gone. space / Return / f snap and stay in the layer (the
-// overlay ends it after the photo), Escape / q close and leave, and an
-// involuntary exit closes too, so the preview never outlives the keys.
+// (phone-cam) is gone. space / Return / f snap and leave, Escape / q close
+// and leave, and nothing else is dispatched on the way out.
 func TestCameraLayerDrivesOverlay(t *testing.T) {
 	lay, ok := Layers["camera"]
 	if !ok {
@@ -103,15 +102,7 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 		if strings.Contains(cmd, "phone-cam") {
 			t.Errorf("%s still runs phone-cam: %q", b.Chord, cmd)
 		}
-		// A snap key must NOT leave the layer: leaving dispatches OnExit
-		// (camera-close) at the same moment, which races the snap and wins
-		// (photo not copied/announced, or not taken). The overlay ends the
-		// layer itself after the photo (set-layer default). Close keys leave.
-		snap := strings.HasSuffix(cmd, "camera-snap")
-		if snap && exits {
-			t.Errorf("%s snaps AND leaves the layer: its OnExit camera-close races the snap", b.Chord)
-		}
-		if !snap && !exits {
+		if !exits {
 			t.Errorf("%s does not leave the camera layer", b.Chord)
 		}
 		got[b.Chord] = strings.TrimPrefix(cmd, qsOverlay+" ")
@@ -119,8 +110,12 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("camera layer verbs = %v, want %v", got, want)
 	}
-	if !reflect.DeepEqual(lay.OnExit, runAction(qsOverlay+" camera-close")) {
-		t.Errorf("camera OnExit = %+v, want qs-overlay.sh camera-close", lay.OnExit)
+	// No OnExit: leaving the layer from a snap key would dispatch it in the
+	// same instant, and a close racing the snap kills the photo (sp041 T7,
+	// user decision 2026-11-22). The overlay's own 2-minute auto-close
+	// covers an involuntary exit (hotkeyd killed at screen lock).
+	if lay.OnExit != nil {
+		t.Errorf("camera OnExit = %+v, want none", lay.OnExit)
 	}
 	if !reflect.DeepEqual(lay.ExitKeys, []string{"BackSpace"}) {
 		t.Errorf("camera ExitKeys = %v, want [BackSpace]", lay.ExitKeys)
@@ -146,7 +141,10 @@ func TestCameraKeysDispatch(t *testing.T) {
 		for _, mod := range mods {
 			m[mod] = true
 		}
-		return runs(e.Handle(layer.Event{Kind: layer.Press, Key: key, Mods: m}))
+		out := runs(e.Handle(layer.Event{Kind: layer.Press, Key: key, Mods: m}))
+		// release too, or the next press of the same key reads as autorepeat
+		e.Handle(layer.Event{Kind: layer.Release, Key: key, Mods: m})
+		return out
 	}
 
 	if got := press("f", kwinMod); !reflect.DeepEqual(got, []string{"camera-open"}) {
@@ -158,17 +156,17 @@ func TestCameraKeysDispatch(t *testing.T) {
 	if got := press("space"); !reflect.DeepEqual(got, []string{"camera-snap"}) {
 		t.Fatalf("space runs %v, want exactly [camera-snap] (no racing camera-close)", got)
 	}
-	if got := e.State().Layer; got != "camera" {
-		t.Fatalf("after space layer = %q, want camera (the overlay ends it after the photo)", got)
+	if got := e.State().Layer; got != layer.DefaultLayer {
+		t.Fatalf("after space layer = %q, want default: the keys must be handed back after a photo", got)
 	}
+	// A space after the photo is an ordinary key again, not another snap.
+	if got := press("space"); len(got) != 0 {
+		t.Fatalf("space after the photo runs %v, want nothing", got)
+	}
+	press("f", kwinMod)
 	got := press("q")
-	if len(got) == 0 || got[0] != "camera-close" {
-		t.Fatalf("q runs %v, want camera-close", got)
-	}
-	for _, c := range got {
-		if c == "camera-snap" {
-			t.Fatalf("q runs %v: must not snap", got)
-		}
+	if !reflect.DeepEqual(got, []string{"camera-close"}) {
+		t.Fatalf("q runs %v, want exactly [camera-close]", got)
 	}
 	if got := e.State().Layer; got != layer.DefaultLayer {
 		t.Fatalf("after q layer = %q, want default", got)
