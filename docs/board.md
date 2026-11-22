@@ -21,10 +21,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp044|us028-ultrawide-lens-focus-control]]
 
 ## ready
 
+- [[sp044|us028-ultrawide-lens-focus-control]]
 - [[sp042|us026-full-resolution-still]]
 - [[sp039|networked-clipboard-hub]]
 - [[sp038|session-launcher]]
