@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp044|us028-ultrawide-lens-focus-control]]
+
 - [[sp040|phone-kwi3-session]]
 
 - [[sp025|agent-inbox]]
