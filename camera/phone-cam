@@ -6,7 +6,7 @@
 #              second into $RUN, so the photo is the frame you were looking
 #              at — the camera is never reopened (no AE re-settle delay).
 #   2nd press: newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg and
-#              the clipboard (wl-copy, image/jpeg), the
+#              the clipboard (wl-copy, as image/png), the
 #              preview closes, notify-send says where it went.
 #   Closing the preview window instead cancels: nothing is saved.
 #
@@ -40,9 +40,17 @@ snap() {
   dest="$OUT/$(date +%Y%m%d-%H%M%S).jpg"
   cp "$frame" "$dest"
   kill -INT "$(cat "$PID")" 2>/dev/null
-  # also onto the Wayland clipboard, ready to paste as an image
+  # also onto the Wayland clipboard, ready to paste as an image. As PNG:
+  # the $mod+v history (i3/scripts/clip-store-wl.sh) only keeps image/png.
   if command -v wl-copy >/dev/null 2>&1; then
-    wl-copy --type image/jpeg <"$dest"
+    png="$RUN/clip.png"
+    if gst-launch-1.0 -q filesrc location="$dest" ! jpegdec ! videoconvert ! \
+         pngenc ! filesink location="$png" >/dev/null 2>&1; then
+      wl-copy --type image/png <"$png"
+    else
+      wl-copy --type image/jpeg <"$dest"
+    fi
+    rm -f "$png"
   fi
   notify -i "$dest" "Photo saved + copied" "$dest"
 }
