@@ -90,5 +90,22 @@ case "$1" in
     projects)         qs_call projects toggle ;;
     # KWin (Wayland) only: config/RegionShot.qml, in the main instance.
     region)           qs_call --main regionshot open ;;
-    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects|region}" ;;
+    # Phone camera (sp041): config/CameraOverlay.qml in the main instance,
+    # driven by hotkeyd's camera layer. A failed open (no quickshell, or no
+    # LibCamera module so no `camera` target) clears that layer again, so
+    # its keys are never left grabbed with no preview on screen.
+    camera-open|camera-snap|camera-close)
+        _verb="${1#camera-}"
+        if _tpid="$(qs_target_pid main)" &&
+           timeout 5 quickshell ipc --pid "$_tpid" call camera "$_verb" >/dev/null 2>&1; then
+            exit 0
+        fi
+        if [ "$_verb" = open ]; then
+            "${QS_LAYER_FEED:-$HOME/.dotfiles/hotkeyd/hotkeyd}" set-layer default >/dev/null 2>&1 || true
+            notify-send -a camera "Camera unavailable" "no camera overlay: is the LibCamera module installed (rotz install camera)?" 2>/dev/null || true
+        fi
+        echo "qs-overlay: camera $_verb failed" >&2
+        exit 1
+        ;;
+    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects|region|camera-open|camera-snap|camera-close}" ;;
 esac

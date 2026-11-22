@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"hotkeyd/internal/bind"
@@ -32,9 +33,9 @@ func TestPhoneTable(t *testing.T) {
 	if got := phoneBind(t, "$mod+Shift+c"); !reflect.DeepEqual(got.Actions, runAction("$HOME/.local/bin/i3reload")) {
 		t.Fatalf("$mod+Shift+c on the phone = %+v, want run i3reload", got)
 	}
-	wantCam := []bind.Action{bind.Run{Cmd: "$HOME/.local/bin/phone-cam start"}, bind.EnterLayer{Layer: "camera"}}
+	wantCam := []bind.Action{bind.Run{Cmd: qsOverlay + " camera-open"}, bind.EnterLayer{Layer: "camera"}}
 	if got := phoneBind(t, "$mod+f"); !reflect.DeepEqual(got.Actions, wantCam) {
-		t.Fatalf("$mod+f on the phone = %+v, want phone-cam start + camera layer", got)
+		t.Fatalf("$mod+f on the phone = %+v, want qs-overlay.sh camera-open + camera layer", got)
 	}
 	for _, mod := range bind.ModResolutions {
 		if problems := bind.Validate(effectiveBinds("/run/kwi3.sock"), Layers, mod); len(problems) != 0 {
@@ -68,5 +69,49 @@ func TestPhoneWorkspaceChords(t *testing.T) {
 				t.Fatalf("%s: Translate(%q) = %#v, %v; want %#v", chord, cmd, got, err, want)
 			}
 		}
+	}
+}
+
+// The camera layer drives quickshell's CameraOverlay (sp041 Task 7): every
+// command it runs is a qs-overlay.sh camera-* verb, and the old gst path
+// (phone-cam) is gone. space / Return / f snap, Escape / q close, and an
+// involuntary exit closes too, so the preview never outlives the keys.
+func TestCameraLayerDrivesOverlay(t *testing.T) {
+	lay, ok := Layers["camera"]
+	if !ok {
+		t.Fatal("no camera layer")
+	}
+	want := map[string]string{
+		"space": "camera-snap", "Return": "camera-snap", "f": "camera-snap",
+		"Escape": "camera-close", "q": "camera-close",
+	}
+	got := map[string]string{}
+	for _, b := range lay.Binds {
+		var cmd string
+		exits := false
+		for _, a := range b.Actions {
+			switch a := a.(type) {
+			case bind.Run:
+				cmd = a.Cmd
+			case bind.ExitLayer:
+				exits = true
+			}
+		}
+		if strings.Contains(cmd, "phone-cam") {
+			t.Errorf("%s still runs phone-cam: %q", b.Chord, cmd)
+		}
+		if !exits {
+			t.Errorf("%s does not leave the camera layer", b.Chord)
+		}
+		got[b.Chord] = strings.TrimPrefix(cmd, qsOverlay+" ")
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("camera layer verbs = %v, want %v", got, want)
+	}
+	if !reflect.DeepEqual(lay.OnExit, runAction(qsOverlay+" camera-close")) {
+		t.Errorf("camera OnExit = %+v, want qs-overlay.sh camera-close", lay.OnExit)
+	}
+	if !reflect.DeepEqual(lay.ExitKeys, []string{"BackSpace"}) {
+		t.Errorf("camera ExitKeys = %v, want [BackSpace]", lay.ExitKeys)
 	}
 }

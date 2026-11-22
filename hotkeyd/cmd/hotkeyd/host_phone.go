@@ -30,10 +30,10 @@ func hostOverrides() map[string][]bind.Action {
 		"Print":            runAction("$HOME/.local/bin/kwi3-shot"),
 		"$mod+Print":       runAction("$HOME/.local/bin/kwi3-shot -w"),
 		"$mod+Shift+Print": runAction(qsScreenshot),
-		// Back camera: opens the viewfinder and the camera layer, whose
-		// keys take or drop the photo (camera dot's phone-cam). Phone-only:
-		// no other host has it.
-		"$mod+f": {bind.Run{Cmd: phoneCam + " start"}, bind.EnterLayer{Layer: "camera"}},
+		// Back camera: opens quickshell's CameraOverlay and the camera
+		// layer, whose keys take or drop the photo (sp041). Phone-only: no
+		// other host has the camera.
+		"$mod+f": {bind.Run{Cmd: qsOverlay + " camera-open"}, bind.EnterLayer{Layer: "camera"}},
 	}
 	// ws-switch.nu is nushell; kwi3's workspace.focus/workspace.move take
 	// the same 1-based position directly.
