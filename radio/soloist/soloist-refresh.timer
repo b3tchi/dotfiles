@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly Spotify Soloist refresh check (radio)
+
+[Timer]
+# Weekly check; the installer downloads only when the copy is older than 30
+# days, so Soloist is refreshed about monthly and never nears its 90-day
+# expiry even when a run is missed.
+OnCalendar=weekly
+RandomizedDelaySec=1h
+# phone off at the scheduled time: run shortly after the next login
+Persistent=true
+
+[Install]
+WantedBy=timers.target

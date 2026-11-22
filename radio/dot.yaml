@@ -20,8 +20,9 @@
 # on musl (postmarketOS), the ~14 MB of glibc libraries it needs (Debian
 # trixie over HTTPS, SHA256-checked, unpacked with xz), plus a soloist-run
 # wrapper; the link puts a `soloist` shim on PATH. Builds stop 90 days after
-# they were built: copies older than 30 days are refreshed, so re-run
-# `rotz install radio` monthly. Needs gopass spotify/soloist-api.
+# they were built: copies older than 30 days are refreshed, by every
+# `rotz install radio` and by soloist-refresh.timer (systemd --user, weekly
+# check, so about monthly downloads). Needs gopass spotify/soloist-api.
 # One-time after install: `radio --login-device`, then pick the device in a
 # Spotify app on the same network (firewall: udp 5353 + Soloist's tcp port
 # from the LAN while pairing). librespot is no longer used: Spotify refuses
@@ -32,6 +33,9 @@ linux:
     radio.desktop: ~/.local/share/applications/radio.desktop
     radio.svg: ~/.local/share/icons/hicolor/scalable/apps/radio.svg
     soloist/soloist: ~/.local/bin/soloist
+    soloist/soloist-refresh: ~/.local/bin/soloist-refresh
+    soloist/soloist-refresh.service: ~/.config/systemd/user/soloist-refresh.service
+    soloist/soloist-refresh.timer: ~/.config/systemd/user/soloist-refresh.timer
     keys.json: ~/.config/radio/keys.json
   installs:
     depends:
@@ -151,6 +155,12 @@ linux:
       if command -v go >/dev/null 2>&1; then
         CGO_ENABLED=0 go run -C "$DOT/soloist" . ||
           echo "radio: WARNING -- Soloist install failed; no local playback until 'rotz install radio' succeeds." >&2
+      fi
+      # weekly refresh check (systemd --user; skipped without systemd)
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+        systemctl --user daemon-reload
+        systemctl --user enable --now soloist-refresh.timer >/dev/null 2>&1 &&
+          echo "radio: soloist-refresh.timer enabled (weekly check)"
       fi
       gopass show -o spotify/soloist-api >/dev/null 2>&1 ||
         echo "radio: no Soloist API key -- gopass insert spotify/soloist-api (or gopass-kv restore spotify)"
