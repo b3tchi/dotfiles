@@ -21,10 +21,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp041|libcamera-qml-camera]]
-
 ## ready
 
+- [[sp041|libcamera-qml-camera]]
 - [[sp039|networked-clipboard-hub]]
 - [[sp038|session-launcher]]
 - [[sp037|infinifu-lifecycle-drives-pi-worker]]
