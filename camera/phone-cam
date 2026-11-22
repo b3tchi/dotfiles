@@ -1,0 +1,65 @@
+#!/bin/sh
+# phone-cam: viewfinder-then-snap for the Nothing Phone's back ultrawide
+# (s5kjn1), bound to $mod+f (Alt+f) on the phone by hotkeyd's host_phone.go.
+#
+#   1st press: fullscreen live preview. The same pipeline tees a few JPEGs a
+#              second into $RUN, so the photo is the frame you were looking
+#              at — the camera is never reopened (no AE re-settle delay).
+#   2nd press: newest COMPLETE frame -> ~/Pictures/camera/<stamp>.jpg, the
+#              preview closes, notify-send says where it went.
+#   Closing the preview window instead cancels: nothing is saved.
+#
+# The main imx766 has no driver; this sensor has no colour tuning yet, so
+# expect a green/cyan cast. The DT says rotation=90; on the phone held
+# upright that means videoflip counterclockwise (tested 2026-11-22). Override with
+# PHONE_CAM_FLIP (videoflip method names:
+# none, clockwise, rotate-180, counterclockwise) and PHONE_CAM_NAME.
+set -u
+
+CAM="${PHONE_CAM_NAME:-/base/soc@0/cci@ac4b000/i2c-bus@0/camera@2d}"
+FLIP="${PHONE_CAM_FLIP:-counterclockwise}"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/phone-cam"
+PID="$RUN/pid"
+OUT="${PHONE_CAM_DIR:-$HOME/Pictures/camera}"
+
+notify() { notify-send -a phone-cam "$@" 2>/dev/null || echo "phone-cam: $*" >&2; }
+
+running() { [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; }
+
+snap() {
+  # multifilesink keeps the last 3 frames; the newest may still be being
+  # written, so take the second newest when there is one.
+  frame=$(ls -1t "$RUN"/frame-*.jpg 2>/dev/null | sed -n 2p)
+  [ -n "$frame" ] || frame=$(ls -1t "$RUN"/frame-*.jpg 2>/dev/null | sed -n 1p)
+  if [ -z "$frame" ]; then
+    notify "Camera" "no frame yet — press again in a moment"
+    return 1
+  fi
+  mkdir -p "$OUT"
+  dest="$OUT/$(date +%Y%m%d-%H%M%S).jpg"
+  cp "$frame" "$dest"
+  kill -INT "$(cat "$PID")" 2>/dev/null
+  notify -i "$dest" "Photo saved" "$dest"
+}
+
+start() {
+  command -v gst-launch-1.0 >/dev/null 2>&1 || {
+    notify "Camera" "gst-launch-1.0 missing: rotz install camera"
+    exit 1
+  }
+  mkdir -p "$RUN"
+  rm -f "$RUN"/frame-*.jpg
+  gst-launch-1.0 -q -e libcamerasrc camera-name="$CAM" ae-exposure-mode=long ! \
+    video/x-raw,width=1280,height=720 ! videoconvert ! videoflip method="$FLIP" ! \
+    tee name=t \
+    t. ! queue ! videoconvert ! waylandsink fullscreen=true \
+    t. ! queue leaky=downstream max-size-buffers=1 ! videorate max-rate=4 ! \
+         jpegenc quality=92 ! multifilesink location="$RUN/frame-%05d.jpg" max-files=3 \
+    >"$RUN/log" 2>&1 &
+  echo $! >"$PID"
+  # wait in the background so a cancelled preview cleans up after itself
+  ( wait_pid=$(cat "$PID"); while kill -0 "$wait_pid" 2>/dev/null; do sleep 1; done
+    rm -f "$PID" "$RUN"/frame-*.jpg ) >/dev/null 2>&1 &
+}
+
+if running; then snap; else start; fi

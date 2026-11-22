@@ -30,6 +30,9 @@ func hostOverrides() map[string][]bind.Action {
 		"Print":            runAction("$HOME/.local/bin/kwi3-shot"),
 		"$mod+Print":       runAction("$HOME/.local/bin/kwi3-shot -w"),
 		"$mod+Shift+Print": runAction(qsScreenshot),
+		// Back camera: first press opens the viewfinder, second saves the
+		// photo (camera dot's phone-cam). Phone-only: no other host has it.
+		"$mod+f": runAction("$HOME/.local/bin/phone-cam"),
 	}
 	// ws-switch.nu is nushell; kwi3's workspace.focus/workspace.move take
 	// the same 1-based position directly.

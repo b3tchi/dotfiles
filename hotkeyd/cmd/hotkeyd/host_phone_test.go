@@ -32,6 +32,9 @@ func TestPhoneTable(t *testing.T) {
 	if got := phoneBind(t, "$mod+Shift+c"); !reflect.DeepEqual(got.Actions, runAction("$HOME/.local/bin/i3reload")) {
 		t.Fatalf("$mod+Shift+c on the phone = %+v, want run i3reload", got)
 	}
+	if got := phoneBind(t, "$mod+f"); !reflect.DeepEqual(got.Actions, runAction("$HOME/.local/bin/phone-cam")) {
+		t.Fatalf("$mod+f on the phone = %+v, want run phone-cam", got)
+	}
 	for _, mod := range bind.ModResolutions {
 		if problems := bind.Validate(effectiveBinds("/run/kwi3.sock"), Layers, mod); len(problems) != 0 {
 			t.Errorf("Validate(mod=%s): %v", mod, problems)

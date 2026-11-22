@@ -1,0 +1,25 @@
+# camera — viewfinder-then-snap for the Nothing Phone's back camera.
+#
+# phone-cam is bound to $mod+f (Alt+f) by hotkeyd's phone build
+# (hotkeyd/cmd/hotkeyd/host_phone.go). It uses libcamera's gstreamer source
+# (simple pipeline, software ISP) — see the nothing-pmos repo's dtb/README.md
+# "Camera status" for what the sensors can do. apk only: no other host has
+# this camera.
+linux:
+  links:
+    phone-cam: ~/.local/bin/phone-cam
+  installs:
+    cmd: |
+      if command -v apk >/dev/null 2>&1; then
+        missing=""
+        command -v cam >/dev/null 2>&1 || missing="$missing libcamera-tools"
+        command -v gst-launch-1.0 >/dev/null 2>&1 || missing="$missing gstreamer-tools"
+        gst-inspect-1.0 libcamerasrc >/dev/null 2>&1 || missing="$missing libcamera-gstreamer"
+        gst-inspect-1.0 jpegenc >/dev/null 2>&1 || missing="$missing gst-plugins-good"
+        gst-inspect-1.0 videoflip >/dev/null 2>&1 || missing="$missing gst-plugins-good"
+        gst-inspect-1.0 waylandsink >/dev/null 2>&1 || missing="$missing gst-plugins-bad"
+        gst-inspect-1.0 videoconvert >/dev/null 2>&1 || missing="$missing gst-plugins-base"
+        [ -z "$missing" ] || doas apk add $missing
+      else
+        echo "camera: apk-only (Nothing Phone); nothing to install here."
+      fi

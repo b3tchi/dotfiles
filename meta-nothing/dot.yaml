@@ -34,6 +34,7 @@ depends:
   - gopass
   - logseq
   - radio
+  - camera
 
 installs:
   # rotz needs a non-empty `cmd` beside `installs.depends`, hence the
