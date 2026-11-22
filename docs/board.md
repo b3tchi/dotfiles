@@ -6,7 +6,6 @@ sections when status flips.
 
 ## idea
 
-
 - [[sp040|phone-kwi3-session]]
 
 - [[sp025|agent-inbox]]
