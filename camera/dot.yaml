@@ -1,26 +1,80 @@
-# camera — viewfinder-then-snap for the Nothing Phone's back camera.
+# camera — the libcamera QML module (LibCamera, ft019 / sp041) on the
+# Nothing Phone.
 #
-# phone-cam is bound to $mod+f (Alt+f) by hotkeyd's phone build
-# (hotkeyd/cmd/hotkeyd/host_phone.go). It uses libcamera's gstreamer source
-# (simple pipeline, software ISP) — see the nothing-pmos repo's dtb/README.md
-# "Camera status" for what the sensors can do. apk only: no other host has
-# this camera.
+# Clones b3tchi/libcamera-qml (private; the `github` dot sets up ssh) to
+# ~/.local/src/libcamera-qml, tracks its main branch fast-forward only, and
+# builds + installs the QML module to ~/.local/lib/qml/LibCamera. Consumers
+# find it through QML_IMPORT_PATH: the phone session exports
+# ~/.local/lib/qml (kwi3's kwi3-phone-session, sp041 Task 5), so quickshell's
+# CameraOverlay and `qml6 ~/.local/src/libcamera-qml/app/main.qml` load it.
+#
+# BUILD TO TEMP, THEN SWAP: a fresh temporary build dir (never a reused
+# CMakeCache), cmake installs into a temporary prefix, and only
+# a complete LibCamera/ directory replaces the live one (mv), so a failed
+# build or install never leaves a half-written module that quickshell would
+# load. The source tree hash is stamped in LibCamera/.tree; an unchanged tree
+# skips the build ("up to date").
+#
+# apk only: libcamera's `simple` pipeline for these sensors is what the
+# module is for; no other host has this camera.
 linux:
-  links:
-    phone-cam: ~/.local/bin/phone-cam
   installs:
     cmd: |
-      if command -v apk >/dev/null 2>&1; then
-        missing=""
-        command -v cam >/dev/null 2>&1 || missing="$missing libcamera-tools"
-        command -v wl-copy >/dev/null 2>&1 || missing="$missing wl-clipboard"
-        command -v gst-launch-1.0 >/dev/null 2>&1 || missing="$missing gstreamer-tools"
-        gst-inspect-1.0 libcamerasrc >/dev/null 2>&1 || missing="$missing libcamera-gstreamer"
-        gst-inspect-1.0 jpegenc >/dev/null 2>&1 || missing="$missing gst-plugins-good"
-        gst-inspect-1.0 videoflip >/dev/null 2>&1 || missing="$missing gst-plugins-good"
-        gst-inspect-1.0 waylandsink >/dev/null 2>&1 || missing="$missing gst-plugins-bad"
-        gst-inspect-1.0 videoconvert >/dev/null 2>&1 || missing="$missing gst-plugins-base"
-        [ -z "$missing" ] || doas apk add $missing
-      else
+      if ! command -v apk >/dev/null 2>&1; then
         echo "camera: apk-only (Nothing Phone); nothing to install here."
+        exit 0
       fi
+
+      missing=""
+      for p in libcamera-dev qt6-qtmultimedia-dev qt6-qtdeclarative-dev cmake samurai wl-clipboard; do
+        apk info -e "$p" >/dev/null 2>&1 || missing="$missing $p"
+      done
+      [ -z "$missing" ] || doas apk add $missing || exit 1
+
+      REPO="${LIBCAMERA_QML_REPO:-git@github.com:b3tchi/libcamera-qml.git}"
+      SRC="$HOME/.local/src/libcamera-qml"
+      if [ -d "$SRC/.git" ]; then
+        if [ -n "$(git -C "$SRC" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+          echo "camera: $SRC has local changes -- refusing to touch it." >&2
+          echo "camera: resolve by hand (commit, stash or reset inside $SRC) and re-run 'rotz install camera'." >&2
+          exit 1
+        fi
+        if ! GIT_TERMINAL_PROMPT=0 git -C "$SRC" fetch --quiet origin main 2>/dev/null; then
+          echo "camera: WARNING -- could not reach $REPO; building what $SRC already has." >&2
+        elif ! git -C "$SRC" merge --quiet --ff-only FETCH_HEAD 2>/dev/null; then
+          echo "camera: $SRC cannot fast-forward to origin/main -- resolve by hand and re-run 'rotz install camera'." >&2
+          exit 1
+        fi
+      else
+        mkdir -p "$(dirname "$SRC")"
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --branch main "$REPO" "$SRC"; then
+          echo "camera: git clone of $REPO failed -- nothing installed." >&2
+          exit 1
+        fi
+      fi
+
+      DEST="$HOME/.local/lib/qml/LibCamera"
+      TREE=$(git -C "$SRC" rev-parse 'HEAD^{tree}')
+      if [ -f "$DEST/qmldir" ] && [ "$(cat "$DEST/.tree" 2>/dev/null)" = "$TREE" ]; then
+        echo "camera: LibCamera module up to date"
+        exit 0
+      fi
+
+      # A fresh build dir every time: a reused one keeps a CMakeCache from an
+      # earlier (possibly failed) configure, e.g. a stale ninja path.
+      mkdir -p "$(dirname "$DEST")" || exit 1
+      BUILD=$(mktemp -d "${TMPDIR:-/tmp}/libcamera-qml-build.XXXXXX") || exit 1
+      PREFIX=$(mktemp -d "$HOME/.local/lib/qml/.libcamera-install.XXXXXX") || { rm -rf "$BUILD"; exit 1; }
+      trap 'rm -rf "$PREFIX" "$BUILD"' EXIT
+      if ! { cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null &&
+             cmake --build "$BUILD" &&
+             ctest --test-dir "$BUILD" --output-on-failure >/dev/null &&
+             cmake --install "$BUILD" --prefix "$PREFIX" >/dev/null; }; then
+        echo "camera: build, test or install of $SRC failed -- the installed module is unchanged." >&2
+        exit 1
+      fi
+      echo "$TREE" > "$PREFIX/lib/qml/LibCamera/.tree"
+      rm -rf "$DEST.old"
+      [ -d "$DEST" ] && mv "$DEST" "$DEST.old"
+      mv "$PREFIX/lib/qml/LibCamera" "$DEST" && rm -rf "$DEST.old"
+      echo "camera: LibCamera module installed to $DEST ($(git -C "$SRC" log -1 --format=%h))"
