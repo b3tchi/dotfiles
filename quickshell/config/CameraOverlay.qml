@@ -57,6 +57,9 @@ Scope {
         active: root.open
         videoSink: preview.videoSink
         onCaptured: (path, ok) => {
+            // closed while the JPEG was being written: the file exists, but
+            // the user cancelled - no clipboard, no notification
+            if (!root.open) return
             if (ok) {
                 cam.copyToClipboard()
                 Quickshell.execDetached(["notify-send", "-a", "camera", "-i", path, "Photo saved + copied", path])
@@ -82,7 +85,11 @@ Scope {
         // between the top bar and the bottom (hint) bar; reserves nothing.
         exclusionMode: ExclusionMode.Normal
         exclusiveZone: 0
-        WlrLayershell.layer: WlrLayer.Top
+        // Overlay, as RegionShot.qml: KWin stacks a fullscreen window above
+        // the Top layer, and the camera layer's keys must never be live
+        // behind a hidden preview. Exclusive zones still apply, so the panel
+        // stays between the bars.
+        WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "qs-camera"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
