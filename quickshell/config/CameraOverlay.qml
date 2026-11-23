@@ -5,6 +5,7 @@ import QtQuick
 import QtMultimedia
 import LibCamera 1.0
 import "./Common"
+import "./Common/CameraReadout.js" as Readout
 
 // Phone camera overlay (dotfiles sp041 Task 6, ft019): the back camera's
 // live preview in a layer-shell panel that fills the space BETWEEN the bars
@@ -18,6 +19,11 @@ import "./Common"
 //   quickshell ipc call camera snap    photo -> ~/Pictures/camera/<stamp>.jpg,
 //                                      clipboard (image/png), notify, close
 //   quickshell ipc call camera close   close, nothing saved
+//   quickshell ipc call camera near|far|refocus|auto|brighter|darker
+//                                      focus / exposure steps (sp045, adr0041):
+//                                      no-ops while closed or capturing; the
+//                                      overlay never clears the hotkeyd layer
+//                                      for them, only close() does
 //
 // Every close path hands the keyboard back (`hotkeyd set-layer default`)
 // and releases the camera. A failed open shows the error and stays put;
@@ -48,6 +54,17 @@ Scope {
         cam.capture(photoDir + "/" + Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss") + ".jpg")
     }
 
+    // A step needs a streaming, idle overlay: closed or `capturing` (the
+    // still pauses the pipeline) -> ignored, as snap is.
+    readonly property bool stepOk: open && !snapping && !cam.capturing
+
+    function near()     { if (stepOk && cam.focusAvailable) cam.focusNear() }
+    function far()      { if (stepOk && cam.focusAvailable) cam.focusFar() }
+    function refocus()  { if (stepOk && cam.focusAvailable) cam.focusReset() }
+    function auto()     { if (stepOk) cam.autoExposure = !cam.autoExposure }
+    function brighter() { if (stepOk) cam.brighter() }
+    function darker()   { if (stepOk) cam.darker() }
+
     function close() {
         if (!open) return
         open = false
@@ -58,6 +75,12 @@ Scope {
     CameraSource {
         id: cam
         active: root.open
+        // machine file camera.focusFar (the infinity position), -1 if absent
+        focusDefault: {
+            var c = Session.machine.camera
+            var v = c ? parseInt(c.focusFar) : NaN
+            return isNaN(v) ? -1 : v
+        }
         videoSink: preview.videoSink
         onCaptured: (path, ok) => {
             // closed while the JPEG was being written: the file exists, but
@@ -89,6 +112,12 @@ Scope {
         function open(): void { root.show() }
         function snap(): void { root.snap() }
         function close(): void { root.close() }
+        function near(): void { root.near() }
+        function far(): void { root.far() }
+        function refocus(): void { root.refocus() }
+        function auto(): void { root.auto() }
+        function brighter(): void { root.brighter() }
+        function darker(): void { root.darker() }
     }
 
     PanelWindow {
@@ -127,6 +156,22 @@ Scope {
             radius: 8
             color: "#c0000000"
             Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.pixelSize: 18 }
+        }
+
+        // us030 AC 3: focus distance + exposure, bottom-left, bound to the
+        // module's properties so it follows a change within a frame.
+        Rectangle {
+            readonly property string txt: [
+                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
+                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain)
+            ].filter(t => t !== "").join("   ")
+            visible: txt !== ""
+            anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }
+            width: roLabel.implicitWidth + 32
+            height: roLabel.implicitHeight + 16
+            radius: 8
+            color: "#c0000000"
+            Text { id: roLabel; anchors.centerIn: parent; text: parent.txt; color: "white"; font.pixelSize: 18 }
         }
 
         Text {
