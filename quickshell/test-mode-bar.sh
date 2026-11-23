@@ -218,6 +218,14 @@ ShellRoot {
       ModeBarTheme.displayName("controls-reverse")
     ]))
 
+    // ---- camera (sp045): step keys + held-Alt reverse strip ----
+    emit("hints-camera", j(ModeBarTheme.hintsFor("camera")))
+    emit("hints-camera-reverse", j(ModeBarTheme.hintsFor("camera-reverse")))
+    emit("camera-display-names", JSON.stringify([
+      ModeBarTheme.displayName("camera"),
+      ModeBarTheme.displayName("camera-reverse")
+    ]))
+
     // ---- empty-string mode -> fallback row with empty label ----
     emit("empty-mode-fallback", j(ModeBarTheme.hintsFor("")))
 
@@ -331,6 +339,13 @@ assert_case "hints-controls" \
 assert_case "hints-controls-reverse" \
   '[{"text":"reversing","key":"⎇"},{"text":"quit","key":"q"}]'
 assert_case "controls-display-names" '["controls +","controls -"]'
+
+scenario "camera — step keys and the held-Alt reverse strip (sp045)"
+assert_case "hints-camera" \
+  '[{"text":"nearer","key":"n"},{"text":"brighter","key":"e"},{"text":"far-focus","key":"d"},{"text":"auto-exposure","key":"a"},{"text":"alt-to-reverse","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"},{"text":"keys-off","key":"⌫"}]'
+assert_case "hints-camera-reverse" \
+  '[{"text":"farther","key":"n"},{"text":"darker","key":"e"},{"text":"reversing","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+assert_case "camera-display-names" '["camera","camera -"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,

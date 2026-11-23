@@ -1436,6 +1436,7 @@ PanelWindow {
                       leftMargin: root.leftPad }
             mode: root.inNavMode ? root.navLayerSticky
                 : root.currentMode === "controls" && (root.daemonMod === "reverse" || root.daemonMod === "reverse-shift") ? "controls-reverse"
+                : root.currentMode === "camera" && (root.daemonMod === "reverse" || root.daemonMod === "reverse-shift") ? "camera-reverse"
                 : root.currentMode
             fontSize: root.fontSize
         }

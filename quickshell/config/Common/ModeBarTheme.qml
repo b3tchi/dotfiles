@@ -115,10 +115,26 @@ Singleton {
         // camera ($mod+f, phone): hotkeyd's camera layer over quickshell's
         // CameraOverlay (sp041). space / Return / f take the photo, q / Esc
         // close it unsaved; BackSpace only leaves the layer (preview stays).
+        // sp045 / adr0041: n / e step focus nearer / exposure brighter and
+        // stay in the layer, held Alt (or Shift) reverses them (the
+        // camera-reverse strip, as controls), d back to far focus, a auto /
+        // manual exposure.
         "camera": [
+            {text: "nearer", key: "n"},
+            {text: "brighter", key: "e"},
+            {text: "far-focus", key: "d"},
+            {text: "auto-exposure", key: "a"},
+            {text: "alt-to-reverse", key: "⎇"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"},
             {text: "keys-off", key: "⌫"}
+        ],
+        "camera-reverse": [
+            {text: "farther", key: "n"},
+            {text: "darker", key: "e"},
+            {text: "reversing", key: "⎇"},
+            {text: "snap", key: "space"},
+            {text: "quit", key: "q"}
         ],
         "system": [
             {text: "lock", key: "l"},
@@ -160,6 +176,7 @@ Singleton {
         if (mode === "nav-resize") return "nav-resize"   // synthetic
         if (mode === "controls") return "controls"
         if (mode === "camera") return "camera"
+        if (mode === "camera-reverse") return "camera-reverse"     // synthetic
         if (mode === "controls-reverse") return "controls-reverse" // synthetic
         // The system surface reaches this function under TWO names, and both
         // have to keep working:
@@ -200,6 +217,7 @@ Singleton {
         if (mode === "nav-resize") return "nav RESIZE"
         if (mode === "controls") return "controls +"
         if (mode === "controls-reverse") return "controls -"
+        if (mode === "camera-reverse") return "camera -"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }
