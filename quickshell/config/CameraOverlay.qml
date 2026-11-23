@@ -155,7 +155,7 @@ Scope {
             height: capLabel.implicitHeight + 16
             radius: 8
             color: "#c0000000"
-            Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.pixelSize: 18 }
+            Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         }
 
         // us030 AC 3: focus distance + exposure, bottom-left, bound to the
@@ -171,7 +171,7 @@ Scope {
             height: roLabel.implicitHeight + 16
             radius: 8
             color: "#c0000000"
-            Text { id: roLabel; anchors.centerIn: parent; text: parent.txt; color: "white"; font.pixelSize: 18 }
+            Text { id: roLabel; anchors.centerIn: parent; text: parent.txt; color: "white"; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
         }
 
         Text {
@@ -180,7 +180,8 @@ Scope {
             visible: cam.error !== ""
             text: cam.error
             color: "#ff6b6b"
-            font.pixelSize: 20
+            font.family: DialogTheme.font
+            font.pixelSize: DialogTheme.fontSize
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
         }
