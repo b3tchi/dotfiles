@@ -184,20 +184,46 @@ func controlsBinds(dir string) []bind.Bind {
 	return append(out, volKeyBinds(false)...)
 }
 
-// cameraSnap / cameraClose drive quickshell's CameraOverlay (sp041) through
-// qs-overlay.sh, and both hand the keyboard back at once. The camera layer
-// has NO OnExit on purpose: leaving the layer from a snap key would
-// dispatch it in the same instant, and a close racing the snap killed the
-// photo. (Ending the layer from the overlay instead is refused: a
-// chord-entered layer outranks external set-layer requests, adr0022.) An
-// involuntary exit - hotkeyd killed when the screen locks - is covered by
-// the overlay's own auto-close. User decision 2026-11-22.
+// cameraSnap / cameraClose / cameraStep drive quickshell's CameraOverlay
+// (sp041) through qs-overlay.sh. Terminal keys (snap, close) run their verb
+// and hand the keyboard back at once; step keys (near/far, refocus, auto,
+// brighter/darker) run their verb and STAY in the layer, and may Repeat
+// (adr0041). The camera layer has NO OnExit on purpose: leaving the layer
+// from a terminal key would dispatch it in the same instant, and a close
+// racing the snap killed the photo. (Ending the layer from the overlay
+// instead is refused: a chord-entered layer outranks external set-layer
+// requests, adr0022.) An involuntary exit - hotkeyd killed when the screen
+// locks - is covered by the overlay's own auto-close. User decision
+// 2026-11-22; step keys per [[adr0041]].
 func cameraSnap() []bind.Action {
 	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-snap"}, bind.ExitLayer{}}
 }
 
 func cameraClose() []bind.Action {
 	return []bind.Action{bind.Run{Cmd: qsOverlay + " camera-close"}, bind.ExitLayer{}}
+}
+
+func cameraStep(verb string) []bind.Action {
+	return runAction(qsOverlay + " camera-" + verb)
+}
+
+// cameraStepBinds is the camera layer's step keys; rev picks the reverse
+// verbs (Alt / Shift), which n and e have, d and a do not.
+func cameraStepBinds(rev bool) []bind.Bind {
+	near, bright := "near", "brighter"
+	if rev {
+		near, bright = "far", "darker"
+	}
+	out := []bind.Bind{
+		{Chord: "n", Actions: cameraStep(near), Repeat: true},
+		{Chord: "e", Actions: cameraStep(bright), Repeat: true},
+	}
+	if !rev {
+		out = append(out,
+			bind.Bind{Chord: "d", Actions: cameraStep("refocus")},
+			bind.Bind{Chord: "a", Actions: cameraStep("auto")})
+	}
+	return out
 }
 
 // enterControls opens the controls layer with volume picked again, so the
@@ -377,8 +403,9 @@ var Layers = map[string]bind.Layer{
 	// Camera viewfinder (phone): entered by $mod+f together with
 	// `qs-overlay.sh camera-open` (host_phone.go), which shows quickshell's
 	// CameraOverlay (sp041). space / Return / f take the photo, Escape / q
-	// close the preview without one; all leave the layer, and the layer has
-	// no OnExit (see cameraSnap). The exit key is
+	// close the preview without one; both leave the layer. n / Alt+n focus
+	// near / far, d refocus, a auto, e / Alt+e brighter / darker step and
+	// stay (adr0041); the layer has no OnExit (see cameraSnap). The exit key is
 	// BackSpace, not q: exit keys are matched before binds and skip OnExit,
 	// so an exit q could never close the preview. BackSpace hands the
 	// keyboard back and leaves the preview up; $mod+f re-enters. No chord
@@ -386,12 +413,16 @@ var Layers = map[string]bind.Layer{
 	// layer when camera-open fails, so these grabs never sit there with no
 	// preview on screen.
 	"camera": {
-		Binds: []bind.Bind{
+		Binds: append([]bind.Bind{
 			{Chord: "space", Actions: cameraSnap()},
 			{Chord: "Return", Actions: cameraSnap()},
 			{Chord: "f", Actions: cameraSnap()},
 			{Chord: "Escape", Actions: cameraClose()},
 			{Chord: "q", Actions: cameraClose()},
+		}, cameraStepBinds(false)...),
+		Mods: map[string]bind.Mod{
+			"reverse":       {Modifier: "Mod1", Binds: cameraStepBinds(true)},
+			"reverse-shift": {Modifier: "Shift", Binds: cameraStepBinds(true)},
 		},
 		ExitKeys: []string{"BackSpace"},
 		// No OnExit: see cameraSnap.

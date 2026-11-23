@@ -86,7 +86,10 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 	want := map[string]string{
 		"space": "camera-snap", "Return": "camera-snap", "f": "camera-snap",
 		"Escape": "camera-close", "q": "camera-close",
+		// step keys (adr0041): run their verb and stay in the layer
+		"n": "camera-near", "e": "camera-brighter", "d": "camera-refocus", "a": "camera-auto",
 	}
+	step := map[string]bool{"n": true, "e": true, "d": true, "a": true}
 	got := map[string]string{}
 	for _, b := range lay.Binds {
 		var cmd string
@@ -102,8 +105,8 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 		if strings.Contains(cmd, "phone-cam") {
 			t.Errorf("%s still runs phone-cam: %q", b.Chord, cmd)
 		}
-		if !exits {
-			t.Errorf("%s does not leave the camera layer", b.Chord)
+		if exits == step[b.Chord] {
+			t.Errorf("%s exits=%v, want %v (terminal keys exit, step keys stay)", b.Chord, exits, !step[b.Chord])
 		}
 		got[b.Chord] = strings.TrimPrefix(cmd, qsOverlay+" ")
 	}
@@ -126,7 +129,8 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 // included (dotfiles-h0hl.7 audit): a snap must run camera-snap alone, never
 // camera-close beside it (the two raced and the close won).
 func TestCameraKeysDispatch(t *testing.T) {
-	e := layer.NewEngine(effectiveBinds("/run/kwi3.sock"), Layers, layer.Config{Mod: kwinMod, Clock: time.Now})
+	now := time.Now()
+	e := layer.NewEngine(effectiveBinds("/run/kwi3.sock"), Layers, layer.Config{Mod: kwinMod, Clock: func() time.Time { return now }})
 	runs := func(acts []bind.Action) []string {
 		var out []string
 		for _, a := range acts {
@@ -170,6 +174,63 @@ func TestCameraKeysDispatch(t *testing.T) {
 	}
 	if got := e.State().Layer; got != layer.DefaultLayer {
 		t.Fatalf("after q layer = %q, want default", got)
+	}
+
+	// adr0041: step keys run their verb and STAY in the camera layer.
+	press("f", kwinMod)
+	for _, c := range []struct {
+		key  string
+		mods []string
+		verb string
+	}{
+		{"n", nil, "camera-near"}, {"n", []string{"Mod1"}, "camera-far"},
+		{"n", []string{"Shift"}, "camera-far"}, {"d", nil, "camera-refocus"},
+		{"a", nil, "camera-auto"}, {"e", nil, "camera-brighter"},
+		{"e", []string{"Mod1"}, "camera-darker"}, {"e", []string{"Shift"}, "camera-darker"},
+	} {
+		// the engine tracks holds from the modifier keysym events themselves
+		for _, m := range c.mods {
+			e.Handle(layer.Event{Kind: layer.Press, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L"}[m], Mods: map[string]bool{}})
+		}
+		got := press(c.key)
+		for _, m := range c.mods {
+			e.Handle(layer.Event{Kind: layer.Release, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L"}[m], Mods: map[string]bool{}})
+		}
+		if !reflect.DeepEqual(got, []string{c.verb}) {
+			t.Fatalf("%v+%s runs %v, want exactly [%s]", c.mods, c.key, got, c.verb)
+		}
+		if got := e.State().Layer; got != "camera" {
+			t.Fatalf("after %v+%s layer = %q, want camera (step keys stay)", c.mods, c.key, got)
+		}
+	}
+	// held n autorepeats: a second Press with no Release between
+	e.Handle(layer.Event{Kind: layer.Press, Key: "n", Mods: map[string]bool{}})
+	now = now.Add(time.Duration(layer.RepeatEveryMS+50) * time.Millisecond)
+	rep := runs(e.Handle(layer.Event{Kind: layer.Press, Key: "n", Mods: map[string]bool{}}))
+	e.Handle(layer.Event{Kind: layer.Release, Key: "n", Mods: map[string]bool{}})
+	if !reflect.DeepEqual(rep, []string{"camera-near"}) {
+		t.Fatalf("held n autorepeat runs %v, want [camera-near]", rep)
+	}
+	// after the steps a snap is still exactly one snap and hands the keys back
+	if got := press("space"); !reflect.DeepEqual(got, []string{"camera-snap"}) {
+		t.Fatalf("space after steps runs %v, want exactly [camera-snap]", got)
+	}
+	if got := e.State().Layer; got != layer.DefaultLayer {
+		t.Fatalf("after snap layer = %q, want default", got)
+	}
+	// f snaps too; BackSpace after steps leaves silently
+	press("f", kwinMod)
+	press("n")
+	if got := press("f"); !reflect.DeepEqual(got, []string{"camera-snap"}) {
+		t.Fatalf("f runs %v, want [camera-snap]", got)
+	}
+	press("f", kwinMod)
+	press("e")
+	if got := press("BackSpace"); len(got) != 0 {
+		t.Fatalf("BackSpace runs %v, want no verb", got)
+	}
+	if got := e.State().Layer; got != layer.DefaultLayer {
+		t.Fatalf("after BackSpace layer = %q, want default", got)
 	}
 }
 
