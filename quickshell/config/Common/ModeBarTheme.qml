@@ -130,7 +130,9 @@ Singleton {
         ],
         // camera ($mod+f, phone): hotkeyd's camera layer over quickshell's
         // CameraOverlay (sp041). space / Return / f take the photo, q / Esc
-        // close it unsaved; BackSpace only leaves the layer (preview stays).
+        // close it unsaved. BackSpace still leaves the layer with the preview
+        // up, but is not advertised: as a hint it read as a way out and left
+        // the preview covering the screen (user 2026-11-23).
         // sp045 / adr0041: n / e step focus nearer / exposure brighter and
         // stay in the layer, held Alt (or Shift) reverses them (the
         // camera-reverse strip, as controls), d back to far focus, a auto /
@@ -142,8 +144,7 @@ Singleton {
             {text: "auto-exposure", key: "a"},
             {text: "alt-to-reverse", key: "⎇"},
             {text: "snap", key: "space"},
-            {text: "quit", key: "q"},
-            {text: "keys-off", key: "⌫"}
+            {text: "quit", key: "q"}
         ],
         "camera-reverse": [
             {text: "farther", key: "n"},
