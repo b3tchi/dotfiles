@@ -283,6 +283,25 @@ func directionalBinds() []bind.Bind {
 // mode, and the hold-modifier alt-tab switcher.
 // ---------------------------------------------------------------------------
 
+// init removes the chords a host build does not bind (hostDroppedLayerBinds,
+// host_<name>.go) from the shared layers, before anything reads Layers.
+func init() {
+	for name, drop := range hostDroppedLayerBinds {
+		lay, ok := Layers[name]
+		if !ok {
+			continue
+		}
+		kept := make([]bind.Bind, 0, len(lay.Binds))
+		for _, b := range lay.Binds {
+			if _, gone := drop[b.Chord]; !gone {
+				kept = append(kept, b)
+			}
+		}
+		lay.Binds = kept
+		Layers[name] = lay
+	}
+}
+
 var Layers = map[string]bind.Layer{
 	// was i3 `mode "nav"` (dotfiles-5u6m). Bare keys focus, held Ctrl moves,
 	// held Alt resizes.

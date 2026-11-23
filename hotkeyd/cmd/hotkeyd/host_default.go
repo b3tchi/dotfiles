@@ -8,6 +8,9 @@ import "hotkeyd/internal/bind"
 // shared table in config.go is used exactly as written.
 func hostOverrides() map[string][]bind.Action { return nil }
 
+// hostDroppedLayerBinds is empty too: every layer keeps all its chords.
+var hostDroppedLayerBinds map[string]map[string]string
+
 // kwinMod is $mod on a kwin session (an X display reads its own from i3's
 // config instead).
 const kwinMod = bind.DefaultMod

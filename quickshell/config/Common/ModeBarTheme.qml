@@ -228,9 +228,15 @@ Singleton {
     // Hint rows for a mode. Known modes return their registry rows; unknown
     // modes fall back to a single [{text: <raw mode>, key: ""}] row — an empty
     // key highlights nothing, so the raw name renders plain (fg).
+    // The phone's kwi3 session (same WAYLAND_DISPLAY key as hotkeyd's
+    // i3exit) has no display manager and no swap: hotkeyd's phone build
+    // binds no u / h in the system layer, so the strip leaves them out too.
+    readonly property bool kwi3Phone: Quickshell.env("WAYLAND_DISPLAY") === "kwi3-phone"
     function hintsFor(mode) {
         var key = resolve(mode)
         if (key === "") return [{text: mode, key: ""}]
+        if (key === "system" && kwi3Phone)
+            return hints[key].filter(function (r) { return r.key !== "u" && r.key !== "h" })
         return hints[key]
     }
 }

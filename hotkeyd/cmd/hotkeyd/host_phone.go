@@ -16,6 +16,18 @@ import (
 // (the Clicks keyboard's Alt key is mapped to leftalt by the clicks dot).
 const kwinMod = "Mod1"
 
+// hostDroppedLayerBinds: layer chords this host does not bind (applied by
+// config.go's init). The system layer ($mod+0) is the desktop's; the phone
+// has no display manager to switch user through and no swap to hibernate
+// to, so u and h would only make i3exit refuse. The bar's hint strip
+// (quickshell ModeBarTheme.qml) drops the same two on kwi3-phone.
+var hostDroppedLayerBinds = map[string]map[string]string{
+	"system": {
+		"u": "no display manager on the phone to switch user through",
+		"h": "no swap on the phone to hibernate to",
+	},
+}
+
 func hostOverrides() map[string][]bind.Action {
 	over := map[string][]bind.Action{
 		// wm-launch-terminal, as on the desktop, so the terminal opens in the

@@ -566,6 +566,14 @@ func TestGoldenDumpParity(t *testing.T) {
 	dropPostPythonBinds(&goDump)
 
 	applyIntentionalDivergences(&pyDump)
+	// A host build drops some layer chords on purpose (hostDroppedLayerBinds,
+	// e.g. the phone's system u / h); hold the golden side to the same table.
+	for name, drop := range hostDroppedLayerBinds {
+		if l, ok := pyDump.Layers[name]; ok {
+			l.Binds = dropChords(l.Binds, drop)
+			pyDump.Layers[name] = l
+		}
+	}
 	normalizeDumpTable(&pyDump)
 	normalizeDumpTable(&goDump)
 

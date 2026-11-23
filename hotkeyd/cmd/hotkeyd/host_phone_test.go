@@ -172,3 +172,23 @@ func TestCameraKeysDispatch(t *testing.T) {
 		t.Fatalf("after q layer = %q, want default", got)
 	}
 }
+
+// TestPhoneSystemLayerHasNoSwitchUserOrHibernate: the phone's $mod+0 layer
+// keeps the session keys it can serve and binds no u / h
+// (hostDroppedLayerBinds).
+func TestPhoneSystemLayerHasNoSwitchUserOrHibernate(t *testing.T) {
+	got := map[string]bool{}
+	for _, b := range Layers["system"].Binds {
+		got[b.Chord] = true
+	}
+	for _, c := range []string{"u", "h"} {
+		if got[c] {
+			t.Errorf("system layer binds %q on the phone", c)
+		}
+	}
+	for _, c := range []string{"l", "e", "s", "r", "p"} {
+		if !got[c] {
+			t.Errorf("system layer lost %q on the phone", c)
+		}
+	}
+}
