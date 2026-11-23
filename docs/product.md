@@ -82,6 +82,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0014|reader loops fail fast and are rate-bounded when their runtime dir vanishes]]
 - [[adr0037|quickshell bar layout is per-machine data, a JSON file rotz links by hostname]]
 - [[adr0038|screen corners and cutouts are machine data from gmobile; the bars cover them, tiles stay rectangular]]
+- [[adr0041|A hotkeyd overlay layer's terminal keys exit, its step keys stay, and it has no OnExit]]
 
 ## AKM Reference
 
