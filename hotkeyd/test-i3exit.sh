@@ -73,16 +73,22 @@ check "kwin no verb runs nothing" 1 "" $KWIN --
 check "kwin logout without a session id runs nothing" 1 "" \
     WAYLAND_DISPLAY=kwi3-kwin KWI3SOCK=/nonexistent/kwi3.sock -- logout
 
-# --- kwi3-phone (postmarketOS): no system i3exit either, same verbs as kwin ---
+# --- kwi3-phone (postmarketOS): logind + KWin's kscreenlocker ---
 PHONE="WAYLAND_DISPLAY=kwi3-phone XDG_SESSION_ID=5 KWI3SOCK=/nonexistent/kwi3.sock"
+check "phone lock asks logind, KWin's locker answers" 0 "loginctl lock-session 5" $PHONE -- lock
 check "phone logout ends this login session" 0 "loginctl terminate-session 5" $PHONE -- logout
 check "phone suspend" 0 "systemctl suspend" $PHONE -- suspend
-check "phone hibernate" 0 "systemctl hibernate" $PHONE -- hibernate
 check "phone reboot" 0 "systemctl reboot" $PHONE -- reboot
 check "phone shutdown powers off" 0 "systemctl poweroff" $PHONE -- shutdown
-check "phone lock reports failure, locks nothing" 1 \
-    "notify-send -u critical i3exit No screen locker in this session - the screen is NOT locked" \
-    $PHONE -- lock
+check "phone hibernate reports failure" 1 \
+    "notify-send -u critical i3exit Hibernate is not supported on this device" \
+    $PHONE -- hibernate
+check "phone switch_user reports failure" 1 \
+    "notify-send -u critical i3exit No display manager on this device - cannot switch user" \
+    $PHONE -- switch_user
+check "phone unknown verb runs nothing" 1 "" $PHONE -- frobnicate
+check "phone lock without a session id runs nothing" 1 "" \
+    WAYLAND_DISPLAY=kwi3-phone KWI3SOCK=/nonexistent/kwi3.sock -- lock
 check "phone logout without a session id runs nothing" 1 "" \
     WAYLAND_DISPLAY=kwi3-phone KWI3SOCK=/nonexistent/kwi3.sock -- logout
 

@@ -16,15 +16,48 @@
 # I3EXIT_SYS: test-i3exit.sh only, so a test can never reach the real script.
 SYS=${I3EXIT_SYS:-/usr/bin/i3exit}
 
-# The KWin Wayland sessions have no system script to lean on: Arch ships no
-# i3exit, postmarketOS (the phone's kwi3-phone) ships none either, and i3kwin is
-# a KWin script there, so there is no i3kwin-x11 to signal for logout. Both run
-# systemd + logind, so the verbs go straight to loginctl / systemctl. Keyed on
-# the session's socket so every X11 session keeps the paths below. Nothing can
-# lock here (kwin_wayland runs with --no-lockscreen and no locker is installed),
-# so lock fails out loud: a key that looks like it locked the screen and did not
-# is worse than one that refuses.
-if [ "$WAYLAND_DISPLAY" = kwi3-kwin ] || [ "$WAYLAND_DISPLAY" = kwi3-phone ]; then
+# kwi3-phone (postmarketOS, the Nothing Phone): no system i3exit ships there
+# either, and no i3kwin-x11 exists to signal. The session runs systemd + logind
+# and KWin with --lockscreen, so lock is logind's lock-session, which KWin's
+# kscreenlocker answers (nothing-pmos lockscreen/ draws its greeter). There is
+# no swap to hibernate to (logind CanHibernate=na) and no display manager to
+# switch user through, so those two say so instead of doing nothing.
+if [ "$WAYLAND_DISPLAY" = kwi3-phone ]; then
+    case "$1" in
+        lock | logout)
+            if [ -z "$XDG_SESSION_ID" ]; then
+                echo "i3exit: no XDG_SESSION_ID - cannot '$1'" >&2
+                exit 1
+            fi
+            if [ "$1" = lock ]; then
+                exec loginctl lock-session "$XDG_SESSION_ID"
+            fi
+            exec loginctl terminate-session "$XDG_SESSION_ID"
+            ;;
+        suspend | reboot) exec systemctl "$1" ;;
+        shutdown) exec systemctl poweroff ;;
+        hibernate)
+            notify-send -u critical i3exit "Hibernate is not supported on this device"
+            exit 1
+            ;;
+        switch_user)
+            notify-send -u critical i3exit "No display manager on this device - cannot switch user"
+            exit 1
+            ;;
+        *)
+            echo "i3exit: unknown verb '$1'" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+# kwi3-kwin-session has no system script to lean on: Arch ships no i3exit, and
+# i3kwin is a KWin script here, so there is no i3kwin-x11 to signal for logout.
+# Keyed on this session's socket so every X11 session keeps the paths below.
+# Nothing can lock here (kwin_wayland runs with --no-lockscreen and no locker is
+# installed), so lock fails out loud: a key that looks like it locked the screen
+# and did not is worse than one that refuses.
+if [ "$WAYLAND_DISPLAY" = kwi3-kwin ]; then
     case "$1" in
         logout)
             if [ -z "$XDG_SESSION_ID" ]; then
