@@ -43,6 +43,9 @@ installs:
     - nothing-pmos
     - clicks
   cmd: |
+    # hotkeyd links only (i3exit for the $mod+0 system keys, hwctl for
+    # $mod+c), same as meta-pipa; the daemon itself comes with kwi3.
+    rotz link hotkeyd
     rotz link firefox
     rotz install firefox
     echo "meta-nothing: device fixes and Clicks mapping installed;"

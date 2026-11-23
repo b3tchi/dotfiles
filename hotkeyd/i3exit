@@ -16,13 +16,15 @@
 # I3EXIT_SYS: test-i3exit.sh only, so a test can never reach the real script.
 SYS=${I3EXIT_SYS:-/usr/bin/i3exit}
 
-# kwi3-kwin-session has no system script to lean on: Arch ships no i3exit, and
-# i3kwin is a KWin script here, so there is no i3kwin-x11 to signal for logout.
-# Keyed on this session's socket so the phone's KWin (kwi3-phone) and every X11
-# session keep the paths below. Nothing can lock here (kwin_wayland runs with
-# --no-lockscreen and no locker is installed), so lock fails out loud: a key that
-# looks like it locked the screen and did not is worse than one that refuses.
-if [ "$WAYLAND_DISPLAY" = kwi3-kwin ]; then
+# The KWin Wayland sessions have no system script to lean on: Arch ships no
+# i3exit, postmarketOS (the phone's kwi3-phone) ships none either, and i3kwin is
+# a KWin script there, so there is no i3kwin-x11 to signal for logout. Both run
+# systemd + logind, so the verbs go straight to loginctl / systemctl. Keyed on
+# the session's socket so every X11 session keeps the paths below. Nothing can
+# lock here (kwin_wayland runs with --no-lockscreen and no locker is installed),
+# so lock fails out loud: a key that looks like it locked the screen and did not
+# is worse than one that refuses.
+if [ "$WAYLAND_DISPLAY" = kwi3-kwin ] || [ "$WAYLAND_DISPLAY" = kwi3-phone ]; then
     case "$1" in
         logout)
             if [ -z "$XDG_SESSION_ID" ]; then
