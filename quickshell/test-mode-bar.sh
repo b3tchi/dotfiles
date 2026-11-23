@@ -225,6 +225,11 @@ ShellRoot {
       ModeBarTheme.displayName("camera"),
       ModeBarTheme.displayName("camera-reverse")
     ]))
+    // the overlay's live values lead the strip; the pill shows a still
+    ModeBarTheme.cameraValues = {focus: "F 1.0 m", exposure: "M 1/100 x2.0", busy: true}
+    emit("hints-camera-values", j(ModeBarTheme.hintsFor("camera").slice(0, 3)))
+    emit("camera-busy-name", JSON.stringify(ModeBarTheme.displayName("camera")))
+    ModeBarTheme.cameraValues = ({})
 
     // ---- empty-string mode -> fallback row with empty label ----
     emit("empty-mode-fallback", j(ModeBarTheme.hintsFor("")))
@@ -346,6 +351,9 @@ assert_case "hints-camera" \
 assert_case "hints-camera-reverse" \
   '[{"text":"farther","key":"n"},{"text":"darker","key":"e"},{"text":"reversing","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
 assert_case "camera-display-names" '["camera","camera -"]'
+assert_case "hints-camera-values" \
+  '[{"text":"focus:1.0m","key":""},{"text":"exp:M1/100x2.0","key":""},{"text":"nearer","key":"n"}]'
+assert_case "camera-busy-name" '"camera …"'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,
