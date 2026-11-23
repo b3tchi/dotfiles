@@ -30,6 +30,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us027|ultrawide-focus-actuator]] (done) >> [[poc028]]
 - [[us028|ultrawide-lens-focus-control]] (ready) >> [[im014]]
 - [[us029|s5kjn1-auto-exposure-tuning]] (draft)
+- [[us030|camera-keyboard-focus-exposure]] (draft)
 
 ## Features
 
