@@ -21,6 +21,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp045|us030-camera-keyboard-focus-exposure]]
 
 ## ready
 
