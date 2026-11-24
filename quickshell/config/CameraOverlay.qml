@@ -107,19 +107,6 @@ Scope {
         onTriggered: root.close()
     }
 
-    // The bar's camera strip reads these while the preview is up (us030 AC 3).
-    Binding {
-        target: ModeBarTheme
-        property: "cameraValues"
-        when: root.open
-        value: ({
-            focus: Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
-            exposure: Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain),
-            busy: cam.capturing
-        })
-        restoreMode: Binding.RestoreValue
-    }
-
     IpcHandler {
         target: "camera"
         function open(): void { root.show() }
@@ -160,10 +147,33 @@ Scope {
             orientation: cam.rotation
         }
 
-        // No text over the picture (sp045, user 2026-11-23): "capturing" and
-        // the focus / exposure readout live in the bar's camera strip
-        // (ModeBarTheme.cameraValues, set below). Only the error text stays,
-        // and it shows when there is no stream to cover.
+        // sp042: a full still pauses the preview for ~1 s.
+        Rectangle {
+            visible: cam.capturing
+            anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 24 }
+            width: capLabel.implicitWidth + 32
+            height: capLabel.implicitHeight + 16
+            radius: 8
+            color: "#c0000000"
+            Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
+        }
+
+        // us030 AC 3: focus distance + exposure, bottom-left, bound to the
+        // module's properties so it follows a change within a frame.
+        Rectangle {
+            readonly property string txt: [
+                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
+                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain)
+            ].filter(t => t !== "").join("   ")
+            visible: txt !== ""
+            anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }
+            width: roLabel.implicitWidth + 32
+            height: roLabel.implicitHeight + 16
+            radius: 8
+            color: "#c0000000"
+            Text { id: roLabel; anchors.centerIn: parent; text: parent.txt; color: "white"; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
+        }
+
         Text {
             anchors.centerIn: parent
             width: parent.width * 0.8

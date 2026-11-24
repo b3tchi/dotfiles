@@ -25,22 +25,6 @@ Singleton {
     // `hwctl show`. selected is the control the volume keys step (a tap on
     // a row picks it; `hwctl show` reports it, volume by default).
     property var controlValues: ({})
-
-    // The camera layer's live values (sp045): CameraOverlay sets them while
-    // the preview is up, so the picture itself carries no text and the strip
-    // reads them: {focus: "F 1.0 m" | "F ∞" | "F -" | "", exposure: "AE" |
-    // "M 1/100 x2.0" | "", busy: a still is being taken}. Empty when closed.
-    property var cameraValues: ({})
-    // "F 1.0 m" -> "focus:1.0m", "M 1/100 x2.0" -> "exp:M1/100x2.0": one
-    // kebab-free token each (a strip word has no spaces), no key to light.
-    function cameraValueRows() {
-        var out = []
-        var f = cameraValues.focus || ""
-        var e = cameraValues.exposure || ""
-        if (f !== "") out.push({text: "focus:" + f.replace(/^F /, "").replace(/ /g, ""), key: ""})
-        if (e !== "") out.push({text: "exp:" + e.replace(/ /g, ""), key: ""})
-        return out
-    }
     readonly property string controlSelected: controlValues.selected || "volume"
     readonly property var controlRows: [
         {text: "volume", key: "v", control: "volume", value: controlValues.volume || ""},
@@ -235,7 +219,6 @@ Singleton {
         if (mode === "controls") return "controls +"
         if (mode === "controls-reverse") return "controls -"
         if (mode === "camera-reverse") return "camera -"
-        if (mode === "camera") return cameraValues.busy ? "camera …" : "camera"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }
@@ -271,8 +254,6 @@ Singleton {
     function hintsFor(mode) {
         var key = resolve(mode)
         if (key === "") return [{text: mode, key: ""}]
-        if (key === "camera" || key === "camera-reverse")
-            return cameraValueRows().concat(hints[key])
         if (key === "system" && kwi3Phone)
             return hints[key].filter(function (r) { return r.key !== "u" && r.key !== "h" })
         return hints[key]
