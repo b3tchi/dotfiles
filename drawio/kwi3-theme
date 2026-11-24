@@ -57,10 +57,14 @@ function lighten(h, amount) {
 
 // Same roles as libreoffice/kwi3-theme: dark = titlebar/input bg, body =
 // tile body bg; the chrome is dark. The canvas (the grid) is black.
-// Grid: draw.io draws the sub-grid in the main lines' color at a fixed 20%
-// opacity, so a visible sub-grid would force glaring main lines. gridSteps 1
-// draws every line as a main line, all in the dim kwi3 body color.
+// Grid: main lines in the dim kwi3 body color, sub-grid at MINOR of that.
+// draw.io hard-codes the sub-grid at 20% opacity inside the grid image it
+// builds, so the css swaps that image for gridImage() below. draw.io still
+// sizes and positions it (background-size = one GRID_STEPS cell at the
+// current zoom), so the replacement follows zoom and pan.
 const CANVAS = "#000000";
+const GRID_STEPS = 4;   // draw.io's stock gridSteps
+const MINOR = 0.70;     // sub-grid opacity relative to the main lines
 // New shapes and edges: hand-drawn like the kwi3 docs/diagrams/*.drawio
 // (sketch, Architects Daughter from the fonts dot), rounded.
 const SKETCH = {
@@ -72,6 +76,19 @@ const EDGE = {
   edgeStyle: "orthogonalEdgeStyle", jettySize: "auto", orthogonalLoop: "1",
   defaultLabelBackgroundColor: "page", labelPadding: "0 4",
 };
+// One GRID_STEPS x GRID_STEPS cell, stretched by draw.io's background-size;
+// non-scaling-stroke keeps lines 1px at any zoom.
+function gridImage(color) {
+  const n = GRID_STEPS;
+  const minor = [];
+  for (let i = 1; i < n; i++) minor.push(`M0 ${i}H${n}M${i} 0V${n}`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n} ${n}" preserveAspectRatio="none">`
+    + `<path d="${minor.join("")}" fill="none" stroke="${color}" stroke-opacity="${MINOR}" stroke-width="1" vector-effect="non-scaling-stroke"/>`
+    + `<path d="M0 0H${n}V${n}H0Z" fill="none" stroke="${color}" stroke-width="1" vector-effect="non-scaling-stroke"/>`
+    + `</svg>`;
+  return `url("data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}")`;
+}
+
 export function build(grid) {
   const c = grid.colors;
   const dark = c.focused.background;
@@ -131,9 +148,14 @@ ${ui} {
   font-family: "${font.family}", sans-serif !important;
   font-size: ${px}px !important;
 }
+/* grid image: only on the element draw.io put its own grid on (page
+   background, or the canvas svg without page view), dark mode only */
+body.geDarkMode .geDiagramContainer > [style*="image/svg+xml"] {
+  background-image: ${gridImage(body)} !important;
+}
 `;
   return {
-    darkColor: CANVAS, defaultDarkGridColor: body, gridSteps: 1,
+    darkColor: CANVAS, defaultDarkGridColor: body, gridSteps: GRID_STEPS,
     defaultVertexStyle: { ...SKETCH },
     defaultEdgeStyle: { ...EDGE, ...SKETCH },
     css,
