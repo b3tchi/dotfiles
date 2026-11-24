@@ -25,6 +25,13 @@ Singleton {
     // `hwctl show`. selected is the control the volume keys step (a tap on
     // a row picks it; `hwctl show` reports it, volume by default).
     property var controlValues: ({})
+
+    // True while CameraOverlay takes and saves a still (sp045, user
+    // 2026-11-24). hotkeyd leaves the camera layer the moment snap is
+    // pressed (adr0041: the keyboard is handed back at once), but the photo
+    // takes another second or two; Bar.qml keeps the camera strip up until
+    // it is done. Visual only: no keys are grabbed meanwhile.
+    property bool cameraCapturing: false
     readonly property string controlSelected: controlValues.selected || "volume"
     readonly property var controlRows: [
         {text: "volume", key: "v", control: "volume", value: controlValues.volume || ""},

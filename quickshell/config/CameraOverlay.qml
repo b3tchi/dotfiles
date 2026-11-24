@@ -107,6 +107,16 @@ Scope {
         onTriggered: root.close()
     }
 
+    // The bar keeps the camera strip up while a still is taken and saved,
+    // though hotkeyd already left the layer at the snap key (adr0041).
+    Binding {
+        target: ModeBarTheme
+        property: "cameraCapturing"
+        when: root.open
+        value: root.snapping
+        restoreMode: Binding.RestoreValue
+    }
+
     IpcHandler {
         target: "camera"
         function open(): void { root.show() }

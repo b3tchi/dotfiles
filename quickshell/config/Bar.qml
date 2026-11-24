@@ -850,6 +850,7 @@ PanelWindow {
     // belongs to exactly one grabber — and if they ever disagree, the daemon's
     // layer is the one whose keys are live under your fingers.
     readonly property string activeMode: daemonLayer !== "default" ? daemonLayer
+                                       : ModeBarTheme.cameraCapturing ? "camera"
                                        : i3Mode
 
     // SILENT LAYERS READ AS "default" HERE (dotfiles-hwds.44), which is what
