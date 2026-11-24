@@ -26,12 +26,15 @@ Singleton {
     // a row picks it; `hwctl show` reports it, volume by default).
     property var controlValues: ({})
 
-    // True while CameraOverlay takes and saves a still (sp045, user
-    // 2026-11-24). hotkeyd leaves the camera layer the moment snap is
-    // pressed (adr0041: the keyboard is handed back at once), but the photo
-    // takes another second or two; Bar.qml keeps the camera strip up until
-    // it is done. Visual only: no keys are grabbed meanwhile.
-    property bool cameraCapturing: false
+    // True while CameraOverlay's preview is on screen (sp045, user
+    // 2026-11-24). hotkeyd leaves the camera layer the moment snap or quit
+    // is pressed (adr0041: the keyboard is handed back at once), but the
+    // overlay only hears the verb ~0.3 s later (qs-overlay.sh spawns
+    // `quickshell ipc`) and a photo then takes another second or two; a
+    // screen recording showed the normal bar under the preview in that gap.
+    // Bar.qml shows the camera strip for as long as the preview is up.
+    // Visual only: no keys are grabbed meanwhile.
+    property bool cameraActive: false
     readonly property string controlSelected: controlValues.selected || "volume"
     readonly property var controlRows: [
         {text: "volume", key: "v", control: "volume", value: controlValues.volume || ""},
