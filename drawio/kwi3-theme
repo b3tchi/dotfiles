@@ -10,7 +10,7 @@
 // draw.io keeps its configuration (Extras > Configuration) only in the
 // renderer's localStorage, key ".configuration"; it has no config file. So
 // this starts draw.io with a private --remote-debugging-port, merges the keys
-// it owns ("css", "darkColor") into that JSON over the DevTools protocol and
+// it owns ("css", "darkColor", "defaultDarkGridColor") into that JSON over the DevTools protocol and
 // closes the window again; every other configuration key is kept. draw.io
 // applies the configuration on its next start.
 //
@@ -55,7 +55,9 @@ function lighten(h, amount) {
 }
 
 // Same roles as libreoffice/kwi3-theme: dark = titlebar/input bg, body =
-// tile body bg. The page (canvas) is body, the chrome around it is dark.
+// tile body bg; the chrome is dark. The canvas (the grid) is black, its
+// grid lines dim: the kwi3 body color.
+const CANVAS = "#000000";
 export function build(grid) {
   const c = grid.colors;
   const dark = c.focused.background;
@@ -71,8 +73,8 @@ export function build(grid) {
   // draw.io's dark rules read these via light-dark(light, dark); only the
   // dark half is overridden, so light mode stays stock.
   const vars = {
-    "--dark-color": body,
-    "--ge-dark-color": body,
+    "--dark-color": CANVAS,
+    "--ge-dark-color": CANVAS,
     "--ge-dark-panel-color": dark,
     "--dark-toolbar-color": dark,
     "--dark-header-color": dark,
@@ -116,7 +118,7 @@ ${ui} {
   font-size: ${px}px !important;
 }
 `;
-  return { darkColor: body, css };
+  return { darkColor: CANVAS, defaultDarkGridColor: body, css };
 }
 
 function freePort() {
@@ -175,7 +177,14 @@ function cdp(wsUrl) {
 
 // Runs in the page. Merges the owned keys into ".configuration" and swaps a
 // live <style> so the open window shows the result at once.
+// The grid color also lives in draw.io's own settings (mxSettings,
+// ".drawio-config"), saved there on first start with the stock #424242; that
+// copy wins over the configuration key, so it is set through mxSettings too.
 function applyInPage(owned) {
+  if (typeof mxSettings !== "undefined" && owned.defaultDarkGridColor) {
+    mxSettings.setGridColor(owned.defaultDarkGridColor, true);
+    mxSettings.save();
+  }
   const key = ".configuration";
   let conf = {};
   try { conf = JSON.parse(localStorage.getItem(key)) || {}; } catch { conf = {}; }
