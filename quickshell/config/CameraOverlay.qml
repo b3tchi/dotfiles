@@ -147,24 +147,15 @@ Scope {
             orientation: cam.rotation
         }
 
-        // sp042: a full still pauses the preview for ~1 s.
-        Rectangle {
-            visible: cam.capturing
-            anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 24 }
-            width: capLabel.implicitWidth + 32
-            height: capLabel.implicitHeight + 16
-            radius: 8
-            color: "#c0000000"
-            Text { id: capLabel; anchors.centerIn: parent; text: "capturing…"; color: "white"; font.family: DialogTheme.font; font.pixelSize: DialogTheme.fontSize }
-        }
-
         // us030 AC 3: focus distance + exposure, bottom-left, bound to the
-        // module's properties so it follows a change within a frame.
+        // module's properties so it follows a change within a frame. A full
+        // still pauses the preview for ~1 s (sp042); "capturing…" shows in
+        // the same label, beside the values.
         Rectangle {
-            readonly property string txt: [
+            readonly property string txt: Readout.line(
                 Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
-                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain)
-            ].filter(t => t !== "").join("   ")
+                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain),
+                cam.capturing)
             visible: txt !== ""
             anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }
             width: roLabel.implicitWidth + 32

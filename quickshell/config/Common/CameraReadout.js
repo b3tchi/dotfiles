@@ -29,3 +29,10 @@ function exposureText(auto, expUs, gain) {
     if (!(expUs > 0)) return "M"
     return "M 1/" + Math.round(1e6 / expUs) + " x" + Number(gain).toFixed(1)
 }
+
+// The one readout label over the picture: focus, exposure and, during a
+// still, "capturing…" beside them (user 2026-11-24). Empty parts leave no
+// gap; "" hides the label.
+function line(focus, exposure, capturing) {
+    return [focus, exposure, capturing ? "capturing…" : ""].filter(function (t) { return t !== "" }).join("   ")
+}
