@@ -20,3 +20,20 @@ linux:
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm drawio-desktop
       {{/if}}
+      # Alpine (postmarketOS/Nura, aarch64 musl): upstream builds are
+      # glibc-only, so it comes from Flathub (aarch64 build, own runtime).
+      # Launcher mirrors logseq's: ambient caps dropped for bwrap, Ozone
+      # flags because the phone's KWin has no Xwayland (see logseq/dot.yaml).
+      if command -v apk >/dev/null 2>&1; then
+        set -e
+        command -v flatpak >/dev/null 2>&1 || doas apk add --no-interactive flatpak
+        flatpak remote-add --user --if-not-exists flathub \
+          https://dl.flathub.org/repo/flathub.flatpakrepo
+        flatpak install --user --noninteractive flathub com.jgraph.drawio.desktop
+        flatpak override --user --socket=wayland \
+          --env=ELECTRON_OZONE_PLATFORM_HINT=wayland com.jgraph.drawio.desktop
+        mkdir -p "$HOME/.local/bin"
+        printf '%s\n' '#!/bin/sh' 'exec setpriv --ambient-caps -all flatpak run com.jgraph.drawio.desktop --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland "$@"' >"$HOME/.local/bin/drawio"
+        chmod 755 "$HOME/.local/bin/drawio"
+        echo "drawio: $(flatpak info --user com.jgraph.drawio.desktop | sed -n 's/^ *Version: //p') installed (Flathub)"
+      fi
