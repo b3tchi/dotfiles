@@ -70,6 +70,32 @@ Scope {
         open = false
         snapping = false
         Quickshell.execDetached([hotkeyd, "set-layer", "default"])
+        releaseRing()
+    }
+
+    // kwi3's focus ring is a KWin-internal window drawn above every
+    // layer-shell surface, so the preview cannot cover it. kwi3 hides it
+    // in any non-default mode (kwi3/config.js modeFrame '*': 'none'), but
+    // hotkeyd sets kwi3's mode back to default the moment snap or quit is
+    // pressed (adr0041), while the preview stays up for the photo (0.3-2 s)
+    // and the ring showed over it (user 2026-11-24). While the preview is
+    // up, a ring that comes back is put away again by setting kwi3's mode
+    // to "camera" over its RPC (ft010 mode.set, as hotkeyd does); close
+    // hands "default" back if this overlay set it.
+    property bool ringHeld: false
+    function holdRing() {
+        if (!open || !Kwi3Grid.active || !Kwi3Grid.frameEnabled) return
+        ringHeld = true
+        Kwi3Client.call("mode.set", {name: "camera"}, function () {})
+    }
+    function releaseRing() {
+        if (!ringHeld) return
+        ringHeld = false
+        Kwi3Client.call("mode.set", {name: "default"}, function () {})
+    }
+    Connections {
+        target: Kwi3Grid
+        function onFrameEnabledChanged() { root.holdRing() }
     }
 
     CameraSource {
