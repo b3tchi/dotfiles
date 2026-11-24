@@ -10,7 +10,8 @@
 // draw.io keeps its configuration (Extras > Configuration) only in the
 // renderer's localStorage, key ".configuration"; it has no config file. So
 // this starts draw.io with a private --remote-debugging-port, merges the keys
-// it owns ("css", "darkColor", "defaultDarkGridColor") into that JSON over the DevTools protocol and
+// it owns (css, darkColor, defaultDarkGridColor, gridSteps,
+// defaultVertexStyle, defaultEdgeStyle) into that JSON over the DevTools protocol and
 // closes the window again; every other configuration key is kept. draw.io
 // applies the configuration on its next start.
 //
@@ -55,9 +56,22 @@ function lighten(h, amount) {
 }
 
 // Same roles as libreoffice/kwi3-theme: dark = titlebar/input bg, body =
-// tile body bg; the chrome is dark. The canvas (the grid) is black, its
-// grid lines dim: the kwi3 body color.
+// tile body bg; the chrome is dark. The canvas (the grid) is black.
+// Grid: draw.io draws the sub-grid in the main lines' color at a fixed 20%
+// opacity, so a visible sub-grid would force glaring main lines. gridSteps 1
+// draws every line as a main line, all in the dim kwi3 body color.
 const CANVAS = "#000000";
+// New shapes and edges: hand-drawn like the kwi3 docs/diagrams/*.drawio
+// (sketch, Architects Daughter from the fonts dot), rounded.
+const SKETCH = {
+  sketch: "1", rounded: "1", hachureGap: "4", jiggle: "2", curveFitting: "1",
+  fontFamily: "Architects Daughter",
+};
+// draw.io's stock edge defaults, kept under the sketch keys.
+const EDGE = {
+  edgeStyle: "orthogonalEdgeStyle", jettySize: "auto", orthogonalLoop: "1",
+  defaultLabelBackgroundColor: "page", labelPadding: "0 4",
+};
 export function build(grid) {
   const c = grid.colors;
   const dark = c.focused.background;
@@ -118,7 +132,12 @@ ${ui} {
   font-size: ${px}px !important;
 }
 `;
-  return { darkColor: CANVAS, defaultDarkGridColor: body, css };
+  return {
+    darkColor: CANVAS, defaultDarkGridColor: body, gridSteps: 1,
+    defaultVertexStyle: { ...SKETCH },
+    defaultEdgeStyle: { ...EDGE, ...SKETCH },
+    css,
+  };
 }
 
 function freePort() {
