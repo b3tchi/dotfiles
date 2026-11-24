@@ -24,7 +24,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp045|us030-camera-keyboard-focus-exposure]]
 - [[sp044|us028-ultrawide-lens-focus-control]]
 - [[sp042|us026-full-resolution-still]]
 - [[sp039|networked-clipboard-hub]]

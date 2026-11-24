@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp045|us030-camera-keyboard-focus-exposure]]
+
 - [[sp043|us027-ultrawide-focus-actuator]]
 
 - [[sp041|libcamera-qml-camera]]
