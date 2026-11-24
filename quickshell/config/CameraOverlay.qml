@@ -119,6 +119,20 @@ Scope {
         }
     }
 
+    // hotkeyd restarted or died with the preview up (2026-11-24: a deploy
+    // restarted it mid-preview; the new daemon starts in default, so the
+    // preview stayed with no camera keys to close it). While open, follow
+    // hotkeyd's state feed like Bar.qml does; `state-tail` exits when the
+    // daemon's socket goes, and then the preview is closed at once instead
+    // of waiting for the auto-close below.
+    Process {
+        id: daemonWatch
+        command: [root.hotkeyd, "state-tail"]
+        running: root.open
+        stdout: SplitParser { onRead: data => {} }
+        onExited: if (root.open) root.close()
+    }
+
     // Safety net for an involuntary exit: hotkeyd's camera layer has no
     // on-exit close (it would race a snap, sp041 T7), so if hotkeyd dies
     // with the preview up - the session kills it when the screen locks -
