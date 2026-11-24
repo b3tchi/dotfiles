@@ -30,7 +30,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us027|ultrawide-focus-actuator]] (done) >> [[poc028]]
 - [[us028|ultrawide-lens-focus-control]] (ready) >> [[im014]]
 - [[us029|s5kjn1-auto-exposure-tuning]] (draft)
-- [[us030|camera-keyboard-focus-exposure]] (draft)
+- [[us030|camera-keyboard-focus-exposure]] (done) >> [[im015]]
 
 ## Features
 
@@ -83,6 +83,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0037|quickshell bar layout is per-machine data, a JSON file rotz links by hostname]]
 - [[adr0038|screen corners and cutouts are machine data from gmobile; the bars cover them, tiles stay rectangular]]
 - [[adr0041|A hotkeyd overlay layer's terminal keys exit, its step keys stay, and it has no OnExit]]
+- [[adr0042|An overlay that outlives its hotkeyd layer owns kwi3's mode until it closes]]
 
 ## AKM Reference
 
