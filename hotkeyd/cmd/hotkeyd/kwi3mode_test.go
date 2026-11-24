@@ -429,3 +429,51 @@ func TestKwi3ModeResentAfterKwi3Restart(t *testing.T) {
 		t.Fatalf("the restarted kwi3 must be told the current mode: got %v", g)
 	}
 }
+
+// TestKwi3ModeHandsCameraExitToOverlay is sp045 (user 2026-11-24): leaving
+// the camera layer must NOT tell kwi3 "default" - the preview is still up
+// for the photo and kwi3's focus ring (a KWin-internal window above every
+// layer-shell surface) would flash over it. CameraOverlay sends "default"
+// itself when the preview closes. The next layer hotkeyd enters is sent
+// even if it is the same name as the last one hotkeyd sent, because the
+// overlay changed kwi3's mode behind hotkeyd's back.
+func TestKwi3ModeHandsCameraExitToOverlay(t *testing.T) {
+	srv := newModeServer(t, false)
+	rec := &recPublisher{}
+	logf := func(s string) { t.Fatalf("unexpected log: %s", s) }
+	pub, closer := enginePublisher(rec, srv.addr, logf)
+	defer closer.Close()
+
+	srv.waitFor(t, 1) // startup: mode.set default
+
+	pub.Publish(layer.State{Layer: "camera"})
+	srv.waitFor(t, 2)
+	// held Alt inside the camera layer is still the camera layer
+	pub.Publish(layer.State{Layer: "camera", Mod: "reverse"})
+	srv.waitFor(t, 3)
+	pub.Publish(layer.State{Layer: "camera"})
+	srv.waitFor(t, 4)
+	// snap / quit: back to default - NOT reported (the overlay owns it)
+	pub.Publish(layer.State{Layer: layer.DefaultLayer})
+	time.Sleep(80 * time.Millisecond)
+	want := []string{"mode.set default", "mode.set camera", "mode.set reverse", "mode.set camera"}
+	if g := srv.got(); strings.Join(g, "|") != strings.Join(want, "|") {
+		t.Fatalf("camera exit: want %v, got %v", want, g)
+	}
+
+	// $mod+f again: camera is re-sent although it is the last name sent.
+	pub.Publish(layer.State{Layer: "camera"})
+	srv.waitFor(t, 5)
+	if g := srv.got(); g[4] != "mode.set camera" {
+		t.Fatalf("re-entering camera after the hand-off must be sent, got %v", g)
+	}
+
+	// Leaving camera for another layer (not default) is reported normally.
+	pub.Publish(layer.State{Layer: "nav"})
+	srv.waitFor(t, 6)
+	pub.Publish(layer.State{Layer: layer.DefaultLayer})
+	srv.waitFor(t, 7)
+	if g := srv.got(); g[5] != "mode.set nav" || g[6] != "mode.set default" {
+		t.Fatalf("other layers keep reporting default on exit, got %v", g)
+	}
+}

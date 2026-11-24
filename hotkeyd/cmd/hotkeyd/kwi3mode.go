@@ -86,7 +86,8 @@ type kwi3ModeReporter struct {
 	mu      sync.Mutex
 	current string        // the effective mode hotkeyd is in now
 	acked   string        // last mode kwi3 acknowledged on this connection; "" = unknown
-	gen     uint64        // bumped by Resync, so an ack racing it is not trusted
+	gen     uint64        // bumped by Resync (and a hand-off), so an ack racing it is not trusted
+	layer   string        // the layer of the last Publish, for the hand-off rule
 	kick    chan struct{} // one slot: "current may differ from acked"
 	done    chan struct{} // closed by Close
 	closed  bool
@@ -109,8 +110,32 @@ func newKwi3ModeReporter(caller *kwi3rpc.Client, logf func(string), initial stri
 	return r
 }
 
+// kwi3HandOffLayers are layers whose exit back to default is NOT reported
+// to kwi3: the external overlay the layer drives is still on screen after
+// its terminal key (adr0041 hands the keyboard back at once) and owns
+// kwi3's mode until it closes, sending "default" itself. sp045, user
+// 2026-11-24: kwi3's focus ring is a KWin-internal window above every
+// layer-shell surface, and a "default" sent at the snap key flashed it over
+// the camera preview while the photo was still being taken.
+var kwi3HandOffLayers = map[string]bool{"camera": true}
+
 // Publish implements layer.Publisher.
 func (r *kwi3ModeReporter) Publish(st layer.State) {
+	r.mu.Lock()
+	prev := r.layer
+	r.layer = st.Layer
+	if st.Layer == layer.DefaultLayer && kwi3HandOffLayers[prev] && !r.closed {
+		// Hand-off: say nothing now, and record kwi3 as already back at
+		// default (the overlay sends it), so the next layer entered - even
+		// the same one again - is sent. gen++: a mode.set still in flight
+		// must not overwrite this with its ack.
+		r.current = layer.DefaultLayer
+		r.acked = layer.DefaultLayer
+		r.gen++
+		r.mu.Unlock()
+		return
+	}
+	r.mu.Unlock()
 	r.report(effectiveMode(st))
 }
 
