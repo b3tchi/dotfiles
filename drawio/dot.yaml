@@ -1,5 +1,7 @@
 # draw.io desktop (diagrams, e.g. kwi3 docs/diagrams/*.drawio).
 # fonts provides Architects Daughter, the sketch-style font those diagrams use.
+# kwi3-theme (run by hand, draw.io closed): kwi3 palette + kwi3 font/px for
+# the UI, written into draw.io's own configuration (see the script).
 windows:
   installs:
     cmd: |
@@ -36,7 +38,13 @@ linux:
           --env=ELECTRON_OZONE_PLATFORM_HINT=wayland \
           --env=GTK_THEME=Adwaita:dark com.jgraph.drawio.desktop
         mkdir -p "$HOME/.local/bin"
-        printf '%s\n' '#!/bin/sh' 'exec setpriv --ambient-caps -all flatpak run com.jgraph.drawio.desktop --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland --force-dark-mode "$@"' >"$HOME/.local/bin/drawio"
+        # draw.io saves "lastWinSize" with a fullscreen flag and restores it
+        # with setFullScreen(true): a phone-screen-sized window gets saved as
+        # fullscreen and then covers the bar. The launcher clears the flag.
+        printf '%s\n' '#!/bin/sh' \
+          'cfg="$HOME/.var/app/com.jgraph.drawio.desktop/config/draw.io/config.json"' \
+          '[ -f "$cfg" ] && sed -i '"'"'s/\("lastWinSize": "[^"]*\),true"/\1,false"/'"'"' "$cfg"' \
+          'exec setpriv --ambient-caps -all flatpak run com.jgraph.drawio.desktop --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland --force-dark-mode "$@"' >"$HOME/.local/bin/drawio"
         chmod 755 "$HOME/.local/bin/drawio"
         echo "drawio: $(flatpak info --user com.jgraph.drawio.desktop | sed -n 's/^ *Version: //p') installed (Flathub)"
       fi
