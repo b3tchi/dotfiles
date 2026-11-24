@@ -73,7 +73,6 @@
 # - github.repo
 
 dolt.shared-server: true
-
 # sync.remote: "git+https://github.com/b3tchi/dotfiles.git"
 
 # Disable bd's auto-export-after-mutation. Pairs with no-auto-flush above;
@@ -82,11 +81,10 @@ dolt.shared-server: true
 # git-tracked jsonl carries history snapshots, not live state. See
 # CLAUDE.md "Sync setup (Dolt-canonical, manual jsonl)" for rationale.
 export.auto: false
-
 # Don't auto-stage .beads/issues.jsonl after export — we want explicit
 # `git add` so a half-finished mutation can't sneak into the next commit.
 export.git-add: false
-
 dolt.auto-commit: "on"
-
 export.path: "issues-snapshot.jsonl"
+sync:
+    remote: "git+ssh://git@github.com/b3tchi/dotfiles.git"
