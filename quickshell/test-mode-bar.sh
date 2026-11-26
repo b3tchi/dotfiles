@@ -221,9 +221,11 @@ ShellRoot {
     // ---- camera (sp045): step keys + held-Alt reverse strip ----
     emit("hints-camera", j(ModeBarTheme.hintsFor("camera")))
     emit("hints-camera-reverse", j(ModeBarTheme.hintsFor("camera-reverse")))
+    emit("hints-camera-reset", j(ModeBarTheme.hintsFor("camera-reset")))
     emit("camera-display-names", JSON.stringify([
       ModeBarTheme.displayName("camera"),
-      ModeBarTheme.displayName("camera-reverse")
+      ModeBarTheme.displayName("camera-reverse"),
+      ModeBarTheme.displayName("camera-reset")
     ]))
 
     // ---- empty-string mode -> fallback row with empty label ----
@@ -342,10 +344,12 @@ assert_case "controls-display-names" '["controls +","controls -"]'
 
 scenario "camera — step keys and the held-Alt reverse strip (sp045)"
 assert_case "hints-camera" \
-  '[{"text":"nearer","key":"n"},{"text":"brighter","key":"e"},{"text":"far-focus","key":"d"},{"text":"auto-exposure","key":"a"},{"text":"iso","key":"i"},{"text":"alt-to-reverse","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+  '[{"text":"nearer","key":"n"},{"text":"brighter","key":"e"},{"text":"iso","key":"i"},{"text":"alt-down","key":"⎇"},{"text":"ctrl-reset","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
 assert_case "hints-camera-reverse" \
   '[{"text":"farther","key":"n"},{"text":"darker","key":"e"},{"text":"lower-iso","key":"i"},{"text":"reversing","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
-assert_case "camera-display-names" '["camera","camera -"]'
+assert_case "hints-camera-reset" \
+  '[{"text":"far-focus","key":"n"},{"text":"auto-exposure","key":"e"},{"text":"auto-iso","key":"i"},{"text":"resetting","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+assert_case "camera-display-names" '["camera","camera -","camera reset"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,

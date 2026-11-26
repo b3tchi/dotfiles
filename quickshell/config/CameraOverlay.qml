@@ -19,7 +19,7 @@ import "./Common/CameraReadout.js" as Readout
 //   quickshell ipc call camera snap    photo -> ~/Pictures/camera/<stamp>.jpg,
 //                                      clipboard (image/png), notify, close
 //   quickshell ipc call camera close   close, nothing saved
-//   quickshell ipc call camera near|far|refocus|auto|brighter|darker|isoUp|isoDown
+//   quickshell ipc call camera near|far|refocus|auto|brighter|darker|isoUp|isoDown|isoAuto|aeAuto
 //                                      focus / exposure steps (sp045, adr0041):
 //                                      no-ops while closed or capturing; the
 //                                      overlay never clears the hotkeyd layer
@@ -66,6 +66,8 @@ Scope {
     function darker()   { if (stepOk) cam.darker() }
     function isoUp()    { if (stepOk) cam.isoUp() }
     function isoDown()  { if (stepOk) cam.isoDown() }
+    function isoAuto()  { if (stepOk) cam.isoAuto() }
+    function aeAuto()   { if (stepOk) cam.autoExposure = true }
 
     function close() {
         if (!open) return
@@ -167,6 +169,8 @@ Scope {
         function darker(): void { root.darker() }
         function isoUp(): void { root.isoUp() }
         function isoDown(): void { root.isoDown() }
+        function isoAuto(): void { root.isoAuto() }
+        function aeAuto(): void { root.aeAuto() }
     }
 
     PanelWindow {

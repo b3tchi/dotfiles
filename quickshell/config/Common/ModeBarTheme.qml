@@ -128,16 +128,16 @@ Singleton {
         // up, but is not advertised: as a hint it read as a way out and left
         // the preview covering the screen (user 2026-11-23).
         // sp045 / adr0041: n / e step focus nearer / exposure brighter and
-        // stay in the layer, held Alt (or Shift) reverses them (the
-        // camera-reverse strip, as controls), d back to far focus, a auto /
-        // manual exposure, i / Alt+i ISO up / down (auto, 100 .. 6400).
+        // stay in the layer: n focus, e exposure, i ISO (auto, 100 .. 6400);
+        // held Alt (or Shift) steps them down (the camera-reverse strip, as
+        // controls), held Ctrl resets them (camera-reset strip: far focus,
+        // auto exposure, auto ISO). User 2026-11-26.
         "camera": [
             {text: "nearer", key: "n"},
             {text: "brighter", key: "e"},
-            {text: "far-focus", key: "d"},
-            {text: "auto-exposure", key: "a"},
             {text: "iso", key: "i"},
-            {text: "alt-to-reverse", key: "⎇"},
+            {text: "alt-down", key: "⎇"},
+            {text: "ctrl-reset", key: "⌃"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}
         ],
@@ -146,6 +146,14 @@ Singleton {
             {text: "darker", key: "e"},
             {text: "lower-iso", key: "i"},
             {text: "reversing", key: "⎇"},
+            {text: "snap", key: "space"},
+            {text: "quit", key: "q"}
+        ],
+        "camera-reset": [
+            {text: "far-focus", key: "n"},
+            {text: "auto-exposure", key: "e"},
+            {text: "auto-iso", key: "i"},
+            {text: "resetting", key: "⌃"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}
         ],
@@ -190,6 +198,7 @@ Singleton {
         if (mode === "controls") return "controls"
         if (mode === "camera") return "camera"
         if (mode === "camera-reverse") return "camera-reverse"     // synthetic
+        if (mode === "camera-reset") return "camera-reset"         // synthetic
         if (mode === "controls-reverse") return "controls-reverse" // synthetic
         // The system surface reaches this function under TWO names, and both
         // have to keep working:
@@ -231,6 +240,7 @@ Singleton {
         if (mode === "controls") return "controls +"
         if (mode === "controls-reverse") return "controls -"
         if (mode === "camera-reverse") return "camera -"
+        if (mode === "camera-reset") return "camera reset"
         var key = resolve(mode)
         return key !== "" ? key : mode
     }

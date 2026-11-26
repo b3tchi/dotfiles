@@ -207,24 +207,23 @@ func cameraStep(verb string) []bind.Action {
 	return runAction(qsOverlay + " camera-" + verb)
 }
 
-// cameraStepBinds is the camera layer's step keys; rev picks the reverse
-// verbs (Alt / Shift), which n, e and i have, d and a do not.
-func cameraStepBinds(rev bool) []bind.Bind {
-	near, bright, iso := "near", "brighter", "iso-up"
-	if rev {
-		near, bright, iso = "far", "darker", "iso-down"
+// cameraStepBinds is the camera layer's step keys, one scheme for all three
+// (user 2026-11-26): n focus, e exposure, i ISO; the bare key steps up
+// (nearer / brighter / higher ISO), held Alt or Shift steps down (dir "-"),
+// held Ctrl resets (dir "0": far focus, auto exposure, auto ISO). Steps
+// repeat when held; resets do not.
+func cameraStepBinds(dir string) []bind.Bind {
+	verbs := map[string][3]string{
+		"+": {"near", "brighter", "iso-up"},
+		"-": {"far", "darker", "iso-down"},
+		"0": {"refocus", "ae-auto", "iso-auto"},
+	}[dir]
+	rep := dir != "0"
+	return []bind.Bind{
+		{Chord: "n", Actions: cameraStep(verbs[0]), Repeat: rep},
+		{Chord: "e", Actions: cameraStep(verbs[1]), Repeat: rep},
+		{Chord: "i", Actions: cameraStep(verbs[2]), Repeat: rep},
 	}
-	out := []bind.Bind{
-		{Chord: "n", Actions: cameraStep(near), Repeat: true},
-		{Chord: "e", Actions: cameraStep(bright), Repeat: true},
-		{Chord: "i", Actions: cameraStep(iso), Repeat: true},
-	}
-	if !rev {
-		out = append(out,
-			bind.Bind{Chord: "d", Actions: cameraStep("refocus")},
-			bind.Bind{Chord: "a", Actions: cameraStep("auto")})
-	}
-	return out
 }
 
 // enterControls opens the controls layer with volume picked again, so the
@@ -404,9 +403,10 @@ var Layers = map[string]bind.Layer{
 	// Camera viewfinder (phone): entered by $mod+f together with
 	// `qs-overlay.sh camera-open` (host_phone.go), which shows quickshell's
 	// CameraOverlay (sp041). space / Return / f take the photo, Escape / q
-	// close the preview without one; both leave the layer. n / Alt+n focus
-	// near / far, d refocus, a auto, e / Alt+e brighter / darker, i / Alt+i
-	// ISO up / down step and stay (adr0041); the layer has no OnExit (see cameraSnap). The exit key is
+	// close the preview without one; both leave the layer. n / Alt+n /
+	// Ctrl+n focus near / far / reset, e / Alt+e / Ctrl+e exposure brighter /
+	// darker / auto, i / Alt+i / Ctrl+i ISO up / down / auto step and stay
+	// (adr0041, cameraStepBinds); the layer has no OnExit (see cameraSnap). The exit key is
 	// BackSpace, not q: exit keys are matched before binds and skip OnExit,
 	// so an exit q could never close the preview. BackSpace hands the
 	// keyboard back and leaves the preview up; $mod+f re-enters. No chord
@@ -420,10 +420,11 @@ var Layers = map[string]bind.Layer{
 			{Chord: "f", Actions: cameraSnap()},
 			{Chord: "Escape", Actions: cameraClose()},
 			{Chord: "q", Actions: cameraClose()},
-		}, cameraStepBinds(false)...),
+		}, cameraStepBinds("+")...),
 		Mods: map[string]bind.Mod{
-			"reverse":       {Modifier: "Mod1", Binds: cameraStepBinds(true)},
-			"reverse-shift": {Modifier: "Shift", Binds: cameraStepBinds(true)},
+			"reverse":       {Modifier: "Mod1", Binds: cameraStepBinds("-")},
+			"reverse-shift": {Modifier: "Shift", Binds: cameraStepBinds("-")},
+			"reset":         {Modifier: "Ctrl", Binds: cameraStepBinds("0")},
 		},
 		ExitKeys: []string{"BackSpace"},
 		// No OnExit: see cameraSnap.

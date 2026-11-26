@@ -87,10 +87,9 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 		"space": "camera-snap", "Return": "camera-snap", "f": "camera-snap",
 		"Escape": "camera-close", "q": "camera-close",
 		// step keys (adr0041): run their verb and stay in the layer
-		"n": "camera-near", "e": "camera-brighter", "d": "camera-refocus", "a": "camera-auto",
-		"i": "camera-iso-up",
+		"n": "camera-near", "e": "camera-brighter", "i": "camera-iso-up",
 	}
-	step := map[string]bool{"n": true, "e": true, "d": true, "a": true, "i": true}
+	step := map[string]bool{"n": true, "e": true, "i": true}
 	got := map[string]string{}
 	for _, b := range lay.Binds {
 		var cmd string
@@ -184,20 +183,21 @@ func TestCameraKeysDispatch(t *testing.T) {
 		mods []string
 		verb string
 	}{
+		// key = up, Alt (or Shift) = down, Ctrl = reset (user 2026-11-26)
 		{"n", nil, "camera-near"}, {"n", []string{"Mod1"}, "camera-far"},
-		{"n", []string{"Shift"}, "camera-far"}, {"d", nil, "camera-refocus"},
-		{"a", nil, "camera-auto"}, {"e", nil, "camera-brighter"},
-		{"e", []string{"Mod1"}, "camera-darker"}, {"e", []string{"Shift"}, "camera-darker"},
+		{"n", []string{"Shift"}, "camera-far"}, {"n", []string{"Ctrl"}, "camera-refocus"},
+		{"e", nil, "camera-brighter"}, {"e", []string{"Mod1"}, "camera-darker"},
+		{"e", []string{"Shift"}, "camera-darker"}, {"e", []string{"Ctrl"}, "camera-ae-auto"},
 		{"i", nil, "camera-iso-up"}, {"i", []string{"Mod1"}, "camera-iso-down"},
-		{"i", []string{"Shift"}, "camera-iso-down"},
+		{"i", []string{"Shift"}, "camera-iso-down"}, {"i", []string{"Ctrl"}, "camera-iso-auto"},
 	} {
 		// the engine tracks holds from the modifier keysym events themselves
 		for _, m := range c.mods {
-			e.Handle(layer.Event{Kind: layer.Press, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L"}[m], Mods: map[string]bool{}})
+			e.Handle(layer.Event{Kind: layer.Press, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L", "Ctrl": "Control_L"}[m], Mods: map[string]bool{}})
 		}
 		got := press(c.key)
 		for _, m := range c.mods {
-			e.Handle(layer.Event{Kind: layer.Release, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L"}[m], Mods: map[string]bool{}})
+			e.Handle(layer.Event{Kind: layer.Release, Key: map[string]string{"Mod1": "Alt_L", "Shift": "Shift_L", "Ctrl": "Control_L"}[m], Mods: map[string]bool{}})
 		}
 		if !reflect.DeepEqual(got, []string{c.verb}) {
 			t.Fatalf("%v+%s runs %v, want exactly [%s]", c.mods, c.key, got, c.verb)
