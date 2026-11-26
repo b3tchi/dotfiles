@@ -19,7 +19,7 @@
     }
   },
   "camera": {
-    "id": "/base/soc@0/cci@ac4b000/i2c-bus@0/camera@2d",
-    "focusFar": 385
+    "id": "/base/soc@0/cci@ac4b000/i2c-bus@1/camera@10",
+    "focusFar": 1024
   }
 }
