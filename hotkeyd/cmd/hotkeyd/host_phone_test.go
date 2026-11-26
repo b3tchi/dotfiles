@@ -88,8 +88,9 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 		"Escape": "camera-close", "q": "camera-close",
 		// step keys (adr0041): run their verb and stay in the layer
 		"n": "camera-near", "e": "camera-brighter", "d": "camera-refocus", "a": "camera-auto",
+		"i": "camera-iso-up",
 	}
-	step := map[string]bool{"n": true, "e": true, "d": true, "a": true}
+	step := map[string]bool{"n": true, "e": true, "d": true, "a": true, "i": true}
 	got := map[string]string{}
 	for _, b := range lay.Binds {
 		var cmd string
@@ -187,6 +188,8 @@ func TestCameraKeysDispatch(t *testing.T) {
 		{"n", []string{"Shift"}, "camera-far"}, {"d", nil, "camera-refocus"},
 		{"a", nil, "camera-auto"}, {"e", nil, "camera-brighter"},
 		{"e", []string{"Mod1"}, "camera-darker"}, {"e", []string{"Shift"}, "camera-darker"},
+		{"i", nil, "camera-iso-up"}, {"i", []string{"Mod1"}, "camera-iso-down"},
+		{"i", []string{"Shift"}, "camera-iso-down"},
 	} {
 		// the engine tracks holds from the modifier keysym events themselves
 		for _, m := range c.mods {

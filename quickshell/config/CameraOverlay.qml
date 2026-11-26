@@ -19,7 +19,7 @@ import "./Common/CameraReadout.js" as Readout
 //   quickshell ipc call camera snap    photo -> ~/Pictures/camera/<stamp>.jpg,
 //                                      clipboard (image/png), notify, close
 //   quickshell ipc call camera close   close, nothing saved
-//   quickshell ipc call camera near|far|refocus|auto|brighter|darker
+//   quickshell ipc call camera near|far|refocus|auto|brighter|darker|isoUp|isoDown
 //                                      focus / exposure steps (sp045, adr0041):
 //                                      no-ops while closed or capturing; the
 //                                      overlay never clears the hotkeyd layer
@@ -64,6 +64,8 @@ Scope {
     function auto()     { if (stepOk) cam.autoExposure = !cam.autoExposure }
     function brighter() { if (stepOk) cam.brighter() }
     function darker()   { if (stepOk) cam.darker() }
+    function isoUp()    { if (stepOk) cam.isoUp() }
+    function isoDown()  { if (stepOk) cam.isoDown() }
 
     function close() {
         if (!open) return
@@ -163,6 +165,8 @@ Scope {
         function auto(): void { root.auto() }
         function brighter(): void { root.brighter() }
         function darker(): void { root.darker() }
+        function isoUp(): void { root.isoUp() }
+        function isoDown(): void { root.isoDown() }
     }
 
     PanelWindow {
@@ -199,7 +203,7 @@ Scope {
         Rectangle {
             readonly property string txt: Readout.line(
                 Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
-                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain),
+                Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain, cam.iso),
                 cam.capturing)
             visible: txt !== ""
             anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }

@@ -95,8 +95,9 @@ case "$1" in
     # LibCamera module so no `camera` target) clears that layer again, so
     # its keys are never left grabbed with no preview on screen. A failed
     # step (near/far/...) leaves the layer: the preview is still up.
-    camera-open|camera-snap|camera-close|camera-near|camera-far|camera-refocus|camera-auto|camera-brighter|camera-darker)
+    camera-open|camera-snap|camera-close|camera-near|camera-far|camera-refocus|camera-auto|camera-brighter|camera-darker|camera-iso-up|camera-iso-down)
         _verb="${1#camera-}"
+        case "$_verb" in iso-up) _verb=isoUp ;; iso-down) _verb=isoDown ;; esac
         if _tpid="$(qs_target_pid main)" &&
            timeout 5 quickshell ipc --pid "$_tpid" call camera "$_verb" >/dev/null 2>&1; then
             exit 0
@@ -108,5 +109,5 @@ case "$1" in
         echo "qs-overlay: camera $_verb failed" >&2
         exit 1
         ;;
-    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects|region|camera-open|camera-snap|camera-close|camera-near|camera-far|camera-refocus|camera-auto|camera-brighter|camera-darker}" ;;
+    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects|region|camera-open|camera-snap|camera-close|camera-near|camera-far|camera-refocus|camera-auto|camera-brighter|camera-darker|camera-iso-up|camera-iso-down}" ;;
 esac

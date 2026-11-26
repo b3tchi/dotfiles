@@ -10,15 +10,20 @@ TestCase {
         compare(R.focusText(true, 400, -1), "F -")            // no machine default
         compare(R.focusText(true, 385, 385), "F ∞")           // pos == far
         compare(R.focusText(true, 380, 385), "F ∞")           // beyond far, still infinity
-        compare(R.focusText(true, 385 + 18.9, 385), "F 1.0 m")
-        compare(R.focusText(true, 385 + 18.9 / 0.25, 385), "F 0.25 m")
-        compare(R.focusText(true, 385 + 18.9 / 12, 385), "F 12 m")
+        compare(R.focusText(true, 385 + 12.9, 385), "F 1.0 m")
+        compare(R.focusText(true, 385 + 12.9 / 0.25, 385), "F 0.25 m")
+        compare(R.focusText(true, 385 + 12.9 / 12, 385), "F 12 m")
+        // 2026-11-26 recalibration: chart at 31.5 cm sharpest at lens 426
+        compare(R.focusText(true, 426, 385), "F 0.31 m")
     }
     function test_exposure() {
         compare(R.exposureText(true, 10000, 2), "AE")
         compare(R.exposureText(false, 10000, 2), "M 1/100 x2.0")
         compare(R.exposureText(false, 33333, 1.5), "M 1/30 x1.5")
         compare(R.exposureText(false, 0, 1), "M")             // no exposure reported yet
+        compare(R.exposureText(true, 10000, 8, 800), "ISO 800") // auto time, fixed gain
+        compare(R.exposureText(true, 10000, 8, 0), "AE")
+        compare(R.exposureText(false, 10000, 2, 800), "M 1/100 x2.0") // manual wins
     }
     function test_line() {
         compare(R.line("F ∞", "AE", false), "F ∞   AE")

@@ -130,12 +130,13 @@ Singleton {
         // sp045 / adr0041: n / e step focus nearer / exposure brighter and
         // stay in the layer, held Alt (or Shift) reverses them (the
         // camera-reverse strip, as controls), d back to far focus, a auto /
-        // manual exposure.
+        // manual exposure, i / Alt+i ISO up / down (auto, 100 .. 6400).
         "camera": [
             {text: "nearer", key: "n"},
             {text: "brighter", key: "e"},
             {text: "far-focus", key: "d"},
             {text: "auto-exposure", key: "a"},
+            {text: "iso", key: "i"},
             {text: "alt-to-reverse", key: "⎇"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}
@@ -143,6 +144,7 @@ Singleton {
         "camera-reverse": [
             {text: "farther", key: "n"},
             {text: "darker", key: "e"},
+            {text: "lower-iso", key: "i"},
             {text: "reversing", key: "⎇"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}
