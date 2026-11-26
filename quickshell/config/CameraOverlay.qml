@@ -102,6 +102,13 @@ Scope {
     CameraSource {
         id: cam
         active: root.open
+        // machine file camera.id: the camera the focus ladder and tuning
+        // belong to (spacewar: the s5kjn1 ultrawide; libcamera now lists the
+        // imx766 main camera first, which pickCamera() would take)
+        cameraId: {
+            var c = Session.machine.camera
+            return c && c.id ? c.id : ""
+        }
         // machine file camera.focusFar (the infinity position), -1 if absent
         focusDefault: {
             var c = Session.machine.camera
