@@ -23,7 +23,9 @@ TestCase {
         compare(R.exposureText(false, 0, 1), "M")             // no exposure reported yet
         compare(R.exposureText(true, 10000, 8, 800), "ISO 800") // auto time, fixed gain
         compare(R.exposureText(true, 10000, 8, 0), "AE")
-        compare(R.exposureText(false, 10000, 2, 800), "M 1/100 x2.0") // manual wins
+        // manual exposure at a fixed ISO: shutter priority, time only
+        compare(R.exposureText(false, 16667, 8, 800), "ISO 800 1/60")
+        compare(R.exposureText(false, 0, 8, 800), "ISO 800 M")       // no time reported yet
     }
     function test_line() {
         compare(R.line("F ∞", "AE", false), "F ∞   AE")

@@ -25,10 +25,12 @@ function focusText(available, pos, far) {
     return "F " + metres(pos, far)
 }
 
-// "AE", "ISO <n>" for auto exposure at a fixed ISO (iso > 0), or
-// "M 1/<s> x<gain>" for manual exposure (exposureTime in us).
+// "AE"; "ISO <n>" for auto exposure at a fixed ISO (iso > 0); manual
+// exposure: "M 1/<s> x<gain>", or "ISO <n> 1/<s>" at a fixed ISO (time-only
+// steps, shutter priority). exposureTime in us.
 function exposureText(auto, expUs, gain, iso) {
     if (auto) return iso > 0 ? "ISO " + iso : "AE"
+    if (iso > 0) return "ISO " + iso + (expUs > 0 ? " 1/" + Math.round(1e6 / expUs) : " M")
     if (!(expUs > 0)) return "M"
     return "M 1/" + Math.round(1e6 / expUs) + " x" + Number(gain).toFixed(1)
 }
