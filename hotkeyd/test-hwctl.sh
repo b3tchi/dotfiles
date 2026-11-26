@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-hwctl.sh - hwctl's auto-suspend stepper, brightness steps, rotation on
+# test-hwctl.sh - hwctl's idle chain steppers (screen off, lock, suspend), brightness steps, rotation on
 # both backends (xrandr under X11, kscreen-doctor under Wayland), and what
 # `hwctl show` reports for them. The device tools it calls are stubbed away. Usage: hotkeyd/test-hwctl.sh
 set -u
@@ -26,21 +26,42 @@ CONF="$T/cfg/spacewar/autosuspend"
 field() { sh "$H" show | tr ' ' '\n' | sed -n "s/^$1=//p"; }
 step() { sh "$H" autosuspend "$1"; field autosuspend; }
 
-check "no setting: shows the default" "$(field autosuspend)" "1min"
+check "no setting: shows the default" "$(field autosuspend)" "+1min"
 [ -e "$CONF" ] && check "show writes nothing" yes no || check "show writes nothing" no no
-check "+ from the default" "$(step +)" "10min"
+check "+ from the default" "$(step +)" "+10min"
 check "the setting is stored" "$(cat "$CONF")" "10min"
-check "+ steps up" "$(step +)" "1hr"
+check "+ steps up" "$(step +)" "+1hr"
 check "+ steps to off" "$(step +)" "off"
-check "+ wraps to the shortest" "$(step +)" "30s"
-check "+ from 30s" "$(step +)" "1min"
-check "- steps down" "$(step -)" "30s"
+check "+ wraps to the shortest" "$(step +)" "+30s"
+check "+ from 30s" "$(step +)" "+1min"
+check "- steps down" "$(step -)" "+30s"
 check "- wraps to off" "$(step -)" "off"
-check "- from off" "$(step -)" "1hr"
-check "- again" "$(step -)" "10min"
+check "- from off" "$(step -)" "+1hr"
+check "- again" "$(step -)" "+10min"
 echo garbage >"$CONF"
-check "garbage setting: shows the default" "$(field autosuspend)" "1min"
-check "garbage setting: + steps from the default" "$(step +)" "10min"
+check "garbage setting: shows the default" "$(field autosuspend)" "+1min"
+check "garbage setting: + steps from the default" "$(step +)" "+10min"
+
+# screen off: idle time, no +; lock: after screen off, default off.
+sstep() { sh "$H" screenoff "$1"; field screenoff; }
+check "screenoff: default" "$(field screenoff)" "1min"
+check "screenoff: + steps" "$(sstep +)" "2min"
+check "screenoff: stored bare" "$(cat "$T/cfg/spacewar/screenoff")" "2min"
+check "screenoff: + to 5min" "$(sstep +)" "5min"
+check "screenoff: + to 1hr" "$(sstep +)" "1hr"
+check "screenoff: + to off" "$(sstep +)" "off"
+check "screenoff: + wraps" "$(sstep +)" "30s"
+check "screenoff: - wraps" "$(sstep -)" "off"
+lstep() { sh "$H" autolock "$1"; field autolock; }
+check "autolock: default off" "$(field autolock)" "off"
+check "autolock: + wraps to with screen off" "$(lstep +)" "+0s"
+check "autolock: + steps" "$(lstep +)" "+30s"
+check "autolock: + to 1min" "$(lstep +)" "+1min"
+check "autolock: + to 5min" "$(lstep +)" "+5min"
+check "autolock: + to off" "$(lstep +)" "off"
+check "autolock: - from off" "$(lstep -)" "+5min"
+echo 10min >"$T/cfg/spacewar/autolock"
+check "autolock: a step it lacks reads as off" "$(field autolock)" "off"
 check "autorotate still reported" "$(field autorotate)" "off"
 sh "$H" nosuch + 2>/dev/null
 check "unknown control: exit 2" "$?" "2"
@@ -189,9 +210,9 @@ sh "$H" select autosuspend
 check "select autosuspend: show says it" "$(field selected)" "autosuspend"
 echo 1min >"$CONF"
 sh "$H" selected +
-check "selected + steps the picked control" "$(field autosuspend)" "10min"
+check "selected + steps the picked control" "$(field autosuspend)" "+10min"
 sh "$H" selected +
-check "a repeat under 0.5 s is skipped for a non-stepper" "$(field autosuspend)" "10min"
+check "a repeat under 0.5 s is skipped for a non-stepper" "$(field autosuspend)" "+10min"
 sh "$H" select bogus 2>/dev/null
 check "select of an unknown control fails" "$?" "2"
 check "...and keeps the previous pick" "$(field selected)" "autosuspend"

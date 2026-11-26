@@ -605,6 +605,22 @@
           "device": "",
           "on_release": false
         },
+                {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl screenoff +"
+          ],
+          "chord": "o",
+          "device": "",
+          "on_release": false
+        },
+                {
+          "actions": [
+            "run:$HOME/.local/bin/hwctl autolock +"
+          ],
+          "chord": "k",
+          "device": "",
+          "on_release": false
+        },
         {
           "actions": [
             "run:$HOME/.local/bin/hwctl autosuspend +"
@@ -703,6 +719,22 @@
               "device": "",
               "on_release": false
             },
+                        {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl screenoff -"
+              ],
+              "chord": "o",
+              "device": "",
+              "on_release": false
+            },
+                        {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl autolock -"
+              ],
+              "chord": "k",
+              "device": "",
+              "on_release": false
+            },
             {
               "actions": [
                 "run:$HOME/.local/bin/hwctl autosuspend -"
@@ -793,6 +825,22 @@
                 "run:$HOME/.local/bin/hwctl autorotate -"
               ],
               "chord": "a",
+              "device": "",
+              "on_release": false
+            },
+                        {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl screenoff -"
+              ],
+              "chord": "o",
+              "device": "",
+              "on_release": false
+            },
+                        {
+              "actions": [
+                "run:$HOME/.local/bin/hwctl autolock -"
+              ],
+              "chord": "k",
               "device": "",
               "on_release": false
             },

@@ -166,9 +166,10 @@ func controlsBinds(dir string) []bind.Bind {
 		// f: the session's font size, as the output scale (hwctl toggles
 		// 1.5/2, both keep the kwi3 module grid whole device pixels)
 		{"f", "scale"},
-		// s steps through the idle delays; the rest are toggles, which + and -
-		// both flip
-		{"a", "autorotate"}, {"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
+		// o, k, s step the idle chain's delays: screen (o)ff, auto-loc(k),
+		// auto-(s)uspend; the rest are toggles, which + and - both flip
+		{"a", "autorotate"}, {"o", "screenoff"}, {"k", "autolock"},
+		{"s", "autosuspend"}, {"w", "wifi"}, {"t", "bluetooth"},
 		{"n", "nfc"}, {"g", "gps"},
 		// l: the flash LED as a torchlight (the panel's torch(l)ight)
 		{"l", "torch"},

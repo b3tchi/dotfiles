@@ -23,9 +23,16 @@
 #               (1.5 12x30, 2 16x40), so foot's pinned
 #               line-height and the grid stay in step
 #
-#   autosuspend idle delay before the phone suspends: 30s, 1min, 10min, 1hr, off,
-#               wrapping; default 1min. ~/.config/spacewar/autosuspend, which
-#               spacewar-idle-suspend reads (nothing-pmos suspend/)
+#   The idle chain (nothing-pmos suspend/spacewar-idle-suspend reads the files
+#   in ~/.config/spacewar/): screen off, then lock, then suspend, each delay
+#   counting from the stage before it. Steps wrap; show prints the lock and
+#   suspend delays with a leading + (the time after the stage before).
+#   screenoff   idle time before the screen goes off: 30s, 1min, 2min, 5min,
+#               1hr, off; default 1min
+#   autolock    after screen off, before the lock: 0s, 30s, 1min, 5min, off;
+#               default off
+#   autosuspend after the lock, before suspend: 30s, 1min, 10min, 1hr, off;
+#               default 1min. Suspend always locks first
 #
 # Toggles (+ and - both flip them):
 #   autorotate  ~/.config/spacewar/autorotate, which the phone's
@@ -47,13 +54,13 @@
 #               percent N%
 
 AUTOROTATE=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autorotate
-SUSPEND=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar/autosuspend
+SPACEWAR=${XDG_CONFIG_HOME:-$HOME/.config}/spacewar
 TORCH_LEVELS=${XDG_CONFIG_HOME:-$HOME/.config}/hwctl/torch-levels
 BACKLIGHT=${HWCTL_BACKLIGHT:-/sys/class/backlight}
 LEDS=${HWCTL_LEDS:-/sys/class/leds}
 SELECTED=${XDG_RUNTIME_DIR:-/tmp}/hwctl-selected
-CONTROLS="volume brightness rotation scale autorotate autosuspend wifi bluetooth nfc gps torch"
-USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|autosuspend|wifi|bluetooth|nfc|gps|torch|selected +|- | hwctl select CONTROL | hwctl show"
+CONTROLS="volume brightness rotation scale autorotate screenoff autolock autosuspend wifi bluetooth nfc gps torch"
+USAGE="usage: hwctl volume|brightness|rotation|scale|autorotate|screenoff|autolock|autosuspend|wifi|bluetooth|nfc|gps|torch|selected +|- | hwctl select CONTROL | hwctl show"
 
 # The control `selected` steps: what `select` stored, volume for none or a bad one.
 selected_get() {
@@ -116,15 +123,41 @@ torch_get() {
 	[ -n "$_t" ] && torch_level "$_t" || echo -
 }
 
-# The auto-suspend delay in effect: the default for no setting, or a bad one.
-suspend_delay() {
-	case $(cat "$SUSPEND" 2>/dev/null) in
-	30s) echo 30s ;;
-	10min) echo 10min ;;
-	1hr) echo 1hr ;;
-	off) echo off ;;
-	*) echo 1min ;;
+# An idle chain setting's steps, in order, and its default.
+delay_steps() {
+	case $1 in
+	screenoff) echo "30s 1min 2min 5min 1hr off" ;;
+	autolock) echo "0s 30s 1min 5min off" ;;
+	autosuspend) echo "30s 1min 10min 1hr off" ;;
 	esac
+}
+delay_default() {
+	case $1 in autolock) echo off ;; *) echo 1min ;; esac
+}
+
+# The delay in effect: the default for no setting, or a bad one.
+delay_get() { # <screenoff|autolock|autosuspend>
+	_v=$(cat "$SPACEWAR/$1" 2>/dev/null)
+	case " $(delay_steps "$1") " in
+	*" $_v "*) [ -n "$_v" ] && echo "$_v" || delay_default "$1" ;;
+	*) delay_default "$1" ;;
+	esac
+}
+
+# For show: lock and suspend count from the stage before, so a leading +.
+delay_show() { # <setting>
+	_v=$(delay_get "$1")
+	case "$1:$_v" in
+	screenoff:* | *:off) echo "$_v" ;;
+	*) echo "+$_v" ;;
+	esac
+}
+
+# The next step of a setting, + up and - down, wrapping.
+delay_step() { # <setting> <+|->
+	delay_steps "$1" | tr ' ' '\n' | awk -v c="$(delay_get "$1")" -v d="$2" '
+		{ v[NR] = $0; if ($0 == c) i = NR }
+		END { i += d == "+" ? 1 : -1; if (i > NR) i = 1; if (i < 1) i = NR; print v[i] }'
 }
 
 # The device's current brightness in percent, to the nearest one.
@@ -224,7 +257,8 @@ if [ "$control" = show ]; then
 		gps=on
 		systemctl list-units -q --state=active --no-legend 'qmi-gnss@*' 2>/dev/null | grep -q . && gps=in-use
 	fi
-	echo "volume=${vol:--} brightness=${bri:--} rotation=${rot:--} scale=${sc:--} autorotate=$auto autosuspend=$(suspend_delay)" \
+	echo "volume=${vol:--} brightness=${bri:--} rotation=${rot:--} scale=${sc:--} autorotate=$auto" \
+		"screenoff=$(delay_show screenoff) autolock=$(delay_show autolock) autosuspend=$(delay_show autosuspend)" \
 		"wifi=$(radio wlan) bluetooth=$(radio bluetooth) nfc=$(radio nfc) gps=$gps torch=$(torch_get) selected=$(selected_get)"
 	exit 0
 fi
@@ -292,13 +326,9 @@ autorotate)
 		mkdir -p "${AUTOROTATE%/*}" && : >"$AUTOROTATE"
 	fi
 	;;
-autosuspend)
-	if [ "$dir" = + ]; then
-		case $(suspend_delay) in 30s) to=1min ;; 1min) to=10min ;; 10min) to=1hr ;; 1hr) to=off ;; *) to=30s ;; esac
-	else
-		case $(suspend_delay) in 30s) to=off ;; 1min) to=30s ;; 10min) to=1min ;; 1hr) to=10min ;; *) to=1hr ;; esac
-	fi
-	mkdir -p "${SUSPEND%/*}" && echo "$to" >"$SUSPEND"
+screenoff | autolock | autosuspend)
+	to=$(delay_step "$control" "$dir")
+	mkdir -p "$SPACEWAR" && echo "$to" >"$SPACEWAR/$control"
 	;;
 wifi) rfkill toggle wlan ;;
 bluetooth) rfkill toggle bluetooth ;;

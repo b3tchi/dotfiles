@@ -209,7 +209,7 @@ ShellRoot {
 
     // ---- controls: each word carries its live value; pill says + / - ----
     ModeBarTheme.controlValues = {volume: "50%", brightness: "40%", rotation: "right",
-                                  autorotate: "off", autosuspend: "10min", wifi: "on", bluetooth: "off", nfc: "on", gps: "in-use"}
+                                  autorotate: "off", screenoff: "2min", autolock: "+30s", autosuspend: "+10min", wifi: "on", bluetooth: "off", nfc: "on", gps: "in-use"}
     emit("controls-rows", j(ModeBarTheme.controlRows))
     emit("hints-controls", j(ModeBarTheme.hintsFor("controls")))
     emit("hints-controls-reverse", j(ModeBarTheme.hintsFor("controls-reverse")))
@@ -335,7 +335,7 @@ assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
 
 scenario "controls — panel rows carry live values, strip keeps + / - pill"
 assert_case "controls-rows" \
-  '[{"text":"volume","key":"v","value":"50%"},{"text":"brightness","key":"b","value":"40%"},{"text":"rotation","key":"r","value":"right"},{"text":"auto-rotate","key":"a","value":"off"},{"text":"auto-suspend","key":"s","value":"10min"},{"text":"wifi","key":"w","value":"on"},{"text":"bluetooth","key":"t","value":"off"},{"text":"nfc","key":"n","value":"on"},{"text":"gps","key":"g","value":"in-use"}]'
+  '[{"text":"volume","key":"v","control":"volume","value":"50%"},{"text":"brightness","key":"b","control":"brightness","value":"40%"},{"text":"rotation","key":"r","control":"rotation","value":"right"},{"text":"font-size","key":"f","control":"scale","value":""},{"text":"auto-rotate","key":"a","control":"autorotate","value":"off"},{"text":"screen-off","key":"o","control":"screenoff","value":"2min"},{"text":"auto-lock","key":"k","control":"autolock","value":"+30s"},{"text":"auto-suspend","key":"s","control":"autosuspend","value":"+10min"},{"text":"wifi","key":"w","control":"wifi","value":"on"},{"text":"bluetooth","key":"t","control":"bluetooth","value":"off"},{"text":"nfc","key":"n","control":"nfc","value":"on"},{"text":"gps","key":"g","control":"gps","value":"in-use"},{"text":"torchlight","key":"l","control":"torch","value":""}]'
 assert_case "hints-controls" \
   '[{"text":"alt-to-reverse","key":"⎇"},{"text":"quit","key":"q"}]'
 assert_case "hints-controls-reverse" \

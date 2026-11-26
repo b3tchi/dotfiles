@@ -42,6 +42,8 @@ Singleton {
         {text: "rotation", key: "r", control: "rotation", value: controlValues.rotation || ""},
         {text: "font-size", key: "f", control: "scale", value: controlValues.scale || ""},
         {text: "auto-rotate", key: "a", control: "autorotate", value: controlValues.autorotate || ""},
+        {text: "screen-off", key: "o", control: "screenoff", value: controlValues.screenoff || ""},
+        {text: "auto-lock", key: "k", control: "autolock", value: controlValues.autolock || ""},
         {text: "auto-suspend", key: "s", control: "autosuspend", value: controlValues.autosuspend || ""},
         {text: "wifi", key: "w", control: "wifi", value: controlValues.wifi || ""},
         {text: "bluetooth", key: "t", control: "bluetooth", value: controlValues.bluetooth || ""},
