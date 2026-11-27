@@ -344,11 +344,11 @@ assert_case "controls-display-names" '["controls +","controls -"]'
 
 scenario "camera — step keys and the held-Alt reverse strip (sp045)"
 assert_case "hints-camera" \
-  '[{"text":"nearer","key":"n"},{"text":"brighter","key":"e"},{"text":"iso","key":"i"},{"text":"alt-down","key":"⎇"},{"text":"ctrl-reset","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+  '[{"text":"nearer","key":"n"},{"text":"brighter","key":"e"},{"text":"iso","key":"i"},{"text":"lens","key":"l"},{"text":"alt-down","key":"⎇"},{"text":"ctrl-reset","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
 assert_case "hints-camera-reverse" \
-  '[{"text":"farther","key":"n"},{"text":"darker","key":"e"},{"text":"lower-iso","key":"i"},{"text":"reversing","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+  '[{"text":"farther","key":"n"},{"text":"darker","key":"e"},{"text":"lower-iso","key":"i"},{"text":"front","key":"l"},{"text":"reversing","key":"⎇"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
 assert_case "hints-camera-reset" \
-  '[{"text":"far-focus","key":"n"},{"text":"auto-exposure","key":"e"},{"text":"auto-iso","key":"i"},{"text":"resetting","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
+  '[{"text":"far-focus","key":"n"},{"text":"auto-exposure","key":"e"},{"text":"auto-iso","key":"i"},{"text":"default-cam","key":"l"},{"text":"resetting","key":"⌃"},{"text":"snap","key":"space"},{"text":"quit","key":"q"}]'
 assert_case "camera-display-names" '["camera","camera -","camera reset"]'
 
 # ============================================================================

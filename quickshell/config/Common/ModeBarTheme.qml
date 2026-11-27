@@ -133,11 +133,13 @@ Singleton {
         // stay in the layer: n focus, e exposure, i ISO (auto, 100 .. 6400);
         // held Alt (or Shift) steps them down (the camera-reverse strip, as
         // controls), held Ctrl resets them (camera-reset strip: far focus,
-        // auto exposure, auto ISO). User 2026-11-26.
+        // auto exposure, auto ISO). sp046: l switches the lens (rear; front under
+        // Alt; the default lens under Ctrl). User 2026-11-26.
         "camera": [
             {text: "nearer", key: "n"},
             {text: "brighter", key: "e"},
             {text: "iso", key: "i"},
+            {text: "lens", key: "l"},
             {text: "alt-down", key: "⎇"},
             {text: "ctrl-reset", key: "⌃"},
             {text: "snap", key: "space"},
@@ -147,6 +149,7 @@ Singleton {
             {text: "farther", key: "n"},
             {text: "darker", key: "e"},
             {text: "lower-iso", key: "i"},
+            {text: "front", key: "l"},
             {text: "reversing", key: "⎇"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}
@@ -155,6 +158,7 @@ Singleton {
             {text: "far-focus", key: "n"},
             {text: "auto-exposure", key: "e"},
             {text: "auto-iso", key: "i"},
+            {text: "default-cam", key: "l"},
             {text: "resetting", key: "⌃"},
             {text: "snap", key: "space"},
             {text: "quit", key: "q"}

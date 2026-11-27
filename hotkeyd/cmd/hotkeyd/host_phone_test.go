@@ -87,9 +87,9 @@ func TestCameraLayerDrivesOverlay(t *testing.T) {
 		"space": "camera-snap", "Return": "camera-snap", "f": "camera-snap",
 		"Escape": "camera-close", "q": "camera-close",
 		// step keys (adr0041): run their verb and stay in the layer
-		"n": "camera-near", "e": "camera-brighter", "i": "camera-iso-up",
+		"n": "camera-near", "e": "camera-brighter", "i": "camera-iso-up", "l": "camera-lens",
 	}
-	step := map[string]bool{"n": true, "e": true, "i": true}
+	step := map[string]bool{"n": true, "e": true, "i": true, "l": true}
 	got := map[string]string{}
 	for _, b := range lay.Binds {
 		var cmd string
@@ -254,5 +254,58 @@ func TestPhoneSystemLayerHasNoSwitchUserOrHibernate(t *testing.T) {
 		if !got[c] {
 			t.Errorf("system layer lost %q on the phone", c)
 		}
+	}
+}
+
+// TestCameraLayerLensBinds: `l` switches the lens (sp046 Task 5, adr0041):
+// plain -> lens, held Alt / Shift -> lens-front, held Ctrl -> lens-default.
+// A lens switch re-opens the camera pipeline, so it must never autorepeat.
+func TestCameraLayerLensBinds(t *testing.T) {
+	lay, ok := Layers["camera"]
+	if !ok {
+		t.Fatal("no camera layer")
+	}
+	find := func(binds []bind.Bind) (bind.Bind, int) {
+		var hit bind.Bind
+		n := 0
+		for _, b := range binds {
+			if b.Chord == "l" {
+				hit, n = b, n+1
+			}
+		}
+		return hit, n
+	}
+	cases := []struct {
+		name  string
+		binds []bind.Bind
+		verb  string
+	}{
+		{"plain", lay.Binds, "camera-lens"},
+		{"reverse", lay.Mods["reverse"].Binds, "camera-lens-front"},
+		{"reverse-shift", lay.Mods["reverse-shift"].Binds, "camera-lens-front"},
+		{"reset", lay.Mods["reset"].Binds, "camera-lens-default"},
+	}
+	for _, c := range cases {
+		b, n := find(c.binds)
+		if n != 1 {
+			t.Errorf("%s: %d `l` binds, want exactly 1", c.name, n)
+			continue
+		}
+		want := []bind.Action{bind.Run{Cmd: qsOverlay + " " + c.verb}}
+		if !reflect.DeepEqual(b.Actions, want) {
+			t.Errorf("%s: l actions = %+v, want %+v (step key: stays in the layer)", c.name, b.Actions, want)
+		}
+		if b.Repeat {
+			t.Errorf("%s: l Repeat = true, want false", c.name)
+		}
+	}
+	if m := lay.Mods["reverse"].Modifier; m != "Mod1" {
+		t.Errorf("reverse modifier = %q, want Mod1", m)
+	}
+	if m := lay.Mods["reverse-shift"].Modifier; m != "Shift" {
+		t.Errorf("reverse-shift modifier = %q, want Shift", m)
+	}
+	if m := lay.Mods["reset"].Modifier; m != "Ctrl" {
+		t.Errorf("reset modifier = %q, want Ctrl", m)
 	}
 }

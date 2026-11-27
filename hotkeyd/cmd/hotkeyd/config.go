@@ -211,19 +211,23 @@ func cameraStep(verb string) []bind.Action {
 // cameraStepBinds is the camera layer's step keys, one scheme for all three
 // (user 2026-11-26): n focus, e exposure, i ISO; the bare key steps up
 // (nearer / brighter / higher ISO), held Alt or Shift steps down (dir "-"),
-// held Ctrl resets (dir "0": far focus, auto exposure, auto ISO). Steps
-// repeat when held; resets do not.
+// held Ctrl resets (dir "0": far focus, auto exposure, auto ISO); l switches
+// the lens (rear / front / default). Steps repeat when held; resets and the
+// lens switch do not.
 func cameraStepBinds(dir string) []bind.Bind {
-	verbs := map[string][3]string{
-		"+": {"near", "brighter", "iso-up"},
-		"-": {"far", "darker", "iso-down"},
-		"0": {"refocus", "ae-auto", "iso-auto"},
+	verbs := map[string][4]string{
+		"+": {"near", "brighter", "iso-up", "lens"},
+		"-": {"far", "darker", "iso-down", "lens-front"},
+		"0": {"refocus", "ae-auto", "iso-auto", "lens-default"},
 	}[dir]
 	rep := dir != "0"
 	return []bind.Bind{
 		{Chord: "n", Actions: cameraStep(verbs[0]), Repeat: rep},
 		{Chord: "e", Actions: cameraStep(verbs[1]), Repeat: rep},
 		{Chord: "i", Actions: cameraStep(verbs[2]), Repeat: rep},
+		// l switches the lens (sp046): rear / front / default. Never repeats:
+		// every switch re-opens the camera pipeline.
+		{Chord: "l", Actions: cameraStep(verbs[3])},
 	}
 }
 
