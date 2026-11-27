@@ -6,6 +6,7 @@ import QtMultimedia
 import LibCamera 1.0
 import "./Common"
 import "./Common/CameraReadout.js" as Readout
+import "./Camera"
 
 // Phone camera overlay (dotfiles sp041 Task 6, ft019): the back camera's
 // live preview in a layer-shell panel that fills the space BETWEEN the bars
@@ -24,6 +25,10 @@ import "./Common/CameraReadout.js" as Readout
 //                                      no-ops while closed or capturing; the
 //                                      overlay never clears the hotkeyd layer
 //                                      for them, only close() does
+//   quickshell ipc call camera lens|lensFront|lensDefault
+//                                      switch camera (sp046): rear <-> rear,
+//                                      front <-> last rear, default; shot
+//                                      settings carry over (Camera/LensSwitch.qml)
 //
 // Every close path hands the keyboard back (`hotkeyd set-layer default`)
 // and releases the camera. A failed open shows the error and stays put;
@@ -35,6 +40,18 @@ Scope {
     property bool open: false
     property bool snapping: false
 
+    // Lens state (sp046): the configured list is Session.cameras, the first
+    // entry the default. LensSwitch owns the active camera, the switch in
+    // flight and its carry-over, and sets cam's focus calibration BEFORE its
+    // cameraId (the module restarts on the id at once); none of it is bound.
+    LensSwitch {
+        id: lensSw
+        cam: cam
+        cameras: Session.cameras
+    }
+    readonly property bool switching: lensSw.switching
+    Component.onCompleted: lensSw.reset()
+
     // Same resolution as RegionShot.qml: the session's own hotkeyd.
     readonly property string hotkeyd: Quickshell.env("QS_LAYER_FEED") || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/hotkeyd")
     readonly property string photoDir: Quickshell.env("HOME") + "/Pictures/camera"
@@ -42,8 +59,11 @@ Scope {
     function show() {
         if (open) return
         snapping = false
+        resetLens()
         open = true
     }
+
+    function resetLens() { lensSw.reset() }
 
     function snap() {
         // `snapping` covers the whole still (capture -> captured), so a
@@ -56,7 +76,7 @@ Scope {
 
     // A step needs a streaming, idle overlay: closed or `capturing` (the
     // still pauses the pipeline) -> ignored, as snap is.
-    readonly property bool stepOk: open && !snapping && !cam.capturing
+    readonly property bool stepOk: open && !snapping && !cam.capturing && !switching
 
     function near()     { if (stepOk && cam.focusAvailable) cam.focusNear() }
     function far()      { if (stepOk && cam.focusAvailable) cam.focusFar() }
@@ -69,10 +89,17 @@ Scope {
     function isoAuto()  { if (stepOk) cam.isoAuto() }
     function aeAuto()   { if (stepOk) cam.autoExposure = true }
 
+    // One attempt (adr0014), see LensSwitch.lens().
+    function lens(kind) { if (stepOk) lensSw.lens(kind) }
+    function lensRear()    { lens("rear") }
+    function lensFront()   { lens("front") }
+    function lensDefault() { lens("default") }
+
     function close() {
         if (!open) return
         open = false
         snapping = false
+        resetLens()
         Quickshell.execDetached([hotkeyd, "set-layer", "default"])
         releaseRing()
     }
@@ -102,19 +129,8 @@ Scope {
     CameraSource {
         id: cam
         active: root.open
-        // machine file camera.id: the camera the focus ladder and tuning
-        // belong to (spacewar: the s5kjn1 ultrawide; libcamera now lists the
-        // imx766 main camera first, which pickCamera() would take)
-        cameraId: {
-            var c = Session.machine.camera
-            return c && c.id ? c.id : ""
-        }
-        // machine file camera.focusFar (the infinity position), -1 if absent
-        focusDefault: {
-            var c = Session.machine.camera
-            var v = c ? parseInt(c.focusFar) : NaN
-            return isNaN(v) ? -1 : v
-        }
+        // focusDefault, focusSlope, then cameraId: set by lensSw.apply()
+        // in that order, never bound (sp046)
         videoSink: preview.videoSink
         onCaptured: (path, ok) => {
             // closed while the JPEG was being written: the file exists, but
@@ -178,6 +194,9 @@ Scope {
         function isoDown(): void { root.isoDown() }
         function isoAuto(): void { root.isoAuto() }
         function aeAuto(): void { root.aeAuto() }
+        function lens(): void { root.lensRear() }
+        function lensFront(): void { root.lensFront() }
+        function lensDefault(): void { root.lensDefault() }
     }
 
     PanelWindow {
@@ -212,10 +231,12 @@ Scope {
         // still pauses the preview for ~1 s (sp042); "capturing…" shows in
         // the same label, beside the values.
         Rectangle {
-            readonly property string txt: Readout.line(
-                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
+            readonly property string rest: Readout.line(
+                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault, cam.focusSlope),
                 Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain, cam.iso),
                 cam.capturing)
+            readonly property string txt: [Readout.labelText(lensSw.activeCam ? lensSw.activeCam.label : ""), rest]
+                .filter(function (t) { return t !== "" }).join("   ")
             visible: txt !== ""
             anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }
             width: roLabel.implicitWidth + 32
@@ -228,8 +249,8 @@ Scope {
         Text {
             anchors.centerIn: parent
             width: parent.width * 0.8
-            visible: cam.error !== ""
-            text: cam.error
+            visible: text !== ""
+            text: cam.error !== "" ? cam.error : lensSw.switchError
             color: "#ff6b6b"
             font.family: DialogTheme.font
             font.pixelSize: DialogTheme.fontSize
