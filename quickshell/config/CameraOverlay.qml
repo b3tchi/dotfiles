@@ -6,6 +6,7 @@ import QtMultimedia
 import LibCamera 1.0
 import "./Common"
 import "./Common/CameraReadout.js" as Readout
+import "./Common/CameraSwitch.js" as Lens
 
 // Phone camera overlay (dotfiles sp041 Task 6, ft019): the back camera's
 // live preview in a layer-shell panel that fills the space BETWEEN the bars
@@ -24,6 +25,10 @@ import "./Common/CameraReadout.js" as Readout
 //                                      no-ops while closed or capturing; the
 //                                      overlay never clears the hotkeyd layer
 //                                      for them, only close() does
+//   quickshell ipc call camera lens|lensFront|lensDefault
+//                                      switch camera (sp046): rear <-> rear,
+//                                      front <-> last rear, default; shot
+//                                      settings carry over (CameraSwitch.js)
 //
 // Every close path hands the keyboard back (`hotkeyd set-layer default`)
 // and releases the camera. A failed open shows the error and stays put;
@@ -35,6 +40,20 @@ Scope {
     property bool open: false
     property bool snapping: false
 
+    // Lens state (sp046): the configured list is Session.cameras, the first
+    // entry the default. `activeId` is what cam.cameraId follows; `pending`
+    // holds {snap, source, target} from a switch until the new camera's
+    // first exposure metadata (setters before it are reset by the module's
+    // start). `switchError` is a switch the overlay refused itself.
+    readonly property var defaultCam: Session.cameras.length > 0 ? Session.cameras[0] : null
+    property string activeId: defaultCam ? defaultCam.id : ""
+    property string lastRearId: activeId
+    property var pending: null
+    property string switchError: ""
+    property real lastDioptres: 0
+    readonly property var activeCam: Lens.byId(Session.cameras, activeId)
+    readonly property bool switching: pending !== null && cam.error === ""
+
     // Same resolution as RegionShot.qml: the session's own hotkeyd.
     readonly property string hotkeyd: Quickshell.env("QS_LAYER_FEED") || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/hotkeyd")
     readonly property string photoDir: Quickshell.env("HOME") + "/Pictures/camera"
@@ -42,7 +61,15 @@ Scope {
     function show() {
         if (open) return
         snapping = false
+        resetLens()
         open = true
+    }
+
+    function resetLens() {
+        activeId = defaultCam ? defaultCam.id : ""
+        lastRearId = activeId
+        pending = null
+        switchError = ""
     }
 
     function snap() {
@@ -56,7 +83,7 @@ Scope {
 
     // A step needs a streaming, idle overlay: closed or `capturing` (the
     // still pauses the pipeline) -> ignored, as snap is.
-    readonly property bool stepOk: open && !snapping && !cam.capturing
+    readonly property bool stepOk: open && !snapping && !cam.capturing && !switching
 
     function near()     { if (stepOk && cam.focusAvailable) cam.focusNear() }
     function far()      { if (stepOk && cam.focusAvailable) cam.focusFar() }
@@ -69,10 +96,61 @@ Scope {
     function isoAuto()  { if (stepOk) cam.isoAuto() }
     function aeAuto()   { if (stepOk) cam.autoExposure = true }
 
+    // One attempt (adr0014): a refused or failed switch leaves its error on
+    // screen and the next key press is the retry; nothing is re-issued here.
+    function lens(kind) {
+        if (!stepOk) return
+        var t = Lens.pick(kind, Session.cameras, cam.cameras, activeId, lastRearId)
+        if (t === null) return
+        switchError = ""
+        if (!Lens.listed(cam.cameras, t.id)) {
+            switchError = "camera not found: " + t.id
+            return
+        }
+        pending = {
+            snap: Lens.snapshot({
+                focusAvailable: cam.focusAvailable, focusDioptres: cam.focusDioptres,
+                autoExposure: cam.autoExposure, exposureTime: cam.exposureTime,
+                iso: cam.iso, colourGains: cam.colourGains
+            }, lastDioptres),
+            source: activeCam,
+            target: t
+        }
+        if (Lens.facingOf(cam.cameras, activeId) === "back") lastRearId = activeId
+        activeId = t.id
+    }
+    function lensRear()    { lens("rear") }
+    function lensFront()   { lens("front") }
+    function lensDefault() { lens("default") }
+
+    // First exposure metadata of the new camera: carry the shot settings
+    // over (the colour gains must land inside the AWB hold, sp046).
+    function applyPending() {
+        if (pending === null || !(cam.exposureTime > 0)) return
+        var p = pending
+        pending = null
+        var steps = Lens.plan(p.snap, p.source, p.target, cam.focusAvailable)
+        for (var i = 0; i < steps.length; i++) {
+            var s = steps[i]
+            if (s.op === "iso") cam.setIso(s.value)
+            else if (s.op === "exposureTime") cam.setExposureTime(s.value)
+            else if (s.op === "dioptres") cam.focusDioptres = s.value
+            else if (s.op === "gains") cam.setColourGains(s.r, s.b)
+        }
+    }
+    Connections {
+        target: cam
+        function onExposureChanged() { root.applyPending() }
+        function onFocusDioptresChanged() {
+            if (cam.focusAvailable) root.lastDioptres = cam.focusDioptres
+        }
+    }
+
     function close() {
         if (!open) return
         open = false
         snapping = false
+        resetLens()
         Quickshell.execDetached([hotkeyd, "set-layer", "default"])
         releaseRing()
     }
@@ -102,19 +180,11 @@ Scope {
     CameraSource {
         id: cam
         active: root.open
-        // machine file camera.id: the camera the focus ladder and tuning
-        // belong to (spacewar: the s5kjn1 ultrawide; libcamera now lists the
-        // imx766 main camera first, which pickCamera() would take)
-        cameraId: {
-            var c = Session.machine.camera
-            return c && c.id ? c.id : ""
-        }
-        // machine file camera.focusFar (the infinity position), -1 if absent
-        focusDefault: {
-            var c = Session.machine.camera
-            var v = c ? parseInt(c.focusFar) : NaN
-            return isNaN(v) ? -1 : v
-        }
+        // Session.cameras (machine file): the active entry's focus
+        // calibration; its id goes last so a switch sees them together.
+        focusDefault: root.activeCam && root.activeCam.focusFar !== undefined ? root.activeCam.focusFar : -1
+        focusSlope: root.activeCam && root.activeCam.focusSlope !== undefined ? root.activeCam.focusSlope : 12.9
+        cameraId: root.activeId
         videoSink: preview.videoSink
         onCaptured: (path, ok) => {
             // closed while the JPEG was being written: the file exists, but
@@ -178,6 +248,9 @@ Scope {
         function isoDown(): void { root.isoDown() }
         function isoAuto(): void { root.isoAuto() }
         function aeAuto(): void { root.aeAuto() }
+        function lens(): void { root.lensRear() }
+        function lensFront(): void { root.lensFront() }
+        function lensDefault(): void { root.lensDefault() }
     }
 
     PanelWindow {
@@ -212,10 +285,12 @@ Scope {
         // still pauses the preview for ~1 s (sp042); "capturing…" shows in
         // the same label, beside the values.
         Rectangle {
-            readonly property string txt: Readout.line(
-                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault),
+            readonly property string rest: Readout.line(
+                Readout.focusText(cam.focusAvailable, cam.focusPosition, cam.focusDefault, cam.focusSlope),
                 Readout.exposureText(cam.autoExposure, cam.exposureTime, cam.analogueGain, cam.iso),
                 cam.capturing)
+            readonly property string txt: [Readout.labelText(root.activeCam ? root.activeCam.label : ""), rest]
+                .filter(function (t) { return t !== "" }).join("   ")
             visible: txt !== ""
             anchors { left: parent.left; bottom: parent.bottom; leftMargin: 16; bottomMargin: 16 }
             width: roLabel.implicitWidth + 32
@@ -228,8 +303,8 @@ Scope {
         Text {
             anchors.centerIn: parent
             width: parent.width * 0.8
-            visible: cam.error !== ""
-            text: cam.error
+            visible: text !== ""
+            text: cam.error !== "" ? cam.error : root.switchError
             color: "#ff6b6b"
             font.family: DialogTheme.font
             font.pixelSize: DialogTheme.fontSize
