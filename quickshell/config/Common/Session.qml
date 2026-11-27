@@ -2,6 +2,7 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "CameraReadout.js" as CameraReadout
 
 // Per-session and per-machine bar configuration, resolved once per
 // quickshell instance. Each session (desktop :0, xrdp :2/:10, phone)
@@ -91,6 +92,11 @@ Singleton {
             return {}
         }
     }
+
+    // The camera list (sp046): machine file "camera": {"cameras": [{id,
+    // label, focusFar, focusSlope, wbRatio}]}; the old {id, focusFar} form
+    // gives one entry. See CameraReadout.cameras.
+    readonly property var cameras: CameraReadout.cameras(machine.camera)
 
     // The machine file's value for `key` on `screenName` ("" for none), or
     // undefined.
