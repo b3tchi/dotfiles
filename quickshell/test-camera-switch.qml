@@ -101,6 +101,12 @@ TestCase {
         st.focusAvailable = true; st.focusDioptres = 1.5
         compare(S.snapshot(st, 3).focusDioptres, 1.5)
     }
+    function test_startFailed() {
+        compare(S.startFailed(""), false)
+        compare(S.startFailed("camera lacks AeEnable / ExposureTime / AnalogueGain: manual exposure off"), false)
+        compare(S.startFailed("camera busy"), true)
+        compare(S.startFailed("unknown camera: UW"), true)
+    }
     function test_byId() {
         compare(id(S.byId(list, "UW")), "UW")
         compare(S.byId(list, "nope"), null)

@@ -82,3 +82,11 @@ function plan(snap, source, target, focusAvailable) {
     }
     return out
 }
+
+// Whether the module's `error` means the stream is down. CameraSource sets
+// one non-fatal note on a successful start of a camera without manual
+// exposure; every other non-empty error is a failure (adr0014: no retry).
+var MANUAL_OFF = "camera lacks AeEnable / ExposureTime / AnalogueGain"
+function startFailed(error) {
+    return typeof error === "string" && error !== "" && error.indexOf(MANUAL_OFF) !== 0
+}
