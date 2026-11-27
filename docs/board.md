@@ -21,6 +21,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp046|camera-switch-carry-over]]
 
 ## ready
 
