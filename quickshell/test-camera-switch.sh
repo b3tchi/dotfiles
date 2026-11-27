@@ -1,7 +1,7 @@
 #!/bin/sh
 # Headless tests of the lens switch (sp046 T4). No camera.
 #   test-camera-switch.qml  config/Common/CameraSwitch.js (pure selection + plan)
-#   test-lens-switch.qml    config/Common/LensSwitch.qml against a stub
+#   test-lens-switch.qml    config/Camera/LensSwitch.qml against a stub
 #                           CameraSource (calibration-before-id order,
 #                           settling guard, failed start)
 cd "$(dirname "$0")" || exit 1
