@@ -21,10 +21,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp046|camera-switch-carry-over]]
-
 ## ready
 
+- [[sp046|camera-switch-carry-over]]
 - [[sp044|us028-ultrawide-lens-focus-control]]
 - [[sp042|us026-full-resolution-still]]
 - [[sp039|networked-clipboard-hub]]
