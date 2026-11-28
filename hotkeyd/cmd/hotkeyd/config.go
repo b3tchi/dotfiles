@@ -407,7 +407,7 @@ var Layers = map[string]bind.Layer{
 
 	// Camera viewfinder (phone): entered by $mod+f together with
 	// `qs-overlay.sh camera-open` (host_phone.go), which shows quickshell's
-	// CameraOverlay (sp041). space / Return / f take the photo, Escape / q
+	// CameraOverlay (sp041). Only space takes the photo (user 2026-11-28), Escape / q
 	// close the preview without one; both leave the layer. n / Alt+n /
 	// Ctrl+n focus near / far / reset, e / Alt+e / Ctrl+e exposure brighter /
 	// darker / auto, i / Alt+i / Ctrl+i ISO up / down / auto step and stay
@@ -421,8 +421,6 @@ var Layers = map[string]bind.Layer{
 	"camera": {
 		Binds: append([]bind.Bind{
 			{Chord: "space", Actions: cameraSnap()},
-			{Chord: "Return", Actions: cameraSnap()},
-			{Chord: "f", Actions: cameraSnap()},
 			{Chord: "Escape", Actions: cameraClose()},
 			{Chord: "q", Actions: cameraClose()},
 		}, cameraStepBinds("+")...),
