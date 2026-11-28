@@ -76,15 +76,16 @@ func TestPhoneWorkspaceChords(t *testing.T) {
 
 // The camera layer drives quickshell's CameraOverlay (sp041 Task 7): every
 // command it runs is a qs-overlay.sh camera-* verb, and the old gst path
-// (phone-cam) is gone. space / Return / f snap and leave, Escape / q close
-// and leave, and nothing else is dispatched on the way out.
+// (phone-cam) is gone. Only space snaps and leaves (user 2026-11-28: Return
+// and f no longer take the photo), Escape / q close and leave, and nothing
+// else is dispatched on the way out.
 func TestCameraLayerDrivesOverlay(t *testing.T) {
 	lay, ok := Layers["camera"]
 	if !ok {
 		t.Fatal("no camera layer")
 	}
 	want := map[string]string{
-		"space": "camera-snap", "Return": "camera-snap", "f": "camera-snap",
+		"space":  "camera-snap",
 		"Escape": "camera-close", "q": "camera-close",
 		// step keys (adr0041): run their verb and stay in the layer
 		"n": "camera-near", "e": "camera-brighter", "i": "camera-iso-up", "l": "camera-lens",
@@ -221,13 +222,18 @@ func TestCameraKeysDispatch(t *testing.T) {
 	if got := e.State().Layer; got != layer.DefaultLayer {
 		t.Fatalf("after snap layer = %q, want default", got)
 	}
-	// f snaps too; BackSpace after steps leaves silently
+	// only space snaps: f and Return run nothing and stay in the layer;
+	// BackSpace after steps leaves silently
 	press("f", kwinMod)
 	press("n")
-	if got := press("f"); !reflect.DeepEqual(got, []string{"camera-snap"}) {
-		t.Fatalf("f runs %v, want [camera-snap]", got)
+	for _, k := range []string{"f", "Return"} {
+		if got := press(k); len(got) != 0 {
+			t.Fatalf("%s in the camera layer runs %v, want nothing (only space snaps)", k, got)
+		}
+		if got := e.State().Layer; got != "camera" {
+			t.Fatalf("after %s layer = %q, want camera", k, got)
+		}
 	}
-	press("f", kwinMod)
 	press("e")
 	if got := press("BackSpace"); len(got) != 0 {
 		t.Fatalf("BackSpace runs %v, want no verb", got)
